@@ -1,0 +1,128 @@
+// Dflat sample: exercises the subset dfparse understands
+
+i32 a = 10
+i32 b = 0; char c = 'c'; string what = "what"
+u64 big = 0x1F
+r64 half = 0.5
+const i32 limit = 100
+
+fun u64 fib(u64 n) {
+  if n < 2 {
+    return n
+  }
+  return fib(n - 1) + fib(n - 2)
+}
+
+fun bool isPalindrome(string s) {
+  u64 i = 0
+  u64 j = s.length
+  while i < j {
+    j--
+    if s[i] != s[j] {
+      return false
+    }
+    i++
+  }
+  return true
+}
+
+fun i32, string getUser() {
+  return 1, "john"
+}
+
+fun (i32 val, string name) getPair() {
+  return (1, "name")
+}
+
+fun hello(string name = "john doe", i32 age) {
+  print("Hello " + name)
+}
+
+fun callBack(i32 val, i32(string, u8) cb, fun(i32) done) {
+  i32 r = cb("a", 1)
+  done(r)
+}
+
+fun string greet = (string name) { "hello " + name }
+
+public enum Color Colors {
+  Red: Color(1, 0, 0), Green: Color(0, 1, 0), Blue: Color(0, 0, 1)
+  , fun Colors Closest(Color col) {
+    return Colors.Red
+  }
+}
+
+enum Status { Active, Inactive, Pending: 10 }
+
+public class Px(i32 a, i32 b) {
+  u64 c = [u64]a << 32 | [u64]b
+
+  public Px() : Px(0, 0)
+  public Px(i32 b) : Px(b, b)
+  public Px(u64 a, char b) : Px([i32]a, (i32)a) {
+    c = [u64]b
+  }
+
+  public fun u64 GetVal() { c }
+  public fun i64 GetIVal() { [i64]c }
+}
+
+Px p = Px(5)
+i32 id, string uname = getUser()
+_, string n2 = getUser()
+(i32, r128, string) t = (1, 2.5, "x")
+vec i16,4 v = {1, 2, 3, 4}
+
+for u8 i = 0..10 step i += 2 {
+  hello(age: i)
+}
+for char ch in "my string" {
+  print(ch)
+}
+for u64 key in what.keys {
+  print(key)
+}
+
+switch a {
+  1: print("one"), 2: print("two")
+  3, 4, 5: { b = 1; b++ }
+  default: jump done
+}
+
+bool res = a ? { 1: true, 2: true, 4: true, default: false }
+string yn = res ? { "yes", "no" }
+
+i8? maybe = null
+i8 abyte = maybe ?? 0
+enforce maybe {
+  abyte = maybe
+} else {
+  abyte = -1
+}
+
+{
+  a--
+} while a > 0
+
+i32 x = 5
+r32 f = (r32)x
+r32 bits = [r32]x
+i32 inv = _x
+bool z = x & 0xFF == 0
+x >>= 2
+
+u64 total = items
+  .where((n) { n > 0 })
+  .count()
+sort(items, (l, r) { l < r })
+
+atEnd {
+  print("bye")
+}
+
+#done#
+i32 q = 10 / b
+catch OverflowException ex {
+  print(ex.message)
+}
+return 0

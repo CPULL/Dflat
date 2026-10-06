@@ -1,6 +1,3 @@
-# Dflat Language
-A new language D♭ that is the same as C# but easier to write and faster to execute
-
 # D♭ — Dflat Language Specification (draft)
 
 Status: design in progress. Decisions below reflect the latest choices; earlier alternatives are omitted.

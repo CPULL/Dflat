@@ -1,4 +1,1 @@
-i32 res = 0;
-for u8 i = 0..10 {
-  res += i;
-}
+Root.Console.Log("Hello world!")

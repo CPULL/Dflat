@@ -5,20 +5,21 @@ public sealed class Parser {
   static readonly HashSet<string> BuiltinTypes = new() {
     "i8", "i16", "i32", "i64", "i128", "i256",
     "u8", "u16", "u32", "u64", "u128", "u256",
-    "r16", "r32", "r64", "r128",
-    "dec", "bool", "char", "byte", "date", "clock", "lapse", "string", "vec"
+    "r16", "r32", "r64", "r128", "int", "uns", "real",
+    "dec", "bool", "char", "byte", "date", "clock", "lapse", "string",
+    "vec", "list", "map", "hmap", "dfoot"
   };
 
   // ">>=" is handled separately (lexed as '>' '>=')
   static readonly HashSet<string> AssignOps = new() {
-    "=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", "??="
+    "=", "_=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", "??="
   };
 
   static readonly HashSet<string> Modifiers = new() {
-    "public", "internal", "private", "const"
+    "public", "internal", "private", "const", "override"
   };
 
-  // Rust-style precedence, lowest first. ".." and "??" sit below these.
+  // Rust-style precedence, lowest first. "..", "??" and "? { }" sit below these.
   static readonly string[][] Levels = {
     new[] { "||" },
     new[] { "^^" },
@@ -31,6 +32,8 @@ public sealed class Parser {
     new[] { "+", "-" },
     new[] { "*", "/", "%" }
   };
+
+  const int ComparisonLevel = 3;
 
   readonly List<Token> toks;
   int pos;
@@ -148,24 +151,26 @@ public sealed class Parser {
       case TokenKind.Int:
       case TokenKind.Real:
       case TokenKind.String:
+      case TokenKind.InterpString:
       case TokenKind.Char:
         return true;
       case TokenKind.Keyword:
         return t.Text is "true" or "false" or "null";
       case TokenKind.Op:
-        return t.Text is "(" or "[" or "!" or "-" or "+" or "_" or "&" or "++" or "--";
+        return t.Text is "(" or "[" or "!" or "-" or "+" or "_" or "&" or "->" or "++" or "--";
       default:
         return false;
     }
   }
 
-  // After "(UserType)": stricter, so "(a)-b" stays a subtraction
+  // After "(UserType)" or "[type]": stricter, so "(a)-b" stays a subtraction
   static bool StartsCastOperand(Token t) {
     switch (t.Kind) {
       case TokenKind.Ident:
       case TokenKind.Int:
       case TokenKind.Real:
       case TokenKind.String:
+      case TokenKind.InterpString:
       case TokenKind.Char:
         return true;
       case TokenKind.Keyword:
@@ -175,6 +180,16 @@ public sealed class Parser {
       default:
         return false;
     }
+  }
+
+  string ParseQualifiedName() {
+    var first = ExpectIdent();
+    string name = first.Text;
+    while (IsOp(".") && PeekAt(1).Kind == TokenKind.Ident) {
+      Next();
+      name += "." + Next().Text;
+    }
+    return name;
   }
 
   // ---------------------------------------------------------------- program and statements
@@ -214,7 +229,8 @@ public sealed class Parser {
     throw Error("expected end of statement");
   }
 
-  Node ParseStatement(string? className = null, bool caseBody = false) {
+  // ownerName: class or trait whose constructors may appear in this block
+  Node ParseStatement(string? ownerName = null, bool caseBody = false) {
     var mods = ParseModifiers();
     if (IsKw("fun")) {
       return WithMods(ParseFun(), mods);
@@ -222,10 +238,13 @@ public sealed class Parser {
     if (IsKw("class")) {
       return WithMods(ParseClass(), mods);
     }
+    if (IsKw("trait")) {
+      return WithMods(ParseTrait(), mods);
+    }
     if (IsKw("enum")) {
       return WithMods(ParseEnum(), mods);
     }
-    if (className != null && Peek.Kind == TokenKind.Ident && Peek.Text == className && PeekAt(1).Is("(")) {
+    if (ownerName != null && Peek.Kind == TokenKind.Ident && Peek.Text == ownerName && PeekAt(1).Is("(")) {
       return WithMods(ParseConstructor(), mods);
     }
     if (mods.Count > 0) {
@@ -245,6 +264,12 @@ public sealed class Parser {
     }
     if (Peek.Kind == TokenKind.Keyword) {
       switch (Peek.Text) {
+        case "namespace":
+          return ParseNamespace();
+        case "import":
+          return ParseImport();
+        case "alias":
+          return ParseAlias();
         case "if":
           return ParseIf();
         case "while":
@@ -255,8 +280,14 @@ public sealed class Parser {
           return ParseSwitch();
         case "jump":
           return ParseJump(caseBody);
+        case "break":
+          return ParseBreak(caseBody);
+        case "continue":
+          return ParseContinue(caseBody);
         case "return":
           return ParseReturn(caseBody);
+        case "throw":
+          return ParseThrow(caseBody);
         case "catch":
           return ParseCatch();
         case "atEnd":
@@ -270,7 +301,7 @@ public sealed class Parser {
     return simple;
   }
 
-  Node ParseBlock(string? className = null) {
+  Node ParseBlock(string? ownerName = null) {
     SkipNewlines();
     var open = ExpectOp("{");
     var block = new Node("Block", open);
@@ -281,7 +312,7 @@ public sealed class Parser {
       if (AtEnd) {
         throw ErrorAt("unclosed '{'", open);
       }
-      block.Add(ParseStatement(className));
+      block.Add(ParseStatement(ownerName));
       SkipTerminators();
     }
     Next();
@@ -309,20 +340,66 @@ public sealed class Parser {
     return e;
   }
 
-  bool AcceptElse() {
+  bool PeekElse() {
     int save = pos;
     SkipNewlines();
-    if (IsKw("else")) {
-      Next();
-      return true;
-    }
+    bool found = IsKw("else");
     pos = save;
-    return false;
+    return found;
   }
 
+  bool AcceptElse() {
+    if (!PeekElse()) {
+      return false;
+    }
+    SkipNewlines();
+    Next();
+    return true;
+  }
+
+  // namespace a.b.c   |   namespace local
+  Node ParseNamespace() {
+    var t = Next();
+    var name = ParseQualifiedName();
+    EndStatement(false);
+    return new Node(name == "local" ? "NamespaceLocal" : "Namespace", t, name == "local" ? null : name);
+  }
+
+  Node ParseImport() {
+    var t = Next();
+    var name = ParseQualifiedName();
+    EndStatement(false);
+    return new Node("Import", t, name);
+  }
+
+  // alias r Root   |   alias byte u8
+  Node ParseAlias() {
+    Next();
+    var name = ExpectIdent();
+    var node = new Node("Alias", name, name.Text).Add(ParseType());
+    EndStatement(false);
+    return node;
+  }
+
+  // if c { } else { }   |   if c then statement   (same line, no else)
   Node ParseIf() {
     var t = Next();
-    var node = new Node("If", t).Add(ParseCondition()).Add(ParseBlock());
+    var cond = ParseCondition();
+    if (IsKw("then")) {
+      var then = Next();
+      if (Peek.Line != then.Line || IsNewline || AtEnd) {
+        throw ErrorAt("the statement after 'then' must be on the same line", then);
+      }
+      if (IsOp("{")) {
+        throw Error("'then' takes a single statement; use 'if cond { }' for blocks");
+      }
+      var body = ParseStatement();
+      if (PeekElse()) {
+        throw ErrorAt("'if ... then' cannot have 'else'; use braces", then);
+      }
+      return new Node("IfThen", t).Add(cond).Add(body);
+    }
+    var node = new Node("If", t).Add(cond).Add(ParseBlock());
     if (AcceptElse()) {
       var els = new Node("Else", t);
       els.Add(IsKw("if") ? ParseIf() : ParseBlock());
@@ -403,11 +480,43 @@ public sealed class Parser {
     return node;
   }
 
+  // jump name | jump #label# | jump default | jump <case value>
   Node ParseJump(bool caseBody) {
     var t = Next();
-    var target = ExpectIdent();
+    var node = new Node("Jump", t);
+    if (Peek.Kind == TokenKind.Label) {
+      var l = Next();
+      node.Add(new Node("Label", l, l.Text));
+    } else if (IsKw("default")) {
+      node.Add(new Node("Default", Next()));
+    } else if (Peek.Kind == TokenKind.Ident) {
+      var n = Next();
+      node.Add(new Node("Target", n, n.Text));
+    } else {
+      node.Add(new Node("CaseValue", Peek).Add(ParseUnary()));
+    }
     EndStatement(caseBody);
-    return new Node("Jump", t, target.Text);
+    return node;
+  }
+
+  // break | break Label | break #Label#
+  Node ParseBreak(bool caseBody) {
+    var t = Next();
+    var node = new Node("Break", t);
+    if (Peek.Line == t.Line && (Peek.Kind == TokenKind.Ident || Peek.Kind == TokenKind.Label)) {
+      node.Text = Next().Text;
+    }
+    EndStatement(caseBody);
+    return node;
+  }
+
+  Node ParseContinue(bool caseBody) {
+    var t = Next();
+    if (Peek.Line == t.Line && (Peek.Kind == TokenKind.Ident || Peek.Kind == TokenKind.Label)) {
+      throw Error("'continue' takes no label; use 'jump'");
+    }
+    EndStatement(caseBody);
+    return new Node("Continue", t);
   }
 
   Node ParseReturn(bool caseBody) {
@@ -424,18 +533,30 @@ public sealed class Parser {
     return node;
   }
 
-  // catch { }   |   catch ex { }   |   catch OverflowException ex { }
+  // throw Exception("msg")   |   throw Panic(3)
+  Node ParseThrow(bool caseBody) {
+    var t = Next();
+    var node = new Node("Throw", t).Add(ParseExpr());
+    EndStatement(caseBody);
+    return node;
+  }
+
+  // catch { }   |   catch ex { }   |   catch OverflowException ex { }   |   catch my.lib.Err e { }
   Node ParseCatch() {
     var t = Next();
     var node = new Node("Catch", t);
     if (Peek.Kind == TokenKind.Ident) {
-      var first = Next();
+      var start = Peek;
+      string first = ParseQualifiedName();
       if (Peek.Kind == TokenKind.Ident) {
         var name = Next();
         node.Text = name.Text;
-        node.Add(new Node("Type", first, first.Text));
+        node.Add(new Node("Type", start, first));
       } else {
-        node.Text = first.Text;
+        if (first.Contains('.')) {
+          throw Error("expected the exception variable name");
+        }
+        node.Text = first;
       }
     }
     node.Add(ParseBlock());
@@ -467,6 +588,7 @@ public sealed class Parser {
     var start = Peek;
     var first = ParseTarget();
 
+    // a, b = b, a   |   i32 id, string name = getUser()
     if (allowMulti && IsOp(",")) {
       var targets = new Node("Targets", start).Add(first);
       while (AcceptOp(",")) {
@@ -474,34 +596,43 @@ public sealed class Parser {
       }
       var eq = ExpectOp("=");
       SkipNewlines();
-      return new Node("MultiAssign", eq).Add(targets).Add(ParseExpr());
+      var values = new Node("Values", eq).Add(ParseExpr());
+      while (AcceptOp(",")) {
+        SkipNewlines();
+        values.Add(ParseExpr());
+      }
+      return new Node("MultiAssign", eq).Add(targets).Add(values);
     }
 
     if (first.Kind == "Decl") {
-      if (AcceptOp("=")) {
+      if (IsOp("=") || IsOp("_=")) {
+        var op = Next();
         SkipNewlines();
-        first.Add(ParseExpr());
+        first.Add(new Node(op.Text == "=" ? "Init" : "WeakInit", op).Add(ParseExpr()));
       }
       return first;
     }
 
-    string? op = null;
+    string? opText = null;
     if (PeekCompoundGt() == ">>=") {
-      op = ">>=";
+      opText = ">>=";
     } else if (Peek.Kind == TokenKind.Op && AssignOps.Contains(Peek.Text)) {
-      op = Peek.Text;
+      opText = Peek.Text;
     }
-    if (op != null) {
+    if (opText != null) {
       var opTok = Next();
-      if (op == ">>=") {
+      if (opText == ">>=") {
         Next();
       }
       SkipNewlines();
-      return new Node("Assign", opTok, op).Add(first).Add(ParseExpr());
+      return new Node("Assign", opTok, opText).Add(first).Add(ParseExpr());
     }
 
     if (first.Kind == "Discard") {
       throw ErrorAt("'_' alone is only valid as an assignment target", start);
+    }
+    if (first.Kind is "Tuple" or "List" or "Map") {
+      throw ErrorAt("a literal must be assigned, passed or returned", start);
     }
     return new Node("ExprStmt", start).Add(first);
   }
@@ -518,9 +649,10 @@ public sealed class Parser {
     return ParseExpr();
   }
 
-  // Speculative: "Type name" followed by '=', ',', or end of statement
+  // Speculative: "Type name" followed by '=', '_=', ',', or end of statement
   Node? TryParseDecl() {
-    if (Peek.Kind != TokenKind.Ident && !IsOp("(")) {
+    bool startsType = Peek.Kind == TokenKind.Ident || IsOp("(") || IsKw("dyn") || IsKw("impl") || IsKw("fun");
+    if (!startsType) {
       return null;
     }
     int save = pos;
@@ -530,7 +662,7 @@ public sealed class Parser {
         var name = Peek;
         var after = PeekAt(1);
         bool ends = after.Kind == TokenKind.Newline || after.Kind == TokenKind.Eof
-          || after.Is("=") || after.Is(",") || after.Is(";") || after.Is("}");
+          || after.Is("=") || after.Is("_=") || after.Is(",") || after.Is(";") || after.Is("}");
         if (ends) {
           Next();
           return new Node("Decl", name, name.Text).Add(type);
@@ -548,6 +680,11 @@ public sealed class Parser {
   Node ParseType(bool allowCallback = true) {
     var start = Peek;
     Node type;
+    if (IsKw("dyn") || IsKw("impl")) {
+      var k = Next();
+      type = new Node(k.Text == "dyn" ? "Dyn" : "Impl", k).Add(ParseType(false));
+      return type;
+    }
     if (IsKw("fun")) {
       // fun(i32, string)  or  fun i32(string)
       Next();
@@ -559,23 +696,14 @@ public sealed class Parser {
     } else if (IsOp("(")) {
       type = ParseTupleType();
     } else {
-      var name = ExpectIdent();
-      if (name.Text == "vec") {
-        type = new Node("VecType", name).Add(ParseType(false));
-        ExpectOp(",");
-        if (Peek.Kind != TokenKind.Int) {
-          throw Error("expected vector length");
-        }
-        type.Text = Next().Text;
-      } else {
-        type = new Node("Type", name, name.Text);
-        if (IsOp("<")) {
-          Next();
-          do {
-            type.Add(ParseType());
-          } while (AcceptOp(","));
-          ExpectOp(">");
-        }
+      string name = ParseQualifiedName();
+      type = new Node("Type", start, name);
+      if (IsOp("<")) {
+        Next();
+        do {
+          type.Add(ParseTypeArg());
+        } while (AcceptOp(","));
+        ExpectOp(">");
       }
       // i32(string, u8): callback with return type
       if (allowCallback && IsOp("(")) {
@@ -587,6 +715,15 @@ public sealed class Parser {
       type = new Node("Nullable", q).Add(type);
     }
     return type;
+  }
+
+  // vec<4, i16>: a type argument may be a count
+  Node ParseTypeArg() {
+    if (Peek.Kind == TokenKind.Int) {
+      var n = Next();
+      return new Node("Count", n, n.Text);
+    }
+    return ParseType();
   }
 
   Node ParseTypeList() {
@@ -601,7 +738,7 @@ public sealed class Parser {
     return list;
   }
 
-  // (i32, r128, string)  or  (i32 val, string name)
+  // (i32, r128, string)  or  (i32 val, string name); at least 2 fields
   Node ParseTupleType() {
     var open = ExpectOp("(");
     var tuple = new Node("TupleType", open);
@@ -615,12 +752,16 @@ public sealed class Parser {
       }
     } while (AcceptOp(","));
     ExpectOp(")");
+    if (tuple.Children.Count < 2) {
+      throw ErrorAt("a tuple needs at least 2 elements", open);
+    }
     return tuple;
   }
 
   // ---------------------------------------------------------------- declarations
 
-  // fun [type[, type...]] name(params) { }   |   fun [type] name = lambda
+  // fun [type[, type...]] name(params) { }   |   fun [type] name(params)   (no body: trait)
+  // fun [type] name = lambda
   Node ParseFun() {
     var t = Next();
     var rets = new Node("Returns", t);
@@ -641,11 +782,19 @@ public sealed class Parser {
       return node;
     }
     node.Add(ParseParams());
-    node.Add(ParseBlock());
+    int save = pos;
+    SkipNewlines();
+    if (IsOp("{")) {
+      node.Add(ParseBlock());
+    } else {
+      pos = save;
+      node.Add(new Node("NoBody", name));
+      EndStatement(false);
+    }
     return node;
   }
 
-  // (type name [= default], &type name, type name!, ...)
+  // (type name [= default], &type name, type name!, &type name!, ->type name, ...)
   Node ParseParams() {
     var open = ExpectOp("(");
     var ps = new Node("Params", open);
@@ -654,12 +803,19 @@ public sealed class Parser {
       do {
         SkipNewlines();
         bool byRef = AcceptOp("&");
+        bool gift = !byRef && AcceptOp("->");
         var type = ParseType();
         var name = ExpectIdent();
-        var p = new Node(byRef ? "RefParam" : "Param", name, name.Text).Add(type);
-        if (AcceptOp("!")) {
-          p.Kind = "CopyParam";
-        }
+        bool copy = AcceptOp("!");
+        string kind = (byRef, gift, copy) switch {
+          (true, _, true) => "ConstRefParam",
+          (true, _, false) => "RefParam",
+          (_, true, false) => "GiftParam",
+          (false, false, true) => "CopyParam",
+          (_, true, true) => throw ErrorAt("'->' and '!' cannot be combined", name),
+          _ => "Param"
+        };
+        var p = new Node(kind, name, name.Text).Add(type);
         if (IsOp("=")) {
           var eq = Next();
           p.Add(new Node("Default", eq).Add(ParseExpr()));
@@ -672,7 +828,17 @@ public sealed class Parser {
     return ps;
   }
 
-  // class Name(primary params) { members }
+  // : Parent, TraitA, TraitB
+  Node ParseBases(Token at) {
+    var bases = new Node("Bases", at);
+    do {
+      SkipNewlines();
+      bases.Add(ParseType(false));
+    } while (AcceptOp(","));
+    return bases;
+  }
+
+  // class Name(primary params) : Parent, Traits { members }
   Node ParseClass() {
     Next();
     var name = ExpectIdent();
@@ -682,18 +848,44 @@ public sealed class Parser {
       ps.Kind = "PrimaryCtor";
       node.Add(ps);
     }
+    if (IsOp(":")) {
+      node.Add(ParseBases(Next()));
+    }
     node.Add(ParseBlock(name.Text));
     return node;
   }
 
-  // Name(params) [: Name(args)] [{ body }]
+  // trait Name : SuperTrait { properties, methods, constructor }
+  Node ParseTrait() {
+    Next();
+    var name = ExpectIdent();
+    var node = new Node("Trait", name, name.Text);
+    if (IsOp(":")) {
+      var colon = Next();
+      var bases = ParseBases(colon);
+      if (bases.Children.Count > 1) {
+        throw ErrorAt("a trait can extend only one trait", colon);
+      }
+      node.Add(bases);
+    }
+    node.Add(ParseBlock(name.Text));
+    return node;
+  }
+
+  // Name(params) [: Name(args), Trait(args)] [{ body }]
   Node ParseConstructor() {
     var name = Next();
     var node = new Node("Constructor", name, name.Text).Add(ParseParams());
     if (IsOp(":")) {
       var colon = Next();
-      var target = ExpectIdent();
-      node.Add(new Node("Chain", colon, target.Text).Add(ParseArgs()));
+      var chain = new Node("Chain", colon);
+      do {
+        SkipNewlines();
+        var start = Peek;
+        string target = ParseQualifiedName();
+        chain.Add(new Node("Call", start, target).Add(ParseArgs()));
+      } while (AcceptOp(","));
+      node.Add(chain);
     }
     int save = pos;
     SkipNewlines();
@@ -814,11 +1006,27 @@ public sealed class Parser {
     return left;
   }
 
+  // a..b  a..=b  a..  ..b  ..=b
   Node ParseRange() {
+    if (IsOp("..") || IsOp("..=")) {
+      var op = Next();
+      return new Node("Range", op, op.Text).Add(new Node("Open", op)).Add(ParseBinary(0));
+    }
+    if (IsOp("...")) {
+      throw Error("'...' is reserved");
+    }
     var left = ParseBinary(0);
     if (IsOp("..") || IsOp("..=")) {
       var op = Next();
-      return new Node("Range", op, op.Text).Add(left).Add(ParseBinary(0));
+      var range = new Node("Range", op, op.Text).Add(left);
+      if (StartsOperand(Peek)) {
+        range.Add(ParseBinary(0));
+      } else if (op.Text == "..=") {
+        throw Error("an inclusive range needs an end");
+      } else {
+        range.Add(new Node("Open", op));
+      }
+      return range;
     }
     if (IsOp("...")) {
       throw Error("'...' is reserved");
@@ -832,6 +1040,10 @@ public sealed class Parser {
     }
     var left = ParseBinary(level + 1);
     while (true) {
+      if (level == ComparisonLevel && IsKw("is")) {
+        left = ParseIs(left);
+        continue;
+      }
       string? op = MatchBinaryOp(Levels[level]);
       if (op == null) {
         return left;
@@ -843,6 +1055,21 @@ public sealed class Parser {
       SkipNewlines();
       left = new Node("Binary", tok, op).Add(left).Add(ParseBinary(level + 1));
     }
+  }
+
+  // x is null   |   x is ClassName   |   x is ClassName target
+  Node ParseIs(Node subject) {
+    var t = Next();
+    if (IsKw("null")) {
+      Next();
+      return new Node("IsNull", t).Add(subject);
+    }
+    var type = ParseType(false);
+    var node = new Node("Is", t).Add(subject).Add(type);
+    if (Peek.Kind == TokenKind.Ident && Peek.Line == t.Line) {
+      node.Text = Next().Text;
+    }
+    return node;
   }
 
   string? MatchBinaryOp(string[] ops) {
@@ -878,6 +1105,9 @@ public sealed class Parser {
         case "&":
           Next();
           return new Node("Ref", t).Add(ParseUnary());
+        case "->":
+          Next();
+          return new Node("Gift", t).Add(ParseUnary());
         case "_":
           Next();
           if (StartsOperand(Peek)) {
@@ -885,10 +1115,11 @@ public sealed class Parser {
           }
           return new Node("Discard", t);
         case "[":
-          Next();
-          var target = ParseType();
-          ExpectOp("]");
-          return new Node("Transmute", t).Add(target).Add(ParseUnary());
+          var transmute = TryParseTransmute();
+          if (transmute != null) {
+            return transmute;
+          }
+          break;
         case "(":
           var cast = TryParseCast();
           if (cast != null) {
@@ -898,6 +1129,25 @@ public sealed class Parser {
       }
     }
     return ParsePostfix(ParsePrimary());
+  }
+
+  // [type]expr ; otherwise '[' starts a list literal
+  Node? TryParseTransmute() {
+    int save = pos;
+    var open = Next();
+    if (Peek.Kind == TokenKind.Ident) {
+      try {
+        var type = ParseType(false);
+        if (IsOp("]") && StartsCastOperand(PeekAt(1))) {
+          Next();
+          return new Node("Transmute", open).Add(type).Add(ParseUnary());
+        }
+      } catch (DfException) {
+        // not a transmute
+      }
+    }
+    pos = save;
+    return null;
   }
 
   // (type)expr
@@ -988,6 +1238,9 @@ public sealed class Parser {
       case TokenKind.String:
         Next();
         return new Node("String", t, t.Text);
+      case TokenKind.InterpString:
+        Next();
+        return ParseInterpolated(t);
       case TokenKind.Char:
         Next();
         return new Node("Char", t, t.Text);
@@ -1008,8 +1261,11 @@ public sealed class Parser {
         if (t.Text == "(") {
           return ParseParen();
         }
+        if (t.Text == "[") {
+          return ParseListLiteral();
+        }
         if (t.Text == "{" && !noBrace) {
-          return ParseCollection();
+          return ParseMapLiteral();
         }
         if (t.Text == "...") {
           throw Error("'...' is reserved");
@@ -1041,7 +1297,7 @@ public sealed class Parser {
     return -1;
   }
 
-  // (expr)  |  (a, b, ...) tuple  |  (params) { body } lambda
+  // (expr)  |  (a, b, ...) tuple  |  (params; captures) { body } lambda
   Node ParseParen() {
     if (!noBrace) {
       int close = FindMatchingParen(pos);
@@ -1059,11 +1315,8 @@ public sealed class Parser {
     bool saved = noBrace;
     noBrace = false;
     SkipNewlines();
-    var tuple = new Node("Tuple", open);
     if (IsOp(")")) {
-      Next();
-      noBrace = saved;
-      return tuple;
+      throw ErrorAt("a tuple needs at least 2 elements", open);
     }
     var first = ParseExpr();
     SkipNewlines();
@@ -1072,7 +1325,7 @@ public sealed class Parser {
       noBrace = saved;
       return new Node("Paren", open).Add(first);
     }
-    tuple.Add(first);
+    var tuple = new Node("Tuple", open).Add(first);
     while (AcceptOp(",")) {
       SkipNewlines();
       tuple.Add(ParseExpr());
@@ -1083,30 +1336,62 @@ public sealed class Parser {
     return tuple;
   }
 
-  // (a, b) { a < b }   |   (string name) { ... }
+  // (a, b) { a < b }   |   (string name) { ... }   |   (x; limit!, ->owned, _weak) { ... }
   Node ParseLambda() {
     var open = ExpectOp("(");
     var ps = new Node("Params", open);
+    var caps = new Node("Captures", open);
     SkipNewlines();
-    if (!IsOp(")")) {
+    if (!IsOp(")") && !IsOp(";")) {
       do {
         SkipNewlines();
-        var after = PeekAt(1);
-        bool untyped = Peek.Kind == TokenKind.Ident
-          && (after.Is(",") || after.Is(")") || after.Kind == TokenKind.Newline);
-        if (untyped) {
-          var n = Next();
-          ps.Add(new Node("Param", n, n.Text));
-        } else {
-          var type = ParseType();
-          var n = ExpectIdent();
-          ps.Add(new Node("Param", n, n.Text).Add(type));
-        }
+        ps.Add(ParseLambdaParam());
+        SkipNewlines();
+      } while (AcceptOp(","));
+    }
+    if (AcceptOp(";")) {
+      do {
+        SkipNewlines();
+        caps.Add(ParseCapture());
         SkipNewlines();
       } while (AcceptOp(","));
     }
     ExpectOp(")");
-    return new Node("Lambda", open).Add(ps).Add(ParseBlock());
+    var node = new Node("Lambda", open).Add(ps);
+    if (caps.Children.Count > 0) {
+      node.Add(caps);
+    }
+    return node.Add(ParseBlock());
+  }
+
+  Node ParseLambdaParam() {
+    var after = PeekAt(1);
+    bool untyped = Peek.Kind == TokenKind.Ident
+      && (after.Is(",") || after.Is(")") || after.Is(";") || after.Kind == TokenKind.Newline);
+    if (untyped) {
+      var n = Next();
+      return new Node("Param", n, n.Text);
+    }
+    var type = ParseType();
+    var name = ExpectIdent();
+    return new Node("Param", name, name.Text).Add(type);
+  }
+
+  // limit (borrow) | limit! (copy) | ->limit (move) | _limit (weak)
+  Node ParseCapture() {
+    if (AcceptOp("->")) {
+      var n = ExpectIdent();
+      return new Node("MoveCapture", n, n.Text);
+    }
+    if (AcceptOp("_")) {
+      var n = ExpectIdent();
+      return new Node("WeakCapture", n, n.Text);
+    }
+    var name = ExpectIdent();
+    if (AcceptOp("!")) {
+      return new Node("CopyCapture", name, name.Text);
+    }
+    return new Node("Capture", name, name.Text);
   }
 
   // (a, b, name: c)
@@ -1135,14 +1420,16 @@ public sealed class Parser {
     return args;
   }
 
-  // { a, b, c }
-  Node ParseCollection() {
+  // [a, b, c]
+  Node ParseListLiteral() {
     var open = Next();
     var list = new Node("List", open);
+    bool saved = noBrace;
+    noBrace = false;
     SkipNewlines();
-    while (!IsOp("}")) {
+    while (!IsOp("]")) {
       if (AtEnd) {
-        throw ErrorAt("unclosed '{'", open);
+        throw ErrorAt("unclosed '['", open);
       }
       list.Add(ParseExpr());
       SkipNewlines();
@@ -1151,7 +1438,153 @@ public sealed class Parser {
       }
       SkipNewlines();
     }
-    ExpectOp("}");
+    ExpectOp("]");
+    noBrace = saved;
     return list;
+  }
+
+  // { one: 1, 2: "two", "three": x, true: y }  keys are literals, bare names are strings
+  Node ParseMapLiteral() {
+    var open = Next();
+    var map = new Node("Map", open);
+    SkipNewlines();
+    while (!IsOp("}")) {
+      if (AtEnd) {
+        throw ErrorAt("unclosed '{'", open);
+      }
+      var key = ParseMapKey();
+      ExpectOp(":");
+      SkipNewlines();
+      map.Add(new Node("Entry", key.Item1).Add(key.Item2).Add(ParseExpr()));
+      SkipNewlines();
+      if (!AcceptOp(",")) {
+        break;
+      }
+      SkipNewlines();
+    }
+    ExpectOp("}");
+    return map;
+  }
+
+  (Token, Node) ParseMapKey() {
+    var t = Peek;
+    switch (t.Kind) {
+      case TokenKind.Ident:
+        Next();
+        return (t, new Node("Key", t, "\"" + t.Text + "\""));
+      case TokenKind.Int:
+      case TokenKind.String:
+      case TokenKind.Char:
+        Next();
+        return (t, new Node("Key", t, t.Text));
+      case TokenKind.Keyword when t.Text is "true" or "false":
+        Next();
+        return (t, new Node("Key", t, t.Text));
+      case TokenKind.Op when t.Text == "-" && PeekAt(1).Kind == TokenKind.Int:
+        Next();
+        var n = Next();
+        return (t, new Node("Key", t, "-" + n.Text));
+    }
+    if (t.Kind == TokenKind.Real) {
+      throw Error("real numbers cannot be map keys");
+    }
+    throw Error("map keys must be literals");
+  }
+
+  // ---------------------------------------------------------------- interpolation
+
+  // $"text {expr} text {expr:spec}"
+  Node ParseInterpolated(Token t) {
+    string s = t.Text.Substring(2, t.Text.Length - 3);
+    var node = new Node("Interp", t);
+    var text = new System.Text.StringBuilder();
+    int i = 0;
+    while (i < s.Length) {
+      char c = s[i];
+      if (c == '\\') {
+        int end = i + 2;
+        if (end <= s.Length && (s[i + 1] == 'u' || s[i + 1] == '#')) {
+          end = s.IndexOf('}', i) + 1;
+        }
+        text.Append(s, i, end - i);
+        i = end;
+        continue;
+      }
+      if (c != '{') {
+        text.Append(c);
+        i++;
+        continue;
+      }
+      if (text.Length > 0) {
+        node.Add(new Node("Text", t, "\"" + text + "\""));
+        text.Clear();
+      }
+      int exprEnd = ScanHole(s, i + 1, true);
+      string exprSrc = s.Substring(i + 1, exprEnd - i - 1);
+      var hole = new Node("Hole", t).Add(ParseHoleExpr(exprSrc, t));
+      i = exprEnd;
+      if (s[i] == ':') {
+        int specEnd = ScanHole(s, i + 1, false);
+        hole.Add(new Node("Spec", t, s.Substring(i + 1, specEnd - i - 1)));
+        i = specEnd;
+      }
+      node.Add(hole);
+      i++; // '}'
+    }
+    if (text.Length > 0) {
+      node.Add(new Node("Text", t, "\"" + text + "\""));
+    }
+    return node;
+  }
+
+  // Returns the index of the ':' (when allowed) or '}' that ends a hole section.
+  static int ScanHole(string s, int i, bool stopAtColon) {
+    int depth = 0;
+    while (i < s.Length) {
+      char c = s[i];
+      if (c == '"' || c == '\'') {
+        i++;
+        while (i < s.Length && s[i] != c) {
+          if (s[i] == '\\') {
+            i++;
+          }
+          i++;
+        }
+        i++;
+        continue;
+      }
+      if (c == '(' || c == '[' || c == '{') {
+        depth++;
+      } else if (c == ')' || c == ']') {
+        depth--;
+      } else if (c == '}') {
+        if (depth == 0) {
+          return i;
+        }
+        depth--;
+      } else if (c == ':' && depth == 0 && stopAtColon) {
+        return i;
+      }
+      i++;
+    }
+    return s.Length - 1;
+  }
+
+  static Node ParseHoleExpr(string src, Token at) {
+    if (src.Trim().Length == 0) {
+      throw ErrorAt("empty interpolation hole", at);
+    }
+    try {
+      var tokens = new Lexer(src).Tokenize();
+      var p = new Parser(tokens);
+      var e = p.ParseExpr();
+      p.SkipNewlines();
+      if (!p.AtEnd) {
+        throw p.Error("unexpected text in interpolation hole");
+      }
+      return e;
+    } catch (DfException ex) {
+      throw new DfException($"in interpolation '{{{src}}}': {ex.Message}", at.Line, at.Col);
+    }
   }
 }

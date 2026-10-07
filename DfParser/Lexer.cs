@@ -6,6 +6,7 @@ public enum TokenKind {
   Int,
   Real,
   String,
+  InterpString,
   Char,
   Label,
   Op,
@@ -36,7 +37,7 @@ public sealed class Token {
       TokenKind.Eof => "<eof>",
       _ => Text
     };
-    return $"{Line,4}:{Col,-4} {Kind,-8} {shown}";
+    return $"{Line,4}:{Col,-4} {Kind,-12} {shown}";
   }
 }
 
@@ -52,16 +53,18 @@ public sealed class DfException : Exception {
 
 public sealed class Lexer {
   static readonly HashSet<string> Keywords = new() {
-    "fun", "class", "enum", "public", "internal", "private", "const",
-    "if", "else", "while", "for", "in", "step", "switch", "default",
-    "jump", "return", "catch", "atEnd", "enforce", "true", "false", "null"
+    "fun", "class", "trait", "enum", "alias", "namespace", "import",
+    "public", "internal", "private", "const", "override", "dyn", "impl",
+    "if", "then", "else", "while", "for", "in", "step", "switch", "default",
+    "jump", "break", "continue", "return", "throw", "catch", "atEnd", "enforce",
+    "is", "true", "false", "null"
   };
 
   // Longest first. ">>" and ">>=" are not tokens: the parser joins adjacent '>'
   // so that generics like list<list<i32>> close correctly.
   static readonly string[] Ops = {
     "..=", "...", "??=", "<<=",
-    "==", "!=", "<=", ">=", "&&", "||", "^^", "++", "--",
+    "->", "_=", "==", "!=", "<=", ">=", "&&", "||", "^^", "++", "--",
     "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<", "?.", "??", "..",
     "+", "-", "*", "/", "%", "&", "|", "^", "!", "_", "=", "<", ">",
     "(", ")", "{", "}", "[", "]", ",", ";", ":", ".", "?"
@@ -136,6 +139,10 @@ public sealed class Lexer {
         LexNumber(l, cl);
         continue;
       }
+      if (c == '$' && At(1) == '"') {
+        LexInterpolated(l, cl);
+        continue;
+      }
       if (c == '"') {
         LexQuoted('"', TokenKind.String, l, cl);
         continue;
@@ -159,7 +166,7 @@ public sealed class Lexer {
     tokens.Add(new Token(kind, text, l, c));
   }
 
-  // Go-style: a line break ends a statement only after a token that can end one.
+  // JavaScript-style: a line break ends a statement only after a token that can end one.
   void AddNewline() {
     if (tokens.Count == 0) {
       return;
@@ -172,8 +179,10 @@ public sealed class Lexer {
 
   static bool EndsStatement(Token t) {
     return t.Kind switch {
-      TokenKind.Ident or TokenKind.Int or TokenKind.Real or TokenKind.String or TokenKind.Char => true,
-      TokenKind.Keyword => t.Text is "return" or "true" or "false" or "null",
+      TokenKind.Ident or TokenKind.Int or TokenKind.Real or TokenKind.String
+        or TokenKind.InterpString or TokenKind.Char or TokenKind.Label => true,
+      TokenKind.Keyword => t.Text is "return" or "break" or "continue" or "default"
+        or "true" or "false" or "null",
       TokenKind.Op => t.Text is ")" or "]" or "}" or "++" or "--" or "!",
       _ => false
     };
@@ -201,55 +210,229 @@ public sealed class Lexer {
     }
   }
 
+  // ---------------------------------------------------------------- numbers
+
+  static bool IsBinDigit(char c) => c == '0' || c == '1';
+
+  // digits with '_' separators: '_' must sit between two digits
+  void ReadDigits(Func<char, bool> isDigit) {
+    while (true) {
+      if (isDigit(Cur)) {
+        Advance();
+      } else if (Cur == '_' && isDigit(At(1)) && pos > 0 && isDigit(src[pos - 1])) {
+        Advance();
+      } else {
+        return;
+      }
+    }
+  }
+
   void LexNumber(int l, int c) {
     int start = pos;
     var kind = TokenKind.Int;
+
     if (Cur == '0' && (At(1) == 'x' || At(1) == 'X')) {
       Advance();
       Advance();
       if (!char.IsAsciiHexDigit(Cur)) {
         throw Error("invalid hex number", l, c);
       }
-      while (char.IsAsciiHexDigit(Cur)) {
-        Advance();
-      }
-    } else {
-      while (char.IsDigit(Cur)) {
-        Advance();
-      }
-      // "0..10" is a range, "1.5" is a real
-      if (Cur == '.' && char.IsDigit(At(1))) {
-        kind = TokenKind.Real;
-        Advance();
-        while (char.IsDigit(Cur)) {
-          Advance();
-        }
-      }
-      bool exp = Cur == 'e' || Cur == 'E';
-      bool expDigits = char.IsDigit(At(1)) || ((At(1) == '+' || At(1) == '-') && char.IsDigit(At(2)));
-      if (exp && expDigits) {
-        kind = TokenKind.Real;
-        Advance();
-        if (Cur == '+' || Cur == '-') {
-          Advance();
-        }
-        while (char.IsDigit(Cur)) {
-          Advance();
-        }
-      }
+      ReadDigits(char.IsAsciiHexDigit);
+      ReadSuffix("u", l, c);
+      Add(kind, src[start..pos], l, c);
+      return;
     }
-    if (char.IsLetter(Cur) || Cur == '_') {
-      throw Error("invalid character in number", line, col);
+
+    // "0b101" is binary; "0b" alone is zero with the byte suffix
+    if (Cur == '0' && (At(1) == 'b' || At(1) == 'B') && IsBinDigit(At(2))) {
+      Advance();
+      Advance();
+      ReadDigits(IsBinDigit);
+      ReadSuffix("u", l, c);
+      Add(kind, src[start..pos], l, c);
+      return;
+    }
+
+    ReadDigits(char.IsDigit);
+    // "0..10" is a range, "1.5" is a real
+    if (Cur == '.' && char.IsDigit(At(1))) {
+      kind = TokenKind.Real;
+      Advance();
+      ReadDigits(char.IsDigit);
+    }
+    bool exp = Cur == 'e' || Cur == 'E';
+    bool expDigits = char.IsDigit(At(1)) || ((At(1) == '+' || At(1) == '-') && char.IsDigit(At(2)));
+    if (exp && expDigits) {
+      kind = TokenKind.Real;
+      Advance();
+      if (Cur == '+' || Cur == '-') {
+        Advance();
+      }
+      ReadDigits(char.IsDigit);
+    }
+
+    if (kind == TokenKind.Real) {
+      ReadSuffix("f", l, c);
+    } else {
+      // f on an integer literal makes it a real: 2f
+      if ((Cur == 'f' || Cur == 'F') && !char.IsLetterOrDigit(At(1))) {
+        Advance();
+        kind = TokenKind.Real;
+      } else {
+        ReadSuffix("ulbs", l, c);
+      }
     }
     Add(kind, src[start..pos], l, c);
+  }
+
+  // Suffix letters (case-insensitive), each at most once, at most two.
+  void ReadSuffix(string allowed, int l, int c) {
+    var seen = new HashSet<char>();
+    while (char.IsLetter(Cur)) {
+      char s = char.ToLowerInvariant(Cur);
+      if (!allowed.Contains(s) || seen.Contains(s) || seen.Count == 2) {
+        throw Error($"invalid number suffix '{Cur}'", line, col);
+      }
+      seen.Add(s);
+      Advance();
+    }
+    if (Cur == '_' || char.IsDigit(Cur)) {
+      throw Error("invalid character in number", line, col);
+    }
+    // l (64), s (16) and b (8) are sizes: at most one of them
+    int sizes = (seen.Contains('l') ? 1 : 0) + (seen.Contains('s') ? 1 : 0) + (seen.Contains('b') ? 1 : 0);
+    if (sizes > 1) {
+      throw Error("conflicting number suffixes", l, c);
+    }
+  }
+
+  // ---------------------------------------------------------------- strings
+
+  // Validates one escape starting at '\'.
+  void ReadEscape(int l, int c, bool interpolated) {
+    Advance(); // backslash
+    char e = Cur;
+    switch (e) {
+      case 'n':
+      case 'r':
+      case 't':
+      case '\\':
+      case '\'':
+      case '"':
+      case '0':
+        Advance();
+        return;
+      case '{':
+      case '}':
+        if (!interpolated) {
+          throw Error($"'\\{e}' is only valid in interpolated strings", line, col);
+        }
+        Advance();
+        return;
+      case 'u':
+        Advance();
+        ReadCodePoint(16, l, c);
+        return;
+      case '#':
+        Advance();
+        ReadCodePoint(10, l, c);
+        return;
+      default:
+        throw Error($"unknown escape '\\{e}'", line, col);
+    }
+  }
+
+  void ReadCodePoint(int radix, int l, int c) {
+    if (Cur != '{') {
+      throw Error(radix == 16 ? "code point escape is \\u{hex}" : "code point escape is \\#{decimal}", line, col);
+    }
+    Advance();
+    int start = pos;
+    while (radix == 16 ? char.IsAsciiHexDigit(Cur) : char.IsDigit(Cur)) {
+      Advance();
+    }
+    string digits = src[start..pos];
+    if (Cur != '}' || digits.Length == 0) {
+      throw Error("malformed code point escape", line, col);
+    }
+    Advance();
+    long value;
+    try {
+      value = Convert.ToInt64(digits, radix);
+    } catch (Exception) {
+      throw Error("code point out of range", l, c);
+    }
+    if (value > 0x10FFFF || (value >= 0xD800 && value <= 0xDFFF)) {
+      throw Error("invalid Unicode code point", l, c);
+    }
   }
 
   void LexQuoted(char quote, TokenKind kind, int l, int c) {
     int start = pos;
     Advance();
+    int chars = 0;
     while (Cur != quote) {
       if (pos >= src.Length || Cur == '\n') {
         throw Error(kind == TokenKind.String ? "unterminated string" : "unterminated char", l, c);
+      }
+      if (Cur == '\\') {
+        ReadEscape(l, c, false);
+      } else {
+        Advance();
+      }
+      chars++;
+    }
+    Advance();
+    if (kind == TokenKind.Char && chars != 1) {
+      throw Error(chars == 0 ? "empty char literal" : "char literal holds one character", l, c);
+    }
+    Add(kind, src[start..pos], l, c);
+  }
+
+  // $"text {expr:spec} text": braces nest, and quotes inside braces are nested strings
+  void LexInterpolated(int l, int c) {
+    int start = pos;
+    Advance(); // $
+    Advance(); // "
+    int depth = 0;
+    while (true) {
+      if (pos >= src.Length || Cur == '\n') {
+        throw Error("unterminated interpolated string", l, c);
+      }
+      char ch = Cur;
+      if (ch == '\\') {
+        ReadEscape(l, c, true);
+        continue;
+      }
+      if (depth == 0 && ch == '"') {
+        Advance();
+        break;
+      }
+      if (depth > 0 && (ch == '"' || ch == '\'')) {
+        SkipNested(ch, l, c);
+        continue;
+      }
+      if (ch == '{') {
+        depth++;
+      } else if (ch == '}') {
+        if (depth == 0) {
+          throw Error("unmatched '}' in interpolated string (use \\})", line, col);
+        }
+        depth--;
+      }
+      Advance();
+    }
+    if (depth != 0) {
+      throw Error("unclosed '{' in interpolated string", l, c);
+    }
+    Add(TokenKind.InterpString, src[start..pos], l, c);
+  }
+
+  void SkipNested(char quote, int l, int c) {
+    Advance();
+    while (Cur != quote) {
+      if (pos >= src.Length || Cur == '\n') {
+        throw Error("unterminated string inside interpolation", l, c);
       }
       if (Cur == '\\') {
         Advance();
@@ -257,12 +440,9 @@ public sealed class Lexer {
       Advance();
     }
     Advance();
-    string text = src[start..pos];
-    if (kind == TokenKind.Char && text.Length <= 2) {
-      throw Error("empty char literal", l, c);
-    }
-    Add(kind, text, l, c);
   }
+
+  // ---------------------------------------------------------------- labels and operators
 
   void LexLabel(int l, int c) {
     Advance();

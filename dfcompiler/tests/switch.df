@@ -1,0 +1,98 @@
+namespace switches
+alias r Root
+
+enum Color { Red, Green, Blue }
+
+fun string classify(i32 value) {
+  string result = "?"
+  switch value {
+    1: result = "one", 2: result = "two"
+    3, 4, 5: {
+      result = "three to five"
+    }
+    default: result = "other"
+  }
+  return result
+}
+
+for i32 i = 0..7 {
+  r.Console.Log($"classify({i}) = {classify(i)}")
+}
+
+// jumps between cases, by value and to default
+fun string walk(i32 start) {
+  string path = ""
+  switch start {
+    1: {
+      path += "1 "
+      jump 3
+    }
+    2: {
+      path += "2 "
+      jump default
+    }
+    3: {
+      path += "3 "
+    }
+    default: path += "default "
+  }
+  return path
+}
+r.Console.Log("walk(1) = " + walk(1))
+r.Console.Log("walk(2) = " + walk(2))
+
+// enum subject: entries without the enum name, jump by entry name
+Color paint = Color.Green
+switch paint {
+  Red: r.Console.Log("red")
+  Green: {
+    r.Console.Log("green, then...")
+    jump Blue
+  }
+  Blue: r.Console.Log("blue")
+}
+
+// strings, labels out of a switch, break of the enclosing loop
+string word = "beta"
+switch word {
+  "alpha": r.Console.Log("first")
+  "beta": jump #after#
+  default: r.Console.Log("unknown")
+}
+r.Console.Log("not printed")
+#after#
+r.Console.Log("jumped to #after#")
+
+i32 seen = 0
+for i32 n = 0..10 {
+  switch n {
+    4: break
+    default: seen++
+  }
+}
+r.Console.Log($"loop stopped at 4, seen = {seen}")
+
+// the subject is evaluated once
+i32 calls = 0
+fun i32 next(i32 value) { value + 1 }
+switch next(calls) {
+  1: r.Console.Log("next(0) is 1")
+}
+
+// switch expressions
+for i32 i = 0..4 {
+  bool odd = i ? { 1, 3: true, default: false }
+  string name = i ? { 0: "zero", 1: "one", default: "many" }
+  r.Console.Log($"{i}: odd = {odd}, name = {name}")
+}
+bool flag = true
+string yesNo = flag ? { "yes", "no" }
+r.Console.Log($"flag ? yes/no = {yesNo}")
+i32 count = 0
+r.Console.Log($"count ? = {count ? { "some", "none" }}")
+string hue = paint ? { Red: "warm", Green: "natural", Blue: "cold" }
+r.Console.Log($"hue = {hue}")
+i64 wide = flag ? { 1, 2l }
+r.Console.Log($"wide = {wide}")
+r64 mixed = flag ? { 1, 2.5 }
+r.Console.Log($"mixed = {mixed}")

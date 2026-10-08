@@ -1,4 +1,4 @@
-namespace dfparse;
+namespace dfparser;
 
 public sealed class Node {
   public Node(string kind, Token at, string? text = null) {

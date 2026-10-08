@@ -1,0 +1,53 @@
+namespace tuples
+alias r Root
+
+fun i32, string getUser() { return 1, "ada" }
+
+fun i32, string forward() { return getUser() }
+
+fun (i32 id, string name) getPair() { return (2, "bob") }
+
+fun i64, r64, bool stats(i32 count) {
+  return count * 2, (r64)count / 2.0, count > 3
+}
+
+// multiple return values
+i32 id, string name = getUser()
+r.Console.Log($"getUser: {id} {name}")
+i32 otherId, _ = forward()
+r.Console.Log($"forward id: {otherId}")
+i64 doubled, r64 halved, bool big = stats(5)
+r.Console.Log($"stats(5): {doubled} {halved} {big}")
+id, name = getUser()
+_, name, i32 level = 7, "carl", 3
+r.Console.Log($"name = {name}, level = {level}")
+
+// swap: the right side is evaluated first
+i32 x = 1
+i32 y = 2
+x, y = y, x
+r.Console.Log($"after swap: x = {x}, y = {y}")
+
+// tuples
+(i32 id, string name) pair = getPair()
+r.Console.Log($"pair = {pair}, pair.id = {pair.id}, pair.name = {pair.name}, pair.1 = {pair.1}")
+pair.id = 20
+pair.name += "!"
+r.Console.Log($"changed pair = {pair}")
+(i32, string) plain = pair
+r.Console.Log($"plain = {plain}, equal: {plain == pair}")
+(i64, r64) widened = (3, 1.5)
+r.Console.Log($"widened = {widened}")
+(i32 count, (bool flag, char letter) inner) nested = (1, (true, 'z'))
+r.Console.Log($"nested = {nested}, nested.inner.letter = {nested.inner.letter}")
+(i32 a, i32 b) zero
+r.Console.Log($"zero = {zero}")
+bool literalEqual = (1, "a") == (1, "a")
+bool different = (1, 2) != (1, 3)
+r.Console.Log($"literal equal: {literalEqual}, different: {different}")
+
+// nullable tuple
+(i32, i32)? maybePair
+r.Console.Log($"maybePair = {maybePair}")
+maybePair = (4, 5)
+r.Console.Log($"maybePair = {maybePair}, first = {maybePair?.0}")

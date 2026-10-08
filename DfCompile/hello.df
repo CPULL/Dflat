@@ -1,3 +1,0 @@
-namespace hello
-string name = 1;
-Root.Console.Log($"Hello {name}!")

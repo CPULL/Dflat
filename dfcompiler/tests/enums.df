@@ -1,0 +1,40 @@
+namespace enums
+alias r Root
+
+enum Status { Active, Inactive, Pending: 10, Waiting, OnHold: Pending }
+
+enum u8 Level {
+  Low: 1, Mid: 5, High: 9
+  , fun Level Next(Level current) {
+    return current ? { Low: Mid, Mid: High, High: High }
+  }
+  , fun bool IsTop(Level value) { value == High }
+}
+
+enum i64 Big { Min: -9223372036854775808, Max: 9223372036854775807 }
+
+fun string describe(Status value) {
+  return value ? { Active: "running", Inactive: "stopped", default: "waiting" }
+}
+
+Status current = Status.Pending
+Status fresh
+r.Console.Log($"current = {current}, value {(i32)current}")
+r.Console.Log($"fresh = {fresh}")
+r.Console.Log($"Waiting = {(i32)Status.Waiting}")
+r.Console.Log($"OnHold prints as {Status.OnHold}, equals Pending: {Status.OnHold == Status.Pending}")
+r.Console.Log($"Active < Pending: {Status.Active < Status.Pending}")
+r.Console.Log("describe(Inactive) = " + describe(Status.Inactive))
+r.Console.Log("describe(OnHold) = " + describe(Status.OnHold))
+
+Level level = Level.Low
+level = Level.Next(level)
+r.Console.Log($"next of Low = {level}, top = {Level.IsTop(level)}")
+level = Level.Next(level)
+r.Console.Log($"next of Mid = {level}, top = {Level.IsTop(level)}")
+
+Status fromNumber = (Status)11
+Status unknown = (Status)3
+r.Console.Log($"(Status)11 = {fromNumber}, (Status)3 = {unknown}")
+r.Console.Log($"Big: {Big.Min} {(i64)Big.Min} {Big.Max}")
+if current then r.Console.Log("enum to bool: true")

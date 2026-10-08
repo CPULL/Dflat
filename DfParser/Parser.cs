@@ -1,4 +1,4 @@
-namespace dfparse;
+namespace dfparser;
 
 // Hand-written recursive descent parser for a Dflat subset.
 public sealed class Parser {

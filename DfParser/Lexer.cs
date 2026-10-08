@@ -1,4 +1,4 @@
-namespace dfparse;
+namespace dfparser;
 
 public enum TokenKind {
   Ident,

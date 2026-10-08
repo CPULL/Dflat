@@ -1,0 +1,79 @@
+namespace basics
+alias r Root
+
+fun u64 fib(u64 n) {
+  if n < 2 then return n
+  return fib(n - 1) + fib(n - 2)
+}
+
+fun i32 square(i32 x) { x * x }
+
+fun greet(string name = "world") {
+  r.Console.Log($"Hello {name}!")
+}
+
+greet()
+greet("Dflat")
+
+// loops and recursion
+for u64 i = 0..10 {
+  r.Console.Log($"fib({i}) = {fib(i)}")
+}
+
+i32 total = 0
+for i32 i = 1..=100 step i += 1 {
+  total += i
+}
+r.Console.Log("sum 1..100 = " + total)
+
+i32 count = 0
+while count < 3 {
+  count++
+}
+{
+  count--
+} while count > 1
+r.Console.Log($"count = {count}")
+
+// casts and transmutes
+i16 big16 = 257
+r.Console.Log($"(i8)257 = {(i8)big16}, [i8]257 = {[i8]big16}")
+r64 huge = 1e300
+r.Console.Log($"(i32)1e300 = {(i32)huge}")
+
+// numbers and strings
+r64 x = 2
+r.Console.Log($"sqrt(2) = {r.Math.Sqrt(x)}")
+r.Console.Log($"pi = {r.Math.Pi}, lerp = {r.Math.Lerp(0, 10, 0.25)}")
+r.Console.Log(1 + 2 + "a")
+r.Console.Log('a' + 'b')
+r.Console.Log($"square(12) = {square(12)}")
+char smile = '\u{1F600}'
+r.Console.Log("smile " + smile)
+string word = "héllo"
+r.Console.Log($"{word} has {word.len} chars and {word.sizeof} bytes")
+r.Console.Log($"literal braces: \{ok\}")
+
+bool flag = true
+if flag && total > 5000 {
+  r.Console.Log("big total")
+} else if total > 100 {
+  r.Console.Log("medium total")
+} else {
+  r.Console.Log("small total")
+}
+
+// labels and break
+for i32 a = 0..5 {
+  for i32 b = 0..5 {
+    if a * b == 6 then break Found
+  }
+}
+#Found#
+r.Console.Log("found a * b == 6")
+
+// errors
+i32 zero = 0
+r.Console.Log("dividing by zero...")
+i32 boom = 10 / zero
+r.Console.Log($"not reached {boom}")

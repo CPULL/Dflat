@@ -1,19 +1,25 @@
-namespace dfparse;
+namespace dfparser;
 
 public static class Program {
+  public const string Version = "0.0.1alpha";
+
   public static int Main(string[] args) {
     bool showTokens = false;
     string? path = null;
-    foreach (var a in args) {
-      if (a == "--tokens") {
+    foreach (var arg in args) {
+      if (arg is "-version" or "--version") {
+        Console.WriteLine($"dfparser {Version}");
+        return 0;
+      }
+      if (arg == "--tokens") {
         showTokens = true;
       } else {
-        path = a;
+        path = arg;
       }
     }
 
     if (path == null) {
-      Console.Error.WriteLine("usage: dfparse [--tokens] <file.df>");
+      Console.Error.WriteLine("usage: dfparser [--tokens] <file.df> | -version");
       return 2;
     }
     if (!File.Exists(path)) {
@@ -25,8 +31,8 @@ public static class Program {
     try {
       var tokens = new Lexer(src).Tokenize();
       if (showTokens) {
-        foreach (var t in tokens) {
-          Console.WriteLine(t);
+        foreach (var token in tokens) {
+          Console.WriteLine(token);
         }
         return 0;
       }

@@ -1,0 +1,88 @@
+namespace nullables
+alias r Root
+
+fun i32? find(i32 key) {
+  if key > 0 then return key * 10
+  return null
+}
+
+fun i32? half(i32? value) { value / 2 }
+
+i32? empty
+i32? some = 5
+r.Console.Log($"empty = {empty}, some = {some}")
+r.Console.Log($"empty == null: {empty == null}, some is null: {some is null}, some == 5: {some == 5}")
+
+// null propagates in arithmetic
+i32? sum = some + 1
+i32? none = empty + 1
+r.Console.Log($"some + 1 = {sum}, empty + 1 = {none}, -some = {-some}")
+r.Console.Log($"half(some) = {half(some)}, half(null) = {half(null)}")
+
+// ?? unwraps
+i32 plain = empty ?? 7
+i8 small = 3
+i8? maybeSmall = null
+i8 unwrapped = maybeSmall ?? 0
+r.Console.Log($"empty ?? 7 = {plain}, maybeSmall ?? 0 = {unwrapped}, find(2) ?? 0 = {find(2) ?? 0}, find(-1) ?? -1 = {find(-1) ?? -1}")
+i32? chain = empty ?? find(-5) ?? find(3)
+r.Console.Log($"chain = {chain}")
+
+// ??= assigns only when null
+empty ??= 42
+some ??= 99
+r.Console.Log($"after ??=: empty = {empty}, some = {some}")
+
+// enforce
+i32? first = find(1)
+i32? second = find(0)
+enforce first {
+  i32 doubled = first * 2
+  r.Console.Log($"first is {first}, doubled {doubled}")
+} else {
+  r.Console.Log("first is null")
+}
+enforce first, second {
+  r.Console.Log("both set")
+} else {
+  r.Console.Log("second is null")
+}
+
+// null sorts first
+i32? nothing = null
+r.Console.Log($"null < 1: {nothing < 1}, 1 < null: {1 < nothing}, null <= null: {nothing <= nothing}, 2 > 1: {some > 1}")
+
+// to bool
+if nothing {
+  r.Console.Log("wrong")
+} else {
+  r.Console.Log("null is false")
+}
+if some then r.Console.Log("some is true")
+
+// ?. on strings and nullables
+string text = "héllo"
+string blank = null
+u64? textLen = text?.len
+u64? blankLen = blank?.len
+r.Console.Log($"text?.len = {textLen}, blank?.len = {blankLen}, blank == null: {blank == null}")
+r.Console.Log($"some?.toStr() = {some?.toStr()}, nothing?.toStr() = '{nothing?.toStr()}'")
+string named = blank ?? "anonymous"
+r.Console.Log("blank ?? anonymous = " + named)
+
+// casts keep null
+i64? wider = some
+u8? narrowed = (u8?)some
+r.Console.Log($"wider = {wider}, narrowed = {narrowed}, (i64)nothing = {(i64)nothing}")
+
+// nullable enum
+enum Mode { Off, On }
+Mode? mode
+r.Console.Log($"mode = {mode}")
+mode = Mode.On
+r.Console.Log($"mode = {mode}, is On: {mode == Mode.On}")
+switch mode {
+  null: r.Console.Log("no mode")
+  On: r.Console.Log("mode on")
+  Off: r.Console.Log("mode off")
+}

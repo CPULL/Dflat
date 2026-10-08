@@ -1,7 +1,7 @@
 # Dflat Language
 A new language D♭ that is the same as C# but easier to write and faster to execute
 
-**Version** 0.0.2  2026/10/07 by CPU
+**Version** 0.0.3  2026/10/08 by CPU
 
 # D♭ — Dflat Language Specification (draft)
 
@@ -25,31 +25,45 @@ Status: design in progress. Decisions below reflect the latest choices; earlier 
 - **Statement end**: JavaScript rules. A line break ends a statement when the statement can end there; `;` is needed only for several statements on one line.
 - **Identifiers**: cannot start with `_` (underscores inside names are fine).
 - **Naming convention** (not enforced): namespaces lowercase; public classes, methods and members PascalCase; everything else camelCase. Built-in types are lowercase.
-- **Labels**: `#name#`.
 - **Reserved**: `...`.
 
-### 2.1 Number literals
+### 2.1 Labels
+
+- `#name#`: starts and ends with `#`, no spaces, at least one letter.
+- Allowed characters: letters (Unicode included), digits, `_ - + ! ? $ %`.
+
+### 2.2 Directives
+
+- A directive starts with `#` in the first column, then the keyword, then optional text that cannot contain `#`. Indented lines are not directives.
+- `#region` / `#endregion`: fold the code between them, no other effect. Regions nest and pair like braces. Unmatched → level 3 warning.
+- `#region parts #2#` is a compile error (`#` in the text).
+- Conditional compilation (`#if` family): open.
+
+### 2.3 Number literals
 
 | Literal | Type |
 |---|---|
-| `123` | `i32` |
+| `123` | native signed integer |
 | `123u` | `u32` |
 | `123l` | `i64` |
 | `123ul` | `u64` |
 | `123s` / `123us` | `i16` / `u16` |
 | `123b` | `byte` (`u8`) |
-| `1.5` | `r64` |
+| `1.5` | native real |
 | `1.5f`, `2f` | `r32` |
-| `6.022e23` | `r64` |
-| `0x1F` | hex; size from digit count (2 → 8 bit, 4 → 16, 8 → 32, 16 → 64), signed; `u` suffix for unsigned |
+| `6.022e23` | native real |
+| `0x1F` | hex; size = smallest type holding the digits (1–2 → 8 bit, 3–4 → 16, 5–8 → 32, 9–16 → 64), zero-filled, widened further if needed; signed; `u` suffix for unsigned |
 | `0b1010` | binary, same rules as hex |
 | `1_000_000` | `_` digit separator |
 
 - Suffixes are case-insensitive.
+- Unsuffixed literals take the native size of the target (or the size forced by the native-size compiler option, 3.1). A value that doesn't fit takes the smallest wider type that does (`300` on an 8-bit target → `i16`).
+- Reals fit by range only (precision loss accepted). On a CPU without FPU the native real is the smallest defined one (`r16`).
 - Literals adapt to the declared type; a value that doesn't fit is a compile error.
 - `0x00000000DEADBEEF` is a 64-bit value; hex and binary always describe raw bits.
+- A literal transmuted to a pointer is zero-extended to the pointer size: `[*i32]0xA0000`.
 
-### 2.2 Characters and strings
+### 2.4 Characters and strings
 
 - Chars: `'a'`. Strings: `"text"`.
 - Escapes: `\n \r \t \\ \' \" \0`, code points `\u{1F600}` (hex) and `\#{123}` (decimal).
@@ -70,9 +84,10 @@ Status: design in progress. Decisions below reflect the latest choices; earlier 
 | `r32` `r64` `r128` | IEEE floats (`r128` software-emulated) |
 | `dec` | fixed-point, 32 + 32 bits |
 | `byte` | alias of `u8` |
-| `int` `uns` `real` | target-dependent aliases, mapped by compiler options or conditional compilation; for small targets; not allowed in `dfoot` |
+| `int` `uns` `real` | target-dependent aliases; for small targets; not allowed in `dfoot` |
 
-Numbers are **not nullable** unless declared `type?`.
+- **Native size**: one compiler option sets the native size used by `int` / `uns` / `real` and by unsuffixed literals. It can force a size below or above the CPU's own.
+- Numbers are **not nullable** unless declared `type?`.
 
 ### 3.2 Other scalars
 
@@ -83,6 +98,7 @@ Numbers are **not nullable** unless declared `type?`.
 | `date` | 64-bit, ms since 1 Jan 1970 UTC; null = minimum value |
 | `clock` | u64 monotonic counter, 0.1 ns, from `GetClock()`; intervals only; `GetClock()` never returns 0; null = 0 |
 | `lapse` | difference between two dates or two clocks (3.3) |
+| `addr` | an address as a number; size from the target definition (64-bit by default, 16 on C64), stored in the most efficient way; comparison and transmute only, arithmetic through pointer methods (15.1); prints as hex in groups of 4 digits separated by spaces |
 
 ### 3.3 `lapse`
 
@@ -110,7 +126,7 @@ Signed 64-bit; raw value = `value × 8 + code`.
 | `hmap<K, V>` | hash map |
 | tuple | `(i32, string)` or `(i32 val, string name)`; **at least 2 elements** |
 | `string` | UTF-8 text (13) |
-| `dfoot` | Dflat Fast Open Objects Tree (12.5) |
+| `dfoot` | Dflat Fast Open Objects Tree (12.3) |
 
 - GUID is defined by the EF layer, platform-specific.
 - Lengths and default indexes are `u64` everywhere.
@@ -122,13 +138,16 @@ Signed 64-bit; raw value = `value × 8 + code`.
 ```
 i32 a = 10
 const i32 limit = 100
+var count = 10                      // type inferred
 i32 id, string name = getUser()     // multiple return values
+var userId, var userName = getUser()
 existing, _, i32 fresh = f()        // mix existing, discard, new
 x, y = y, x                         // swap: right side evaluated first
 ```
 
 - Type-first; C#-style scope and definite assignment.
 - `const`: read-only value and pointer, global guarantee.
+- `var`: type taken from the initializer; if it can't be decided → compile error (`var x = null`, `var l = []`). Allowed in multiple returns when the return type is known. Coexists with partial forms like `vec v = [...]` / `map m = {...}`.
 - A tuple or literal must be assigned, passed or returned; alone it's a compile error.
 - Tuple destructuring on the left: open.
 
@@ -162,9 +181,10 @@ alias byte8 u8
 
 ## 6. Conversions
 
-- **Cast `(type)`**: keeps the value; out of range saturates (level 2 warning). From `r`: +∞ → max, −∞ → min (0 for unsigned), NaN → 0.
+- **Cast `(type)`**: keeps the value; out of range saturates (level 2 warning). From `r`: truncates toward zero (Rust rules), +∞ → max, −∞ → min (0 for unsigned), NaN → 0.
 - **Transmute `[type]`**: same bits; truncates low bits or zero-extends. `[bool]`: 0 = false. `[char]`: invalid → U+0000.
 - **Implicit**: only same-family widening (`i8 → i64`, `r32 → r64`) and any type → bool.
+- **Pointers**: created from numbers or other pointers by transmute only (`[*u64]address`); pointer → `addr` also with `=`.
 - **To bool**: numbers 0 / NaN = false; `char` `\0`; `date` / `clock` null; `lapse` zero or null; `string` null/empty; `vec` and tuples not convertible.
 
 ---
@@ -181,7 +201,8 @@ alias byte8 u8
 | increment | `++x x++ --x x--` (not atomic) |
 | ranges | `a..b` exclusive, `a..=b` inclusive, `a..`, `..b` |
 | null-safe | `?.` `??` |
-| ownership | `->x` move, `x!` copy, `&x` by reference |
+| ownership | `->x` move, `x!` copy |
+| pointers | `&x` address (read-only pointer), `(&)x` writable pointer or writable argument |
 
 - Assignments are not expressions (`++`/`--` are).
 - `+` evaluates left to right; with a string or char operand it concatenates: `1 + 2 + "a"` = `"3a"`, `'a' + 'b'` = `"ab"`. Char codes need a transmute: `[u32]'a' + [u32]'b'`.
@@ -230,7 +251,7 @@ bool res = val ? { 1: true, default: false }
 string yn = ok ? { "yes", "no" }
 ```
 
-- No fall-through; `default`; a jump loop between cases is a level 3 warning.
+- No fall-through; `default`; a jump loop between cases is a level 1 warning.
 - Inside a switch, `jump name` targets a case; `jump #name#` always targets a label.
 
 ---
@@ -247,15 +268,21 @@ fun u64 getVal() { c }                         // single expression returns
 
 ### 9.1 Parameters
 
-| Definition | Call | Meaning |
-|---|---|---|
-| `i32 x` | `f(x)` | value type, copied |
-| `&i32 x` | `f(&x)` | value type by reference |
-| `Item o` | `f(o)` | object borrowed, callee may modify |
-| `&Item o!` | `f(&o!)` | object borrowed read-only |
-| `Item o!` | `f(o!)` | object copied |
-| `->Item o` | `f(->o)` | ownership moves to the callee |
+The definition says how a parameter is passed, ownership included. The call marks only what the reader must notice (writing, moving) or what the caller chooses (copying).
 
+| Definition | Example | Description |
+|---|---|---|
+| `f(i32 x)` | `f(x)` | copied |
+| `f(&i32 x)` | `f(x)` | by reference, read-only |
+| `f((&)i32 x)` | `f((&)x)` | by reference, writable; `(&)` required in the call |
+| `f(volatile &i32 x)` | `f(x)` | volatile, read-only |
+| `f(Item o)` | `f(o)` | borrowed, read-only |
+| `f((&)Item o)` | `f((&)o)` | borrowed, read/write; `(&)` required in the call |
+| `f(Item o)` | `f(o!)` | copied by the caller, not part of the definition |
+| `f(->Item o)` | `f(->o)` | ownership moves; `->` required in the call |
+
+- Native data: integers, reals, chars, bools, enums, pointers. Objects: class instances.
+- A mismatched call is a compile error.
 - Defaults anywhere; named arguments when needed (`hello(age: 27)`).
 
 ### 9.2 Overloading
@@ -340,11 +367,11 @@ enum Status { Active, Inactive, Pending: 10 }
 ```
 list<i32> l = [1, 2, 3]
 vec v = ["a", "b", "c"]                 // vec<3, string>
-map m = { one: 1, two: 2 }              // map<string, i32>
-map n = { 1: "one", 2: "two" }          // map<i32, string>
+map m = { one: 1, two: 2 }              // map<string, native integer>
+map n = { 1: "one", 2: "two" }          // map<native integer, string>
 ```
 
-- Types are inferred from literals; integers default to `i32`, mixed `[1, 2.5]` → `r64`; other mixes are errors; empty literals need a declared type.
+- Types are inferred from literals; integers and reals default to the native size (2.3), mixed `[1, 2.5]` → native real; other mixes are errors; empty literals need a declared type.
 - Map keys are literals (bare names are strings); values may be any expression.
 
 ### 12.2 Members
@@ -401,13 +428,31 @@ Used in `$"{expr:spec}"` and `toStr("spec")`. Options in any order; letters act 
 | `f<char>` | fill character |
 | `a<` `a>` `a^` `a.` | align left, right, center, on the decimal symbol |
 | `g<sep><size>[<size><sep>...]+` | grouping, right to left; trailing `r` = left to right; `L` = locale |
-| `e` | scientific (to define) |
+| `e[<lit>]<min>` | scientific (14.2) |
 
 - Hex / binary show raw bits (no negative hex). Width overflow prints the full number.
 - Special values: `NaN`, `∞`, `-∞`, `null` (`INF` / `-INF` on targets without Unicode).
 - Default for reals: as C# (shortest round-trip). Example: `12345.toStr("f0w10")` → `0000012345`.
 
-### 14.2 Strings
+### 14.2 Scientific format `e`
+
+- Mantissa: one non-zero digit before the decimal symbol (as C++, C#, Rust, Python).
+- `<lit>`: text printed literally before the exponent. `+` in it = exponent sign always; `-` = exponent sign on negatives only. Escapes: `\[ \] \+ \-`; everything else is literal.
+- `<min>`: minimum exponent digits; `0<n>` = zero-padded, `#<n>` = space-padded; absent = unpadded.
+- Combines with `D`, `S`, `w`, `f`, `a`.
+- Plain `e` = `e[e+]D6a<` (exponent unpadded).
+- Zero prints `0`; special values as in 14.1.
+
+Examples with `1234.56`:
+
+| Spec | Output |
+|---|---|
+| `e[E+]02D2` | `1.23E+03` |
+| `e[e^]02D2` | `1.23e^03` |
+| `e[e-]#3D2` | `1.23e  3` |
+| `e[x10^]D1` | `1.2x10^3` |
+
+### 14.3 Strings
 
 | Option | Meaning |
 |---|---|
@@ -419,7 +464,7 @@ Used in `$"{expr:spec}"` and `toStr("spec")`. Options in any order; letters act 
 | `q` | quoted and escaped |
 | `s` `sl` `sr` | trim both / left / right |
 
-### 14.3 Dates
+### 14.4 Dates
 
 - C# custom pattern letters: `d f F g h H k m M s t y z`.
 - Additions: `w` week, `q` quarter, `i` ISO week, `r` ISO year, `e` day of year (3 wide), `j` day of week; a doubled letter pads with a space.
@@ -450,6 +495,52 @@ Rust model, Dflat syntax.
 - Weak references are used through `enforce w { } else { }`; inside the block the object is kept alive.
 - `.asRefCount` / `.asSharedRefCount` / `.isRC` are built-in operations, not methods.
 
+### 15.1 Pointers
+
+```
+*i32 reader = &value                          // read-only
+(*)i32 writer = (&)value                      // writable
+*i32{count} samples = ...                     // bounded
+(*)i32{65536} screen = [*i32]0xA0000          // memory-mapped, unsafe
+writer[] = 5                                  // same as writer[0]
+i32 third = samples[2]
+string label = itemPointer[].Name
+```
+
+- Types, prefix only: `*T` read-only (default), `(*)T` read/write. Nesting reads left to right: `**i32`, `(*)*i32`.
+- Bounds: `{count}` in entries, constant or variable, copied at creation; for read-only and writable pointers. Constant indexes are checked at compile time, variable ones at runtime.
+- Usage by index only: `p[i]`, `p[]` = `p[0]`, fields `p[].Field`. No prefix `*` dereference, no infix `->`.
+- `&x` gives a read-only pointer to `x`; `(&)x` a writable one; `(&)` on a `const` is a compile error.
+- No untyped pointers: `*byte` stands in for C `void*`.
+- No pointer arithmetic (`p + 4` is a compile error); use the methods below.
+- `null` is the null pointer.
+- Conversions: transmute only (6); pointer → `addr` also with `=`.
+- Logical model: base, size and cursor. The compiler keeps base and size only for bound checks; an unbounded pointer is just the cursor.
+- Pointers coming from outside the program (other libraries, OS calls) or built from numbers are always unsafe.
+
+Methods (plain = steps of the pointed type, `Raw` = bytes):
+
+| Method | Description |
+|---|---|
+| `Add(steps)` / `AddRaw(bytes)` | move the cursor, in place |
+| `InRange(steps)` / `InRangeRaw(bytes)` | true if moving by the signed amount stays within the bounds |
+| `GetOffset()` / `GetOffsetRaw()` | cursor − base, `i64` |
+| `GetOffset(other)` / `GetOffsetRaw(other)` | cursor − other address, `i64` |
+| `GetAddress(steps)` / `GetAddressRaw(bytes)` | `addr` at cursor + amount, cursor unchanged |
+
+### 15.2 Volatile
+
+```
+volatile (*)u8{65536} screen = [*u8]0xA0000
+u8 pixel = screen[128]                        // read once, pixel is a normal value
+fun wait(volatile &clock now) { }
+```
+
+- `volatile` prefixes any reference or pointer type.
+- Every access goes to memory: the compiler never reuses a previously read value.
+- To keep a value, copy it into a normal variable.
+- Passing a volatile where a non-volatile is expected: no compile error, behavior undefined.
+
 ---
 
 ## 16. Classes and traits
@@ -472,17 +563,97 @@ trait Shape : Named { fun r64 Area() }
 - No `new`: `Circle c = Circle(2.0)`.
 - Primary constructor parameters become fields; secondary constructors chain `: Class(...)`, plus trait constructors.
 - Single parent class; any number of traits; base of everything: `root.Class`.
+- Traits are implemented only in the class header; a trait cannot be added to an existing type (built-in or library) from outside its declaration.
 - Construction order: parent, traits in listed order, class body.
 - `override` mandatory; `parent.Method()` reaches the overridden version.
 - Traits: properties, methods with or without body, constructor when they have properties; one parent trait; a supertrait inherited twice exists once.
 - Same member in two traits: `TraitA.member` (inside), `px.TraitA.member` (outside), unqualified → compile error.
 - Visibility: private by default, `public`, `internal` (namespace + sub-namespaces). A subclass sees everything when the parent's source is available, public only for compiled libraries (at its own risk). No `sealed`.
-- Type checks: `if v is Circle c { }` (reference, `c` scoped to the block), `if v! is Circle c { }` (copy); upward checks are a warning.
-- Trait-typed values: the compiler chooses static or dynamic dispatch; force with `impl Shape` / `dyn Shape`.
+- Type checks: `if v is Circle c { }` (reference, `c` scoped to the block), `if v! is Circle c { }` (copy); upward checks are a level 2 warning.
+- Trait-typed values: the compiler chooses static or dynamic dispatch; force with `specific Shape` (one type, known at compile time) / `any Shape` (any implementing type, dispatched at runtime). `list<any Shape>` holds mixed shapes.
 
 ---
 
-## 17. Standard library (first sketch)
+## 17. Generics
+
+Rust model (code generated per type, checked at the definition), Dflat syntax.
+
+### 17.1 Functions
+
+```
+fun Item min<Item : Numeric>(Item first, Item second) {
+  first.Compare(second) ? { first, second }
+}
+
+fun Item pick<Item, Key>(Item value, Key key)
+  where Item : Numeric && Orderable, Key : Hashable && Named { }
+
+fun printAll<Item>(list<Item> items) where list<Item> : Printable { }
+```
+
+- Constraints inline `<Item : Trait>` or in a `where` clause, never both in one declaration (compile error).
+- Several traits joined with `&&`. No negative constraints.
+- `where` may constrain any type expression; parameters separated by commas.
+
+### 17.2 Classes and traits
+
+```
+class Stack<Item> {
+  list<Item> items
+  fun Push(->Item value) { items.add(->value) }
+  fun Item Pop() { ... }
+}
+
+trait Container<Item> {
+  fun Item Get(u64 index)
+  fun Add(->Item value)
+}
+
+class Names : root.Class, Container<string> { ... }
+class Cache<Key : Hashable, Value> { hmap<Key, Value> entries }
+
+Stack<i32> numbers = Stack<i32>()
+```
+
+- Several parameters are comma-separated; types and value parameters can be mixed.
+- A generic trait can be implemented several times by one class with different types.
+
+### 17.3 Value parameters
+
+```
+class Grid<u64 Width, u64 Height, Cell> { vec<Width * Height, Cell> cells }
+```
+
+- A value parameter is declared with its type first; it is a compile-time constant and part of the type.
+- Allowed types: integers (`i*`, `u*`), `bool`, `char`, `r16` `r32` `r64` `r128`, `dec`.
+- NaN → compile error; `-0` is normalized to `0`.
+- Arithmetic in types: only `+`, `*`, `<<`, on unsigned integers, saturating at the max. Signed operands are cast to unsigned (negatives → 0); real operands are cast to unsigned with ceiling.
+
+### 17.4 Placeholders
+
+```
+trait Sequence {
+  placeholder Item
+  fun Item? Next()
+}
+
+class Countdown : root.Class, Sequence with (Item is u32) { ... }
+
+fun printAll<Source : Sequence>(Source items) { ... }
+```
+
+- `placeholder` declares a type inside a trait that each implementing class fixes once, with `with (Name is type, ...)` in the header.
+- Users of the trait don't name the placeholder.
+
+### 17.5 Inference
+
+- The compiler infers type arguments; if it can't → compile error. Explicit arguments are always allowed: `min<u8>(3, 5)`.
+- A name followed by `<…>(` is read as a generic call (lookahead). When the code could also read as comparisons → level 3 warning; parentheses force comparisons.
+- Unsuffixed literals follow 2.3: `min(3, 5)` → native signed integer.
+
+---
+
+## 18. Standard library (first sketch)
 
 ```
 alias r Root
@@ -502,22 +673,68 @@ r.Math (= Math64, r64)    r.Math32 (r32 results)
 
 ---
 
-## 18. Toolchain
+## 19. Toolchain
 
 - **dfparse** `[--tokens] file.df`: .NET 10, hand-written lexer and recursive-descent parser, prints the syntax tree.
 - **dfcompile** (planned): parse → type check → emit C → clang; minimal or zero libc, calling the OS directly.
+- **Native-size option**: forces the native size of integers and reals (3.1).
+
+### 19.1 Warnings
+
+Level 1 = most important, level 3 = least.
+
+| Level | Warning | Section |
+|---|---|---|
+| 1 | Skipped root file | 4.1 |
+| 1 | Unlisted local `const` auto-copied into a lambda | 9.3 |
+| 1 | Jump loop between switch cases | 8.1 |
+| 2 | Cast out of range saturates | 6 |
+| 2 | Upward type check | 16 |
+| 3 | Unmatched `#region` / `#endregion` | 2.2 |
+| 3 | Generic call chosen over comparisons | 17.5 |
 
 ---
 
-## 19. Open items
+## 20. Open items
 
 - Tuple destructuring on the left
-- Scientific number format `e`
 - Locale details
 - Date formatting week rules
-- Conditional compilation syntax
-- Generics (user-defined)
+- Conditional compilation (`#if` family)
 - Exception list, `Panic` exit codes for `atEnd` failures
 - Stdlib: strings, files, time, collections extras (insert, clear, sets, queue/stack)
-- Pointers
+- Pointers: automatic bound for `&` on `vec` / `list`; bound methods on unbounded pointers
+- Safe / unsafe logic
+- Function pointers (objects); C function tables (COM vtables, Vulkan dispatch tables)
+- C interop: declaring external functions, struct layout, calling conventions, callbacks, strings (UTF-8 / UTF-16), ownership across the boundary, errors, unions, bit flags, varargs
 - Deferred: async/await, locks/atomics, tasks, SIMD, EF syntax, Vulkan, shaders
+
+---
+
+## Changes in 0.0.3
+
+- 2.1 Labels: allowed characters, at least one letter
+- 2.2 Directives: `#region` / `#endregion` (column 1, no `#` in text, nesting, unmatched = level 3 warning)
+- 2.3 Unsuffixed literals take native size, widening to fit; reals fit by range; `r16` default without FPU
+- 3.1 Single native-size compiler option for literals and `int` / `uns` / `real`, above or below the CPU size
+- 4 `var` type inference
+- 6 Real → integer cast truncates toward zero
+- 8.1 Jump loop between cases: level 1 warning
+- 12.1 Collection literals default to native size
+- 14.2 Scientific format `e` (new)
+- 16 `impl` / `dyn` renamed `specific` / `any`; traits only in the class header; upward type check level 2 warning
+- 17 Generics (new): functions, `&&` constraints, `where`, generic classes and traits, value parameters, type arithmetic, `placeholder`, inference and lookahead
+- 19.1 Warning levels table (new; 1 = most important)
+- Renumbered: 2.1–2.4, 14.2–14.4, 17–20
+- 3.4 `dfoot` reference fixed (12.5 → 12.3)
+
+### Second update (same version)
+
+- 2.3 Hex/binary literal size for any digit count; literals transmuted to pointers zero-extended
+- 3.2 `addr` type (new)
+- 6 Pointer conversions: transmute only; pointer → `addr` with `=`
+- 7 `&x` is address-of; `(&)x` writable; `&x` no longer marks by-reference calls
+- 9.1 Parameter passing table rewritten: definition declares the mode, call marks only `(&)`, `->`, `!`
+- 15.1 Pointers (new): types, bounds, index usage, address-of, fat pointer model, methods
+- 15.2 Volatile (new)
+- 20 Open items: pointers details, safe/unsafe, function pointers, C interop

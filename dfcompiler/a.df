@@ -1,0 +1,9 @@
+alias r Root
+for i32 y = 0..10 
+{
+	string line = ""
+	for i32 x = 0..10 {
+  	line += "#"
+	}
+	r.Console.Log(line + y)
+}

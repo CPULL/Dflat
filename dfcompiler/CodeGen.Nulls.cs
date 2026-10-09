@@ -176,7 +176,7 @@ public sealed partial class CodeGen {
         conditions.Add($"{variable.CName}.has");
         unwrapped.Vars[name.Text!] = new VarInfo(BaseOf(variable.Type), variable.CName + ".val", variable.IsConst);
       } else if (variable.Type == "string") {
-        conditions.Add($"{variable.CName}.len != 0");
+        throw Error($"strings cannot be enforced ('{name.Text}')", name);
       } else {
         throw Error($"'{name.Text}' is {variable.Type}, which is never null", name);
       }

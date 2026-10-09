@@ -138,6 +138,9 @@ public sealed partial class CodeGen {
   }
 
   string CType(string type) {
+    if (type == "Exception") {
+      return "df_exception*";
+    }
     if (IsNullable(type)) {
       return OptCType(BaseOf(type));
     }
@@ -206,7 +209,7 @@ public sealed partial class CodeGen {
     if (IsNullable(type)) {
       return $"(({CType(type)}){{0}})";
     }
-    if (IsTuple(type)) {
+    if (IsTuple(type) || IsMulti(type)) {
       var zeros = TupleElems(type).Select(elem => ZeroValue(elem.Type));
       return $"(({CType(type)}){{ {string.Join(", ", zeros)} }})";
     }
@@ -223,7 +226,7 @@ public sealed partial class CodeGen {
       case "Nullable": {
         string inner = ResolveType(n.Children[0]);
         if (inner == "string") {
-          return "string"; // "" and null are the same
+          throw Error("string is already nullable; 'string?' is not allowed", n);
         }
         if (IsNullable(inner)) {
           throw Error($"'{inner}' is already nullable", n);
@@ -425,7 +428,7 @@ public sealed partial class CodeGen {
       return e.Code;
     }
     if (e.Type == "null") {
-      return "df_str_lit(\"null\", 4)";
+      return "df_str_lit(\"\", 0)"; // a null string is empty
     }
     if (e.Type == "void") {
       throw Error("this expression has no value", at);
@@ -452,6 +455,9 @@ public sealed partial class CodeGen {
     }
     if (IsEnum(e.Type)) {
       return $"df_enum_str_{e.Type}({e.Code})";
+    }
+    if (e.Type == "Exception") {
+      throw Error("Exception cannot be converted to a string yet; use its Message", at);
     }
     if (SignedTypes.Contains(e.Type)) {
       return $"df_str_from_i64((int64_t)({e.Code}))";

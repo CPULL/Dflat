@@ -1,0 +1,137 @@
+namespace errors
+alias r Root
+
+fun i32 divide(i32 total, i32 parts) { total / parts }
+
+fun i32 safeDivide(i32 total, i32 parts) {
+  i32 result = divide(total, parts)
+  catch DivisionByZeroException ex {
+    r.Console.Log($"caught: {ex.Message} | id {ex.Id} | in {ex.Function} | line {ex.Line}")
+    return -1
+  }
+  return result
+}
+
+r.Console.Log($"safeDivide(10, 2) = {safeDivide(10, 2)}")
+r.Console.Log($"safeDivide(10, 0) = {safeDivide(10, 0)}")
+
+// catches in order: the first one that handles the type runs
+fun check(i32 mode) {
+  if mode == 1 then throw Exception("plain")
+  if mode == 2 then throw DivisionByZeroException("by zero")
+  i32 zero = 0
+  i32 boom = 1 / zero
+  catch DivisionByZeroException {
+    r.Console.Log($"  mode {mode}: division by zero catch")
+  }
+  catch ex {
+    r.Console.Log($"  mode {mode}: generic catch, message '{ex.Message}'")
+  }
+  r.Console.Log($"  mode {mode}: code after the catches runs")
+}
+check(1)
+check(2)
+check(3)
+
+// throw in a function, caught by the caller; rethrow to the next level
+fun fail(string message) {
+  throw Exception(message)
+}
+fun relay() {
+  fail("from fail()")
+  catch ex {
+    r.Console.Log("relay saw: " + ex.Message)
+    throw ex
+  }
+}
+relay()
+catch all ex {
+  r.Console.Log($"top level got it again: {ex.Message}, thrown in {ex.Function}")
+}
+
+// a catch only covers the code above it
+{
+  r.Console.Log("before")
+  catch all {
+    r.Console.Log("never runs")
+  }
+  fail("below the catch")
+  catch ex {
+    r.Console.Log("second catch: " + ex.Message)
+  }
+}
+
+// atEnd: whole scope, every exit, last to first
+fun i32 cleanup(i32 mode) {
+  atEnd { r.Console.Log($"  first atEnd, mode {mode}") }
+  atEnd { r.Console.Log($"  second atEnd, mode {mode}") }
+  if mode == 1 then return 10
+  if mode == 2 then fail("failing in cleanup")
+  return 20
+}
+r.Console.Log($"cleanup(1) = {cleanup(1)}")
+r.Console.Log($"cleanup(3) = {cleanup(3)}")
+i32 failed = cleanup(2)
+catch ex {
+  r.Console.Log("cleanup(2) raised: " + ex.Message)
+}
+
+// the return value is computed first; a return inside atEnd overrides it
+fun i32 counter() {
+  i32 count = 1
+  atEnd {
+    r.Console.Log($"  atEnd sees count = {count}")
+    return count * 100
+  }
+  return count++
+}
+r.Console.Log($"counter() = {counter()}")
+
+// variables declared after atEnd have their default value when the scope ends before them
+fun early(bool leave) {
+  atEnd { r.Console.Log($"  early({leave}): total = {total}") }
+  if leave then return
+  i32 total = 5
+}
+early(true)
+early(false)
+
+// loop body atEnd: once, after the loop ends, only if the body ran
+for i32 i = 0..3 {
+  atEnd { r.Console.Log($"loop atEnd after the loop, i = {i}") }
+  r.Console.Log($"iteration {i}")
+}
+i32 none = 0
+while none > 0 {
+  atEnd { r.Console.Log("never: the body never ran") }
+  none--
+}
+i32 turns = 0
+while true {
+  atEnd { r.Console.Log($"break: atEnd once, turns = {turns}") }
+  turns++
+  if turns == 2 then continue
+  if turns == 4 then break
+}
+
+// leaving nested scopes with jump and break
+for i32 outer = 0..3 {
+  {
+    atEnd { r.Console.Log($"inner block atEnd, outer = {outer}") }
+    if outer == 1 then jump #done#
+  }
+}
+#done#
+r.Console.Log("after #done#")
+
+// a catch that leaves the scope runs the atEnd
+fun leaving() {
+  atEnd { r.Console.Log("  leaving(): atEnd") }
+  fail("x")
+  catch {
+    r.Console.Log("  leaving(): catch returns")
+    return
+  }
+}
+leaving()
+r.Console.Log("done")

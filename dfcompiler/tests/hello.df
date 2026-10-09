@@ -1,3 +1,4 @@
 namespace hello
-string name = "World";
-Root.Console.Log($"Hello {name}!")
+alias r Root
+
+r.Console.Log("Hello world!")

@@ -1,0 +1,44 @@
+Done
+
+Numeric, bool, char, string types
+Literals with range checks
+Variables, const, zero init
+Functions, defaults, recursion
+Multiple return values
+if, while, do-while, for
+break, continue, labels, jump
+switch and switch expressions
+Enums with static methods
+Nullables, ??, ?., enforce
+Tuples, multi-assign, swap
+Casts and transmutes
+Operators, checked division
+String interpolation, toStr
+Console and Math library
+catch, throw, Panic
+Standard exceptions with IDs
+Scope atEnd
+
+Not yet
+
+Classes, traits, inheritance
+Generics
+Collections and literals
+Ownership, move, copy, refcount
+Reference and move parameters
+Lambdas and captures
+Pointers, addr, alignment, volatile
+Silent exceptions
+Custom exception classes
+Class atEnd
+128/256-bit ints, r16/r128
+dec, date, clock, lapse
+int/uns/real, native size
+Format specs
+var inference
+Overloading, named arguments
+Imports, multiple files, namespaces
+Standard library beyond Console/Math
+Runtime without C library
+Parser update to 0.0.4
+Debug builds (line, stack trace)

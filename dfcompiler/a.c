@@ -15,23 +15,120 @@ typedef struct {
   uint64_t len;    /* byte length */
 } df_string;
 
-static void df_fail(const char* type, const char* msg) {
-  fflush(stdout);
-  fprintf(stderr, "Unhandled %s: %s\n", type, msg);
-  exit(1);
-}
+/* ---- panic ---- */
 
+/* critical exit: prints "Panic <code>" on stdout, no cleanup */
 static void df_panic(int64_t code) {
   fflush(stdout);
+  printf("Panic %lld\n", (long long)code);
+  fflush(stdout);
   _Exit((int)code);
+}
+
+#define DF_PANIC_UNHANDLED (-1000)
+
+/* out of memory is not catchable yet: message and panic */
+static void df_out_of_memory(void) {
+  fflush(stdout);
+  printf("Out Of Memory Exception\n");
+  df_panic(DF_PANIC_UNHANDLED);
 }
 
 static void* df_alloc(uint64_t n) {
   void* p = malloc(n ? n : 1);
   if (!p) {
-    df_fail("OutOfMemoryException", "out of memory");
+    df_out_of_memory();
   }
   return p;
+}
+
+/* ---- exceptions (error register, spec 10.7) ---- */
+
+typedef struct df_descriptor {
+  uint64_t id;
+  const char* name;
+  const struct df_descriptor* parent;
+  bool silent;
+} df_descriptor;
+
+typedef struct {
+  uint64_t id;
+  const df_descriptor* descriptor;
+  char* message;     /* C-style, max 2 KB */
+  char* function;    /* C-style, max 1 KB: minified header of the failing function */
+  uint64_t line;     /* 0 in release */
+} df_exception;
+
+static const df_descriptor df_desc_Exception = { 10, "Exception", NULL, false };
+static const df_descriptor df_desc_NullPointerException = { 11, "NullPointerException", &df_desc_Exception, false };
+static const df_descriptor df_desc_OverflowException = { 12, "OverflowException", &df_desc_Exception, true };
+static const df_descriptor df_desc_InvalidCastException = { 13, "InvalidCastException", &df_desc_Exception, false };
+static const df_descriptor df_desc_DivisionByZeroException = { 14, "DivisionByZeroException", &df_desc_Exception, false };
+static const df_descriptor df_desc_OutOfMemoryException = { 15, "OutOfMemoryException", &df_desc_Exception, false };
+static const df_descriptor df_desc_ChangingRefCountTypeException = { 16, "ChangingRefCountTypeException", &df_desc_Exception, false };
+static const df_descriptor df_desc_OutOfRangeCastException = { 17, "OutOfRangeCastException", &df_desc_Exception, true };
+static const df_descriptor df_desc_InvalidCharacterCodePointException = { 18, "InvalidCharacterCodePointException", &df_desc_Exception, true };
+
+/* 0 = no error; otherwise the exception being raised */
+static df_exception* df_err = NULL;
+/* true when df_err was raised by a throw statement (a throw inside a catch goes to the enclosing level) */
+static bool df_err_thrown = false;
+
+/* copies at most maxBytes - 1 bytes plus the terminator, never cutting a UTF-8 character */
+static char* df_cstr_truncated(const char* text, uint64_t length, uint64_t maxBytes) {
+  uint64_t keep = length;
+  if (keep > maxBytes - 1) {
+    keep = maxBytes - 1;
+    while (keep > 0 && ((unsigned char)text[keep] & 0xC0) == 0x80) {
+      keep--;
+    }
+  }
+  char* copy = (char*)df_alloc(keep + 1);
+  memcpy(copy, text, keep);
+  copy[keep] = 0;
+  return copy;
+}
+
+static df_exception* df_new_exception(const df_descriptor* descriptor, const char* message, uint64_t messageLength, const char* function) {
+  df_exception* exception = (df_exception*)df_alloc(sizeof(df_exception));
+  exception->id = descriptor->id;
+  exception->descriptor = descriptor;
+  exception->message = df_cstr_truncated(message, messageLength, 2048);
+  exception->function = df_cstr_truncated(function, strlen(function), 1024);
+  exception->line = 0;
+  return exception;
+}
+
+/* runtime error: the message is the exception name written with spaces */
+static void df_raise(const df_descriptor* descriptor, const char* function) {
+  char spaced[256];
+  uint64_t length = 0;
+  for (const char* letter = descriptor->name; *letter && length < sizeof spaced - 2; letter++) {
+    if (letter != descriptor->name && *letter >= 'A' && *letter <= 'Z') {
+      spaced[length++] = ' ';
+    }
+    spaced[length++] = *letter;
+  }
+  spaced[length] = 0;
+  df_err = df_new_exception(descriptor, spaced, length, function);
+  df_err_thrown = false;
+}
+
+/* true when the exception is of that type or a subtype */
+static bool df_exc_is(const df_exception* exception, uint64_t id) {
+  for (const df_descriptor* descriptor = exception->descriptor; descriptor; descriptor = descriptor->parent) {
+    if (descriptor->id == id) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/* unhandled exception: its message, then Panic -1000 */
+static void df_panic_unhandled(void) {
+  fflush(stdout);
+  printf("%s\n", df_err ? df_err->message : "");
+  df_panic(DF_PANIC_UNHANDLED);
 }
 
 /* ---- strings (never freed yet: ownership comes later) ---- */
@@ -54,6 +151,11 @@ static df_string df_str_from_buf(const char* buf) {
   char* p = (char*)df_alloc(n);
   memcpy(p, buf, n);
   df_string s = { p, n };
+  return s;
+}
+
+static df_string df_str_from_cstr(const char* text) {
+  df_string s = { text, strlen(text) };
   return s;
 }
 
@@ -178,25 +280,26 @@ static void df_init(void) {
 
 /* ---- checked integer division ---- */
 
+/* on division by zero: raise DivisionByZeroException and return 0; the caller checks df_err */
 #define DF_DIV_SIGNED(T, NAME, MIN) \
-  static T df_div_##NAME(T a, T b) { \
-    if (b == 0) df_fail("DivisionByZeroException", "division by zero"); \
+  static T df_div_##NAME(T a, T b, const char* function) { \
+    if (b == 0) { df_raise(&df_desc_DivisionByZeroException, function); return 0; } \
     if (b == -1) return (T)(0 - (uint64_t)a); \
     return (T)(a / b); \
   } \
-  static T df_mod_##NAME(T a, T b) { \
-    if (b == 0) df_fail("DivisionByZeroException", "division by zero"); \
+  static T df_mod_##NAME(T a, T b, const char* function) { \
+    if (b == 0) { df_raise(&df_desc_DivisionByZeroException, function); return 0; } \
     if (b == -1) return 0; \
     return (T)(a % b); \
   }
 
 #define DF_DIV_UNSIGNED(T, NAME) \
-  static T df_div_##NAME(T a, T b) { \
-    if (b == 0) df_fail("DivisionByZeroException", "division by zero"); \
+  static T df_div_##NAME(T a, T b, const char* function) { \
+    if (b == 0) { df_raise(&df_desc_DivisionByZeroException, function); return 0; } \
     return (T)(a / b); \
   } \
-  static T df_mod_##NAME(T a, T b) { \
-    if (b == 0) df_fail("DivisionByZeroException", "division by zero"); \
+  static T df_mod_##NAME(T a, T b, const char* function) { \
+    if (b == 0) { df_raise(&df_desc_DivisionByZeroException, function); return 0; } \
     return (T)(a % b); \
   }
 
@@ -251,83 +354,21 @@ static uint64_t df_sat_u64_r(double v) {
 /* ---- end of runtime ---- */
 /* ---- program ---- */
 
-static uint64_t f_fib(uint64_t v_n);
-static int32_t f_square(int32_t v_x);
-static void f_greet(df_string v_name);
+static const char df_fn1[] = "main()";
 
-static uint64_t f_fib(uint64_t v_n) {
-  if ((v_n < ((uint64_t)2ULL))) {
-    return v_n;
-  }
-  return ((uint64_t)(f_fib(((uint64_t)(v_n - ((uint64_t)1ULL)))) + f_fib(((uint64_t)(v_n - ((uint64_t)2ULL))))));
-}
-
-static int32_t f_square(int32_t v_x) {
-  return ((int32_t)(v_x * v_x));
-}
-
-static void f_greet(df_string v_name) {
-  df_console_log(df_str_concat(df_str_concat(df_str_lit("Hello ", 6), v_name), df_str_lit("!", 1)));
-}
 
 int main(int argc, char** argv) {
   (void)argc;
   (void)argv;
   df_init();
-  /* Namespace basics */
-  f_greet(df_str_lit("world", 5));
-  f_greet(df_str_lit("Dflat", 5));
-  for (uint64_t v_i = ((uint64_t)0ULL); v_i < ((uint64_t)10ULL); v_i++) {
-    df_console_log(df_str_concat(df_str_concat(df_str_concat(df_str_lit("fib(", 4), df_str_from_u64((uint64_t)(v_i))), df_str_lit(") = ", 4)), df_str_from_u64((uint64_t)(f_fib(v_i)))));
-  }
-  int32_t v_total = ((int32_t)0LL);
-  for (int32_t v_i = ((int32_t)1LL); v_i <= ((int32_t)100LL); v_i = ((int32_t)(v_i + ((int32_t)1LL)))) {
-    v_total = ((int32_t)(v_total + v_i));
-  }
-  df_console_log(df_str_concat(df_str_lit("sum 1..100 = ", 13), df_str_from_i64((int64_t)(v_total))));
-  int32_t v_count = ((int32_t)0LL);
-  while ((v_count < ((int32_t)3LL))) {
-    v_count++;
-  }
-  do {
-    v_count--;
-  } while ((v_count > ((int32_t)1LL)));
-  df_console_log(df_str_concat(df_str_lit("count = ", 8), df_str_from_i64((int64_t)(v_count))));
-  int16_t v_big16 = ((int16_t)257LL);
-  df_console_log(df_str_concat(df_str_concat(df_str_concat(df_str_lit("(i8)257 = ", 10), df_str_from_i64((int64_t)(df_sat_i8_i((int64_t)(v_big16))))), df_str_lit(", [i8]257 = ", 12)), df_str_from_i64((int64_t)(((int8_t)(uint16_t)(v_big16))))));
-  double v_huge = (1E+300);
-  df_console_log(df_str_concat(df_str_lit("(i32)1e300 = ", 13), df_str_from_i64((int64_t)(df_sat_i32_r((double)(v_huge))))));
-  double v_x = (2.0);
-  df_console_log(df_str_concat(df_str_lit("sqrt(2) = ", 10), df_str_from_r64(sqrt(v_x))));
-  df_console_log(df_str_concat(df_str_concat(df_str_concat(df_str_lit("pi = ", 5), df_str_from_r64((3.141592653589793))), df_str_lit(", lerp = ", 9)), df_str_from_r64(((0.0) + ((10.0) - (0.0)) * (0.25)))));
-  df_console_log(df_str_concat(df_str_from_i64((int64_t)(((int32_t)(((int32_t)1LL) + ((int32_t)2LL))))), df_str_lit("a", 1)));
-  df_console_log(df_str_concat(df_str_from_char(((uint32_t)97u)), df_str_from_char(((uint32_t)98u))));
-  df_console_log(df_str_concat(df_str_lit("square(12) = ", 13), df_str_from_i64((int64_t)(f_square(((int32_t)12LL))))));
-  uint32_t v_smile = ((uint32_t)128512u);
-  df_console_log(df_str_concat(df_str_lit("smile ", 6), df_str_from_char(v_smile)));
-  df_string v_word = df_str_lit("h\303\251llo", 6);
-  df_console_log(df_str_concat(df_str_concat(df_str_concat(df_str_concat(df_str_concat(v_word, df_str_lit(" has ", 5)), df_str_from_u64((uint64_t)(df_str_chars(v_word)))), df_str_lit(" chars and ", 11)), df_str_from_u64((uint64_t)(((v_word).len)))), df_str_lit(" bytes", 6)));
-  df_console_log(df_str_lit("literal braces: {ok}", 20));
-  bool v_flag = true;
-  if ((v_flag && (v_total > ((int32_t)5000LL)))) {
-    df_console_log(df_str_lit("big total", 9));
-  } else if ((v_total > ((int32_t)100LL))) {
-    df_console_log(df_str_lit("medium total", 12));
-  } else {
-    df_console_log(df_str_lit("small total", 11));
-  }
-  for (int32_t v_a = ((int32_t)0LL); v_a < ((int32_t)5LL); v_a++) {
-    for (int32_t v_b = ((int32_t)0LL); v_b < ((int32_t)5LL); v_b++) {
-      if ((((int32_t)(v_a * v_b)) == ((int32_t)6LL))) {
-        goto lbl_Found;
-      }
+  for (int32_t v_y = ((int32_t)0LL); v_y < ((int32_t)10LL); v_y++) {
+    df_string v_line = df_str_lit("", 0);
+    for (int32_t v_x = ((int32_t)0LL); v_x < ((int32_t)10LL); v_x++) {
+      v_line = df_str_concat(v_line, df_str_lit("#", 1));
     }
+    df_console_log(df_str_concat(v_line, df_str_from_i64((int64_t)(v_y))));
   }
-  lbl_Found: ;
-  df_console_log(df_str_lit("found a * b == 6", 16));
-  int32_t v_zero = ((int32_t)0LL);
-  df_console_log(df_str_lit("dividing by zero...", 19));
-  int32_t v_boom = df_div_i32(((int32_t)10LL), v_zero);
-  df_console_log(df_str_concat(df_str_lit("not reached ", 12), df_str_from_i64((int64_t)(v_boom))));
+  return 0;
+  fn1_panic: df_panic_unhandled();
   return 0;
 }

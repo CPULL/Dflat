@@ -19,23 +19,120 @@ typedef struct {
   uint64_t len;    /* byte length */
 } df_string;
 
-static void df_fail(const char* type, const char* msg) {
-  fflush(stdout);
-  fprintf(stderr, "Unhandled %s: %s\n", type, msg);
-  exit(1);
-}
+/* ---- panic ---- */
 
+/* critical exit: prints "Panic <code>" on stdout, no cleanup */
 static void df_panic(int64_t code) {
   fflush(stdout);
+  printf("Panic %lld\n", (long long)code);
+  fflush(stdout);
   _Exit((int)code);
+}
+
+#define DF_PANIC_UNHANDLED (-1000)
+
+/* out of memory is not catchable yet: message and panic */
+static void df_out_of_memory(void) {
+  fflush(stdout);
+  printf("Out Of Memory Exception\n");
+  df_panic(DF_PANIC_UNHANDLED);
 }
 
 static void* df_alloc(uint64_t n) {
   void* p = malloc(n ? n : 1);
   if (!p) {
-    df_fail("OutOfMemoryException", "out of memory");
+    df_out_of_memory();
   }
   return p;
+}
+
+/* ---- exceptions (error register, spec 10.7) ---- */
+
+typedef struct df_descriptor {
+  uint64_t id;
+  const char* name;
+  const struct df_descriptor* parent;
+  bool silent;
+} df_descriptor;
+
+typedef struct {
+  uint64_t id;
+  const df_descriptor* descriptor;
+  char* message;     /* C-style, max 2 KB */
+  char* function;    /* C-style, max 1 KB: minified header of the failing function */
+  uint64_t line;     /* 0 in release */
+} df_exception;
+
+static const df_descriptor df_desc_Exception = { 10, "Exception", NULL, false };
+static const df_descriptor df_desc_NullPointerException = { 11, "NullPointerException", &df_desc_Exception, false };
+static const df_descriptor df_desc_OverflowException = { 12, "OverflowException", &df_desc_Exception, true };
+static const df_descriptor df_desc_InvalidCastException = { 13, "InvalidCastException", &df_desc_Exception, false };
+static const df_descriptor df_desc_DivisionByZeroException = { 14, "DivisionByZeroException", &df_desc_Exception, false };
+static const df_descriptor df_desc_OutOfMemoryException = { 15, "OutOfMemoryException", &df_desc_Exception, false };
+static const df_descriptor df_desc_ChangingRefCountTypeException = { 16, "ChangingRefCountTypeException", &df_desc_Exception, false };
+static const df_descriptor df_desc_OutOfRangeCastException = { 17, "OutOfRangeCastException", &df_desc_Exception, true };
+static const df_descriptor df_desc_InvalidCharacterCodePointException = { 18, "InvalidCharacterCodePointException", &df_desc_Exception, true };
+
+/* 0 = no error; otherwise the exception being raised */
+static df_exception* df_err = NULL;
+/* true when df_err was raised by a throw statement (a throw inside a catch goes to the enclosing level) */
+static bool df_err_thrown = false;
+
+/* copies at most maxBytes - 1 bytes plus the terminator, never cutting a UTF-8 character */
+static char* df_cstr_truncated(const char* text, uint64_t length, uint64_t maxBytes) {
+  uint64_t keep = length;
+  if (keep > maxBytes - 1) {
+    keep = maxBytes - 1;
+    while (keep > 0 && ((unsigned char)text[keep] & 0xC0) == 0x80) {
+      keep--;
+    }
+  }
+  char* copy = (char*)df_alloc(keep + 1);
+  memcpy(copy, text, keep);
+  copy[keep] = 0;
+  return copy;
+}
+
+static df_exception* df_new_exception(const df_descriptor* descriptor, const char* message, uint64_t messageLength, const char* function) {
+  df_exception* exception = (df_exception*)df_alloc(sizeof(df_exception));
+  exception->id = descriptor->id;
+  exception->descriptor = descriptor;
+  exception->message = df_cstr_truncated(message, messageLength, 2048);
+  exception->function = df_cstr_truncated(function, strlen(function), 1024);
+  exception->line = 0;
+  return exception;
+}
+
+/* runtime error: the message is the exception name written with spaces */
+static void df_raise(const df_descriptor* descriptor, const char* function) {
+  char spaced[256];
+  uint64_t length = 0;
+  for (const char* letter = descriptor->name; *letter && length < sizeof spaced - 2; letter++) {
+    if (letter != descriptor->name && *letter >= 'A' && *letter <= 'Z') {
+      spaced[length++] = ' ';
+    }
+    spaced[length++] = *letter;
+  }
+  spaced[length] = 0;
+  df_err = df_new_exception(descriptor, spaced, length, function);
+  df_err_thrown = false;
+}
+
+/* true when the exception is of that type or a subtype */
+static bool df_exc_is(const df_exception* exception, uint64_t id) {
+  for (const df_descriptor* descriptor = exception->descriptor; descriptor; descriptor = descriptor->parent) {
+    if (descriptor->id == id) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/* unhandled exception: its message, then Panic -1000 */
+static void df_panic_unhandled(void) {
+  fflush(stdout);
+  printf("%s\n", df_err ? df_err->message : "");
+  df_panic(DF_PANIC_UNHANDLED);
 }
 
 /* ---- strings (never freed yet: ownership comes later) ---- */
@@ -58,6 +155,11 @@ static df_string df_str_from_buf(const char* buf) {
   char* p = (char*)df_alloc(n);
   memcpy(p, buf, n);
   df_string s = { p, n };
+  return s;
+}
+
+static df_string df_str_from_cstr(const char* text) {
+  df_string s = { text, strlen(text) };
   return s;
 }
 
@@ -182,25 +284,26 @@ static void df_init(void) {
 
 /* ---- checked integer division ---- */
 
+/* on division by zero: raise DivisionByZeroException and return 0; the caller checks df_err */
 #define DF_DIV_SIGNED(T, NAME, MIN) \
-  static T df_div_##NAME(T a, T b) { \
-    if (b == 0) df_fail("DivisionByZeroException", "division by zero"); \
+  static T df_div_##NAME(T a, T b, const char* function) { \
+    if (b == 0) { df_raise(&df_desc_DivisionByZeroException, function); return 0; } \
     if (b == -1) return (T)(0 - (uint64_t)a); \
     return (T)(a / b); \
   } \
-  static T df_mod_##NAME(T a, T b) { \
-    if (b == 0) df_fail("DivisionByZeroException", "division by zero"); \
+  static T df_mod_##NAME(T a, T b, const char* function) { \
+    if (b == 0) { df_raise(&df_desc_DivisionByZeroException, function); return 0; } \
     if (b == -1) return 0; \
     return (T)(a % b); \
   }
 
 #define DF_DIV_UNSIGNED(T, NAME) \
-  static T df_div_##NAME(T a, T b) { \
-    if (b == 0) df_fail("DivisionByZeroException", "division by zero"); \
+  static T df_div_##NAME(T a, T b, const char* function) { \
+    if (b == 0) { df_raise(&df_desc_DivisionByZeroException, function); return 0; } \
     return (T)(a / b); \
   } \
-  static T df_mod_##NAME(T a, T b) { \
-    if (b == 0) df_fail("DivisionByZeroException", "division by zero"); \
+  static T df_mod_##NAME(T a, T b, const char* function) { \
+    if (b == 0) { df_raise(&df_desc_DivisionByZeroException, function); return 0; } \
     return (T)(a % b); \
   }
 

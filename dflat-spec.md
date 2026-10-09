@@ -1,7 +1,7 @@
 # Dflat Language
 A new language D♭ that is the same as C# but easier to write and faster to execute
 
-**Version** 0.0.3  2026/10/08 by CPU
+**Version** 0.0.4  2026/10/09 by CPU
 
 # D♭ — Dflat Language Specification (draft)
 
@@ -58,7 +58,7 @@ Status: design in progress. Decisions below reflect the latest choices; earlier 
 
 - Suffixes are case-insensitive.
 - Unsuffixed literals take the native size of the target (or the size forced by the native-size compiler option, 3.1). A value that doesn't fit takes the smallest wider type that does (`300` on an 8-bit target → `i16`).
-- Reals fit by range only (precision loss accepted). On a CPU without FPU the native real is the smallest defined one (`r16`).
+- Reals fit by range only (precision loss accepted). The target architecture decides the best native real format (for example `r64` on 64-bit, `r32` on 32-bit, `r16` on 8- and 16-bit, or software emulation where faster).
 - Literals adapt to the declared type; a value that doesn't fit is a compile error.
 - `0x00000000DEADBEEF` is a 64-bit value; hex and binary always describe raw bits.
 - A literal transmuted to a pointer is zero-extended to the pointer size: `[*i32]0xA0000`.
@@ -78,13 +78,13 @@ Status: design in progress. Decisions below reflect the latest choices; earlier 
 
 | Type | Description |
 |---|---|
-| `i8` `i16` `i32` `i64` `i128` `i256` | signed integers (`i128`/`i256` software-emulated for now) |
+| `i8` `i16` `i32` `i64` `i128` `i256` | signed integers (sizes not supported in hardware are software-emulated; on very small targets, types wider than 4 bytes may not be available at all) |
 | `u8` `u16` `u32` `u64` `u128` `u256` | unsigned integers |
 | `r16` | IEEE 754 binary16 (GPU half) |
 | `r32` `r64` `r128` | IEEE floats (`r128` software-emulated) |
 | `dec` | fixed-point, 32 + 32 bits |
 | `byte` | alias of `u8` |
-| `int` `uns` `real` | target-dependent aliases; for small targets; not allowed in `dfoot` |
+| `int` `uns` `real` | target-dependent aliases, to force a specific size for global data or registers; not allowed in `dfoot` |
 
 - **Native size**: one compiler option sets the native size used by `int` / `uns` / `real` and by unsuffixed literals. It can force a size below or above the CPU's own.
 - Numbers are **not nullable** unless declared `type?`.
@@ -95,10 +95,10 @@ Status: design in progress. Decisions below reflect the latest choices; earlier 
 |---|---|
 | `bool` | true / false |
 | `char` | 32-bit Unicode code point |
-| `date` | 64-bit, ms since 1 Jan 1970 UTC; null = minimum value |
+| `date` | 64-bit, ms since 1 Jan 1970 UTC; a null `date` is represented by the minimum `i64` value |
 | `clock` | u64 monotonic counter, 0.1 ns, from `GetClock()`; intervals only; `GetClock()` never returns 0; null = 0 |
 | `lapse` | difference between two dates or two clocks (3.3) |
-| `addr` | an address as a number; size from the target definition (64-bit by default, 16 on C64), stored in the most efficient way; comparison and transmute only, arithmetic through pointer methods (15.1); prints as hex in groups of 4 digits separated by spaces |
+| `addr` | native type holding an address as a number; size from the target definition (64-bit by default, 16 on C64), stored in the most efficient way; comparison and transmute only, arithmetic through pointer methods (15.1); cannot be dereferenced; prints as hex in groups of 4 digits separated by spaces; null is 0 (unmapped address) |
 
 ### 3.3 `lapse`
 
@@ -170,10 +170,10 @@ alias byte8 u8
 ## 5. Nulls
 
 - Value types: nullable only as `type?`. Classes are nullable.
-- Strings: `""` and null are the same.
+- Strings: `""` and null are the same; `string` is already nullable, so `string?` is a compile error.
 - Null propagates in arithmetic; equals only null; sorts first.
 - Null object access raises `NullPointerException`; no `x!` force-unwrap.
-- `enforce a, b { } else { }`: the only unwrap for `type?` (and for weak references, 15).
+- `enforce a, b { } else { }`: the only unwrap for `type?` (and for weak references, 15). Strings cannot be enforced.
 - `?.` `??` `??=`; `i8 b = maybe ?? 0` unwraps into a non-nullable target.
 - `a == null` may call an overloaded `==`; `a is null` always checks the reference.
 
@@ -181,8 +181,8 @@ alias byte8 u8
 
 ## 6. Conversions
 
-- **Cast `(type)`**: keeps the value; out of range saturates (level 2 warning). From `r`: truncates toward zero (Rust rules), +∞ → max, −∞ → min (0 for unsigned), NaN → 0.
-- **Transmute `[type]`**: same bits; truncates low bits or zero-extends. `[bool]`: 0 = false. `[char]`: invalid → U+0000.
+- **Cast `(type)`**: keeps the value; out of range saturates (level 2 warning), or raises `OutOfRangeCastException` if a specific catch exists. From `r`: truncates toward zero (Rust rules), +∞ → max, −∞ → min (0 for unsigned), NaN → 0.
+- **Transmute `[type]`**: same bits; truncates low bits or zero-extends. `[bool]`: 0 = false. `[char]`: invalid → U+0000, or `InvalidCharacterCodePointException` if a specific catch exists.
 - **Implicit**: only same-family widening (`i8 → i64`, `r32 → r64`) and any type → bool.
 - **Pointers**: created from numbers or other pointers by transmute only (`[*u64]address`); pointer → `addr` also with `=`.
 - **To bool**: numbers 0 / NaN = false; `char` `\0`; `date` / `clock` null; `lapse` zero or null; `string` null/empty; `vec` and tuples not convertible.
@@ -206,7 +206,7 @@ alias byte8 u8
 
 - Assignments are not expressions (`++`/`--` are).
 - `+` evaluates left to right; with a string or char operand it concatenates: `1 + 2 + "a"` = `"3a"`, `'a' + 'b'` = `"ab"`. Char codes need a transmute: `[u32]'a' + [u32]'b'`.
-- Overflow wraps unless a `catch` for `OverflowException` is in the same function.
+- Overflow wraps unless a specific `catch` for `OverflowException` is in the same function (silent exception, 10.4).
 - Division by zero and similar errors are always checked explicitly (no CPU traps).
 - Precedence (Rust): postfix, unary, `* / %`, `+ -`, shifts, `&`, `^`, `|`, comparisons and `is`, `&&`, `^^`, `||`, ranges, `??`, `? { }`.
 - Operator overloading: allowed for custom classes, not for built-in types. Overloading `==` on a map key class requires a matching hash.
@@ -312,37 +312,127 @@ list.Filter((x; _limit) { x < limit })     // weak
 ### 10.1 Syntax
 
 ```
-i32 r = 10 / b
+i32 ratio = 10 / divisor
 catch DivisionByZeroException ex { }
-catch ex { }
+catch NetworkException { }                    // no variable
+catch SilentException ex { }                  // by trait
+catch ex { }                                  // same as catch Exception ex
+catch all ex { }                              // everything, silent exceptions included
+catch all { }
 throw Exception("message")
-throw MyException(123, "wow")
+throw MyException("message", 123)
 throw Panic(3)
-atEnd { cleanup() }
 ```
 
-- No `try`; a `catch` handles everything raised above it in its block; innermost matching catch wins; unhandled → caller; top level → program ends with the message.
+- No `try`; a `catch` handles everything raised above it in its block; unhandled → caller; top level → program ends.
+- Catches are checked in order: the first one that handles the exception type runs, the following ones are ignored. A catch that doesn't handle the type is skipped, and a later one can.
+- `catch Type` handles that type and its subtypes; a catch can also name a trait.
+- `catch variable` is the same as `catch Exception variable`; it does not handle silent exceptions.
+- `catch all [variable]` handles everything, silent exceptions included. After `catch`, `all` is always the catch-all keyword (fixed parser rule), so `catch all all { }` is valid.
+- After a catch that doesn't leave the scope, execution continues with the code after it.
+- `throw` inside a catch (including `throw ex`) passes the exception to the enclosing level; later catches in the same block don't see it.
+- An error raised inside a catch body and not handled there → `Panic`.
 
-### 10.2 Types
+### 10.2 Exception class
 
-- `root.Exception` is the base; standard ones are subclasses in `root`: `NullPointerException`, `OverflowException`, `InvalidCastException`, `DivisionByZeroException`, `OutOfMemoryException` (list grows during development).
+```
+class Exception {
+  u64 Id
+  *ExceptionTrait Descriptor    // extra data to build the specific exception class
+  string Message                // max 2 KB
+  string Function               // minified header of the failing function, max 1 KB
+  u64 Line                      // debug builds; 0 in release
+  StackTrace StackTrace         // debug builds; null in release
+}
+```
+
+- Constructors: message first and optional, then the subclass fields: `MyException("Whoa a message!", 123)`, `MyException()`.
+- `Message` and `Function` are stored C-style (null-terminated, no length field) and truncated in bytes when the exception is built, never cutting a UTF-8 character.
+- Standard runtime error messages: the exception name written with spaces.
 - Subclasses only when they carry extra fields.
-- `ChangingRefCountTypeException`: switching an object between the two counting kinds.
-- `Panic(code)`: critical exit, not an exception; not catchable, no cleanup, exits with `code`.
 
-### 10.3 Implementation
+### 10.3 Standard exceptions
+
+`root.Exception` is the base; the standard ones are subclasses in `root`.
+
+| ID | Exception | Silent fallback |
+|---|---|---|
+| 0–9 | reserved | |
+| 10 | `Exception` | |
+| 11 | `NullPointerException` | |
+| 12 | `OverflowException` | wraps |
+| 13 | `InvalidCastException` | |
+| 14 | `DivisionByZeroException` | |
+| 15 | `OutOfMemoryException` | |
+| 16 | `ChangingRefCountTypeException` | |
+| 17 | `OutOfRangeCastException` | saturates (6) |
+| 18 | `InvalidCharacterCodePointException` | U+0000 (6) |
+
+- The list grows during development; each new standard exception takes the next ID.
+- Missing map key (12.2) is also silent (null or zero value); its exception name is open.
+
+### 10.4 Silent exceptions
+
+```
+class MySilentException : Exception, SilentException { ... }
+```
+
+- A silent exception is raised only if a catch for it exists; otherwise execution continues as if nothing happened (like an alert or assertion).
+- Standard silent exceptions have their own fallback (table above); custom ones just continue.
+- A class is silent when it implements the `SilentException` trait (a marker trait with a dummy method). Subclasses of a silent exception are silent too.
+- The silent flag is stored in the descriptor.
+- A silent exception needs a specific catch: its own type, a parent below `Exception`, the `SilentException` trait, or `catch all`. `catch Exception` / `catch variable` don't handle it.
+
+### 10.5 Panic and exit codes
+
+- `Panic(code)`: critical exit, not an exception; not catchable, no cleanup, exits with `code`.
+- Unhandled exception at the top level, unhandled error inside a catch body, exception inside `atEnd` while another is propagating, double free: exit with -1000 for now. Every panic case will get its own code later.
+
+### 10.6 Targets without exceptions
+
+- On targets that can't support exceptions (e.g. C64), `catch` blocks are ignored.
+- A silent exception (raised by the runtime or by `throw`) is ignored and falls back to its silent behavior.
+- A non-silent exception (raised by the runtime or by `throw`) terminates the program.
+
+### 10.7 Implementation
 
 - Rust/Swift style: a failing function returns normally with an **error register** holding 0 or a pointer to an error record; the caller jumps to its `catch` or propagates. Functions that can't fail skip the check.
-- Error record: `{ id, descriptor*, message, subclass fields }`. Descriptor: `{ id, name, parent* }`.
+- Error record: `{ id, descriptor*, message, subclass fields }`. Descriptor: `{ id, name, parent*, silent flag }`.
 - IDs: 0–255 reserved for `root`, otherwise a hash of the full name. Exact catch = one compare; base-class catch walks the parents.
-- Release builds keep function, type and message; debug builds add the stack trace.
 - External libraries raise the base types with a short message; richer errors via an exported mapping function.
 
-### 10.4 `atEnd`
+### 10.8 Scope `atEnd`
 
-- Registers code for the enclosing scope; runs on every exit (end, `return`, `break`, jumps, exceptions), not on `Panic`.
-- Several `atEnd` run in reverse order; owned objects are freed in reverse order too.
-- An exception inside `atEnd` while another is propagating → `Panic`, printing both (details later).
+```
+mutex.Lock()
+atEnd { mutex.Unlock() }
+
+if queue.len == 0 { return }      // unlocked
+Item next = queue.Pop()           // if it throws: unlocked
+```
+
+- A compile-time definition: it covers its whole scope wherever it is written, and runs automatically on every exit of the scope (normal end, `return`, `break`, `jump`, an exception passing through, a catch that leaves the scope). It cannot be called directly.
+- If a catch handles an exception and execution continues, `atEnd` runs at the normal end of the scope.
+- Not run on `Panic`. On a non-panic exception that reaches the top level, it runs.
+- In a loop body, it runs once, when the loop exits, not on every iteration.
+- `return value`: the value is computed first, then `atEnd` runs.
+- May contain `break` and `jump` only within its own block. `return` and `throw` are allowed.
+- `return` inside `atEnd` overrides the function's result on a normal exit. While an exception is passing through, its return value is ignored and the exception keeps propagating.
+- `throw` inside `atEnd` while another exception is propagating → `Panic`.
+- Can use everything in the scope that is still valid.
+- Several `atEnd` blocks in a scope run from the last to the first; the last one to run sets the result.
+
+### 10.9 Class `atEnd`
+
+```
+class LogFile : root.Class {
+  atEnd { handle?.Close() }      // syntax open
+}
+```
+
+- The class cleanup function, private (cannot be called), run when the object is freed; follows Rust `Drop` rules (the last owner going away, moves, reference counting).
+- Order at scope end: scope `atEnd` blocks from last to first, then the class `atEnd` of every owned object still alive.
+- Once the final result is decided, ordinary exceptions raised by later class cleanup are ignored. A double free is a `Panic`.
 
 ---
 
@@ -390,7 +480,7 @@ map n = { 1: "one", 2: "two" }          // map<native integer, string>
 | `tryGet(k, &out[, default])` | maps |
 | `.keys` | keys or positions |
 
-- Missing map key: null, zero value, or exception if a matching catch exists.
+- Missing map key: null or zero value, or an exception if a specific catch exists (silent exception, 10.4).
 - Collections own their elements (15).
 
 ### 12.3 `dfoot`
@@ -488,7 +578,7 @@ Rust model, Dflat syntax.
 | `.asSharedRefCount` | thread-safe counting |
 | `.isRC` | true for both kinds |
 
-- Single owner; freed at the end of the owner's scope.
+- Single owner; freed at the end of the owner's scope, running the class `atEnd` (10.9).
 - Function parameters borrow; returning moves ownership to the caller.
 - Collections own their elements: adding moves in, removing moves out, reading borrows.
 - Switching an object between the two counting kinds → `ChangingRefCountTypeException`.
@@ -514,8 +604,8 @@ string label = itemPointer[].Name
 - No untyped pointers: `*byte` stands in for C `void*`.
 - No pointer arithmetic (`p + 4` is a compile error); use the methods below.
 - `null` is the null pointer.
-- Conversions: transmute only (6); pointer → `addr` also with `=`.
-- Logical model: base, size and cursor. The compiler keeps base and size only for bound checks; an unbounded pointer is just the cursor.
+- Conversions: transmute only (6); pointer → `addr` also with `=`. `addr` → pointer via transmute (`[*i32]someAddress`) is always unsafe.
+- Logical model: base, size and cursor. The underlying implementation is decided by the compiler: base and size are kept only for bound checks, an unbounded pointer is just the cursor, and only the cursor crosses into C.
 - Pointers coming from outside the program (other libraries, OS calls) or built from numbers are always unsafe.
 
 Methods (plain = steps of the pointed type, `Raw` = bytes):
@@ -526,9 +616,35 @@ Methods (plain = steps of the pointed type, `Raw` = bytes):
 | `InRange(steps)` / `InRangeRaw(bytes)` | true if moving by the signed amount stays within the bounds |
 | `GetOffset()` / `GetOffsetRaw()` | cursor − base, `i64` |
 | `GetOffset(other)` / `GetOffsetRaw(other)` | cursor − other address, `i64` |
+| `GetAddress()` | cursor as `addr` |
 | `GetAddress(steps)` / `GetAddressRaw(bytes)` | `addr` at cursor + amount, cursor unchanged |
+| `IsAligned()` | `bool`: cursor aligned to `r.Alignment.Arch` |
+| `IsAligned(bytes)` | `bool`: cursor aligned to `bytes` |
 
-### 15.2 Volatile
+### 15.2 Alignment
+
+```
+u64 typeAlignment  = r.Alignment.Type<i32>()
+u64 archAlignment  = r.Alignment.Arch
+u64 cacheAlignment = r.Alignment.Cache
+bool onArch  = r.Alignment.IsAligned(samples)
+bool onType  = r.Alignment.IsAligned<r64>(samples)
+bool onCache = r.Alignment.IsAlignedCache(samples)
+```
+
+| Member | Returns |
+|---|---|
+| `Type<T>()` | `u64`, natural alignment of `T` |
+| `Arch` | `u64`, architecture alignment |
+| `Cache` | `u64`, cache line alignment |
+| `IsAligned(p)` | `bool`, against `Arch` (same as `p.IsAligned()`) |
+| `IsAligned<T>(p)` | `bool`, against `Type<T>()` |
+| `IsAlignedCache(p)` | `bool`, against `Cache` |
+
+- All values are compile-time constants, usable in `vec<…>` sizes and value parameters.
+- `Arch` comes from the target definition; `Cache` from a compiler option, default 64. Builds for other cache sizes use specific targeted compilations.
+
+### 15.3 Volatile
 
 ```
 volatile (*)u8{65536} screen = [*u8]0xA0000
@@ -701,9 +817,13 @@ Level 1 = most important, level 3 = least.
 - Locale details
 - Date formatting week rules
 - Conditional compilation (`#if` family)
-- Exception list, `Panic` exit codes for `atEnd` failures
+- Panic exit codes (all -1000 for now)
+- Name of the missing-map-key exception
+- Whether standard messages keep the word "Exception"
+- Class `atEnd`: syntax, order with parent classes and traits
 - Stdlib: strings, files, time, collections extras (insert, clear, sets, queue/stack)
 - Pointers: automatic bound for `&` on `vec` / `list`; bound methods on unbounded pointers
+- `addr` in `dfoot` (fixed memory maps ok, runtime addresses problematic)
 - Safe / unsafe logic
 - Function pointers (objects); C function tables (COM vtables, Vulkan dispatch tables)
 - C interop: declaring external functions, struct layout, calling conventions, callbacks, strings (UTF-8 / UTF-16), ownership across the boundary, errors, unions, bit flags, varargs
@@ -736,5 +856,39 @@ Level 1 = most important, level 3 = least.
 - 7 `&x` is address-of; `(&)x` writable; `&x` no longer marks by-reference calls
 - 9.1 Parameter passing table rewritten: definition declares the mode, call marks only `(&)`, `->`, `!`
 - 15.1 Pointers (new): types, bounds, index usage, address-of, fat pointer model, methods
-- 15.2 Volatile (new)
+- 15.2 Volatile (new; now 15.3)
 - 20 Open items: pointers details, safe/unsafe, function pointers, C interop
+
+### Third update (same version)
+
+- 2.3 Native real format decided by the target architecture (examples: `r64` 64-bit, `r32` 32-bit, `r16` 8/16-bit); replaces the no-FPU rule
+- 3.1 Integers wider than 4 bytes may be unavailable on very small targets; `int` / `uns` / `real` description
+- 3.2 Null `date` wording: minimum `i64` value; `addr` null is 0
+- 5 `string?` is a compile error; strings cannot be enforced
+- 3.2 / 15.1 `addr` as generic pointer base: under review
+
+---
+
+## Changes in 0.0.4
+
+- 3.2 `addr` is a native type, cannot be dereferenced; "under review" removed
+- 15.1 `addr` → pointer via transmute, always unsafe
+- 15.1 Pointer implementation decided by the compiler
+- 15.1 `GetAddress()` returns the cursor as `addr`
+- 15.1 `IsAligned()` / `IsAligned(bytes)` return `bool`
+- 15.2 Alignment (new): `r.Alignment.Type<T>()`, `Arch`, `Cache`, `IsAligned(p)`, `IsAligned<T>(p)`, `IsAlignedCache(p)`; cache alignment compiler option, default 64
+- 15.3 Volatile (renumbered from 15.2)
+- 20 Open items: `addr` in `dfoot`
+- 10 Errors rewritten:
+  - 10.1 catch order, `catch Type` without variable, catch by trait, `catch all`, code continues after a catch, `throw` inside a catch, errors inside a catch → `Panic`
+  - 10.2 `Exception` class members, constructors (message first, optional), C-style truncation, message text
+  - 10.3 Standard exceptions with IDs (0–9 reserved); new `OutOfRangeCastException`, `InvalidCharacterCodePointException`
+  - 10.4 Silent exceptions (new): `SilentException` marker trait, fallbacks, specific catch required
+  - 10.5 Panic and exit codes: -1000 placeholder
+  - 10.6 Targets without exceptions (new)
+  - 10.7 Implementation: silent flag in the descriptor
+  - 10.8 Scope `atEnd`: compile-time, automatic on every exit, not callable, loop, return value, control flow, exceptions passing through, order
+  - 10.9 Class `atEnd` (new): private cleanup, Rust `Drop` rules, order, errors after the result
+- 6 / 7 / 12.2 Out-of-range cast, `[char]` transmute, overflow and missing key are silent exceptions
+- 15 Freeing runs the class `atEnd`
+- 20 Open items: panic codes, missing-key exception name, "Exception" in messages, class `atEnd` with inheritance

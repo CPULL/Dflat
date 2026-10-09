@@ -43,8 +43,8 @@ public sealed partial class CodeGen {
     return new Expr($"({{ {declarations}({CType(tupleType)}){{ {string.Join(", ", temps)} }}; }})", tupleType);
   }
 
-  // return a, b
-  void EmitMultiReturn(Node s, StringBuilder sb, Scope scope, string pad) {
+  // return a, b: the values are computed left to right into temporaries
+  string MultiReturnCode(Node s, Scope scope, StringBuilder sb, string pad) {
     var elems = TupleElems(currentRet!);
     if (s.Children.Count == 1) {
       // forwarding another call with the same return values
@@ -52,22 +52,19 @@ public sealed partial class CodeGen {
       if (single.Type != currentRet) {
         throw Error($"this function returns {elems.Count} values", s);
       }
-      sb.Append($"{pad}return {single.Code};\n");
-      return;
+      return single.Code;
     }
     if (s.Children.Count != elems.Count) {
       throw Error($"this function returns {elems.Count} values, not {s.Children.Count}", s);
     }
     var temps = new List<string>();
-    sb.Append($"{pad}{{\n");
     for (int index = 0; index < elems.Count; index++) {
       string temp = NewTemp();
       temps.Add(temp);
       var value = ExprOf(s.Children[index], scope, elems[index].Type);
-      sb.Append($"{pad}  {CType(elems[index].Type)} {temp} = {Convert(value, elems[index].Type, s.Children[index])};\n");
+      sb.Append($"{pad}{CType(elems[index].Type)} {temp} = {Convert(value, elems[index].Type, s.Children[index])};\n");
     }
-    sb.Append($"{pad}  return (({CType(currentRet!)}){{ {string.Join(", ", temps)} }});\n");
-    sb.Append($"{pad}}}\n");
+    return $"(({CType(currentRet!)}){{ {string.Join(", ", temps)} }})";
   }
 
   // i32 id, string name = getUser()   |   x, y = y, x   |   existing, _, i32 fresh = f()
@@ -141,6 +138,11 @@ public sealed partial class CodeGen {
       string type = ResolveType(target.Children.First(child => TypeNodeKinds.Contains(child.Kind)));
       if (scope.Vars.ContainsKey(target.Text!)) {
         throw Error($"'{target.Text}' is already declared in this scope", target);
+      }
+      if (frames.Peek().Hoisted.TryGetValue(target.Text!, out var hoisted)) {
+        scope.Vars[target.Text!] = hoisted;
+        sb.Append($"{pad}{hoisted.CName} = {Convert(value.Value, type, target)};\n");
+        return;
       }
       string cname = "v_" + target.Text;
       sb.Append($"{pad}{CType(type)} {cname} = {Convert(value.Value, type, target)};\n");

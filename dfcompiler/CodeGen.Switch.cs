@@ -25,12 +25,14 @@ sealed class EnumInfo {
 }
 
 sealed class SwitchContext {
-  public SwitchContext(int id, string subjectType) {
+  public SwitchContext(int id, string subjectType, Frame frame) {
     Id = id;
     SubjectType = subjectType;
+    Frame = frame;
   }
 
   public int Id { get; }
+  public Frame Frame { get; }                                    // the scope holding the switch
   public string SubjectType { get; }
   public Dictionary<string, int> Keys { get; } = new();          // constant case value → case index
   public int? DefaultIndex { get; set; }
@@ -250,7 +252,7 @@ public sealed partial class CodeGen {
     var subject = ExprOf(s.Children[0], scope);
     CheckSubject(subject, s);
     tempCounter++;
-    var context = new SwitchContext(tempCounter, subject.Type);
+    var context = new SwitchContext(tempCounter, subject.Type, frames.Peek());
     string subjectTemp = $"sw{context.Id}_value";
     var subjectExpr = new Expr(subjectTemp, subject.Type);
     var cases = s.Children.Skip(1).ToList();
@@ -288,11 +290,7 @@ public sealed partial class CodeGen {
       context.CurrentCase = index;
       var body = cases[index].Children.Last();
       sb.Append($"{pad}  {context.CaseLabel(index)}: {{\n");
-      if (body.Kind == "Block") {
-        EmitBlock(body, sb, scope, indent + 2);
-      } else {
-        EmitStmt(body, sb, new Scope(scope), indent + 2);
-      }
+      EmitStatementAsBlock(body, sb, scope, indent + 2);
       sb.Append($"{pad}  }}\n{pad}  goto {context.EndLabel};\n");
     }
     switches.Pop();
@@ -304,15 +302,16 @@ public sealed partial class CodeGen {
   }
 
   // jump #label# | jump name (a case inside a switch, a label outside) | jump default | jump <case value>
-  void EmitJump(Node s, StringBuilder sb, string pad) {
+  void EmitJump(Node s, StringBuilder sb, int indent) {
+    string pad = Pad(indent);
     var target = s.Children[0];
     if (target.Kind == "Label") {
-      sb.Append($"{pad}goto lbl_{target.Text};\n");
+      EmitJumpToLabel(target.Text!, sb, indent, s);
       return;
     }
     if (switches.Count == 0) {
       if (target.Kind == "Target") {
-        sb.Append($"{pad}goto lbl_{target.Text};\n");
+        EmitJumpToLabel(target.Text!, sb, indent, s);
         return;
       }
       throw Error("jumps to case values are only valid inside a switch", s);
@@ -340,6 +339,7 @@ public sealed partial class CodeGen {
       }
       targets.Add(caseIndex);
     }
+    EmitUnwindTo(context.Frame, sb, indent, s);
     sb.Append($"{pad}goto {context.CaseLabel(caseIndex)};\n");
   }
 

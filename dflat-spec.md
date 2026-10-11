@@ -169,7 +169,7 @@ alias u8 as byte8
 
 - `program.df` > `main.df` > `lib.df`: the first one found is the root (executable, or library for `lib.df`); a skipped root file gives a level 1 warning. `dfcompile -forcelib folder/` forces a library.
 - The root file declares its namespace explicitly; `local` = root namespace + folder path.
-- `alias <original> as <new>`; aliases are pure aliases (interchangeable with the original). They can also go to members and functions: `alias cons as Root.Console` and `alias log as Root.Console.Log`
+- `alias <original> as <new>`; aliases are pure aliases (interchangeable with the original). They can also go to members and functions: `alias Root.Console as c` and `alias Root.Console.Log as log`
 
 ---
 
@@ -264,7 +264,7 @@ switch val {
 }
 bool res = val ? { 1: true, default: false }
 string yn = ok ? { "yes", "no" }
-i32 sign = value ? { ..-1: -1, 0: 0, 1..: 1 }
+i32 sign = value ? { ..=-1: -1, 0: 0, 1..: 1 }
 ```
 
 - Case values: literals, enum entries, sets (`3, 4, 5:`) and ranges (`400..=499:`, `..-1:`, `1..:`); the same in switch expressions.
@@ -805,26 +805,83 @@ fun printAll<Source : Sequence>(Source items) { ... }
 ---
 
 ## 18. Standard library (first sketch)
-
-```
-alias Root as r
-r.GetClock()        r.Now()
-r.Console.Log  .LogError .Print .GetInput  .GetChar
-r.Math (= Math64, r64)    r.Math32 (r32 results)
-  Sin Cos Tan Asin Acos Atan Atan2(y, x) Sinh Cosh Tanh
-  Sqrt Cbrt Pow Exp Ln Log10 Log(x, base)
-  Abs Sign Min Max Clamp (also integers)
-  Floor Ceil Round Trunc Hypot Fmod Lerp(a, b, t) InverseLerp(a, b, v)
-  constants: Pi PiHalf E Sqrt2 R2D D2R
-```
-
-`Console.Log()` prints a newline, `Console.Print()` does not add newline
-
-`Console.GetInput()` returns `""` at end of input, `Console.GetChar()` returns any printable character or `\0` at end of input
-
 - Type members live on the types: `d.Year`, `d.AddDays(3)`, `s.Split(",")`, `c.IsDigit`, `list.Sort()`.
-- Random: `import stdrnd`; `Rnd rnd = Rnd([u64]r.Now())`; `Int(min, max)`, `RealRange(min, max)` (max excluded), `Real()` in [0, 1], `Seed(u64)`, `Shuffle(c)` for lists, vectors, strings. Generator: later.
 - To add: strings, chars, parsing, files, paths, environment, time.
+
+### Console
+Access to stdinput and stdoutput and stderror
+
+| Definition | Example | Description |
+|---|---|---|
+| `Log(any)` | `Root.Console.Log("Hello")` | Converts the object to string if needed, prints on stdout appending a newline |
+| `LogError(any)` | `Root.Console.LogError("Hello")` | Converts the object to string if needed, prints on stderr appending a newline |
+| `Print(any)` | `Root.Console.Print("Hello")` | Converts the object to string if needed, prints on stdout |
+| `char Read()` | `char c = Root.Console.Read()` | Reads a character from stdin and returns it, returns '\0' at end of input |
+| `char ReadLine()` | `string line = Root.Console.ReadLine()` | Reads a line from stdin and returns it, the line is not stripped of the newline character, if any. Returns "" at end of input |
+| `` | `` |  |
+
+### Date and Time
+Mostly used to get current date and time and to measure elapsed at nanosecond scale
+
+| Definition | Example | Description |
+|---|---|---|
+| `date Now()` | `date d = Root.Time.Now()` | Gets the current time in UTF |
+| `clock Clock()` | `Root.Time.Clock()` | Returns a u64 monotonic counter with a resolution of 0.1 ns; `GetClock()` never returns 0 |
+| `` | `` |  |
+
+### Math
+Standard mathematical functions. `Root.Math` operates on `r64` while `Root.Math32` operates on `r32` (similar to `Mathf` of C#)
+
+| Name | Definition | Description |
+|---|---|---|
+| `Sin` | `r64 Sin(r64 v)` | Computes the trigonometric sine of an angle in radians. |
+| `Cos` | `r64 Cos(r64 v)` | Computes the trigonometric cosine of an angle in radians. |
+| `Tan` | `r64 Tan(r64 v)` | Computes the trigonometric tangent of an angle in radians. |
+| `Asin` | `r64 Asin(r64 v)` | Computes the arcsine (inverse sine) in radians, returning a value between $-\pi/2$ and $\pi/2$. |
+| `Acos` | `r64 Acos(r64 v)` | Computes the arccosine (inverse cosine) in radians, returning a value between $0$ and $\pi$. |
+| `Atan` | `r64 Atan(r64 v)` | Computes the arctangent (inverse tangent) in radians, returning a value between $-\pi/2$ and $\pi/2$. |
+| `Atan2` | `r64 Atan2(r64 y, r64 x)` | Computes the 4-quadrant arctangent of $y / x$ using the signs of both arguments to determine the correct quadrant. |
+| `Sinh` | `r64 Sinh(r64 v)` | Computes the hyperbolic sine of a value. |
+| `Cosh` | `r64 Cosh(r64 v)` | Computes the hyperbolic cosine of a value. |
+| `Tanh` | `r64 Tanh(r64 v)` | Computes the hyperbolic tangent of a value. |
+| `Sqrt` | `r64 Sqrt(r64 v)` | Computes the non-negative square root of a value. |
+| `Cbrt` | `r64 Cbrt(r64 v)` | Computes the cube root of a value. |
+| `Pow` | `r64 Pow(r64 v)` | Raises a base value to a specified exponent power. |
+| `Exp` | `r64 Exp(r64 v)` | Computes $e$ raised to the power of the given value ($e^v$). |
+| `Ln` | `r64 Ln(r64 v)` | Computes the natural logarithm (base $e$) of a value. |
+| `Log10` | `r64 Log10(r64 v)` | Computes the common logarithm (base 10) of a value. |
+| `Log(x, base)` | `r64 Log(r64 x, r64 base)` | Computes the logarithm of $x$ with respect to a custom base. |
+| `Abs` | `r64 Abs(r64 v)` | Returns the absolute (non-negative) value of a number. |
+| `Sign` | `r64 Sign(r64 v)` | Returns the sign of a number ($1$ for positive, $-1$ for negative, $0$ for zero). |
+| `Min` | `r64 Min(r64 v)` | Returns the smaller of two or more values. |
+| `Max` | `r64 Max(r64 v)` | Returns the larger of two or more values. |
+| `Clamp` | `r64 Clamp(r64 v, r64 min, r64 max)` | Constrains a value to lie between the specified minimum and maximum bounds. |
+| `Floor` | `r64 Floor(r64 v)` | Rounds a value down to the largest integer less than or equal to the number. |
+| `Ceil` | `r64 Ceil(r64 v)` | Rounds a value up to the smallest integer greater than or equal to the number. |
+| `Round` | `r64 Round(r64 v)` | Rounds a value to the nearest integer. |
+| `Trunc` | `r64 Trunc(r64 v)` | Truncates the fractional part of a number, rounding toward zero. |
+| `Hypot` | `r64 Hypot(r64 v...)` | Computes the square root of the sum of squares of its arguments (Euclidean distance function). |
+| `Fmod` | `r64 Fmod(r64 v)` | Computes the floating-point remainder of division. |
+| `Lerp(a, b, t)` | `r64 Lerp(r64 a, r64 b, r64 t)` | Performs linear interpolation between $a$ and $b$ using parameter $t$ ($0.0$ to $1.0$). |
+| `InverseLerp(a, b, v)` | `r64 InverseLerp(r64 a, r64 b, r64 v)` | Finds the interpolation factor $t$ for value $v$ between range $a$ and $b$. |
+| `Pi` | `r64 Pi` | Mathematical constant Pi ($\pi \approx 3.14159$). |
+| `PiHalf` | `r64 PiHalf` | Mathematical constant Pi divided by two ($\pi/2 \approx 1.57079$). |
+| `E` | `r64 E` | Mathematical constant Euler's number ($e \approx 2.71828$). |
+| `Sqrt2` | `r64 Sqrt2` | Mathematical constant square root of two ($\sqrt{2} \approx 1.41421$). |
+| `R2D` | `r64 R2D` | Conversion factor from radians to degrees ($180 / \pi$). |
+| `D2R` | `r64 D2R` | Conversion factor from degrees to radians ($\pi / 180$). |
+
+### Random
+A simple random number gereator is included in the standardlibrary
+
+| Name | Definition | Description |
+|---|---|---|
+| `Seed` | `Root.Random.Seed(u64)` | Initialize the seed of the generator with the provided value |
+| `Int` | `i64 Int(i64 min, i64 max)` | Returns a random integer between the minimum number and the maximum number (both included) |
+| `RealRange` | `r64 RealRange(r64 min, r64 max)` | Returns a random real number between the minimum number and the maximum number (max excluded) |
+| `Real` | `r64 Real()` | Returns a real value in the range [0, 1] (1 is included) |
+| `Shuffle` | `Shuffle(collection)` | Randomize the order of elements in an ordered collection. It is valid for lists, vectors, strings |
+| `` | `` |  |
 
 ---
 

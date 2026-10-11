@@ -1,5 +1,5 @@
 namespace errors
-alias r Root
+alias Root as r
 
 fun i32 divide(i32 total, i32 parts) { total / parts }
 

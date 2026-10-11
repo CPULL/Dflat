@@ -1,5 +1,5 @@
 namespace enums
-alias r Root
+alias Root as r
 
 enum Status { Active, Inactive, Pending: 10, Waiting, OnHold: Pending }
 

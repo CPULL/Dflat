@@ -21,6 +21,11 @@ public sealed partial class CodeGen {
   static bool IsMulti(string type) => type.StartsWith('*');
   bool IsEnum(string type) => enums.ContainsKey(type);
 
+  static bool IsTimeType(string t) => t is "date" or "clock" or "lapse";
+
+  // the null of date, clock and lapse (spec 3.2, 3.3)
+  static string NullCode(string t) => t == "date" ? "INT64_MIN" : $"(({PrimitiveCType(t)})0)";
+
   static bool IsInt(string t) => SignedTypes.Contains(t) || UnsignedTypes.Contains(t);
   static bool IsNumeric(string t) => IsInt(t) || RealTypes.Contains(t);
 
@@ -35,7 +40,7 @@ public sealed partial class CodeGen {
 
   bool IsKnownType(string t) {
     return SignedTypes.Contains(t) || UnsignedTypes.Contains(t) || RealTypes.Contains(t)
-      || t is "bool" or "char" or "string" or "byte" || IsEnum(t);
+      || t is "bool" or "char" or "string" or "byte" or "date" or "clock" or "lapse" || IsEnum(t);
   }
 
   static string Normalize(string t) => t == "byte" ? "u8" : t;
@@ -132,6 +137,9 @@ public sealed partial class CodeGen {
       "bool" => "bool",
       "char" => "uint32_t",
       "string" => "df_string",
+      "date" => "int64_t",
+      "clock" => "uint64_t",
+      "lapse" => "int64_t",
       "void" => "void",
       _ => throw new InvalidOperationException(t)
     };
@@ -216,6 +224,9 @@ public sealed partial class CodeGen {
     if (enums.TryGetValue(type, out var info)) {
       return IntConstCode(info.Entries[0].Value, info.ValueType);
     }
+    if (IsTimeType(type)) {
+      return NullCode(type);   // date, clock and lapse start as null
+    }
     return type == "bool" ? "false" : "0";
   }
 
@@ -227,6 +238,9 @@ public sealed partial class CodeGen {
         string inner = ResolveType(n.Children[0]);
         if (inner == "string") {
           throw Error("string is already nullable; 'string?' is not allowed", n);
+        }
+        if (IsTimeType(inner)) {
+          throw Error($"{inner} is already nullable; '{inner}?' is not allowed", n);
         }
         if (IsNullable(inner)) {
           throw Error($"'{inner}' is already nullable", n);
@@ -282,7 +296,7 @@ public sealed partial class CodeGen {
       return false;
     }
     if (from == "null") {
-      return IsNullable(to) || to == "string";
+      return IsNullable(to) || to == "string" || IsTimeType(to);
     }
     if (IsNullable(to)) {
       string toBase = BaseOf(to);
@@ -326,6 +340,9 @@ public sealed partial class CodeGen {
       }
       if (to == "string") {
         return "df_str_lit(\"\", 0)";
+      }
+      if (IsTimeType(to)) {
+        return NullCode(to);
       }
       throw Error($"{to} is not nullable; declare it as {to}?", at);
     }
@@ -430,6 +447,12 @@ public sealed partial class CodeGen {
     if (e.Type == "string") {
       return $"(({e.Code}).len != 0)";
     }
+    if (e.Type == "date") {
+      return $"(({e.Code}) != INT64_MIN)";
+    }
+    if (e.Type == "lapse") {
+      return $"df_lapse_bool({e.Code})";
+    }
     return $"(({e.Code}) != 0)";
   }
 
@@ -480,6 +503,9 @@ public sealed partial class CodeGen {
       "r32" => $"df_str_from_r32({e.Code})",
       "bool" => $"df_str_from_bool({e.Code})",
       "char" => $"df_str_from_char({e.Code})",
+      "date" => $"df_str_from_date({e.Code})",
+      "clock" => $"df_str_from_clock({e.Code})",
+      "lapse" => $"df_str_from_lapse({e.Code})",
       _ => throw Error($"{e.Type} cannot be converted to a string yet", at)
     };
   }
@@ -493,6 +519,15 @@ public sealed partial class CodeGen {
     }
     if (l.Type == "null") {
       (l, r) = (r, l);
+    }
+    if (IsTimeType(l.Type) || IsTimeType(r.Type)) {
+      if (r.Type == "null") {
+        return $"({l.Code} == {NullCode(l.Type)})";
+      }
+      if (l.Type != r.Type) {
+        throw Error($"cannot compare {l.Type} and {r.Type}", at);
+      }
+      return $"({l.Code} == {r.Code})";
     }
     if (r.Type == "null") {
       if (IsNullable(l.Type)) {

@@ -53,7 +53,7 @@ public sealed class DfException : Exception {
 
 public sealed class Lexer {
   static readonly HashSet<string> Keywords = new() {
-    "fun", "class", "trait", "enum", "alias", "namespace", "import",
+    "fun", "class", "trait", "enum", "alias", "as", "namespace", "import",
     "public", "internal", "private", "const", "override",
     "if", "then", "else", "while", "for", "in", "step", "switch", "default",
     "jump", "break", "continue", "return", "throw", "catch", "atEnd", "enforce",

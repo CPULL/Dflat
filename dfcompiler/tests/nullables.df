@@ -1,5 +1,5 @@
 namespace nullables
-alias r Root
+alias Root as r
 
 fun i32? find(i32 key) {
   if key > 0 then return key * 10

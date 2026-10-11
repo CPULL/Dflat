@@ -87,15 +87,6 @@ public sealed partial class CodeGen {
     "Type", "Nullable", "TupleType", "FunType", "Pointer", "WritablePointer", "Volatile", "Specific", "Any"
   };
 
-  static readonly Dictionary<string, string> MathFuns = new() {
-    ["Sqrt"] = "sqrt", ["Cbrt"] = "cbrt", ["Sin"] = "sin", ["Cos"] = "cos", ["Tan"] = "tan",
-    ["Asin"] = "asin", ["Acos"] = "acos", ["Atan"] = "atan", ["Sinh"] = "sinh", ["Cosh"] = "cosh",
-    ["Tanh"] = "tanh", ["Exp"] = "exp", ["Ln"] = "log", ["Log10"] = "log10", ["Floor"] = "floor",
-    ["Ceil"] = "ceil", ["Round"] = "round", ["Trunc"] = "trunc", ["Abs"] = "fabs",
-    ["Atan2"] = "atan2", ["Pow"] = "pow", ["Min"] = "fmin", ["Max"] = "fmax", ["Hypot"] = "hypot",
-    ["Fmod"] = "fmod"
-  };
-
   static readonly Dictionary<string, string> MathConsts = new() {
     ["Pi"] = "3.141592653589793",
     ["PiHalf"] = "1.5707963267948966",
@@ -1093,6 +1084,9 @@ public sealed partial class CodeGen {
     if (op == "+" && (l.Type is "string" or "char" || r.Type is "string" or "char")) {
       return new Expr($"df_str_concat({StrOf(l, at)}, {StrOf(r, at)})", "string");
     }
+    if (IsTimeType(l.Type) || IsTimeType(r.Type)) {
+      return TimeOp(op, l, r, at);
+    }
     if (op is "==" or "!=") {
       string equal = EqualsCode(l, r, at);
       return new Expr(op == "==" ? equal : $"(!{equal})", "bool");
@@ -1293,34 +1287,8 @@ public sealed partial class CodeGen {
 
     string? path = Path(callee);
     if (path != null && scope.Find(path.Split('.')[0]) == null) {
-      switch (path) {
-        case "Root.Console.Log":
-        case "Root.Console.LogError":
-        case "Root.Console.Print": {
-          if (args.Count != 1 || args[0].Kind == "Named") {
-            throw Error($"{path} takes one argument", n);
-          }
-          string function = path switch {
-            "Root.Console.Log" => "df_console_log",
-            "Root.Console.LogError" => "df_console_log_error",
-            _ => "df_console_print"
-          };
-          return new Expr($"{function}({StrOf(ExprOf(args[0], scope), n)})", "void");
-        }
-        case "Root.Console.GetInput":
-        case "Root.Console.GetChar":
-          if (args.Count != 0) {
-            throw Error($"{path} takes no arguments", n);
-          }
-          return path.EndsWith("Input")
-            ? new Expr("df_console_get_input()", "string")
-            : new Expr("df_console_get_char()", "char");
-      }
-      if (args.Any(arg => arg.Kind == "Named") && (path.StartsWith("Root.") || path.StartsWith("root."))) {
-        throw Error("named arguments are not supported here", n);
-      }
-      if (path.StartsWith("Root.Math.") || path.StartsWith("Root.Math64.") || path.StartsWith("Root.Math32.")) {
-        return MathCall(path, args, scope, n);
+      if (Stdlib.TryGetValue(path, out var stdOverloads)) {
+        return StdCall(path, stdOverloads, args, scope, n);
       }
       bool enumMethod = callee.Kind == "Member" && IsEnum(path.Split('.')[0]);
       if ((callee.Kind == "Name" || enumMethod) && funs.TryGetValue(path, out var overloads)) {
@@ -1350,36 +1318,11 @@ public sealed partial class CodeGen {
     return new Expr(failingFuns.Contains(f) ? CheckRaise(call, f.Ret) : call, f.Ret);
   }
 
-  Expr MathCall(string path, List<Node> args, Scope scope, Node at) {
-    bool is32 = path.StartsWith("Root.Math32.");
-    string name = path[(path.LastIndexOf('.') + 1)..];
-    string rt = is32 ? "r32" : "r64";
-    if (name is "Lerp" or "InverseLerp" or "Clamp") {
-      if (args.Count != 3) {
-        throw Error($"{name} takes 3 arguments", at);
-      }
-      var a = Convert(ExprOf(args[0], scope, rt), rt, at);
-      var b = Convert(ExprOf(args[1], scope, rt), rt, at);
-      var c = Convert(ExprOf(args[2], scope, rt), rt, at);
-      string code = name switch {
-        "Lerp" => $"({a} + ({b} - {a}) * {c})",
-        "InverseLerp" => $"(({c} - {a}) / ({b} - {a}))",
-        _ => $"({(is32 ? "fminf(fmaxf" : "fmin(fmax")}({a}, {b}), {c}))"
-      };
-      return new Expr(code, rt);
-    }
-    if (!MathFuns.TryGetValue(name, out var cfun)) {
-      throw Error($"unknown math function '{name}'", at);
-    }
-    var codes = args.Select(a => Convert(ExprOf(a, scope, rt), rt, a)).ToList();
-    return new Expr($"{cfun}{(is32 ? "f" : "")}({string.Join(", ", codes)})", rt);
-  }
-
   Expr MemberValue(Node n, Scope scope) {
     string? path = Path(n);
     if (path != null && scope.Find(path.Split('.')[0]) == null) {
       string name = path[(path.LastIndexOf('.') + 1)..];
-      if ((path.StartsWith("Root.Math.") || path.StartsWith("Root.Math64.")) && MathConsts.TryGetValue(name, out var v)) {
+      if (path.StartsWith("Root.Math.") && MathConsts.TryGetValue(name, out var v)) {
         return new Expr($"({v})", "r64");
       }
       if (path.StartsWith("Root.Math32.") && MathConsts.TryGetValue(name, out var v32)) {

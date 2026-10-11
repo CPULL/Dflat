@@ -14,7 +14,9 @@ Tuples, multi-assign, swap
 Casts and transmutes
 Operators, checked division
 String interpolation, toStr
-Console and Math library
+Standard library: Console, Time, Math, Math32, Random
+date, clock, lapse (null, compare, subtract, print)
+alias Root as r
 catch, throw, Panic
 Standard exceptions with IDs
 Scope atEnd
@@ -32,13 +34,13 @@ Silent exceptions
 Custom exception classes
 Class atEnd
 128/256-bit ints, r16/r128
-dec, date, clock, lapse
+dec
 int/uns/real, native size
 Format specs
 var inference
 Overloading, named arguments
 Imports, multiple files, namespaces
-Standard library beyond Console/Math
+Standard library beyond Console/Time/Math/Random (Random.Shuffle needs collections)
 Runtime without C library
 Parser update to 0.0.4
 Debug builds (line, stack trace)

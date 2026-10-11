@@ -25,7 +25,7 @@ Status: design in progress. Decisions below reflect the latest choices; earlier 
 - **Statement end**: JavaScript rules. A line break ends a statement when the statement can end there; `;` is needed only for several statements on one line.
 - **Identifiers**: cannot start with `_` (underscores inside names are fine).
 - **Naming convention** (not enforced): namespaces lowercase; public classes, methods and members PascalCase; everything else camelCase. Built-in types are lowercase.
-- **`...`**: variadic parameter prefix (9.4); no other use.
+- **`...`**: variadic parameter suffix (9.4); no other use.
 - **Reserved words**: `as` (used in `alias`, 4.1; other uses to be defined).
 
 ### 2.1 Labels
@@ -97,7 +97,7 @@ Status: design in progress. Decisions below reflect the latest choices; earlier 
 | `bool` | true / false |
 | `char` | 32-bit Unicode code point |
 | `date` | 64-bit, ms since 1 Jan 1970 UTC; a null `date` is represented by the minimum `i64` value |
-| `clock` | u64 monotonic counter, 0.1 ns, from `GetClock()`; intervals only; `GetClock()` never returns 0; null = 0 |
+| `clock` | u64 monotonic counter, 0.1 ns, from `Clock()`; intervals only; `Clock()` never returns 0; null = 0 |
 | `lapse` | difference between two dates or two clocks (3.3) |
 | `addr` | native type holding an address as a number; size from the target definition (64-bit by default, 16 on C64), stored in the most efficient way; comparison and transmute only, arithmetic through pointer methods (15.1); cannot be dereferenced; prints as hex in groups of 4 digits separated by spaces; null is 0 (unmapped address) |
 
@@ -329,13 +329,13 @@ list.Filter((x; _limit) { x < limit })     // weak
 ### 9.4 Variadic parameters
 
 ```
-fun LogAll(string level, ...string messages) {
+fun LogAll(string level, string messages...) {
   for string message in messages { r.Console.Log($"{level}: {message}") }
 }
 LogAll("info", "started", "ready")
 ```
 
-- `...T name` accepts any number of `T` arguments; it is equivalent to passing a collection of them.
+- `T name...` accepts any number of `T` arguments; it is equivalent to passing a collection of them.
 
 ---
 
@@ -532,6 +532,21 @@ map n = { 1: "one", 2: "two" }          // map<native integer, string>
 - Small strings: 64 bytes, 1-byte length, up to 62 bytes.
 - Large strings: 32-byte header (char count, byte length, sizeof, block count), content, 8-byte tail (0 or pointer to 4 KB blocks); a compact string is a valid C string.
 - Every type has `toStr()`; class default: `Px { a: Py{}, b: 3, c: BTree{}, … }` (first 3 fields, one level).
+
+### String functions
+
+| Function | Definition |
+|---|---|
+| `string <string>.Trim()` | Removes all not printable characters and all type of spaces from both ends of the string |
+| `string <string>.Trim(string c)` | Removes all specified characters from both ends of the string |
+| `string <string>.TrimLeft()` | Removes all not printable characters and all type of spaces from the left of the string |
+| `string <string>.TrimLeft(string c)` | Removes all specified characters from the left of the string |
+| `string <string>.TrimRight()` | Removes all not printable characters and all type of spaces from the right of the string |
+| `string <string>.TrimRight(string c)` | Removes all specified characters from the right of the string |
+| `string <string>.Substr(u32 start, u32 len)` | Produces a string that are the characters from the one specified (zero based) for the len specified. It does not fail if the len goes beyond the end of the original string |
+| `string <string>.Replace(string toFind, string replacement, bool caseSensitive = true)` | Returns a string where all the occurrences of the specified string are replaced with the replacement string |
+| `i64 <string>.IndexOf(string val, bool caseSensitive = true)` | Returns the first position of the specified string |
+| `i64 <string>.IndexOf(char val, bool caseSensitive = true)` | Returns the first position of the specified character |
 
 ---
 
@@ -813,11 +828,11 @@ Access to stdinput and stdoutput and stderror
 
 | Definition | Example | Description |
 |---|---|---|
-| `Log(any)` | `Root.Console.Log("Hello")` | Converts the object to string if needed, prints on stdout appending a newline |
-| `LogError(any)` | `Root.Console.LogError("Hello")` | Converts the object to string if needed, prints on stderr appending a newline |
-| `Print(any)` | `Root.Console.Print("Hello")` | Converts the object to string if needed, prints on stdout |
+| `Log(string)` | `Root.Console.Log("Hello")` | Converts the object to string if needed, prints on stdout appending a newline |
+| `LogError(string)` | `Root.Console.LogError("Hello")` | Converts the object to string if needed, prints on stderr appending a newline |
+| `Print(string)` | `Root.Console.Print("Hello")` | Converts the object to string if needed, prints on stdout |
 | `char Read()` | `char c = Root.Console.Read()` | Reads a character from stdin and returns it, returns '\0' at end of input |
-| `char ReadLine()` | `string line = Root.Console.ReadLine()` | Reads a line from stdin and returns it, the line is not stripped of the newline character, if any. Returns "" at end of input |
+| `string ReadLine()` | `string line = Root.Console.ReadLine()` | Reads a line from stdin and returns it, the line is not stripped of the newline character, if any. Returns "" at end of input |
 | `` | `` |  |
 
 ### Date and Time
@@ -825,9 +840,12 @@ Mostly used to get current date and time and to measure elapsed at nanosecond sc
 
 | Definition | Example | Description |
 |---|---|---|
-| `date Now()` | `date d = Root.Time.Now()` | Gets the current time in UTF |
-| `clock Clock()` | `Root.Time.Clock()` | Returns a u64 monotonic counter with a resolution of 0.1 ns; `GetClock()` never returns 0 |
+| `date Now()` | `date d = Root.Time.Now()` | Gets the current time in UTC. A `date` prints as ISO 8601, UTC, to the millisecond: `2026-10-11T14:03:22.123Z` |
+| `clock Clock()` | `Root.Time.Clock()` | Returns a u64 monotonic counter with a resolution of 0.1 ns; `Clock()` never returns 0 |
 | `` | `` |  |
+
+- `date`, `clock` and `lapse` are already nullable (`date?` is a compile error) and a variable of these types without a value starts as null. A `clock` prints as its number, a `lapse` as its number in its own unit, and null as `null`.
+- `date - date` and `clock - clock` give a `lapse`. Two values of the same type can be compared; a null date or clock sorts first.
 
 ### Math
 Standard mathematical functions. `Root.Math` operates on `r64` while `Root.Math32` operates on `r32` (similar to `Mathf` of C#)
@@ -846,22 +864,22 @@ Standard mathematical functions. `Root.Math` operates on `r64` while `Root.Math3
 | `Tanh` | `r64 Tanh(r64 v)` | Computes the hyperbolic tangent of a value. |
 | `Sqrt` | `r64 Sqrt(r64 v)` | Computes the non-negative square root of a value. |
 | `Cbrt` | `r64 Cbrt(r64 v)` | Computes the cube root of a value. |
-| `Pow` | `r64 Pow(r64 v)` | Raises a base value to a specified exponent power. |
+| `Pow` | `r64 Pow(r64 v, r64 e)` | Raises a base value to a specified exponent power. |
 | `Exp` | `r64 Exp(r64 v)` | Computes $e$ raised to the power of the given value ($e^v$). |
 | `Ln` | `r64 Ln(r64 v)` | Computes the natural logarithm (base $e$) of a value. |
 | `Log10` | `r64 Log10(r64 v)` | Computes the common logarithm (base 10) of a value. |
 | `Log(x, base)` | `r64 Log(r64 x, r64 base)` | Computes the logarithm of $x$ with respect to a custom base. |
 | `Abs` | `r64 Abs(r64 v)` | Returns the absolute (non-negative) value of a number. |
 | `Sign` | `r64 Sign(r64 v)` | Returns the sign of a number ($1$ for positive, $-1$ for negative, $0$ for zero). |
-| `Min` | `r64 Min(r64 v)` | Returns the smaller of two or more values. |
-| `Max` | `r64 Max(r64 v)` | Returns the larger of two or more values. |
-| `Clamp` | `r64 Clamp(r64 v, r64 min, r64 max)` | Constrains a value to lie between the specified minimum and maximum bounds. |
+| `Min` | `r64 Min(r64 v...)` | Returns the smallest of two or more values (at least two); NaN if any is NaN. |
+| `Max` | `r64 Max(r64 v...)` | Returns the largest of two or more values (at least two); NaN if any is NaN. |
+| `Clamp` | `r64 Clamp(r64 v, r64 min, r64 max)` | Constrains a value to lie between the specified minimum and maximum bounds; NaN stays NaN; `min` greater than `max` is undefined. |
 | `Floor` | `r64 Floor(r64 v)` | Rounds a value down to the largest integer less than or equal to the number. |
 | `Ceil` | `r64 Ceil(r64 v)` | Rounds a value up to the smallest integer greater than or equal to the number. |
-| `Round` | `r64 Round(r64 v)` | Rounds a value to the nearest integer. |
+| `Round` | `r64 Round(r64 v)` | Rounds a value to the nearest integer, halves away from zero. |
 | `Trunc` | `r64 Trunc(r64 v)` | Truncates the fractional part of a number, rounding toward zero. |
 | `Hypot` | `r64 Hypot(r64 v...)` | Computes the square root of the sum of squares of its arguments (Euclidean distance function). |
-| `Fmod` | `r64 Fmod(r64 v)` | Computes the floating-point remainder of division. |
+| `Fmod` | `r64 Fmod(r64 v, r64 d)` | Computes the floating-point remainder of division. |
 | `Lerp(a, b, t)` | `r64 Lerp(r64 a, r64 b, r64 t)` | Performs linear interpolation between $a$ and $b$ using parameter $t$ ($0.0$ to $1.0$). |
 | `InverseLerp(a, b, v)` | `r64 InverseLerp(r64 a, r64 b, r64 v)` | Finds the interpolation factor $t$ for value $v$ between range $a$ and $b$. |
 | `Pi` | `r64 Pi` | Mathematical constant Pi ($\pi \approx 3.14159$). |
@@ -871,16 +889,19 @@ Standard mathematical functions. `Root.Math` operates on `r64` while `Root.Math3
 | `R2D` | `r64 R2D` | Conversion factor from radians to degrees ($180 / \pi$). |
 | `D2R` | `r64 D2R` | Conversion factor from degrees to radians ($\pi / 180$). |
 
+- Math functions never raise exceptions: `Sqrt(-1)` is NaN, `Ln(0)` is `-∞`.
+- `Abs`, `Sign`, `Min`, `Max` and `Clamp` also exist for every integer type (`Abs` and `Sign` for signed ones only) and return that type; the argument types pick the version (9.2 rules). `Math32` has the real versions only.
+
 ### Random
-A simple random number gereator is included in the standardlibrary
+A simple random number generator is included in the standard library. The algorithm is fixed (xoshiro256**, seeded with splitmix64), so the same seed gives the same sequence on every target. Without a call to `Seed` it starts from the current time.
 
 | Name | Definition | Description |
 |---|---|---|
 | `Seed` | `Root.Random.Seed(u64)` | Initialize the seed of the generator with the provided value |
-| `Int` | `i64 Int(i64 min, i64 max)` | Returns a random integer between the minimum number and the maximum number (both included) |
+| `Int` | `i64 Int(i64 min, i64 max)` | Returns a random integer between the minimum number and the maximum number (both included, no bias); the two are swapped if `min` is greater than `max` |
 | `RealRange` | `r64 RealRange(r64 min, r64 max)` | Returns a random real number between the minimum number and the maximum number (max excluded) |
 | `Real` | `r64 Real()` | Returns a real value in the range [0, 1] (1 is included) |
-| `Shuffle` | `Shuffle(collection)` | Randomize the order of elements in an ordered collection. It is valid for lists, vectors, strings |
+| `Shuffle` | `Shuffle(collection)` | Randomize the order of elements in an ordered collection. It is valid for lists, vectors, strings (needs collections: not available yet) |
 | `` | `` |  |
 
 ---
@@ -1019,6 +1040,15 @@ Level 1 = most important, level 3 = least.
 - 13 A null string prints as nothing; null values of other types print `null`
 - 19.1 Warnings: variable read before assignment (L1), `catch { }` (L2)
 - 20 Open items: variadic parameter details
+
+### Third update (same version)
+
+- 2 / 9.4 / 18 Variadic parameters are written `T name...` (was `...T name`)
+- 18 Standard library implemented: Console (`Read`, `ReadLine`), Time (`Now`, `Clock`), Math and Math32, Random
+- 18 Math: `Min`, `Max`, `Clamp` propagate NaN; `Round` halves away from zero; integer versions of `Abs`, `Sign`, `Min`, `Max`, `Clamp`
+- 18 Random: fixed algorithm, default seed from the time, `Int` swaps `min` and `max` if reversed; `Shuffle` waits for collections
+- 18 Time: `date` prints as ISO 8601 UTC; `date`, `clock` and `lapse` with null, comparison and subtraction
+- 4.1 `alias Root as r` is the form everywhere (the parser now reads it, with dotted names)
 
 ### Second update (same version)
 

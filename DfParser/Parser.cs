@@ -423,11 +423,17 @@ public sealed class Parser {
     return new Node("Import", t, name);
   }
 
-  // alias r Root   |   alias byte u8
+  // alias Root as r   |   alias u8 as byte8   |   alias Root.Console.Log as log
   Node ParseAlias() {
     Next();
+    var start = Peek;
+    string original = ParseQualifiedName();
+    if (!IsKw("as")) {
+      throw Error("expected 'as' in alias");
+    }
+    Next();
     var name = ExpectIdent();
-    var node = new Node("Alias", name, name.Text).Add(ParseType());
+    var node = new Node("Alias", name, name.Text).Add(new Node("Type", start, original));
     EndStatement(false);
     return node;
   }

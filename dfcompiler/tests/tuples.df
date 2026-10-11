@@ -1,5 +1,5 @@
 namespace tuples
-alias r Root
+alias Root as r
 
 fun i32, string getUser() { return 1, "ada" }
 

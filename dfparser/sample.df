@@ -2,8 +2,8 @@
 
 namespace demo
 import stdrnd
-alias r Root
-alias octet u8
+alias Root as r
+alias u8 as octet
 
 // ------------------------------------------------ literals
 i32 a = 10

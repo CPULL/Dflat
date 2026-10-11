@@ -13,6 +13,7 @@ public static class Runtime {
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <time.h>
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -237,16 +238,31 @@ static df_string df_str_from_real(double v, int maxDigits, bool isFloat) {
   if (isinf(v)) {
     return v > 0 ? df_str_lit("\xE2\x88\x9E", 3) : df_str_lit("-\xE2\x88\x9E", 4);
   }
-  for (int digits = 1; digits <= maxDigits; digits++) {
-    snprintf(buf, sizeof buf, "%.*g", digits, v);
+  if (v == 0) {
+    return signbit(v) ? df_str_lit("-0", 2) : df_str_lit("0", 1);
+  }
+  int digits;
+  for (digits = 1; digits <= maxDigits; digits++) {
+    snprintf(buf, sizeof buf, "%.*e", digits - 1, v);
     double back = strtod(buf, NULL);
     if (isFloat ? (float)back == (float)v : back == v) {
       break;
     }
   }
-  for (char* c = buf; *c; c++) {
-    if (*c == 'e') {
-      *c = 'E';
+  if (digits > maxDigits) {
+    digits = maxDigits;
+  }
+  snprintf(buf, sizeof buf, "%.*e", digits - 1, v);
+  int exponent = atoi(strchr(buf, 'e') + 1);
+  if (exponent >= -5 && exponent < 15) {
+    /* plain notation, as C# prints it */
+    int decimals = digits - 1 - exponent;
+    snprintf(buf, sizeof buf, "%.*f", decimals < 0 ? 0 : decimals, v);
+  } else {
+    for (char* c = buf; *c; c++) {
+      if (*c == 'e') {
+        *c = 'E';
+      }
     }
   }
   return df_str_from_buf(buf);
@@ -482,6 +498,221 @@ static uint64_t df_sat_u64_r(double v) {
   if (v >= 18446744073709551615.0) return UINT64_MAX;
   return (uint64_t)v;
 }
+
+/* ---- date, clock, lapse (spec 3.2, 3.3) ---- */
+
+/* null date = minimum i64; null clock = 0; null lapse = 0 */
+static int64_t df_time_now(void) {
+#ifdef _WIN32
+  FILETIME ft;
+  GetSystemTimePreciseAsFileTime(&ft);
+  uint64_t t = ((uint64_t)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
+  return (int64_t)((t - 116444736000000000ULL) / 10000ULL);
+#else
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);
+  return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+#endif
+}
+
+/* monotonic counter in 0.1 ns units, never 0 */
+static uint64_t df_time_clock(void) {
+  uint64_t value;
+#ifdef _WIN32
+  static LARGE_INTEGER frequency;
+  LARGE_INTEGER counter;
+  if (frequency.QuadPart == 0) {
+    QueryPerformanceFrequency(&frequency);
+  }
+  QueryPerformanceCounter(&counter);
+  uint64_t f = (uint64_t)frequency.QuadPart;
+  uint64_t n = (uint64_t)counter.QuadPart;
+  value = (n / f) * 10000000000ULL + (n % f) * 10000000000ULL / f;
+#else
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  value = (uint64_t)ts.tv_sec * 10000000000ULL + (uint64_t)ts.tv_nsec * 10ULL;
+#endif
+  return value ? value : 1;
+}
+
+/* ISO 8601, UTC: 2026-10-11T14:03:22.123Z */
+static df_string df_str_from_date(int64_t ms) {
+  if (ms == INT64_MIN) {
+    return df_str_lit("null", 4);
+  }
+  int64_t days = ms / 86400000;
+  int64_t rem = ms % 86400000;
+  if (rem < 0) {
+    rem += 86400000;
+    days--;
+  }
+  int64_t z = days + 719468;
+  int64_t era = (z >= 0 ? z : z - 146096) / 146097;
+  int64_t doe = z - era * 146097;
+  int64_t yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+  int64_t y = yoe + era * 400;
+  int64_t doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+  int64_t mp = (5 * doy + 2) / 153;
+  int64_t d = doy - (153 * mp + 2) / 5 + 1;
+  int64_t m = mp < 10 ? mp + 3 : mp - 9;
+  if (m <= 2) {
+    y++;
+  }
+  char buf[64];
+  snprintf(buf, sizeof buf, "%04lld-%02lld-%02lldT%02lld:%02lld:%02lld.%03lldZ",
+    (long long)y, (long long)m, (long long)d, (long long)(rem / 3600000),
+    (long long)(rem / 60000 % 60), (long long)(rem / 1000 % 60), (long long)(rem % 1000));
+  return df_str_from_buf(buf);
+}
+
+static df_string df_str_from_clock(uint64_t c) {
+  return c == 0 ? df_str_lit("null", 4) : df_str_from_u64(c);
+}
+
+/* lapse = value * 8 + code: 2 date lapse (ms), 3 clock lapse (0.1 ns), 4 year lapse, 7 clock overflow */
+static int64_t df_date_diff(int64_t a, int64_t b) {
+  if (a == INT64_MIN || b == INT64_MIN) {
+    return 0;
+  }
+  __int128 d = (__int128)a - b;
+  const __int128 limit = (__int128)1 << 60;
+  if (d > -limit && d < limit) {
+    return (int64_t)(d * 8 + 2);
+  }
+  return (int64_t)((d / 31556952000LL) * 8 + 4);
+}
+
+static int64_t df_clock_diff(uint64_t a, uint64_t b) {
+  if (a == 0 || b == 0) {
+    return 0;
+  }
+  bool negative = a < b;
+  uint64_t d = negative ? b - a : a - b;
+  if (d >= ((uint64_t)1 << 60)) {
+    return 7;
+  }
+  int64_t v = negative ? -(int64_t)d : (int64_t)d;
+  return v * 8 + 3;
+}
+
+static bool df_lapse_bool(int64_t l) {
+  return (l >> 3) != 0 || l == 7;
+}
+
+static df_string df_str_from_lapse(int64_t l) {
+  if (l == 0) {
+    return df_str_lit("null", 4);
+  }
+  if (l == 7) {
+    return df_str_lit("overflow", 8);
+  }
+  return df_str_from_i64(l >> 3);
+}
+
+/* ---- random: xoshiro256**, seeded through splitmix64 ---- */
+
+static uint64_t df_rng[4];
+static bool df_rng_ready = false;
+
+static uint64_t df_splitmix(uint64_t* state) {
+  uint64_t z = (*state += 0x9E3779B97F4A7C15ULL);
+  z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+  z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+  return z ^ (z >> 31);
+}
+
+static void df_rand_seed(uint64_t seed) {
+  for (int i = 0; i < 4; i++) {
+    df_rng[i] = df_splitmix(&seed);
+  }
+  df_rng_ready = true;
+}
+
+static uint64_t df_rotl(uint64_t x, int k) {
+  return (x << k) | (x >> (64 - k));
+}
+
+static uint64_t df_rand_next(void) {
+  if (!df_rng_ready) {
+    df_rand_seed((uint64_t)df_time_now() ^ df_time_clock());
+  }
+  uint64_t result = df_rotl(df_rng[1] * 5, 7) * 9;
+  uint64_t t = df_rng[1] << 17;
+  df_rng[2] ^= df_rng[0];
+  df_rng[3] ^= df_rng[1];
+  df_rng[1] ^= df_rng[2];
+  df_rng[0] ^= df_rng[3];
+  df_rng[2] ^= t;
+  df_rng[3] = df_rotl(df_rng[3], 45);
+  return result;
+}
+
+/* both ends included; swapped when min > max; no modulo bias */
+static int64_t df_rand_int(int64_t a, int64_t b) {
+  if (a > b) {
+    int64_t t = a;
+    a = b;
+    b = t;
+  }
+  uint64_t range = (uint64_t)b - (uint64_t)a + 1;
+  if (range == 0) {
+    return (int64_t)df_rand_next();
+  }
+  uint64_t threshold = (0 - range) % range;
+  uint64_t r;
+  do {
+    r = df_rand_next();
+  } while (r < threshold);
+  return (int64_t)((uint64_t)a + r % range);
+}
+
+/* [0, 1], both included */
+static double df_rand_real(void) {
+  return (double)(df_rand_next() >> 11) / 9007199254740991.0;
+}
+
+/* [min, max) */
+static double df_rand_real_range(double a, double b) {
+  double u = (double)(df_rand_next() >> 11) * (1.0 / 9007199254740992.0);
+  return a + (b - a) * u;
+}
+
+/* ---- math helpers: NaN propagates in Min, Max, Clamp ---- */
+
+#define DF_MATH_REAL(T, N, LOG) \
+  static T df_min_##N(T a, T b) { if (isnan(a) || isnan(b)) return (T)NAN; return a < b ? a : b; } \
+  static T df_max_##N(T a, T b) { if (isnan(a) || isnan(b)) return (T)NAN; return a > b ? a : b; } \
+  static T df_sign_##N(T v) { return v > 0 ? (T)1 : (v < 0 ? (T)-1 : (v != v ? v : (T)0)); } \
+  static T df_clamp_##N(T v, T lo, T hi) { if (isnan(v)) return v; return v < lo ? lo : (v > hi ? hi : v); } \
+  static T df_lerp_##N(T a, T b, T t) { return a + (b - a) * t; } \
+  static T df_invlerp_##N(T a, T b, T v) { return (v - a) / (b - a); } \
+  static T df_logbase_##N(T x, T b) { return LOG(x) / LOG(b); }
+
+DF_MATH_REAL(double, r64, log)
+DF_MATH_REAL(float, r32, logf)
+
+#define DF_MATH_INT(T, N) \
+  static T df_min_##N(T a, T b) { return a < b ? a : b; } \
+  static T df_max_##N(T a, T b) { return a > b ? a : b; } \
+  static T df_clamp_##N(T v, T lo, T hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
+#define DF_MATH_SIGNED(T, N) \
+  static T df_abs_##N(T v) { return v < 0 ? (T)(0 - (uint64_t)v) : v; } \
+  static T df_sign_##N(T v) { return v > 0 ? (T)1 : (v < 0 ? (T)-1 : (T)0); }
+
+DF_MATH_INT(int8_t, i8)
+DF_MATH_INT(int16_t, i16)
+DF_MATH_INT(int32_t, i32)
+DF_MATH_INT(int64_t, i64)
+DF_MATH_INT(uint8_t, u8)
+DF_MATH_INT(uint16_t, u16)
+DF_MATH_INT(uint32_t, u32)
+DF_MATH_INT(uint64_t, u64)
+DF_MATH_SIGNED(int8_t, i8)
+DF_MATH_SIGNED(int16_t, i16)
+DF_MATH_SIGNED(int32_t, i32)
+DF_MATH_SIGNED(int64_t, i64)
 
 /* ---- end of runtime ---- */
 """;

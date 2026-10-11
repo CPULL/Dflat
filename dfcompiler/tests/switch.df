@@ -1,5 +1,5 @@
 namespace switches
-alias r Root
+alias Root as r
 
 enum Color { Red, Green, Blue }
 

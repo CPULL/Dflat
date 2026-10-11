@@ -1,0 +1,61 @@
+// Standard library: Math, Random, Time, Console
+alias Root as r
+
+// Math on r64
+r.Console.Log(r.Math.Sqrt(16.0))
+r.Console.Log(r.Math.Pow(2.0, 10.0))
+r.Console.Log(r.Math.Fmod(7.5, 2.0))
+r.Console.Log(r.Math.Log(8.0, 2.0))
+r.Console.Log(r.Math.Sign(-3.5))
+r.Console.Log(r.Math.Round(2.5))
+r.Console.Log(r.Math.Min(4.0, 2.0, 3.0))
+r.Console.Log(r.Math.Max(4.0, 2.0, 9.5))
+r.Console.Log(r.Math.Hypot(3.0, 4.0))
+r.Console.Log(r.Math.Hypot(2.0, 3.0, 6.0))
+r.Console.Log(r.Math.Clamp(15.0, 0.0, 10.0))
+r.Console.Log(r.Math.Lerp(0.0, 10.0, 0.25))
+r.Console.Log(r.Math.InverseLerp(0.0, 10.0, 2.5))
+r.Console.Log(r.Math.Min(1.0, r.Math.Sqrt(-1.0)))
+r32 half = 0.5f
+r.Console.Log(r.Math32.Sqrt(half * 8f))
+
+// Math on integers
+i32 neg = -7
+r.Console.Log(r.Math.Abs(neg))
+r.Console.Log(r.Math.Sign(neg))
+r.Console.Log(r.Math.Min(neg, 3))
+r.Console.Log(r.Math.Max(1, 2, 3))
+u8 small = 200b
+r.Console.Log(r.Math.Clamp(small, 10b, 100b))
+r.Console.Log(r.Math.Pi)
+
+// Random: same seed, same sequence
+r.Random.Seed(42ul)
+i64 first = r.Random.Int(1, 1000)
+i64 second = r.Random.Int(1, 1000)
+r.Random.Seed(42ul)
+r.Console.Log(first == r.Random.Int(1, 1000))
+r.Console.Log(second == r.Random.Int(1, 1000))
+bool inRange = true
+for u8 i = 0..200 {
+  i64 v = r.Random.Int(-3, 3)
+  r64 f = r.Random.Real()
+  r64 g = r.Random.RealRange(5.0, 6.0)
+  if v < -3 || v > 3 || f < 0.0 || f > 1.0 || g < 5.0 || g >= 6.0 { inRange = false }
+}
+r.Console.Log(inRange)
+r.Console.Log(r.Random.Int(9, 9))
+
+// Time
+date now = r.Time.Now()
+date none = null
+r.Console.Log(now > none)
+r.Console.Log(none == null)
+r.Console.Log(now != null)
+r.Console.Log($"none is {none}")
+clock c1 = r.Time.Clock()
+clock c2 = r.Time.Clock()
+r.Console.Log(c2 >= c1)
+r.Console.Log(c1 != null)
+lapse elapsed = c2 - c1
+r.Console.Log(elapsed.toStr().len > 0)

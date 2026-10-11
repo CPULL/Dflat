@@ -1,0 +1,101 @@
+{
+  "$schema": "https://githubusercontent.com",
+  "name": "Dflat",
+  "scopeName": "source.df",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#keywords_control" },
+    { "include": "#keywords_declaration" },
+    { "include": "#keywords_types" },
+    { "include": "#keywords_modifiers" },
+    { "include": "#keywords_constants" },
+    { "include": "#keywords_builtins" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.block.df",
+          "begin": "/\\*",
+          "end": "\\*/"
+        },
+        {
+          "name": "comment.line.double-slash.df",
+          "match": "//.*$"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.df",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            { "name": "constant.character.escape.df", "match": "\\\\." }
+          ]
+        },
+        {
+          "name": "string.quoted.single.df",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            { "name": "constant.character.escape.df", "match": "\\\\." }
+          ]
+        },
+        {
+          "name": "string.interpolated.raw.df",
+          "begin": "#",
+          "end": "#"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.hex.df",
+          "match": "\\b0[xX][0-9a-fA-F_]+[uUlLbBsSfF]*\\b"
+        },
+        {
+          "name": "constant.numeric.binary.df",
+          "match": "\\b0[bB][01_]+[uUlLbBsSfF]*\\b"
+        },
+        {
+          "name": "constant.numeric.decimal.df",
+          "match": "\\b[0-9][0-9_]*(\\.[0-9_]+)?([eE][+-]?[0-9_]+)?[uUlLbBsSfF]*\\b"
+        }
+      ]
+    },
+    "keywords_control": {
+      "name": "keyword.control.df",
+      "match": "\\b(if|then|else|while|for|in|step|switch|default|jump|break|continue|return|throw|catch|atEnd|enforce|is)\\b"
+    },
+    "keywords_declaration": {
+      "name": "keyword.declaration.df",
+      "match": "\\b(fun|class|trait|enum|alias|namespace|import|local)\\b"
+    },
+    "keywords_types": {
+      "name": "storage.type.df",
+      "match": "\\b(i8|i16|i32|i64|i128|i256|u8|u16|u32|u64|u128|u256|r16|r32|r64|r128|int|uns|real|dec|bool|char|byte|date|clock|lapse|string|vec|list|map|hmap|dfoot)\\b"
+    },
+    "keywords_modifiers": {
+      "name": "storage.modifier.df",
+      "match": "\\b(public|internal|private|const|override|dyn|impl)\\b"
+    },
+    "keywords_constants": {
+      "name": "constant.language.df",
+      "match": "\\b(true|false|null)\\b"
+    },
+    "keywords_builtins": {
+      "name": "support.type.builtin.df",
+      "match": "\\b(root|Root|Panic|asRefCount|asSharedRefCount|isRC)\\b"
+    },
+    "operators": {
+      "name": "keyword.operator.df",
+      "match": "(\\+|\\-|\\*|\\/|%|&|\\||\\^|!|=|<|>|\\?|:|;|\\.|,)"
+    }
+  }
+}

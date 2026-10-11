@@ -26,6 +26,7 @@ Status: design in progress. Decisions below reflect the latest choices; earlier 
 - **Identifiers**: cannot start with `_` (underscores inside names are fine).
 - **Naming convention** (not enforced): namespaces lowercase; public classes, methods and members PascalCase; everything else camelCase. Built-in types are lowercase.
 - **`...`**: variadic parameter prefix (9.4); no other use.
+- **Reserved words**: `as` (used in `alias`, 4.1; other uses to be defined).
 
 ### 2.1 Labels
 
@@ -124,12 +125,13 @@ Signed 64-bit; raw value = `value × 8 + code`.
 | `list<T>` | growable, counted B-tree, O(log n) insert/remove |
 | `map<K, V>` | sorted (B-tree) |
 | `hmap<K, V>` | hash map |
-| tuple | `(i32, string)` or `(i32 val, string name)`; **at least 2 elements** |
+| tuple | `(i32, string)` or `(i32 val, string name)`; **at least 2 elements**; items by name (`record.label`) or index (`record[1]`) |
 | `string` | UTF-8 text (13) |
 | `dfoot` | Dflat Fast Open Objects Tree (12.3) |
 
 - GUID is defined by the EF layer, platform-specific.
 - Lengths and default indexes are `u64` everywhere.
+- Tuple index: a literal, a `const` or an enum value only; out of range is a compile error. Indexes apply left to right: in an array of tuples, `list[2][1]` is the second item of the third tuple.
 
 ---
 
@@ -143,6 +145,8 @@ i32 id, string name = getUser()     // multiple return values
 var userId, var userName = getUser()
 existing, _, i32 fresh = f()        // mix existing, discard, new
 x, y = y, x                         // swap: right side evaluated first
+i32 total, string name, bool enabled = record    // tuple destructuring
+i32 onlyCount, _, bool onlyActive = record       // partial, _ skips an item
 ```
 
 - Type-first; C#-style scope.
@@ -151,7 +155,7 @@ x, y = y, x                         // swap: right side evaluated first
 - `const`: read-only value and pointer, global guarantee.
 - `var`: type taken from the initializer; if it can't be decided → compile error (`var x = null`, `var l = []`). Allowed in multiple returns when the return type is known. Coexists with partial forms like `vec v = [...]` / `map m = {...}`.
 - A tuple or literal must be assigned, passed or returned; alone it's a compile error.
-- Tuple destructuring on the left: open.
+- Tuple destructuring: the items of a tuple can be unpacked into separate variables in one statement; `_` skips an item.
 
 ### 4.1 Namespaces, imports, aliases
 
@@ -159,13 +163,13 @@ x, y = y, x                         // swap: right side evaluated first
 namespace clinic.planning         // one per file, no braces
 namespace local                   // name from the folder path
 import stdrnd
-alias r Root
-alias byte8 u8
+alias Root as r
+alias u8 as byte8
 ```
 
 - `program.df` > `main.df` > `lib.df`: the first one found is the root (executable, or library for `lib.df`); a skipped root file gives a level 1 warning. `dfcompile -forcelib folder/` forces a library.
 - The root file declares its namespace explicitly; `local` = root namespace + folder path.
-- Aliases are pure aliases (interchangeable with the original).
+- `alias <original> as <new>`; aliases are pure aliases (interchangeable with the original).
 
 ---
 
@@ -211,6 +215,8 @@ alias byte8 u8
 - Overflow wraps unless a specific `catch` for `OverflowException` is in the same function (silent exception, 10.4).
 - Division by zero and similar errors are always checked explicitly (no CPU traps).
 - Precedence (Rust): postfix, unary, `* / %`, `+ -`, shifts, `&`, `^`, `|`, comparisons and `is`, `&&`, `^^`, `||`, ranges, `??`, `? { }`.
+- String vs char: `==` is true only if the string is exactly that one character; `!=` is its opposite (a longer string is always `!=` a char); `<` `>` `<=` `>=` compare the char as a one-character string.
+- Char vs integer: compared by code point (`c == 13`), level 2 warning. In `+` a char is always text: `'a' + 1` = `"a1"`.
 - Operator overloading: allowed for custom classes, not for built-in types. Overloading `==` on a map key class requires a matching hash.
 
 ---
@@ -234,7 +240,7 @@ for u64 k in list.keys { }
 for string message in messages { }
 
 break                             // innermost loop
-break Found                       // to label #Found#
+break #Found#                     // to label #Found#
 continue                          // no label
 jump #retry#                      // to a label
 ```
@@ -801,7 +807,7 @@ fun printAll<Source : Sequence>(Source items) { ... }
 ## 18. Standard library (first sketch)
 
 ```
-alias r Root
+alias Root as r
 r.GetClock()        r.Now()
 r.Console.Log  .LogError .Print .GetInput  .GetChar
 r.Math (= Math64, r64)    r.Math32 (r32 results)
@@ -812,9 +818,9 @@ r.Math (= Math64, r64)    r.Math32 (r32 results)
   constants: Pi PiHalf E Sqrt2 R2D D2R
 ```
 
-`Console.Log()` prints with a newline, `Console.Print()` does not add newline
+`Console.Log()` prints a newline, `Console.Print()` does not add newline
 
-`Console.GetInput()` returns `""` at end of input, `Console.GetCHar()` returns any printable character or `\0` at end of input
+`Console.GetInput()` returns `""` at end of input, `Console.GetChar()` returns any printable character or `\0` at end of input
 
 - Type members live on the types: `d.Year`, `d.AddDays(3)`, `s.Split(",")`, `c.IsDigit`, `list.Sort()`.
 - Random: `import stdrnd`; `Rnd rnd = Rnd([u64]r.Now())`; `Int(min, max)`, `RealRange(min, max)` (max excluded), `Real()` in [0, 1], `Seed(u64)`, `Shuffle(c)` for lists, vectors, strings. Generator: later.
@@ -841,6 +847,7 @@ Level 1 = most important, level 3 = least.
 | 2 | Cast out of range saturates | 6 |
 | 2 | Upward type check | 16 |
 | 2 | `catch { }` without type or variable | 10.1 |
+| 2 | Char compared with an integer | 7 |
 | 3 | Unmatched `#region` / `#endregion` | 2.2 |
 | 3 | Generic call chosen over comparisons | 17.5 |
 
@@ -848,7 +855,6 @@ Level 1 = most important, level 3 = least.
 
 ## 20. Open items
 
-- Tuple destructuring on the left
 - Variadic parameters: position in the parameter list, passing an existing collection
 - Locale details
 - Date formatting week rules
@@ -954,3 +960,14 @@ Level 1 = most important, level 3 = least.
 - 13 A null string prints as nothing; null values of other types print `null`
 - 19.1 Warnings: variable read before assignment (L1), `catch { }` (L2)
 - 20 Open items: variadic parameter details
+
+### Second update (same version)
+
+- 2 `as` is a reserved word (used in `alias`)
+- 3.4 Tuple items by index: literal, `const` or enum only; out of range is a compile error; indexes apply left to right
+- 4 Tuple destructuring, partial with `_` (removed from open items)
+- 4.1 / 18 Alias syntax: `alias <original> as <new>`
+- 7 String vs char comparisons; char vs integer comparison by code point (level 2 warning); `+` treats a char as text
+- 8 `break` to a label uses the label syntax: `break #Found#`
+- 18 Typos: "prints a newline", `Console.GetChar()`
+- 19.1 Warning: char compared with an integer (L2)

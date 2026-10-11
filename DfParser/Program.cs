@@ -29,14 +29,19 @@ public static class Program {
 
     string src = File.ReadAllText(path);
     try {
-      var tokens = new Lexer(src).Tokenize();
+      var lexer = new Lexer(src);
+      var tokens = lexer.Tokenize();
       if (showTokens) {
         foreach (var token in tokens) {
           Console.WriteLine(token);
         }
         return 0;
       }
-      var tree = new Parser(tokens).ParseProgram();
+      var parser = new Parser(tokens);
+      var tree = parser.ParseProgram();
+      foreach (var warning in lexer.Warnings.Concat(parser.Warnings)) {
+        Console.Error.WriteLine(path + warning);
+      }
       tree.Dump(Console.Out, 0);
       return 0;
     } catch (DfException ex) {

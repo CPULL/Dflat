@@ -23,7 +23,8 @@ sealed class FunSig {
   }
 
   public string Name { get; }
-  public string CName => "f_" + Name.Replace('.', '_');
+  public int OverloadIndex { get; set; }
+  public string CName => "f_" + Name.Replace('.', '_') + (OverloadIndex > 0 ? "_" + OverloadIndex : "");
   public string Ret { get; }
   public List<ParamSig> Params { get; }
   public Node Node { get; }
@@ -82,7 +83,9 @@ public sealed partial class CodeGen {
   static readonly HashSet<string> SignedTypes = new() { "i8", "i16", "i32", "i64" };
   static readonly HashSet<string> UnsignedTypes = new() { "u8", "u16", "u32", "u64" };
   static readonly HashSet<string> RealTypes = new() { "r32", "r64" };
-  static readonly HashSet<string> TypeNodeKinds = new() { "Type", "Nullable", "TupleType", "FunType", "Dyn", "Impl" };
+  static readonly HashSet<string> TypeNodeKinds = new() {
+    "Type", "Nullable", "TupleType", "FunType", "Pointer", "WritablePointer", "Volatile", "Specific", "Any"
+  };
 
   static readonly Dictionary<string, string> MathFuns = new() {
     ["Sqrt"] = "sqrt", ["Cbrt"] = "cbrt", ["Sin"] = "sin", ["Cos"] = "cos", ["Tan"] = "tan",
@@ -102,7 +105,7 @@ public sealed partial class CodeGen {
     ["D2R"] = "0.017453292519943295"
   };
 
-  readonly Dictionary<string, FunSig> funs = new();
+  readonly Dictionary<string, List<FunSig>> funs = new();   // name → overloads
   readonly Dictionary<string, string> nameAliases = new();
   readonly Dictionary<string, string> typeAliases = new();
   readonly List<string> warnings = new();
@@ -136,6 +139,7 @@ public sealed partial class CodeGen {
   // ---------------------------------------------------------------- entry
 
   public string Generate(Node program) {
+    CheckTopLevelFeatures(program);
     foreach (var statement in program.Children) {
       if (statement.Kind == "Enum") {
         DeclareEnum(statement);
@@ -154,8 +158,6 @@ public sealed partial class CodeGen {
     foreach (var statement in program.Children) {
       if (statement.Kind == "Fun") {
         RegisterFun(statement, null);
-      } else if (statement.Kind == "FunVar") {
-        throw Error("lambda variables are not supported yet", statement);
       }
     }
 
@@ -163,13 +165,14 @@ public sealed partial class CodeGen {
 
     var protos = new StringBuilder();
     var bodies = new StringBuilder();
-    foreach (var fun in funs.Values) {
+    foreach (var fun in funs.Values.SelectMany(overloads => overloads)) {
       protos.Append(Signature(fun)).Append(";\n");
       bodies.Append(EmitFun(fun)).Append('\n');
     }
 
     // top-level statements: main(); an exception reaching the top level is a panic
     fn = NewFunctionContext("main()", "i32", true);
+    assign = new AssignState();
     currentRet = null;
     var statements = program.Children.Where(statement => statement.Kind is not ("Fun" or "Alias" or "Enum")).ToList();
     var root = PrepareFrame(statements, new Scope(null), FrameKind.Function);
@@ -219,8 +222,10 @@ public sealed partial class CodeGen {
   // enumName: set for static methods declared inside an enum
   void RegisterFun(Node funNode, string? enumName) {
     string name = enumName == null ? funNode.Text! : enumName + "." + funNode.Text;
-    if (funs.ContainsKey(name)) {
-      throw Error($"function '{name}' already defined (overloading not supported yet)", funNode);
+    foreach (var child in funNode.Children) {
+      if (child.Kind is "GenericParams" or "Where") {
+        throw NotSupported("Generics", child);
+      }
     }
     string ret = "void";
     var rets = funNode.Children.FirstOrDefault(child => child.Kind == "Returns");
@@ -234,8 +239,14 @@ public sealed partial class CodeGen {
     var ps = new List<ParamSig>();
     var paramsNode = funNode.Children.First(child => child.Kind == "Params");
     foreach (var p in paramsNode.Children) {
-      if (p.Kind != "Param") {
-        throw Error($"{p.Kind} parameters are not supported yet", p);
+      if (ParamFeatures.TryGetValue(p.Kind, out var feature)) {
+        throw NotSupported(feature, p);
+      }
+      if (p.Children.Any(child => child.Kind == "Volatile")) {
+        throw NotSupported("Pointers", p);
+      }
+      if (ps.Any(existing => existing.Name == p.Text)) {
+        throw Error($"duplicate parameter '{p.Text}'", p);
       }
       var def = p.Children.FirstOrDefault(child => child.Kind == "Default");
       ps.Add(new ParamSig(p.Text!, ResolveType(p.Children[0]), def?.Children[0]));
@@ -243,7 +254,16 @@ public sealed partial class CodeGen {
     if (funNode.Children.Any(child => child.Kind == "NoBody")) {
       throw Error("functions without a body are only valid in traits", funNode);
     }
-    funs[name] = new FunSig(name, ret, ps, funNode, enumName);
+    if (!funs.TryGetValue(name, out var overloads)) {
+      overloads = new List<FunSig>();
+      funs[name] = overloads;
+    }
+    // overloads differ by number, order or types of parameters; the return type alone doesn't count
+    if (overloads.Any(existing => existing.Params.Select(param => param.Type).SequenceEqual(ps.Select(param => param.Type)))) {
+      throw Error($"function '{name}' with these parameter types is already defined", funNode);
+    }
+    var fun = new FunSig(name, ret, ps, funNode, enumName) { OverloadIndex = overloads.Count };
+    overloads.Add(fun);
   }
 
   string Signature(FunSig f) {
@@ -255,6 +275,7 @@ public sealed partial class CodeGen {
 
   string EmitFun(FunSig f) {
     fn = NewFunctionContext(FunHeader(f), f.Ret, false);
+    assign = new AssignState();
     currentRet = f.Ret;
     currentEnum = f.EnumName;
     var scope = new Scope(null);
@@ -308,7 +329,6 @@ public sealed partial class CodeGen {
     switch (s.Kind) {
       case "Namespace":
       case "NamespaceLocal":
-      case "Import":
         sb.Append($"{pad}/* {s.Kind} {s.Text} */\n");
         return;
 
@@ -346,11 +366,14 @@ public sealed partial class CodeGen {
         EmitIf(s, sb, scope, indent, false);
         return;
 
-      case "IfThen":
+      case "IfThen": {
         sb.Append($"{pad}if ({BoolOf(ExprOf(s.Children[0], scope), s)}) {{\n");
+        var before = assign.Clone();
         EmitStatementAsBlock(s.Children[1], sb, scope, indent + 1);
+        assign = AssignState.Merge(new[] { assign, before });
         sb.Append(pad).Append("}\n");
         return;
+      }
 
       case "While":
         EmitWhile(s, sb, scope, indent, false);
@@ -375,13 +398,14 @@ public sealed partial class CodeGen {
       case "Break":
         if (s.Text != null) {
           EmitJumpToLabel(s.Text, sb, indent, s);
-          return;
+        } else {
+          if (loopDepth == 0) {
+            throw Error("'break' outside a loop", s);
+          }
+          EmitUnwindTo(FindLoopFrame(s, "break"), sb, indent, s);
+          sb.Append(pad).Append("break;\n");
         }
-        if (loopDepth == 0) {
-          throw Error("'break' outside a loop", s);
-        }
-        EmitUnwindTo(FindLoopFrame(s, "break"), sb, indent, s);
-        sb.Append(pad).Append("break;\n");
+        assign.Unreachable = true;
         return;
 
       case "Continue":
@@ -390,18 +414,22 @@ public sealed partial class CodeGen {
         }
         EmitUnwindTo(FindLoopFrame(s, "continue"), sb, indent, s);
         sb.Append(pad).Append("continue;\n");
+        assign.Unreachable = true;
         return;
 
       case "Label":
         sb.Append($"{pad}{frames.Peek().CLabel(s.Text!)}: ;\n");
+        assign.Unreachable = false; // reachable from jumps
         return;
 
       case "Jump":
         EmitJump(s, sb, indent);
+        assign.Unreachable = true;
         return;
 
       case "Return":
         EmitReturn(s, sb, scope, indent);
+        assign.Unreachable = true;
         return;
 
       case "Catch":
@@ -410,6 +438,7 @@ public sealed partial class CodeGen {
 
       case "Throw":
         EmitThrow(s, sb, scope, pad);
+        assign.Unreachable = true;
         return;
 
       case "Fun":
@@ -418,6 +447,9 @@ public sealed partial class CodeGen {
         throw Error($"'{s.Kind}' is only supported at the top level for now", s);
 
       default:
+        if (NodeFeatures.TryGetValue(s.Kind, out var feature)) {
+          throw NotSupported(feature, s);
+        }
         throw Error($"'{s.Kind}' is not supported yet", s);
     }
   }
@@ -430,6 +462,7 @@ public sealed partial class CodeGen {
     if (scope.Vars.ContainsKey(s.Text!)) {
       throw Error($"'{s.Text}' is already declared in this scope", s);
     }
+    CheckNotShadowing(s.Text!, scope, s);
     var init = s.Children.FirstOrDefault(c => c.Kind is "Init" or "WeakInit");
     string code;
     if (init == null) {
@@ -439,38 +472,49 @@ public sealed partial class CodeGen {
       code = ZeroValue(type);
     } else {
       if (init.Kind == "WeakInit") {
-        throw Error("weak references are not supported yet", s);
+        throw NotSupported("Ownership", init);
       }
       code = Convert(ExprOf(init.Children[0], scope, type), type, init);
     }
+    VarInfo variable;
     if (frames.Peek().Hoisted.TryGetValue(s.Text!, out var hoisted)) {
       // already created at the start of the scope (the scope has atEnd blocks)
-      scope.Vars[s.Text!] = hoisted;
+      variable = hoisted;
       sb.Append($"{pad}{hoisted.CName} = {code};\n");
-      return;
+    } else {
+      variable = new VarInfo(type, "v_" + s.Text, isConst);
+      sb.Append($"{pad}{(isConst ? "const " : "")}{CType(type)} {variable.CName} = {code};\n");
     }
-    string cname = "v_" + s.Text;
-    scope.Vars[s.Text!] = new VarInfo(type, cname, isConst);
-    sb.Append($"{pad}{(isConst ? "const " : "")}{CType(type)} {cname} = {code};\n");
+    scope.Vars[s.Text!] = variable;
+    if (init == null) {
+      assign.Unassigned.Add(variable);
+    } else {
+      assign.Unassigned.Remove(variable);
+    }
   }
 
   void EmitIf(Node s, StringBuilder sb, Scope scope, int indent, bool isElseIf) {
     string pad = Pad(indent);
     string head = $"if ({BoolOf(ExprOf(s.Children[0], scope), s)}) {{\n";
     sb.Append(isElseIf ? head : pad + head);
+    var before = assign.Clone();
     EmitBlock(s.Children[1], sb, scope, indent + 1);
+    var afterThen = assign;
+    assign = before.Clone();
     sb.Append(pad).Append('}');
     if (s.Children.Count > 2) {
       var els = s.Children[2].Children[0];
       if (els.Kind == "If") {
         sb.Append(" else ");
         EmitIf(els, sb, scope, indent, true);
+        assign = AssignState.Merge(new[] { afterThen, assign });
         return;
       }
       sb.Append(" else {\n");
       EmitBlock(els, sb, scope, indent + 1);
       sb.Append(pad).Append('}');
     }
+    assign = AssignState.Merge(new[] { afterThen, assign });
     sb.Append('\n');
   }
 
@@ -494,6 +538,7 @@ public sealed partial class CodeGen {
       handlerOverride = null;
       return code;
     }
+    var before = assign.Clone();
     sb.Append(doWhile ? $"{innerPad}do {{\n" : $"{innerPad}while ({Condition()}) {{\n");
     if (cleanup) {
       sb.Append($"{innerPad}  {body.RanFlag} = true;\n");
@@ -502,12 +547,15 @@ public sealed partial class CodeGen {
     EmitFrameBody(body, sb, inner + 1);
     loopDepth--;
     sb.Append(doWhile ? $"{innerPad}}} while ({Condition()});\n" : $"{innerPad}}}\n");
+    // assignments inside the loop body don't count after the loop
+    assign = before;
     if (cleanup) {
       EmitLoopTail(body, sb, inner);
       sb.Append($"{pad}}}\n");
     }
   }
 
+  // for T i = start..end [step ...] { }: counts down when start > end
   void EmitFor(Node s, StringBuilder sb, Scope scope, int indent) {
     string pad = Pad(indent);
     var varNode = s.Children[0];
@@ -515,6 +563,9 @@ public sealed partial class CodeGen {
     var step = s.Children.FirstOrDefault(c => c.Kind == "Step");
     var block = s.Children.Last();
 
+    if (varNode.Children.Count == 0) {
+      throw Error($"the 'for' variable '{varNode.Text}' needs a type", s);
+    }
     var range = source.Children[0];
     if (range.Kind != "Range") {
       throw Error("only 'for' over ranges is supported yet", s);
@@ -522,20 +573,13 @@ public sealed partial class CodeGen {
     if (range.Children[0].Kind == "Open" || range.Children[1].Kind == "Open") {
       throw Error("a 'for' range needs a start and an end", s);
     }
-
-    string type;
-    Expr start;
-    if (varNode.Children.Count > 0) {
-      type = ResolveType(varNode.Children[0]);
-      if (!IsInt(type)) {
-        throw Error("a 'for' range variable must be an integer", s);
-      }
-      start = ExprOf(range.Children[0], scope, type);
-    } else {
-      start = ExprOf(range.Children[0], scope);
-      type = start.Type;
+    string type = ResolveType(varNode.Children[0]);
+    if (!IsInt(type)) {
+      throw Error("a 'for' range variable must be an integer", s);
     }
-    string startCode = Convert(start, type, range);
+    CheckNotShadowing(varNode.Text!, scope, s);
+    string startCode = Convert(ExprOf(range.Children[0], scope, type), type, range);
+    string endCode = Convert(ExprOf(range.Children[1], scope, type), type, range);
 
     var innerScope = new Scope(scope);
     string cname = "v_" + varNode.Text;
@@ -543,12 +587,30 @@ public sealed partial class CodeGen {
     var body = PrepareFrame(block.Children, innerScope, FrameKind.LoopBody);
     bool cleanup = body.AtEnds.Count > 0;
 
-    // the end and the step run on every iteration
-    handlerOverride = cleanup ? body.LoopExcLabel : null;
-    string endCode = Convert(ExprOf(range.Children[1], scope, type), type, range);
-    string cmp = range.Text == "..=" ? "<=" : "<";
-    string inc = step == null ? $"{cname}++" : StepCode(step.Children[0], innerScope);
-    handlerOverride = null;
+    tempCounter++;
+    string endVar = $"df_end{tempCounter}";
+    string downVar = $"df_down{tempCounter}";
+    string goVar = $"df_go{tempCounter}";
+    bool inclusive = range.Text == "..=";
+    string init = $"{cname} = {startCode}, {endVar} = {endCode}, {downVar} = ({cname} > {endVar})";
+    string condition;
+    string update;
+    if (step == null) {
+      // inclusive: stop after the end value; exclusive: stop on reaching it
+      init += $", {goVar} = {(inclusive ? "1" : $"({cname} != {endVar})")}";
+      condition = goVar;
+      update = inclusive
+        ? $"{goVar} = ({cname} != {endVar}), {goVar} ? ({downVar} ? {cname}-- : {cname}++) : 0"
+        : $"{downVar} ? {cname}-- : {cname}++, {goVar} = ({cname} != {endVar})";
+    } else {
+      string cmpDown = inclusive ? ">=" : ">";
+      string cmpUp = inclusive ? "<=" : "<";
+      condition = $"({downVar} ? {cname} {cmpDown} {endVar} : {cname} {cmpUp} {endVar})";
+      handlerOverride = cleanup ? body.LoopExcLabel : null;
+      update = StepCode(step.Children[0], innerScope);
+      handlerOverride = null;
+    }
+    string variables = step == null ? $"{cname}, {endVar}, {downVar}, {goVar}" : $"{cname}, {endVar}, {downVar}";
 
     int inner = indent;
     if (cleanup) {
@@ -556,15 +618,17 @@ public sealed partial class CodeGen {
       sb.Append($"{pad}{{\n");
       inner = indent + 1;
       EmitHoists(body, sb, Pad(inner));
-      sb.Append($"{Pad(inner)}{CType(type)} {cname};\n");
-      sb.Append($"{Pad(inner)}for ({cname} = {startCode}; {cname} {cmp} {endCode}; {inc}) {{\n");
+      sb.Append($"{Pad(inner)}{CType(type)} {variables};\n");
+      sb.Append($"{Pad(inner)}for ({init}; {condition}; {update}) {{\n");
       sb.Append($"{Pad(inner)}  {body.RanFlag} = true;\n");
     } else {
-      sb.Append($"{pad}for ({CType(type)} {cname} = {startCode}; {cname} {cmp} {endCode}; {inc}) {{\n");
+      sb.Append($"{pad}for ({CType(type)} {init}; {condition}; {update}) {{\n");
     }
+    var before = assign.Clone();
     loopDepth++;
     EmitFrameBody(body, sb, inner + 1);
     loopDepth--;
+    assign = before;
     sb.Append(Pad(inner)).Append("}\n");
     if (cleanup) {
       EmitLoopTail(body, sb, inner);
@@ -639,12 +703,12 @@ public sealed partial class CodeGen {
   }
 
   // Something that can be written: a variable or a tuple field
-  readonly record struct LValueInfo(string Code, string Type, bool IsConst);
+  readonly record struct LValueInfo(string Code, string Type, bool IsConst, VarInfo? Variable = null);
 
   LValueInfo LValue(Node target, Scope scope) {
     if (target.Kind == "Name") {
       var variable = scope.Find(target.Text!) ?? throw Error($"unknown variable '{target.Text}'", target);
-      return new LValueInfo(variable.CName, variable.Type, variable.IsConst);
+      return new LValueInfo(variable.CName, variable.Type, variable.IsConst, variable);
     }
     if (target.Kind == "Member") {
       var owner = LValue(target.Children[0], scope);
@@ -665,13 +729,18 @@ public sealed partial class CodeGen {
     }
     string op = s.Text!;
     if (op == "=") {
-      return $"{target.Code} = {Convert(ExprOf(s.Children[1], scope, target.Type), target.Type, s)}";
-    }
-    if (op == "??=") {
-      return CoalesceAssignCode(target, s.Children[1], scope, s);
+      string value = Convert(ExprOf(s.Children[1], scope, target.Type), target.Type, s);
+      MarkAssigned(target.Variable);
+      return $"{target.Code} = {value}";
     }
     if (op == "_=") {
-      throw Error($"'{op}' is not supported yet", s);
+      throw NotSupported("Ownership", s);
+    }
+    ReadCheck(target.Variable, targetNode.Text ?? "", targetNode);
+    if (op == "??=") {
+      string code = CoalesceAssignCode(target, s.Children[1], scope, s);
+      MarkAssigned(target.Variable);
+      return code;
     }
     string bin = op[..^1];
     var left = new Expr(target.Code, target.Type);
@@ -700,6 +769,7 @@ public sealed partial class CodeGen {
       case "Name": {
         var v = scope.Find(n.Text!);
         if (v != null) {
+          ReadCheck(v, n.Text!, n);
           return new Expr(v.CName, v.Type);
         }
         return BareEnumEntry(n.Text!) ?? throw Error($"unknown name '{n.Text}'", n);
@@ -760,9 +830,12 @@ public sealed partial class CodeGen {
         return BoolSwitchExpr(n, scope, expected);
       case "IsNull":
         return new Expr(EqualsCode(ExprOf(n.Children[0], scope), new Expr("0", "null"), n), "bool");
-      case "Is":
-        throw Error("type checks with 'is' need classes; not supported yet", n);
+      case "Index":
+        throw NotSupported(n.Children[1].Kind == "Empty" ? "Pointers" : "Collections", n);
       default:
+        if (NodeFeatures.TryGetValue(n.Kind, out var feature)) {
+          throw NotSupported(feature, n);
+        }
         throw Error($"'{n.Kind}' expressions are not supported yet", n);
     }
   }
@@ -784,6 +857,7 @@ public sealed partial class CodeGen {
   Expr IncDec(Node n, Scope scope) {
     var targetNode = n.Children[0];
     var target = LValue(targetNode, scope);
+    ReadCheck(target.Variable, targetNode.Text ?? "", targetNode);
     if (!IsNumeric(target.Type)) {
       throw Error($"++ and -- need a number, not {target.Type}", n);
     }
@@ -1034,6 +1108,9 @@ public sealed partial class CodeGen {
         }
         return new Expr($"({l.Code} {op} {r.Code})", "bool");
       }
+      if (l.Type == "char" && r.Type == "char") {
+        return new Expr($"({l.Code} {op} {r.Code})", "bool");   // by code point ('a'..='z')
+      }
     } else if (withNull) {
       return LiftBinary(op, l, r, at);
     }
@@ -1089,6 +1166,13 @@ public sealed partial class CodeGen {
     }
     if (IsNumeric(a) && IsNumeric(b) && Family(a) == Family(b)) {
       return Bits(a) >= Bits(b) ? a : b;
+    }
+    // unsigned widens to a larger signed type
+    if (Family(a) == "unsigned" && Family(b) == "signed" && Bits(a) < Bits(b)) {
+      return b;
+    }
+    if (Family(b) == "unsigned" && Family(a) == "signed" && Bits(b) < Bits(a)) {
+      return a;
     }
     throw new CompileException($"cannot apply '{op}' to {a} and {b}; use a cast", at.Line);
   }
@@ -1155,6 +1239,10 @@ public sealed partial class CodeGen {
   Expr Transmute(Node n, Scope scope) {
     string to = ResolveType(n.Children[0]);
     var e = ExprOf(n.Children[1], scope);
+    if (to == "bool") {
+      // 0, null, "", NaN and '\0' are false, anything else is true
+      return new Expr(BoolOf(e, n), "bool");
+    }
     string targetType = to;
     if (enums.TryGetValue(to, out var target)) {
       targetType = target.ValueType;
@@ -1191,8 +1279,8 @@ public sealed partial class CodeGen {
   Expr Call(Node n, Scope scope) {
     var callee = n.Children[0];
     var args = n.Children[1].Children;
-    if (args.Any(a => a.Kind == "Named")) {
-      throw Error("named arguments are not supported yet", n);
+    if (callee.Kind == "GenericRef") {
+      throw NotSupported("Generics", callee);
     }
     if (callee.Kind == "SafeMember") {
       return SafeAccess(callee, n, scope);
@@ -1208,42 +1296,58 @@ public sealed partial class CodeGen {
       switch (path) {
         case "Root.Console.Log":
         case "Root.Console.LogError":
-          if (args.Count != 1) {
+        case "Root.Console.Print": {
+          if (args.Count != 1 || args[0].Kind == "Named") {
             throw Error($"{path} takes one argument", n);
           }
-          string fn = path.EndsWith("Error") ? "df_console_log_error" : "df_console_log";
-          return new Expr($"{fn}({StrOf(ExprOf(args[0], scope), n)})", "void");
+          string function = path switch {
+            "Root.Console.Log" => "df_console_log",
+            "Root.Console.LogError" => "df_console_log_error",
+            _ => "df_console_print"
+          };
+          return new Expr($"{function}({StrOf(ExprOf(args[0], scope), n)})", "void");
+        }
+        case "Root.Console.GetInput":
+        case "Root.Console.GetChar":
+          if (args.Count != 0) {
+            throw Error($"{path} takes no arguments", n);
+          }
+          return path.EndsWith("Input")
+            ? new Expr("df_console_get_input()", "string")
+            : new Expr("df_console_get_char()", "char");
+      }
+      if (args.Any(arg => arg.Kind == "Named") && (path.StartsWith("Root.") || path.StartsWith("root."))) {
+        throw Error("named arguments are not supported here", n);
       }
       if (path.StartsWith("Root.Math.") || path.StartsWith("Root.Math64.") || path.StartsWith("Root.Math32.")) {
         return MathCall(path, args, scope, n);
       }
       bool enumMethod = callee.Kind == "Member" && IsEnum(path.Split('.')[0]);
-      if ((callee.Kind == "Name" || enumMethod) && funs.TryGetValue(path, out var f)) {
-        return UserCall(f, args, scope, n);
+      if ((callee.Kind == "Name" || enumMethod) && funs.TryGetValue(path, out var overloads)) {
+        return UserCall(ResolveOverload(overloads, args, scope, n), args, scope, n);
       }
       // inside an enum method, sibling methods without the enum name
-      if (callee.Kind == "Name" && currentEnum != null && funs.TryGetValue(currentEnum + "." + path, out var sibling)) {
-        return UserCall(sibling, args, scope, n);
+      if (callee.Kind == "Name" && currentEnum != null && funs.TryGetValue(currentEnum + "." + path, out var siblings)) {
+        return UserCall(ResolveOverload(siblings, args, scope, n), args, scope, n);
       }
     }
     throw Error($"unknown function '{path ?? callee.Kind}'", n);
   }
 
+  // positional arguments in order, named ones anywhere, defaults for the rest
   Expr UserCall(FunSig f, List<Node> args, Scope scope, Node at) {
-    if (args.Count > f.Params.Count) {
-      throw Error($"'{f.Name}' takes {f.Params.Count} arguments", at);
+    var (slots, problem) = MapArgs(f, args);
+    if (slots == null) {
+      throw Error(problem!, at);
     }
     var codes = new List<string>();
-    for (int i = 0; i < f.Params.Count; i++) {
-      var p = f.Params[i];
-      Node? arg = i < args.Count ? args[i] : p.Default;
-      if (arg == null) {
-        throw Error($"missing argument '{p.Name}' for '{f.Name}'", at);
-      }
-      codes.Add(Convert(ExprOf(arg, scope, p.Type), p.Type, arg));
+    for (int index = 0; index < f.Params.Count; index++) {
+      var param = f.Params[index];
+      Node arg = slots[index] ?? param.Default!;
+      codes.Add(Convert(ExprOf(arg, scope, param.Type), param.Type, arg));
     }
     string call = $"{f.CName}({string.Join(", ", codes)})";
-    return new Expr(failingFuns.Contains(f.Name) ? CheckRaise(call, f.Ret) : call, f.Ret);
+    return new Expr(failingFuns.Contains(f) ? CheckRaise(call, f.Ret) : call, f.Ret);
   }
 
   Expr MathCall(string path, List<Node> args, Scope scope, Node at) {

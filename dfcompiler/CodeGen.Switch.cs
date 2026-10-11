@@ -35,6 +35,7 @@ sealed class SwitchContext {
   public Frame Frame { get; }                                    // the scope holding the switch
   public string SubjectType { get; }
   public Dictionary<string, int> Keys { get; } = new();          // constant case value → case index
+  public List<(BigInteger? Low, BigInteger? High, int Case)> Ranges { get; } = new();   // constant ranges
   public int? DefaultIndex { get; set; }
   public int CurrentCase { get; set; } = -1;
   public Dictionary<int, HashSet<int>> Jumps { get; } = new();   // case → cases it jumps to
@@ -269,6 +270,14 @@ public sealed partial class CodeGen {
           context.DefaultIndex = index;
           continue;
         }
+        if (value.Kind == "Range") {
+          var bounds = ConstRange(value, subject.Type);
+          if (bounds != null) {
+            context.Ranges.Add((bounds.Value.Low, bounds.Value.High, index));
+          }
+          conditions.Add(CaseRangeCondition(subjectExpr, value, scope));
+          continue;
+        }
         string? key = ConstKey(value, subject.Type);
         if (key != null && !context.Keys.TryAdd(key, index)) {
           throw Error("duplicate case value", value);
@@ -286,13 +295,21 @@ public sealed partial class CodeGen {
     sb.Append(tests);
     sb.Append($"{pad}  goto {fallThrough};\n");
     switches.Push(context);
+    var before = assign.Clone();
+    var caseStates = new List<AssignState>();
     for (int index = 0; index < cases.Count; index++) {
       context.CurrentCase = index;
+      assign = before.Clone();
       var body = cases[index].Children.Last();
       sb.Append($"{pad}  {context.CaseLabel(index)}: {{\n");
       EmitStatementAsBlock(body, sb, scope, indent + 2);
       sb.Append($"{pad}  }}\n{pad}  goto {context.EndLabel};\n");
+      caseStates.Add(assign);
     }
+    if (context.DefaultIndex == null) {
+      caseStates.Add(before);
+    }
+    assign = AssignState.Merge(caseStates);
     switches.Pop();
     sb.Append($"{pad}  {context.EndLabel}: ;\n{pad}}}\n");
 
@@ -329,7 +346,18 @@ public sealed partial class CodeGen {
           : Error("a jump to a case needs a constant value", s);
       }
       if (!context.Keys.TryGetValue(key, out caseIndex)) {
-        throw Error("no case with this value in the switch", s);
+        // a value inside a range case
+        int? rangeCase = null;
+        if (key.StartsWith("n:")) {
+          var value = BigInteger.Parse(key[2..]);
+          foreach (var entry in context.Ranges) {
+            if ((entry.Low == null || value >= entry.Low) && (entry.High == null || value <= entry.High)) {
+              rangeCase = entry.Case;
+              break;
+            }
+          }
+        }
+        caseIndex = rangeCase ?? throw Error("no case with this value in the switch", s);
       }
     }
     if (context.CurrentCase >= 0) {
@@ -389,6 +417,7 @@ public sealed partial class CodeGen {
     string code = WithTemp(subject, subjectCode => {
       var subjectExpr = new Expr(subjectCode, subject.Type);
       var keys = new HashSet<string>();
+      var ranges = new List<(BigInteger? Low, BigInteger? High)>();
       int defaultIndex = -1;
       var tests = new List<(string Condition, int Arm)>();
       for (int index = 0; index < arms.Count; index++) {
@@ -399,6 +428,14 @@ public sealed partial class CodeGen {
               throw Error("a switch expression can have only one 'default'", value);
             }
             defaultIndex = index;
+            continue;
+          }
+          if (value.Kind == "Range") {
+            var bounds = ConstRange(value, subject.Type);
+            if (bounds != null) {
+              ranges.Add(bounds.Value);
+            }
+            conditions.Add(CaseRangeCondition(subjectExpr, value, scope));
             continue;
           }
           string? key = ConstKey(value, subject.Type);
@@ -414,7 +451,7 @@ public sealed partial class CodeGen {
 
       int lastIndex = defaultIndex;
       if (lastIndex < 0) {
-        if (!IsExhaustive(subject.Type, keys)) {
+        if (!IsExhaustive(subject.Type, keys, ranges)) {
           throw Error("this switch expression needs a 'default'", n);
         }
         // every value is covered: the last test can be skipped
@@ -431,7 +468,7 @@ public sealed partial class CodeGen {
     return new Expr(code, resultType);
   }
 
-  bool IsExhaustive(string subjectType, HashSet<string> keys) {
+  bool IsExhaustive(string subjectType, HashSet<string> keys, List<(BigInteger? Low, BigInteger? High)> ranges) {
     if (IsNullable(subjectType) && !keys.Contains("null")) {
       return false;
     }
@@ -439,10 +476,24 @@ public sealed partial class CodeGen {
     if (baseType == "bool") {
       return keys.Contains("b:true") && keys.Contains("b:false");
     }
+    bool InRange(BigInteger value) => ranges.Any(range => (range.Low == null || value >= range.Low) && (range.High == null || value <= range.High));
     if (IsEnum(baseType)) {
-      return enums[baseType].Entries.All(entry => keys.Contains("n:" + entry.Value));
+      return enums[baseType].Entries.All(entry => keys.Contains("n:" + entry.Value) || InRange(entry.Value));
     }
-    return false;
+    var intervals = keys.Where(key => key.StartsWith("n:"))
+      .Select(key => BigInteger.Parse(key[2..]))
+      .Select(value => ((BigInteger?)value, (BigInteger?)value))
+      .Concat(ranges);
+    return CoversAllIntegers(subjectType, intervals);
+  }
+
+  // a range case value; a null subject never matches
+  string CaseRangeCondition(Expr subject, Node range, Scope scope) {
+    if (!IsNullable(subject.Type)) {
+      return RangeCondition(subject, range, scope, subject.Type);
+    }
+    return WithTemp(subject, temp =>
+      $"({temp}.has && {RangeCondition(new Expr(temp + ".val", BaseOf(subject.Type)), range, scope, subject.Type)})");
   }
 
   // condition ? { whenTrue, whenFalse }

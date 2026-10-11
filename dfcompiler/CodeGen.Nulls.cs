@@ -182,13 +182,17 @@ public sealed partial class CodeGen {
       }
     }
     sb.Append($"{pad}if ({string.Join(" && ", conditions)}) {{\n");
+    var before = assign.Clone();
     EmitBlock(block, sb, unwrapped, indent + 1);
+    var afterThen = assign;
+    assign = before;
     sb.Append(pad).Append('}');
     if (elseNode != null) {
       sb.Append(" else {\n");
       EmitBlock(elseNode.Children[0], sb, scope, indent + 1);
       sb.Append(pad).Append('}');
     }
+    assign = AssignState.Merge(new[] { afterThen, assign });
     sb.Append('\n');
   }
 }

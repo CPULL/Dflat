@@ -244,19 +244,25 @@ public sealed partial class CodeGen {
         return MakeTuple(elems);
       }
       case "Type": {
-        if (n.Children.Count > 0) {
-          throw Error($"type '{DescribeType(n)}' is not supported yet", n);
-        }
         string t = n.Text!;
+        if (TypeFeatures.TryGetValue(t, out var feature)) {
+          throw NotSupported(feature, n);
+        }
+        if (n.Children.Count > 0) {
+          throw NotSupported("Generics", n);
+        }
         if (typeAliases.TryGetValue(t, out var aliased)) {
           return aliased;
         }
         if (!IsKnownType(t)) {
-          throw Error($"type '{t}' is not supported yet", n);
+          throw Error($"unknown type '{t}'", n);
         }
         return Normalize(t);
       }
       default:
+        if (NodeFeatures.TryGetValue(n.Kind, out var nodeFeature)) {
+          throw NotSupported(nodeFeature, n);
+        }
         throw Error($"type '{DescribeType(n)}' is not supported yet", n);
     }
   }
@@ -293,6 +299,10 @@ public sealed partial class CodeGen {
     }
     if (IsEnum(to) || IsEnum(from)) {
       return false;
+    }
+    // unsigned to a wider signed type keeps the value
+    if (Family(from) == "unsigned" && Family(to) == "signed" && Bits(from) < Bits(to)) {
+      return true;
     }
     return Family(to) == Family(from) && IsNumeric(to) && Bits(from) <= Bits(to);
   }

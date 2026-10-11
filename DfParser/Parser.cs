@@ -38,10 +38,14 @@ public sealed class Parser {
   readonly List<Token> toks;
   int pos;
   bool noBrace; // true while parsing if/while/for/switch headers: '{' starts the block
+  bool noAngle; // true while parsing a value inside <...>: '>' closes the list
 
   public Parser(List<Token> tokens) {
     toks = tokens;
   }
+
+  // "(line): warning L3: message"
+  public List<string> Warnings { get; } = new();
 
   // ---------------------------------------------------------------- helpers
 
@@ -145,6 +149,43 @@ public sealed class Parser {
     return null;
   }
 
+  // '(' '&' ')' or '(' '*' ')' written together
+  bool PeekMarker(string middle) {
+    return IsOp("(") && PeekAt(1).Is(middle) && PeekAt(2).Is(")");
+  }
+
+  // the next token touches the previous one: *i32{count}
+  bool Touching() {
+    if (pos == 0) {
+      return false;
+    }
+    var previous = toks[pos - 1];
+    return Peek.Line == previous.Line && Peek.Col == previous.Col + previous.Text.Length;
+  }
+
+  // name<...>( ahead: a generic function name or a generic call
+  bool IsGenericCallAhead(int offset) {
+    if (PeekAt(offset).Kind != TokenKind.Ident || !PeekAt(offset + 1).Is("<")) {
+      return false;
+    }
+    int depth = 0;
+    for (int index = pos + offset + 1; index < toks.Count; index++) {
+      var token = toks[index];
+      if (token.Kind is TokenKind.Newline or TokenKind.Eof || token.Is("{") || token.Is("}") || token.Is(";")) {
+        return false;
+      }
+      if (token.Is("<")) {
+        depth++;
+      } else if (token.Is(">")) {
+        depth--;
+        if (depth == 0) {
+          return index + 1 < toks.Count && toks[index + 1].Is("(");
+        }
+      }
+    }
+    return false;
+  }
+
   static bool StartsOperand(Token t) {
     switch (t.Kind) {
       case TokenKind.Ident:
@@ -246,6 +287,16 @@ public sealed class Parser {
     }
     if (ownerName != null && Peek.Kind == TokenKind.Ident && Peek.Text == ownerName && PeekAt(1).Is("(")) {
       return WithMods(ParseConstructor(), mods);
+    }
+    // placeholder Item (inside a trait)
+    if (Peek.Kind == TokenKind.Ident && Peek.Text == "placeholder" && PeekAt(1).Kind == TokenKind.Ident) {
+      var after = PeekAt(2);
+      if (after.Kind is TokenKind.Newline or TokenKind.Eof || after.Is(";") || after.Is("}")) {
+        Next();
+        var name = Next();
+        EndStatement(caseBody);
+        return WithMods(new Node("Placeholder", name, name.Text), mods);
+      }
     }
     if (mods.Count > 0) {
       var decl = ParseSimple(!caseBody);
@@ -419,6 +470,9 @@ public sealed class Parser {
     var node = new Node("For", t);
     bool saved = noBrace;
     noBrace = true;
+    if (Peek.Kind == TokenKind.Ident && PeekAt(1).Is("=")) {
+      throw Error($"the 'for' variable needs a type: for i32 {Peek.Text} = ...");
+    }
     if (Peek.Kind == TokenKind.Ident && PeekAt(1).Is("in")) {
       var n = Next();
       node.Add(new Node("Var", n, n.Text));
@@ -466,9 +520,11 @@ public sealed class Parser {
           c.Add(ParseExpr());
         }
       }
-      ExpectOp(":");
+      var colon = ExpectOp(":");
       if (IsOp("{")) {
         c.Add(ParseBlock());
+      } else if (Peek.Line != colon.Line) {
+        c.Add(ParseCaseLines(colon));
       } else {
         c.Add(ParseStatement(null, true));
       }
@@ -478,6 +534,39 @@ public sealed class Parser {
     Next();
     noBrace = saved;
     return node;
+  }
+
+  // case body on the following lines, up to the next case or the end of the switch
+  Node ParseCaseLines(Token colon) {
+    var block = new Node("Block", colon);
+    SkipTerminators();
+    while (!IsOp("}") && !AtEnd && !AtCaseLabel()) {
+      block.Add(ParseStatement());
+      SkipTerminators();
+    }
+    return block;
+  }
+
+  // "default:" or "value, value, ...:" ahead
+  bool AtCaseLabel() {
+    if (IsKw("default")) {
+      return PeekAt(1).Is(":");
+    }
+    int save = pos;
+    bool saved = noBrace;
+    try {
+      ParseExpr();
+      while (AcceptOp(",")) {
+        SkipNewlines();
+        ParseExpr();
+      }
+      return IsOp(":");
+    } catch (DfException) {
+      return false;
+    } finally {
+      pos = save;
+      noBrace = saved;
+    }
   }
 
   // jump name | jump #label# | jump default | jump <case value>
@@ -651,7 +740,7 @@ public sealed class Parser {
 
   // Speculative: "Type name" followed by '=', '_=', ',', or end of statement
   Node? TryParseDecl() {
-    bool startsType = Peek.Kind == TokenKind.Ident || IsOp("(") || IsKw("dyn") || IsKw("impl") || IsKw("fun");
+    bool startsType = Peek.Kind == TokenKind.Ident || IsOp("(") || IsOp("*") || IsKw("fun");
     if (!startsType) {
       return null;
     }
@@ -677,12 +766,41 @@ public sealed class Parser {
 
   // ---------------------------------------------------------------- types
 
+  static bool StartsTypeToken(Token token) {
+    return token.Kind == TokenKind.Ident || token.Is("(") || token.Is("*") || token.Is("fun");
+  }
+
   Node ParseType(bool allowCallback = true) {
     var start = Peek;
     Node type;
-    if (IsKw("dyn") || IsKw("impl")) {
-      var k = Next();
-      type = new Node(k.Text == "dyn" ? "Dyn" : "Impl", k).Add(ParseType(false));
+    // volatile *T | specific Shape | any Shape
+    if (Peek.Kind == TokenKind.Ident && Peek.Text is "volatile" or "specific" or "any" && StartsTypeToken(PeekAt(1))) {
+      var word = Next();
+      string kind = word.Text switch {
+        "volatile" => "Volatile",
+        "specific" => "Specific",
+        _ => "Any"
+      };
+      return new Node(kind, word).Add(ParseType(allowCallback));
+    }
+    // *T read-only pointer, (*)T writable pointer, optional bound: *i32{count}
+    if (IsOp("*") || PeekMarker("*")) {
+      bool writable = !IsOp("*");
+      Next();
+      if (writable) {
+        Next();
+        Next();
+      }
+      type = new Node(writable ? "WritablePointer" : "Pointer", start).Add(ParseType(false));
+      if (IsOp("{") && Touching()) {
+        var open = Next();
+        bool saved = noBrace;
+        noBrace = false;
+        var bound = new Node("Bound", open).Add(ParseExpr());
+        noBrace = saved;
+        ExpectOp("}");
+        type.Add(bound);
+      }
       return type;
     }
     if (IsKw("fun")) {
@@ -717,13 +835,28 @@ public sealed class Parser {
     return type;
   }
 
-  // vec<4, i16>: a type argument may be a count
+  // vec<4, i16> | Grid<Width * Height, Cell>: a type argument may be a count or a value expression
   Node ParseTypeArg() {
-    if (Peek.Kind == TokenKind.Int) {
+    if (Peek.Kind == TokenKind.Int && (PeekAt(1).Is(",") || PeekAt(1).Is(">"))) {
       var n = Next();
       return new Node("Count", n, n.Text);
     }
-    return ParseType();
+    int save = pos;
+    try {
+      var type = ParseType();
+      if (IsOp(",") || IsOp(">")) {
+        return type;
+      }
+    } catch (DfException) {
+      // not a type
+    }
+    pos = save;
+    var start = Peek;
+    bool savedAngle = noAngle;
+    noAngle = true;
+    var value = ParseBinary(0);
+    noAngle = savedAngle;
+    return new Node("ValueArg", start).Add(value);
   }
 
   Node ParseTypeList() {
@@ -765,7 +898,7 @@ public sealed class Parser {
   Node ParseFun() {
     var t = Next();
     var rets = new Node("Returns", t);
-    while (!(Peek.Kind == TokenKind.Ident && (PeekAt(1).Is("(") || PeekAt(1).Is("=")))) {
+    while (!(Peek.Kind == TokenKind.Ident && (PeekAt(1).Is("(") || PeekAt(1).Is("=") || IsGenericCallAhead(0)))) {
       rets.Add(ParseType(false));
       if (!AcceptOp(",")) {
         break;
@@ -776,6 +909,11 @@ public sealed class Parser {
     if (rets.Children.Count > 0) {
       node.Add(rets);
     }
+    Node? generics = null;
+    if (IsOp("<")) {
+      generics = ParseGenericParams();
+      node.Add(generics);
+    }
     if (AcceptOp("=")) {
       node.Kind = "FunVar";
       node.Add(ParseExpr());
@@ -784,6 +922,16 @@ public sealed class Parser {
     node.Add(ParseParams());
     int save = pos;
     SkipNewlines();
+    if (Peek.Kind == TokenKind.Ident && Peek.Text == "where") {
+      var where = ParseWhere();
+      bool inlineConstraints = generics != null && generics.Children.Any(param => param.Kind == "TypeParam" && param.Children.Count > 0);
+      if (inlineConstraints) {
+        throw ErrorAt("constraints go inline or in a 'where' clause, not both", where.Line == 0 ? t : Peek);
+      }
+      node.Add(where);
+      save = pos;
+      SkipNewlines();
+    }
     if (IsOp("{")) {
       node.Add(ParseBlock());
     } else {
@@ -794,7 +942,48 @@ public sealed class Parser {
     return node;
   }
 
-  // (type name [= default], &type name, type name!, &type name!, ->type name, ...)
+  // <Item, Key : Hashable && Named, u64 Width>
+  Node ParseGenericParams() {
+    var open = ExpectOp("<");
+    var node = new Node("GenericParams", open);
+    do {
+      SkipNewlines();
+      if (Peek.Kind == TokenKind.Ident && PeekAt(1).Kind == TokenKind.Ident) {
+        var valueType = ParseType(false);
+        var valueName = ExpectIdent();
+        node.Add(new Node("ValueParam", valueName, valueName.Text).Add(valueType));
+        continue;
+      }
+      var name = ExpectIdent();
+      var param = new Node("TypeParam", name, name.Text);
+      if (AcceptOp(":")) {
+        do {
+          param.Add(ParseType(false));
+        } while (AcceptOp("&&"));
+      }
+      node.Add(param);
+    } while (AcceptOp(","));
+    ExpectOp(">");
+    return node;
+  }
+
+  // where Item : Numeric && Orderable, list<Item> : Printable
+  Node ParseWhere() {
+    var word = Next();
+    var node = new Node("Where", word);
+    do {
+      SkipNewlines();
+      var constraint = new Node("Constraint", Peek).Add(ParseType(false));
+      ExpectOp(":");
+      do {
+        constraint.Add(ParseType(false));
+      } while (AcceptOp("&&"));
+      node.Add(constraint);
+    } while (AcceptOp(","));
+    return node;
+  }
+
+  // (type name [= default], &type name, (&)type name, volatile &type name, ->type name, ...)
   Node ParseParams() {
     var open = ExpectOp("(");
     var ps = new Node("Params", open);
@@ -802,20 +991,38 @@ public sealed class Parser {
     if (!IsOp(")")) {
       do {
         SkipNewlines();
-        bool byRef = AcceptOp("&");
-        bool gift = !byRef && AcceptOp("->");
+        bool isVariadic = AcceptOp("...");
+        bool isVolatile = false;
+        if (Peek.Kind == TokenKind.Ident && Peek.Text == "volatile" && (PeekAt(1).Is("&") || (PeekAt(1).Is("(") && PeekAt(2).Is("&")))) {
+          Next();
+          isVolatile = true;
+        }
+        string kind = "Param";
+        if (PeekMarker("&")) {
+          Next();
+          Next();
+          Next();
+          kind = "WritableRefParam";
+        } else if (AcceptOp("&")) {
+          kind = "RefParam";
+        } else if (AcceptOp("->")) {
+          kind = "GiftParam";
+        }
+        if (isVariadic) {
+          if (kind != "Param" || isVolatile) {
+            throw Error("'...' takes a plain type: ...T name");
+          }
+          kind = "VariadicParam";
+        }
         var type = ParseType();
         var name = ExpectIdent();
-        bool copy = AcceptOp("!");
-        string kind = (byRef, gift, copy) switch {
-          (true, _, true) => "ConstRefParam",
-          (true, _, false) => "RefParam",
-          (_, true, false) => "GiftParam",
-          (false, false, true) => "CopyParam",
-          (_, true, true) => throw ErrorAt("'->' and '!' cannot be combined", name),
-          _ => "Param"
-        };
+        if (IsOp("!")) {
+          throw Error("a copy is chosen by the caller: f(x!)");
+        }
         var p = new Node(kind, name, name.Text).Add(type);
+        if (isVolatile) {
+          p.Add(new Node("Volatile", name));
+        }
         if (IsOp("=")) {
           var eq = Next();
           p.Add(new Node("Default", eq).Add(ParseExpr()));
@@ -833,7 +1040,25 @@ public sealed class Parser {
     var bases = new Node("Bases", at);
     do {
       SkipNewlines();
-      bases.Add(ParseType(false));
+      var baseType = ParseType(false);
+      // Sequence with (Item is u32, Key is string)
+      if (Peek.Kind == TokenKind.Ident && Peek.Text == "with" && PeekAt(1).Is("(")) {
+        var word = Next();
+        Next();
+        var with = new Node("With", word);
+        do {
+          SkipNewlines();
+          var name = ExpectIdent();
+          if (!IsKw("is")) {
+            throw Error("expected 'is'");
+          }
+          Next();
+          with.Add(new Node("Bind", name, name.Text).Add(ParseType()));
+        } while (AcceptOp(","));
+        ExpectOp(")");
+        baseType.Add(with);
+      }
+      bases.Add(baseType);
     } while (AcceptOp(","));
     return bases;
   }
@@ -843,6 +1068,9 @@ public sealed class Parser {
     Next();
     var name = ExpectIdent();
     var node = new Node("Class", name, name.Text);
+    if (IsOp("<")) {
+      node.Add(ParseGenericParams());
+    }
     if (IsOp("(")) {
       var ps = ParseParams();
       ps.Kind = "PrimaryCtor";
@@ -860,6 +1088,9 @@ public sealed class Parser {
     Next();
     var name = ExpectIdent();
     var node = new Node("Trait", name, name.Text);
+    if (IsOp("<")) {
+      node.Add(ParseGenericParams());
+    }
     if (IsOp(":")) {
       var colon = Next();
       var bases = ParseBases(colon);
@@ -1076,6 +1307,9 @@ public sealed class Parser {
     if (Peek.Kind != TokenKind.Op) {
       return null;
     }
+    if (noAngle && (IsOp(">") || IsOp(">="))) {
+      return null; // closes the <...> list
+    }
     string? gt = PeekCompoundGt();
     if (gt != null) {
       return gt == ">>" && ops.Contains(">>") ? ">>" : null;
@@ -1104,7 +1338,7 @@ public sealed class Parser {
           return new Node("PreDec", t).Add(ParseUnary());
         case "&":
           Next();
-          return new Node("Ref", t).Add(ParseUnary());
+          return new Node("AddressOf", t).Add(ParseUnary());
         case "->":
           Next();
           return new Node("Gift", t).Add(ParseUnary());
@@ -1121,6 +1355,12 @@ public sealed class Parser {
           }
           break;
         case "(":
+          if (PeekMarker("&")) {
+            Next();
+            Next();
+            Next();
+            return new Node("WritableAddressOf", t).Add(ParseUnary());
+          }
           var cast = TryParseCast();
           if (cast != null) {
             return cast;
@@ -1135,7 +1375,7 @@ public sealed class Parser {
   Node? TryParseTransmute() {
     int save = pos;
     var open = Next();
-    if (Peek.Kind == TokenKind.Ident) {
+    if (Peek.Kind == TokenKind.Ident || IsOp("*") || PeekMarker("*")) {
       try {
         var type = ParseType(false);
         if (IsOp("]") && StartsCastOperand(PeekAt(1))) {
@@ -1187,6 +1427,14 @@ public sealed class Parser {
       if (t.Kind != TokenKind.Op) {
         return e;
       }
+      if (t.Text == "<" && !noAngle && e.Kind is "Name" or "Member") {
+        var generic = TryParseGenericArgs(e);
+        if (generic != null) {
+          e = generic;
+          continue;
+        }
+        return e;
+      }
       switch (t.Text) {
         case "(":
           e = new Node("Call", t).Add(e).Add(ParseArgs());
@@ -1199,6 +1447,12 @@ public sealed class Parser {
           break;
         case "[":
           Next();
+          if (IsOp("]")) {
+            // p[] = p[0]
+            Next();
+            e = new Node("Index", t).Add(e).Add(new Node("Empty", t));
+            break;
+          }
           bool saved = noBrace;
           noBrace = false;
           SkipNewlines();
@@ -1224,6 +1478,33 @@ public sealed class Parser {
           return e;
       }
     }
+  }
+
+  // name<type, ...>( : a generic call (lookahead); otherwise null and nothing is consumed
+  Node? TryParseGenericArgs(Node target) {
+    int save = pos;
+    var open = Next();
+    var generic = new Node("GenericRef", open).Add(target);
+    try {
+      do {
+        SkipNewlines();
+        generic.Add(ParseTypeArg());
+      } while (AcceptOp(","));
+      if (IsOp(">") && PeekAt(1).Is("(")) {
+        Next();
+        // a<b>(c) also reads as two comparisons: warn when every argument could be a value
+        bool ambiguous = generic.Children.Skip(1).All(arg =>
+          (arg.Kind == "Type" && arg.Children.Count == 0 && !BuiltinTypes.Contains(arg.Text!)) || arg.Kind == "Count");
+        if (ambiguous) {
+          Warnings.Add($"({open.Line}): warning L3: read as a generic call; use parentheses for comparisons");
+        }
+        return generic;
+      }
+    } catch (DfException) {
+      // not a generic call
+    }
+    pos = save;
+    return null;
   }
 
   Node ParsePrimary() {
@@ -1575,7 +1856,7 @@ public sealed class Parser {
       throw ErrorAt("empty interpolation hole", at);
     }
     try {
-      var tokens = new Lexer(src).Tokenize();
+      var tokens = new Lexer(src, at.Line).Tokenize();
       var p = new Parser(tokens);
       var e = p.ParseExpr();
       p.SkipNewlines();

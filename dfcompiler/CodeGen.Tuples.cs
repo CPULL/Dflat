@@ -139,8 +139,10 @@ public sealed partial class CodeGen {
       if (scope.Vars.ContainsKey(target.Text!)) {
         throw Error($"'{target.Text}' is already declared in this scope", target);
       }
+      CheckNotShadowing(target.Text!, scope, target);
       if (frames.Peek().Hoisted.TryGetValue(target.Text!, out var hoisted)) {
         scope.Vars[target.Text!] = hoisted;
+        MarkAssigned(hoisted);
         sb.Append($"{pad}{hoisted.CName} = {Convert(value.Value, type, target)};\n");
         return;
       }
@@ -153,6 +155,7 @@ public sealed partial class CodeGen {
     if (lvalue.IsConst) {
       throw Error($"'{target.Text}' is const", target);
     }
+    MarkAssigned(lvalue.Variable);
     sb.Append($"{pad}{lvalue.Code} = {Convert(value.Value, lvalue.Type, target)};\n");
   }
 }

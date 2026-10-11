@@ -32,6 +32,7 @@ sealed class Frame {
   public Dictionary<string, VarInfo> Hoisted { get; } = new();
   public Scope? AtEndScope { get; set; }
   public int CurrentIndex { get; set; } = -1;
+  public AssignState? StartAssign { get; set; }
   public string OuterHandler { get; set; } = "";
   public string? RanFlag { get; set; }
 
@@ -97,7 +98,7 @@ public sealed partial class CodeGen {
 
   readonly Stack<Frame> frames = new();
   readonly StringBuilder functionNames = new();
-  readonly HashSet<string> failingFuns = new();
+  readonly HashSet<FunSig> failingFuns = new();
   FunctionContext? fn;
   string? handlerOverride;
 
@@ -119,21 +120,23 @@ public sealed partial class CodeGen {
   // ---------------------------------------------------------------- functions that can fail
 
   // A function can fail when it throws, divides integers, or calls a function that can fail.
+  // (any overload of a called name counts)
   void FindFailingFunctions() {
-    var callees = new Dictionary<string, HashSet<string>>();
-    foreach (var fun in funs.Values) {
+    var callees = new Dictionary<FunSig, HashSet<string>>();
+    foreach (var fun in funs.Values.SelectMany(overloads => overloads)) {
       var called = new HashSet<string>();
       if (ContainsRaise(fun.Node, fun.EnumName, called)) {
-        failingFuns.Add(fun.Name);
+        failingFuns.Add(fun);
       }
-      callees[fun.Name] = called;
+      callees[fun] = called;
     }
     bool changed = true;
     while (changed) {
       changed = false;
-      foreach (var (name, called) in callees) {
-        if (!failingFuns.Contains(name) && called.Any(failingFuns.Contains)) {
-          failingFuns.Add(name);
+      foreach (var (fun, called) in callees) {
+        bool callsFailing = called.Any(name => funs.TryGetValue(name, out var overloads) && overloads.Any(failingFuns.Contains));
+        if (!failingFuns.Contains(fun) && callsFailing) {
+          failingFuns.Add(fun);
           changed = true;
         }
       }
@@ -281,6 +284,7 @@ public sealed partial class CodeGen {
     frames.Push(frame);
     var scope = new Scope(frame.ParentScope);
     frame.StatementScope = scope;
+    frame.StartAssign = assign.Clone();
     int catchOrdinal = 0;
     for (int index = 0; index < frame.Statements.Count; index++) {
       frame.CurrentIndex = index;
@@ -375,7 +379,11 @@ public sealed partial class CodeGen {
     sb.Append($"{pad}goto {skip};\n");
     sb.Append($"{pad}{frame.CatchLabel(ordinal)}: {{\n");
     var catchScope = new Scope(frame.StatementScope);
+    // the catch runs from any point above it: assignments made there may be missing
+    var normalFlow = assign;
+    assign = frame.StartAssign!.Clone();
     if (variable != null) {
+      CheckNotShadowing(variable, catchScope, catchNode);
       tempCounter++;
       string cname = $"v_{variable}_{tempCounter}";
       sb.Append($"{pad}  df_exception* {cname} = df_err;\n");
@@ -394,6 +402,7 @@ public sealed partial class CodeGen {
     sb.Append($"{pad}  {cbdone}: ;\n");
     sb.Append($"{pad}}}\n");
     sb.Append($"{pad}{skip}: ;\n");
+    assign = AssignState.Merge(new[] { normalFlow, assign });
   }
 
   // catches are checked in order; the first one that handles the type runs
@@ -443,6 +452,9 @@ public sealed partial class CodeGen {
     loopDepth = 0;
     switches.Clear();
     handlerOverride = null;
+    var savedAssign = assign;
+    assign = assign.Clone();
+    atEndDepth++;
 
     var frame = PrepareFrame(block.Children, owner.AtEndScope!, FrameKind.AtEndBody);
     frame.Owner = owner;
@@ -456,6 +468,8 @@ public sealed partial class CodeGen {
     EmitFrameBody(frame, sb, indent + 1);
     sb.Append($"{pad}}}\n");
 
+    atEndDepth--;
+    assign = savedAssign;
     loopDepth = savedLoopDepth;
     foreach (var context in savedSwitches.Reverse()) {
       switches.Push(context);
@@ -599,7 +613,7 @@ public sealed partial class CodeGen {
     }
     var args = value.Children[1].Children;
     if (args.Any(arg => arg.Kind == "Named")) {
-      throw Error("named arguments are not supported yet", s);
+      throw Error("exceptions take no named arguments yet", s);
     }
     string name = Path(value.Children[0]) ?? throw Error("throw needs an exception, e.g. throw Exception(\"message\")", s);
     if (name == "Panic") {

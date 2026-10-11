@@ -4,6 +4,9 @@ namespace dfcompiler;
 public static class Runtime {
   public const string Source = """
 /* ---- Dflat runtime (libc version) ---- */
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 200809L
+#endif
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -276,9 +279,134 @@ static void df_console_log_error(df_string s) {
   fputc('\n', stderr);
 }
 
+/* no newline */
+static void df_console_print(df_string s) {
+  fwrite(s.p, 1, (size_t)s.len, stdout);
+}
+
+/* waits for Enter; the line keeps its newline when the input has one; "" at end of input */
+static df_string df_console_get_input(void) {
+  fflush(stdout);
+  uint64_t capacity = 128;
+  uint64_t length = 0;
+  char* buffer = (char*)df_alloc(capacity);
+  int next;
+  while ((next = getc(stdin)) != EOF) {
+    if (length == capacity) {
+      char* bigger = (char*)df_alloc(capacity * 2);
+      memcpy(bigger, buffer, length);
+      buffer = bigger;
+      capacity *= 2;
+    }
+    buffer[length++] = (char)next;
+    if (next == '\n') {
+      break;
+    }
+  }
+  df_string s = { buffer, length };
+  return s;
+}
+
+/* one UTF-8 character from a byte reader; 0 at end of input */
+static uint32_t df_decode_utf8(int first, int (*read_byte)(void)) {
+  if (first < 0x80) {
+    return (uint32_t)first;
+  }
+  int extra = (first & 0xE0) == 0xC0 ? 1 : (first & 0xF0) == 0xE0 ? 2 : (first & 0xF8) == 0xF0 ? 3 : 0;
+  uint32_t code = (uint32_t)(first & (0x3F >> extra));
+  for (int index = 0; index < extra; index++) {
+    int next = read_byte();
+    if (next == EOF) {
+      return 0;
+    }
+    code = (code << 6) | (uint32_t)(next & 0x3F);
+  }
+  return code;
+}
+
+static int df_read_stdin_byte(void) {
+  return getc(stdin);
+}
+
+#ifdef _WIN32
+#include <conio.h>
+#include <io.h>
+#else
+#include <termios.h>
+#include <unistd.h>
+#endif
+
+/* the first typable character, without waiting for Enter; '\0' at end of input */
+static uint32_t df_console_get_char(void) {
+  fflush(stdout);
+#ifdef _WIN32
+  if (_isatty(_fileno(stdin))) {
+    while (true) {
+      wint_t key = _getwch();
+      if (key == 0 || key == 0xE0) {
+        _getwch();              /* arrows and function keys: two codes */
+        continue;
+      }
+      if (key >= 0xD800 && key <= 0xDBFF) {
+        wint_t low = _getwch();
+        return 0x10000 + (((uint32_t)key - 0xD800) << 10) + ((uint32_t)low - 0xDC00);
+      }
+      if (key >= 0x20 && key != 0x7F) {
+        return (uint32_t)key;
+      }
+    }
+  }
+#else
+  if (isatty(STDIN_FILENO)) {
+    struct termios saved;
+    tcgetattr(STDIN_FILENO, &saved);
+    struct termios raw = saved;
+    raw.c_lflag &= (tcflag_t)~(ICANON | ECHO);
+    raw.c_cc[VMIN] = 1;
+    raw.c_cc[VTIME] = 0;
+    tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+    uint32_t result = 0;
+    while (true) {
+      int first = getc(stdin);
+      if (first == EOF) {
+        break;
+      }
+      if (first == 0x1B) {
+        /* escape sequence (arrows, function keys): skip it */
+        int second = getc(stdin);
+        if (second == '[' || second == 'O') {
+          int part;
+          while ((part = getc(stdin)) != EOF && !(part >= 0x40 && part <= 0x7E)) {
+          }
+        }
+        continue;
+      }
+      if (first < 0x20 || first == 0x7F) {
+        continue;
+      }
+      result = df_decode_utf8(first, df_read_stdin_byte);
+      break;
+    }
+    tcsetattr(STDIN_FILENO, TCSANOW, &saved);
+    return result;
+  }
+#endif
+  /* not a terminal: the next typable character of the input */
+  while (true) {
+    int first = getc(stdin);
+    if (first == EOF) {
+      return 0;
+    }
+    if (first >= 0x20 && first != 0x7F) {
+      return df_decode_utf8(first, df_read_stdin_byte);
+    }
+  }
+}
+
 static void df_init(void) {
 #ifdef _WIN32
   SetConsoleOutputCP(CP_UTF8);
+  SetConsoleCP(CP_UTF8);
 #endif
 }
 

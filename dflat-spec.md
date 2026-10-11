@@ -1,7 +1,7 @@
 # Dflat Language
 A new language D♭ that is the same as C# but easier to write and faster to execute
 
-**Version** 0.0.4  2026/10/09 by CPU
+**Version** 0.0.5  2026/10/11 by CPU
 
 # D♭ — Dflat Language Specification (draft)
 
@@ -25,7 +25,7 @@ Status: design in progress. Decisions below reflect the latest choices; earlier 
 - **Statement end**: JavaScript rules. A line break ends a statement when the statement can end there; `;` is needed only for several statements on one line.
 - **Identifiers**: cannot start with `_` (underscores inside names are fine).
 - **Naming convention** (not enforced): namespaces lowercase; public classes, methods and members PascalCase; everything else camelCase. Built-in types are lowercase.
-- **Reserved**: `...`.
+- **`...`**: variadic parameter prefix (9.4); no other use.
 
 ### 2.1 Labels
 
@@ -112,7 +112,7 @@ Signed 64-bit; raw value = `value × 8 + code`.
 | `100` | year lapse | beyond ±36M years |
 | `111` | clock lapse overflow | — |
 
-- `date − date` → date lapse; `clock − clock` → clock lapse.
+- `date − date` → date lapse; `clock − clock` → clock lapse; `date − clock` → date lapse.
 - Mixed units convert to date lapse, rounding away from zero. Null propagates.
 - Lapses format as numbers in their own unit.
 
@@ -145,7 +145,9 @@ existing, _, i32 fresh = f()        // mix existing, discard, new
 x, y = y, x                         // swap: right side evaluated first
 ```
 
-- Type-first; C#-style scope and definite assignment.
+- Type-first; C#-style scope.
+- Definite assignment: reading a variable before it is assigned on every path reads its zero value (null for objects) and gives a level 1 warning.
+- No shadowing of locals: a variable with the same name as a local of an enclosing block is a compile error.
 - `const`: read-only value and pointer, global guarantee.
 - `var`: type taken from the initializer; if it can't be decided → compile error (`var x = null`, `var l = []`). Allowed in multiple returns when the return type is known. Coexists with partial forms like `vec v = [...]` / `map m = {...}`.
 - A tuple or literal must be assigned, passed or returned; alone it's a compile error.
@@ -182,10 +184,10 @@ alias byte8 u8
 ## 6. Conversions
 
 - **Cast `(type)`**: keeps the value; out of range saturates (level 2 warning), or raises `OutOfRangeCastException` if a specific catch exists. From `r`: truncates toward zero (Rust rules), +∞ → max, −∞ → min (0 for unsigned), NaN → 0.
-- **Transmute `[type]`**: same bits; truncates low bits or zero-extends. `[bool]`: 0 = false. `[char]`: invalid → U+0000, or `InvalidCharacterCodePointException` if a specific catch exists.
-- **Implicit**: only same-family widening (`i8 → i64`, `r32 → r64`) and any type → bool.
+- **Transmute `[type]`**: same bits; truncates low bits or zero-extends. `[bool]`: 0, null, `""`, NaN and `'\0'` are false, anything else is true. `[char]`: invalid → U+0000, or `InvalidCharacterCodePointException` if a specific catch exists.
+- **Implicit**: only widening that keeps the value: same family (`i8 → i64`, `r32 → r64`) and unsigned to a wider signed (`u16 → i32`); any scalar type → bool. An implicit conversion is equivalent to a cast.
 - **Pointers**: created from numbers or other pointers by transmute only (`[*u64]address`); pointer → `addr` also with `=`.
-- **To bool**: numbers 0 / NaN = false; `char` `\0`; `date` / `clock` null; `lapse` zero or null; `string` null/empty; `vec` and tuples not convertible.
+- **To bool**: numbers 0 / NaN = false; `char` `\0`; `date` / `clock` null; `lapse` zero or null; `string` null/empty; collections and tuples cannot be cast or transmuted to bool.
 
 ---
 
@@ -226,8 +228,10 @@ while i < n { }
 
 for u8 i = 0..10 { }
 for u16 i = 0..=100 step i += 2 { }
+for u8 i = 10..=1 { }                 // start > end: counts down
 for char c in "text" { }
 for u64 k in list.keys { }
+for string message in messages { }
 
 break                             // innermost loop
 break Found                       // to label #Found#
@@ -235,6 +239,8 @@ continue                          // no label
 jump #retry#                      // to a label
 ```
 
+- A range whose start is greater than its end counts down.
+- The `for` variable always has a type; an untyped `for x in ...` is a compile error.
 - `break` / `continue` outside a loop: compile error.
 - Jumps go to the same or an outer block, never into an inner one.
 
@@ -244,13 +250,19 @@ jump #retry#                      // to a label
 switch val {
   1: one(), 2: two()
   3, 4, 5: { b = 1; b++ }
+  6..=9:                          // range; the body continues on the next lines
+    b = 2
+    jump 3
   Red: jump 3                     // jump to another case by value
   default: jump #out#             // explicit label
 }
 bool res = val ? { 1: true, default: false }
 string yn = ok ? { "yes", "no" }
+i32 sign = value ? { ..-1: -1, 0: 0, 1..: 1 }
 ```
 
+- Case values: literals, enum entries, sets (`3, 4, 5:`) and ranges (`400..=499:`, `..-1:`, `1..:`); the same in switch expressions.
+- A case body is a block, a statement on the same line (several cases can share a line, separated by commas), or the statements on the following lines up to the next case.
 - No fall-through; `default`; a jump loop between cases is a level 1 warning.
 - Inside a switch, `jump name` targets a case; `jump #name#` always targets a label.
 
@@ -284,9 +296,12 @@ The definition says how a parameter is passed, ownership included. The call mark
 - Native data: integers, reals, chars, bools, enums, pointers. Objects: class instances.
 - A mismatched call is a compile error.
 - Defaults anywhere; named arguments when needed (`hello(age: 27)`).
+- Positional arguments stay in the order of the parameters; named arguments can be written in any position.
 
 ### 9.2 Overloading
 
+- Functions can share a name when the number, the order or the types of their parameters differ; the return type alone doesn't count.
+- A call that matches more than one function is a compile error, including when default values make it ambiguous (`f(i32 a, i32 b = 0)` and `f(i32 a)` with `f(5)`).
 - Literals: the native-size signed type wins (`i64` on 64-bit), even over an exact `i32`.
 - Variables: exact type, then smallest same-family widening; other families are not candidates; still tied → compile error.
 
@@ -304,6 +319,17 @@ list.Filter((x; _limit) { x < limit })     // weak
 - Parameters before `;`, captures after it. **Captures are mandatory**: using an unlisted outer variable is a compile error.
 - Constants need no listing; an unlisted local `const` is copied in automatically (level 1 warning).
 - Function types: `i32(string, u8)`, `fun(i32)` for void.
+
+### 9.4 Variadic parameters
+
+```
+fun LogAll(string level, ...string messages) {
+  for string message in messages { r.Console.Log($"{level}: {message}") }
+}
+LogAll("info", "started", "ready")
+```
+
+- `...T name` accepts any number of `T` arguments; it is equivalent to passing a collection of them.
 
 ---
 
@@ -328,6 +354,7 @@ throw Panic(3)
 - Catches are checked in order: the first one that handles the exception type runs, the following ones are ignored. A catch that doesn't handle the type is skipped, and a later one can.
 - `catch Type` handles that type and its subtypes; a catch can also name a trait.
 - `catch variable` is the same as `catch Exception variable`; it does not handle silent exceptions.
+- `catch { }` (no type, no variable) is the same as `catch all { }`, with a level 2 warning.
 - `catch all [variable]` handles everything, silent exceptions included. After `catch`, `all` is always the catch-all keyword (fixed parser rule), so `catch all all { }` is valid.
 - After a catch that doesn't leave the scope, execution continues with the code after it.
 - `throw` inside a catch (including `throw ex`) passes the exception to the enclosing level; later catches in the same block don't see it.
@@ -340,7 +367,7 @@ class Exception {
   u64 Id
   *ExceptionTrait Descriptor    // extra data to build the specific exception class
   string Message                // max 2 KB
-  string Function               // minified header of the failing function, max 1 KB
+  string Function               // minified header of the failing function, e.g. i32 divide(i32, i32); max 1 KB
   u64 Line                      // debug builds; 0 in release
   StackTrace StackTrace         // debug builds; null in release
 }
@@ -386,6 +413,7 @@ class MySilentException : Exception, SilentException { ... }
 ### 10.5 Panic and exit codes
 
 - `Panic(code)`: critical exit, not an exception; not catchable, no cleanup, exits with `code`.
+- Every panic prints `Panic <code>` on stdout and exits with `code`. An unhandled exception first prints its `Message` on its own line.
 - Unhandled exception at the top level, unhandled error inside a catch body, exception inside `atEnd` while another is propagating, double free: exit with -1000 for now. Every panic case will get its own code later.
 
 ### 10.6 Targets without exceptions
@@ -419,7 +447,7 @@ Item next = queue.Pop()           // if it throws: unlocked
 - May contain `break` and `jump` only within its own block. `return` and `throw` are allowed.
 - `return` inside `atEnd` overrides the function's result on a normal exit. While an exception is passing through, its return value is ignored and the exception keeps propagating.
 - `throw` inside `atEnd` while another exception is propagating → `Panic`.
-- Can use everything in the scope that is still valid.
+- Can use every variable of its scope, wherever declared; a variable whose declaration was not reached holds its zero value (null for objects).
 - Several `atEnd` blocks in a scope run from the last to the first; the last one to run sets the result.
 
 ### 10.9 Class `atEnd`
@@ -494,6 +522,7 @@ map n = { 1: "one", 2: "two" }          // map<native integer, string>
 ## 13. Strings
 
 - UTF-8; `.len` = chars, `.sizeof` = bytes.
+- `""` and null are the same: a null string prints as nothing (`"a" + null + "b"` = `"ab"`); a null value of another type prints `null` (14.1).
 - Small strings: 64 bytes, 1-byte length, up to 62 bytes.
 - Large strings: 32-byte header (char count, byte length, sizeof, block count), content, 8-byte tail (0 or pointer to 4 KB blocks); a compact string is a valid C string.
 - Every type has `toStr()`; class default: `Px { a: Py{}, b: 3, c: BTree{}, … }` (first 3 fields, one level).
@@ -774,7 +803,7 @@ fun printAll<Source : Sequence>(Source items) { ... }
 ```
 alias r Root
 r.GetClock()        r.Now()
-r.Console.Log  .LogError  .GetInput  .GetChar
+r.Console.Log  .LogError .Print .GetInput  .GetChar
 r.Math (= Math64, r64)    r.Math32 (r32 results)
   Sin Cos Tan Asin Acos Atan Atan2(y, x) Sinh Cosh Tanh
   Sqrt Cbrt Pow Exp Ln Log10 Log(x, base)
@@ -782,6 +811,10 @@ r.Math (= Math64, r64)    r.Math32 (r32 results)
   Floor Ceil Round Trunc Hypot Fmod Lerp(a, b, t) InverseLerp(a, b, v)
   constants: Pi PiHalf E Sqrt2 R2D D2R
 ```
+
+`Console.Log()` prints with a newline, `Console.Print()` does not add newline
+
+`Console.GetInput()` returns `""` at end of input, `Console.GetCHar()` returns any printable character or `\0` at end of input
 
 - Type members live on the types: `d.Year`, `d.AddDays(3)`, `s.Split(",")`, `c.IsDigit`, `list.Sort()`.
 - Random: `import stdrnd`; `Rnd rnd = Rnd([u64]r.Now())`; `Int(min, max)`, `RealRange(min, max)` (max excluded), `Real()` in [0, 1], `Seed(u64)`, `Shuffle(c)` for lists, vectors, strings. Generator: later.
@@ -804,8 +837,10 @@ Level 1 = most important, level 3 = least.
 | 1 | Skipped root file | 4.1 |
 | 1 | Unlisted local `const` auto-copied into a lambda | 9.3 |
 | 1 | Jump loop between switch cases | 8.1 |
+| 1 | Variable read before assignment | 4 |
 | 2 | Cast out of range saturates | 6 |
 | 2 | Upward type check | 16 |
+| 2 | `catch { }` without type or variable | 10.1 |
 | 3 | Unmatched `#region` / `#endregion` | 2.2 |
 | 3 | Generic call chosen over comparisons | 17.5 |
 
@@ -814,6 +849,7 @@ Level 1 = most important, level 3 = least.
 ## 20. Open items
 
 - Tuple destructuring on the left
+- Variadic parameters: position in the parameter list, passing an existing collection
 - Locale details
 - Date formatting week rules
 - Conditional compilation (`#if` family)
@@ -892,3 +928,29 @@ Level 1 = most important, level 3 = least.
 - 6 / 7 / 12.2 Out-of-range cast, `[char]` transmute, overflow and missing key are silent exceptions
 - 15 Freeing runs the class `atEnd`
 - 20 Open items: panic codes, missing-key exception name, "Exception" in messages, class `atEnd` with inheritance
+
+---
+
+## Changes in 0.0.5
+
+- 2 `...` is the variadic parameter prefix (was reserved)
+- 3.3 `date − clock` → date lapse
+- 4 Definite assignment: a read before assignment reads the zero value (null for objects), level 1 warning
+- 4 No shadowing of locals: compile error
+- 6 Implicit conversions: also unsigned → wider signed (`u16 → i32`); any scalar type → bool; equivalent to a cast
+- 6 `[bool]` transmute: 0, null, `""`, NaN, `'\0'` are false, anything else true; collections and tuples not convertible
+- 8 Ranges with start > end count down (`10..=1`)
+- 8 The `for` variable always has a type; untyped `for x in` is a compile error
+- 8.1 Case values can be ranges (`400..=499`, `..-1`, `1..`), also in switch expressions
+- 8.1 Case body can continue on the following lines up to the next case
+- 9.1 Positional arguments stay in order; named arguments can go in any position
+- 9.2 Overloading by number, order or types of parameters; the return type alone doesn't count
+- 9.2 An ambiguous call is a compile error, also when caused by default values
+- 9.4 Variadic parameters (new): `...T name`
+- 10.1 `catch { }` = `catch all { }`, level 2 warning
+- 10.2 `Function` format example: `i32 divide(i32, i32)`
+- 10.5 Panic output: `Panic <code>` on stdout; unhandled exception prints its message first
+- 10.8 `atEnd` sees every variable of its scope; an unreached declaration holds its zero value (null for objects)
+- 13 A null string prints as nothing; null values of other types print `null`
+- 19.1 Warnings: variable read before assignment (L1), `catch { }` (L2)
+- 20 Open items: variadic parameter details

@@ -50,12 +50,14 @@ public static class Program {
     output ??= OperatingSystem.IsWindows() ? Path.ChangeExtension(path, ".exe") : Path.ChangeExtension(path, null);
 
     try {
-      var tokens = new Lexer(File.ReadAllText(path)).Tokenize();
-      var tree = new Parser(tokens).ParseProgram();
+      var lexer = new Lexer(File.ReadAllText(path));
+      var tokens = lexer.Tokenize();
+      var parser = new Parser(tokens);
+      var tree = parser.ParseProgram();
       var gen = new CodeGen();
       string c = gen.Generate(tree);
-      foreach (var w in gen.Warnings) {
-        Console.Error.WriteLine(path + w);
+      foreach (var warning in lexer.Warnings.Concat(parser.Warnings).Concat(gen.Warnings)) {
+        Console.Error.WriteLine(path + warning);
       }
       File.WriteAllText(cPath, c);
     } catch (DfException ex) {

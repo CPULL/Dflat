@@ -169,7 +169,7 @@ alias u8 as byte8
 
 - `program.df` > `main.df` > `lib.df`: the first one found is the root (executable, or library for `lib.df`); a skipped root file gives a level 1 warning. `dfcompile -forcelib folder/` forces a library.
 - The root file declares its namespace explicitly; `local` = root namespace + folder path.
-- `alias <original> as <new>`; aliases are pure aliases (interchangeable with the original).
+- `alias <original> as <new>`; aliases are pure aliases (interchangeable with the original). They can also go to members and functions: `alias cons as Root.Console` and `alias log as Root.Console.Log`
 
 ---
 
@@ -873,6 +873,8 @@ Level 1 = most important, level 3 = least.
 
 ---
 
+# Changes
+
 ## Changes in 0.0.3
 
 - 2.1 Labels: allowed characters, at least one letter
@@ -971,3 +973,4 @@ Level 1 = most important, level 3 = least.
 - 8 `break` to a label uses the label syntax: `break #Found#`
 - 18 Typos: "prints a newline", `Console.GetChar()`
 - 19.1 Warning: char compared with an integer (L2)
+- 4.1 added the full definition for aliases that can also go to sub members

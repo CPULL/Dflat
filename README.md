@@ -12,7 +12,18 @@ The compiler reads the files in a directory (and subdirectory) that have extensi
 Right now the generic C STDLib is included as static, in future it will be stripped out.
 
 A Notepad++ language is available for syntax highlighting
+A VS Code language is available for syntax highlighting
 
 
 ## Language specification
 Here in the Git repository: [Language Specification](dflat-spec.md)
+
+## Status of development
+- Language is not yet full defined but it is at 90%
+- Parser covers 99% of the language specification
+- Compiler (transpiler) covers about 20% of the specified language
+- A minimal standard library is being defined and partially built. Around 5% right now.
+- SIMD not started
+- Asm inclusion not started
+- Vulkan not started
+- Entity Framework not started

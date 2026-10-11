@@ -1,0 +1,22 @@
+{
+  "name": "dflat-syntax",
+  "displayName": "DFlat Syntax Highlight",
+  "version": "0.0.1",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "contributes": {
+    "languages": [{
+      "id": "dflat",
+      "aliases": ["Dflat", "dflat"],
+      "extensions": [".df"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "dflat",
+      "scopeName": "source.df",
+      "path": "./syntaxes/dflat.tmLanguage.json"
+    }]
+  }
+}

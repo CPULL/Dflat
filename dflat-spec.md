@@ -537,16 +537,29 @@ map n = { 1: "one", 2: "two" }          // map<native integer, string>
 
 | Function | Definition |
 |---|---|
-| `string <string>.Trim()` | Removes all not printable characters and all type of spaces from both ends of the string |
+| `string <string>.Trim()` | Removes all non-printable characters and all types of spaces from both ends of the string |
 | `string <string>.Trim(string c)` | Removes all specified characters from both ends of the string |
-| `string <string>.TrimLeft()` | Removes all not printable characters and all type of spaces from the left of the string |
+| `string <string>.TrimLeft()` | Removes all non-printable characters and all types of spaces from the left of the string |
 | `string <string>.TrimLeft(string c)` | Removes all specified characters from the left of the string |
-| `string <string>.TrimRight()` | Removes all not printable characters and all type of spaces from the right of the string |
+| `string <string>.TrimRight()` | Removes all non-printable characters and all types of spaces from the right of the string |
 | `string <string>.TrimRight(string c)` | Removes all specified characters from the right of the string |
-| `string <string>.Substr(u32 start, u32 len)` | Produces a string that are the characters from the one specified (zero based) for the len specified. It does not fail if the len goes beyond the end of the original string |
-| `string <string>.Replace(string toFind, string replacement, bool caseSensitive = true)` | Returns a string where all the occurrences of the specified string are replaced with the replacement string |
-| `i64 <string>.IndexOf(string val, bool caseSensitive = true)` | Returns the first position of the specified string |
-| `i64 <string>.IndexOf(char val, bool caseSensitive = true)` | Returns the first position of the specified character |
+| `string <string>.Substr(u32 start, u32 len)` | Produces a string containing the characters starting from `start` (zero-based) up to `len` length. Does not fail if `len` extends past the end |
+| `string <string>.Replace(string toFind, string replacement, bool caseSensitive = true)` | Returns a string where all occurrences of the specified string are replaced with the replacement string |
+| `i64 <string>.IndexOf(string val, bool caseSensitive = true)` | Returns the first zero-based index of the specified string, or `-1` if not found |
+| `i64 <string>.IndexOf(char val, bool caseSensitive = true)` | Returns the first zero-based index of the specified character, or `-1` if not found |
+| `i64 <string>.LastIndexOf(string val, bool caseSensitive = true)` | Returns the last zero-based index of the specified string, or `-1` if not found |
+| `i64 <string>.LastIndexOf(char val, bool caseSensitive = true)` | Returns the last zero-based index of the specified character, or `-1` if not found |
+| `bool <string>.Contains(string val, bool caseSensitive = true)` | Returns `true` if the specified string exists within the string |
+| `bool <string>.StartsWith(string val, bool caseSensitive = true)` | Returns `true` if the string begins with the specified string |
+| `bool <string>.EndsWith(string val, bool caseSensitive = true)` | Returns `true` if the string ends with the specified string |
+| `Array<string> <string>.Split(string separator)` | Splits the string into an array of substrings bounded by the specified separator string |
+| `string <string>.ToLower()` | Returns a copy of the string with all characters converted to lowercase |
+| `string <string>.ToUpper()` | Returns a copy of the string with all characters converted to uppercase |
+| `string <string>.PadLeft(u32 totalWidth, char paddingChar = ' ')` | Pads the left side of the string with `paddingChar` until it reaches `totalWidth` length |
+| `string <string>.PadRight(u32 totalWidth, char paddingChar = ' ')` | Pads the right side of the string with `paddingChar` until it reaches `totalWidth` length |
+| `vec<len, byte> ToCStr(StringEncoding encoding = StringEncoding.UTF8) | Produces a byte array with the representation of the string as regular C string |
+
+`public enum String.StringEncoding { UTF8, UTF16, UTF32, UTF16BE, UTF32BE, ASCII, ISO88591 }`
 
 ---
 

@@ -64,6 +64,8 @@ public sealed partial class CodeGen {
       "i16" or "u16" => 16,
       "i32" or "u32" or "r32" => 32,
       "i64" or "u64" or "r64" => 64,
+      "i128" or "u128" => 128,
+      "i256" or "u256" => 256,
       _ => 0
     };
   }

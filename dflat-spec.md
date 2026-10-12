@@ -1,7 +1,7 @@
 # Dflat Language
 A new language D♭ that is the same as C# but easier to write and faster to execute
 
-**Version** 0.0.5  2026/10/11 by CPU
+**Version** 0.0.6  2026/10/12 by CPU
 
 # D♭ — Dflat Language Specification (draft)
 
@@ -24,9 +24,15 @@ Status: design in progress. Decisions below reflect the latest choices; earlier 
 - **Comments**: `// line` and `/* block */`.
 - **Statement end**: JavaScript rules. A line break ends a statement when the statement can end there; `;` is needed only for several statements on one line.
 - **Identifiers**: cannot start with `_` (underscores inside names are fine).
-- **Naming convention** (not enforced): namespaces lowercase; public classes, methods and members PascalCase; everything else camelCase. Built-in types are lowercase.
+- **Naming rules**:
+  - Types (classes, traits, enums): PascalCase; otherwise level 2 warning. Built-in types are lowercase (`i32`, `string`, `arr`).
+  - Methods: camelCase; PascalCase is also accepted.
+  - Constants declared with `const`: UPPER_SNAKE_CASE (`const u64 SECRET_CODE_PHASE2`); otherwise level 3 warning. Generic value parameters are not constants (`class Matrix<u64 Rows, u64 Cols>`).
+  - Stdlib constants: UPPERCASE or PascalCase (`Math.PI`, `Math.Pi`), never camelCase.
+  - Variables, parameters, fields, properties, enum entries: no imposed case (camelCase suggested for variables and parameters).
+  - `Root` is a global static class giving access to the stdlib; always written `Root`, can be aliased.
 - **`...`**: variadic parameter suffix (9.4); no other use.
-- **Reserved words**: `as` (used in `alias`, 4.1; other uses to be defined).
+- **Reserved words**: `as` (used in `alias`, 4.1; other uses to be defined), `this` (16).
 
 ### 2.1 Labels
 
@@ -96,7 +102,8 @@ Status: design in progress. Decisions below reflect the latest choices; earlier 
 |---|---|
 | `bool` | true / false |
 | `char` | 32-bit Unicode code point |
-| `date` | 64-bit, ms since 1 Jan 1970 UTC; a null `date` is represented by the minimum `i64` value |
+| `date` | instant: 64-bit, ms since 1 Jan 1970 UTC; a null `date` is represented by the minimum `i64` value |
+| `time` | time of day, millisecond resolution; no date, no zone; stored as an `i32` (ms since midnight, max 86,399,999); a null `time` is represented by `-1` |
 | `clock` | u64 monotonic counter, 0.1 ns, from `Clock()`; intervals only; `Clock()` never returns 0; null = 0 |
 | `lapse` | difference between two dates or two clocks (3.3) |
 | `addr` | native type holding an address as a number; size from the target definition (64-bit by default, 16 on C64), stored in the most efficient way; comparison and transmute only, arithmetic through pointer methods (15.1); cannot be dereferenced; prints as hex in groups of 4 digits separated by spaces; null is 0 (unmapped address) |
@@ -121,16 +128,20 @@ Signed 64-bit; raw value = `value × 8 + code`.
 
 | Type | Description |
 |---|---|
-| `vec<N, T>` | fixed size, contiguous (arrays are vectors) |
+| `arr<T>` | array: fixed size set at initialization (compile-time or runtime), contiguous; cannot grow or shrink |
+| `vec<T>` | vector: contiguous and growable (Rust `Vec` rules) |
 | `list<T>` | growable, counted B-tree, O(log n) insert/remove |
-| `map<K, V>` | sorted (B-tree) |
+| `map<K, V>` | sorted map (B-tree); alias `bmap` |
 | `hmap<K, V>` | hash map |
+| `set<T>` | sorted set (B-tree); alias `bset` |
+| `hset<T>` | hash set |
 | tuple | `(i32, string)` or `(i32 val, string name)`; **at least 2 elements**; items by name (`record.label`) or index (`record[1]`) |
 | `string` | UTF-8 text (13) |
 | `dfoot` | Dflat Fast Open Objects Tree (12.3) |
 
 - GUID is defined by the EF layer, platform-specific.
 - Lengths and default indexes are `u64` everywhere.
+- The size of `arr` and the capacity of `vec` are given only at initialization and are not part of the type (12.1).
 - Tuple index: a literal, a `const` or an enum value only; out of range is a compile error. Indexes apply left to right: in an array of tuples, `list[2][1]` is the second item of the third tuple.
 
 ---
@@ -139,7 +150,7 @@ Signed 64-bit; raw value = `value × 8 + code`.
 
 ```
 i32 a = 10
-const i32 limit = 100
+const i32 LIMIT = 100
 var count = 10                      // type inferred
 i32 id, string name = getUser()     // multiple return values
 var userId, var userName = getUser()
@@ -153,7 +164,7 @@ i32 onlyCount, _, bool onlyActive = record       // partial, _ skips an item
 - Definite assignment: reading a variable before it is assigned on every path reads its zero value (null for objects) and gives a level 1 warning.
 - No shadowing of locals: a variable with the same name as a local of an enclosing block is a compile error.
 - `const`: read-only value and pointer, global guarantee.
-- `var`: type taken from the initializer; if it can't be decided → compile error (`var x = null`, `var l = []`). Allowed in multiple returns when the return type is known. Coexists with partial forms like `vec v = [...]` / `map m = {...}`.
+- `var`: type taken from the initializer; if it can't be decided → compile error (`var x = null`, `var l = []`). Allowed in multiple returns when the return type is known. Coexists with partial forms like `arr a = [...]` / `vec v = [...]` / `map m = {...}`.
 - A tuple or literal must be assigned, passed or returned; alone it's a compile error.
 - Tuple destructuring: the items of a tuple can be unpacked into separate variables in one statement; `_` skips an item.
 
@@ -162,20 +173,24 @@ i32 onlyCount, _, bool onlyActive = record       // partial, _ skips an item
 ```
 namespace clinic.planning         // one per file, no braces
 namespace local                   // name from the folder path
-import stdrnd
+import stdrnd                     // full namespace path of the library (to be defined)
 alias Root as r
 alias u8 as byte8
 ```
 
 - `program.df` > `main.df` > `lib.df`: the first one found is the root (executable, or library for `lib.df`); a skipped root file gives a level 1 warning. `dfcompile -forcelib folder/` forces a library.
 - The root file declares its namespace explicitly; `local` = root namespace + folder path.
+- Namespaces are case-insensitive. Namespaces declared in code can use any Unicode letter.
+- `import` takes the full namespace path of what it brings in; a bare name is not enough.
+- Folder names used for `local` namespaces must be ASCII letters, digits and `_` only, no exceptions; any other folder is ignored by the build (level 3 warning). Two folders whose names differ only by case are a compile error.
 - `alias <original> as <new>`; aliases are pure aliases (interchangeable with the original). They can also go to members and functions: `alias Root.Console as c` and `alias Root.Console.Log as log`
 
 ---
 
 ## 5. Nulls
 
-- Value types: nullable only as `type?`. Classes are nullable.
+- Basic native types (integers, reals, `dec`, `bool`, `char`, enums) and tuples are not nullable by default: nullable only as `type?`.
+- Other native types (`string`, `date`, `time`, `clock`, `lapse`, `addr`), pointers and all objects (classes, collections) are nullable by default; `type?` on them is a compile error.
 - Strings: `""` and null are the same; `string` is already nullable, so `string?` is a compile error.
 - Null propagates in arithmetic; equals only null; sorts first.
 - Null object access raises `NullPointerException`; no `x!` force-unwrap.
@@ -188,10 +203,43 @@ alias u8 as byte8
 ## 6. Conversions
 
 - **Cast `(type)`**: keeps the value; out of range saturates (level 2 warning), or raises `OutOfRangeCastException` if a specific catch exists. From `r`: truncates toward zero (Rust rules), +∞ → max, −∞ → min (0 for unsigned), NaN → 0.
+- **To `time`**: a value out of range converts to null and raises `OutOfRangeCastException` if a specific catch exists (silent).
 - **Transmute `[type]`**: same bits; truncates low bits or zero-extends. `[bool]`: 0, null, `""`, NaN and `'\0'` are false, anything else is true. `[char]`: invalid → U+0000, or `InvalidCharacterCodePointException` if a specific catch exists.
-- **Implicit**: only widening that keeps the value: same family (`i8 → i64`, `r32 → r64`) and unsigned to a wider signed (`u16 → i32`); any scalar type → bool. An implicit conversion is equivalent to a cast.
+- **Implicit**: only widening that keeps the value: same family (`i8 → i64`, `r32 → r64`) and unsigned to a wider signed (`u16 → i32`); any scalar type → bool; any type → `string` when the target is a `string` (calls `toStr()`). An implicit conversion is equivalent to a cast.
+- **To string**: a null `string` converts to `""`; a null of any other type converts to `"null"`.
 - **Pointers**: created from numbers or other pointers by transmute only (`[*u64]address`); pointer → `addr` also with `=`.
-- **To bool**: numbers 0 / NaN = false; `char` `\0`; `date` / `clock` null; `lapse` zero or null; `string` null/empty; collections and tuples cannot be cast or transmuted to bool.
+- **To bool**: numbers 0 / NaN = false; `char` `\0`; `date` / `time` / `clock` null; `lapse` zero or null; `string` null/empty; collections and tuples cannot be cast or transmuted to bool.
+
+### 6.1 Parsing text
+
+```
+i32 count = i32.Parse(text, 0)
+i32 total = i32.Parse(text)                       // default: the zero value
+bool parsed = r64.TryParse("12.3", (&)amount)
+i32 code = i32.Parse(text, 0, "0x{bh}")           // with a format
+i32 balance = i32.Parse(text, 0, "{S}{S()}")       // "-10" or "(10)"
+```
+
+- `T T.Parse(string text, T default = zero, string format = none)` and `bool T.TryParse(string text, (&)T result, string format = none)` exist for integers, reals and `dec`. On failure `Parse` returns the default, `TryParse` returns `false`; no exception.
+
+Without a format:
+- Ignorable characters before and after the number are skipped; only the first number is read, and a space or any other non-number character ends it. No digits → the default.
+- `.` is the only decimal symbol (English); thousands separators are not accepted, so `,` ends the number: `"1,234.5"` → `1.0`, `"1.234"` → `1.234`; as integers both give `1`. Locale separators need a format.
+- Integers drop the decimals.
+- Signed types: a `-` right before the digits is the sign (`"x-12"` → `-12`). Unsigned types: a minus gives `0`, or an `OverflowException` if a specific catch exists.
+- Out of range saturates, or raises `OutOfRangeCastException` if a specific catch exists (silent).
+- Reals: exponent accepted (`"1.5e3"` → `1500.0`); `NaN`, `∞`, `-∞`, `INF`, `-INF` are recognized; extra digits round to the nearest representable value. `dec` uses banker's rounding.
+
+With a format:
+- Layout: `"<prefix>{spec}[{alternative}...]<suffix>"`, using the 14.1 options inside the braces. The prefix and suffix are shared by all alternatives; adjacent placeholders are alternatives for the same value, tried in order, the first that matches wins.
+- Parsing is strict: nothing is skipped automatically, not even spaces.
+- Hex digits are case-insensitive. `\{` and `\}` are literal braces.
+- Static text between placeholders makes the format invalid. A mismatch or invalid format gives the default / `false`.
+- For really different inputs, call `TryParse` once per format.
+
+Dates and times:
+- Without a format, a `date` is parsed only from `yyyy-MM-dd [HH[:mm[:ss]]]`, `yyyy/MM/dd [HH[:mm[:ss]]]` or ISO 8601. Input with no zone is UTC; input with a zone is converted to UTC.
+- A `time` is parsed from `HH[:mm[:ss[.fff]]]` (hours `0`–`23`) or `h[:mm[:ss[.fff]]] am/pm` (hours `1`–`12`; `am` / `pm` case-insensitive, with or without a space, at the end; `12 am` is midnight, `12 pm` is noon).
 
 ---
 
@@ -310,6 +358,7 @@ The definition says how a parameter is passed, ownership included. The call mark
 - A call that matches more than one function is a compile error, including when default values make it ambiguous (`f(i32 a, i32 b = 0)` and `f(i32 a)` with `f(5)`).
 - Literals: the native-size signed type wins (`i64` on 64-bit), even over an exact `i32`.
 - Variables: exact type, then smallest same-family widening; other families are not candidates; still tied → compile error.
+- Conversion to `string` always ranks last: with `f(i32)`, `f(u64)` and `f(string)`, `f(33)` picks `f(i32)` on 32-bit and `f(u64)` on 64-bit, never `f(string)`.
 
 ### 9.3 Lambdas
 
@@ -336,6 +385,21 @@ LogAll("info", "started", "ready")
 ```
 
 - `T name...` accepts any number of `T` arguments; it is equivalent to passing a collection of them.
+
+### 9.5 Entry point
+
+```
+fun int main() { return 0 }
+fun main(arr<string> args) { }
+fun int main(string args...) { return 0 }
+```
+
+- A program starts either from top-level code or from a `main` function in the root file (`program.df` / `main.df`, 4.1); having both is a compile error.
+- `main` is a top-level function, outside any class.
+- Return type: `int` (exit code) or void (exit code 0).
+- Parameters: none, `arr<string> args`, or `string args...` (an `arr<string>`).
+- The command-line arguments are also available from `Root.GetArgs()` (18); with a parameter, `args` and `Root.GetArgs()` are the same object.
+- More than one `main` is a compile error; a `main` in a library is a compile error.
 
 ---
 
@@ -386,7 +450,7 @@ class Exception {
 
 ### 10.3 Standard exceptions
 
-`root.Exception` is the base; the standard ones are subclasses in `root`.
+`Root.Exception` is the base; the standard ones are subclasses in `Root`.
 
 | ID | Exception | Silent fallback |
 |---|---|---|
@@ -432,7 +496,7 @@ class MySilentException : Exception, SilentException { ... }
 
 - Rust/Swift style: a failing function returns normally with an **error register** holding 0 or a pointer to an error record; the caller jumps to its `catch` or propagates. Functions that can't fail skip the check.
 - Error record: `{ id, descriptor*, message, subclass fields }`. Descriptor: `{ id, name, parent*, silent flag }`.
-- IDs: 0–255 reserved for `root`, otherwise a hash of the full name. Exact catch = one compare; base-class catch walks the parents.
+- IDs: 0–255 reserved for `Root`, otherwise a hash of the full name. Exact catch = one compare; base-class catch walks the parents.
 - External libraries raise the base types with a short message; richer errors via an exported mapping function.
 
 ### 10.8 Scope `atEnd`
@@ -459,7 +523,7 @@ Item next = queue.Pop()           // if it throws: unlocked
 ### 10.9 Class `atEnd`
 
 ```
-class LogFile : root.Class {
+class LogFile : Root.Class {
   atEnd { handle?.Close() }      // syntax open
 }
 ```
@@ -490,11 +554,21 @@ enum Status { Active, Inactive, Pending: 10 }
 
 ```
 list<i32> l = [1, 2, 3]
-vec v = ["a", "b", "c"]                 // vec<3, string>
+var a = [1, 2, 3]                       // arr<native integer>, 3 elements
+arr names = ["a", "b", "c"]            // arr<string>, 3 elements
+vec v = [1, 2, 3]                       // vec<native integer>
+var buffer = arr<i32>[100]              // 100 elements, not initialized
+arr<i32>[100] samples = []              // same, size on the declaration
+vec<string>[50] parts                   // empty, capacity 50
 map m = { one: 1, two: 2 }              // map<string, native integer>
 map n = { 1: "one", 2: "two" }          // map<native integer, string>
 ```
 
+- Literals are arrays (`arr`) unless declared otherwise.
+- `arr<T>[size]`: the size can be on either side; a mismatch (`arr<i32>[100] a = arr<i32>[120]`) is a compile error.
+- Arrays are not initialized automatically: `a.Fill(value)` sets every element. Reading an element before it is filled or assigned gives a level 1 warning. Arrays of objects start as null.
+- `vec<T>` is empty; `vec<T>[n]` is empty with capacity `n`.
+- Index checks happen at compile time when possible, otherwise at runtime.
 - Types are inferred from literals; integers and reals default to the native size (2.3), mixed `[1, 2.5]` → native real; other mixes are errors; empty literals need a declared type.
 - Map keys are literals (bare names are strings); values may be any expression.
 
@@ -508,13 +582,32 @@ map n = { 1: "one", 2: "two" }          // map<native integer, string>
 | `c[a..b]`, `c[..b]`, `c[a..]` | sub-collection, same type (shallow) |
 | `add(v)`, `add(collection)` | append |
 | `has(v)`, `hasKey(k)` | bool |
-| `indexOf(v)` | lists and vectors |
+| `indexOf(v)` | arrays, vectors, lists |
 | `keyOf(v)` | maps and others |
-| `remove(v)`, `removeAt(k / range)` | not on vectors |
+| `remove(v)`, `removeAt(k / range)` | not on arrays |
 | `tryGet(k, &out[, default])` | maps |
 | `.keys` | keys or positions |
 
 - Missing map key: null or zero value, or an exception if a specific catch exists (silent exception, 10.4).
+
+### 12.2.1 Sets
+
+```
+set<string> tags = []
+bool added = tags.add("red")                 // false if already there
+u64 count = tags.add(otherTags)              // number actually added
+set<string> both = tags.intersection(otherTags)
+tags |= otherTags
+tags -= "red"
+```
+
+- `set` (alias `bset`) is sorted (B-tree); `hset` is a hash set. A value is held once; adding a duplicate is ignored.
+- `add(val)` → `bool` (true if added); `add(collection)` → number actually added; `has(val)` → `bool`; `remove(val)` → `bool`; `clear()`; `.len`.
+- New sets: `union(other)`, `intersection(other)`, `difference(other)` (items of this set not in `other`), `symmetricDifference(other)` (items in one set only).
+- In place: `|=` (union), `&=` (intersection), `-=` (difference), `^=` (symmetric difference); `+=` is the same as `|=`. With a single value, `|=` / `+=` add it and `-=` removes it. No operators that return a new set (`set1 | set2` is not defined).
+- Tests: `isSubsetOf(other)` (every item of this set is in `other`), `isSupersetOf(other)`, `isDisjointFrom(other)` → `bool`.
+- Iteration (`for T item in tags`): sorted for `set`, unspecified order for `hset`.
+- Class elements follow the map key rules (`==` with a matching hash, or ordering for a sorted set).
 - Collections own their elements (15).
 
 ### 12.3 `dfoot`
@@ -531,6 +624,8 @@ map n = { 1: "one", 2: "two" }          // map<native integer, string>
 - `""` and null are the same: a null string prints as nothing (`"a" + null + "b"` = `"ab"`); a null value of another type prints `null` (14.1).
 - Small strings: 64 bytes, 1-byte length, up to 62 bytes.
 - Large strings: 32-byte header (char count, byte length, sizeof, block count), content, 8-byte tail (0 or pointer to 4 KB blocks); a compact string is a valid C string.
+- `text[pos]` reads the character at position `pos` (characters, not bytes); writing by index is open (20).
+- Large strings behave like a StringBuilder: every operation (`+=`, `Replace`, …) works in place on the 4 KB blocks, without copying the existing text.
 - Every type has `toStr()`; class default: `Px { a: Py{}, b: 3, c: BTree{}, … }` (first 3 fields, one level).
 
 ### String functions
@@ -552,12 +647,12 @@ map n = { 1: "one", 2: "two" }          // map<native integer, string>
 | `bool <string>.Contains(string val, bool caseSensitive = true)` | Returns `true` if the specified string exists within the string |
 | `bool <string>.StartsWith(string val, bool caseSensitive = true)` | Returns `true` if the string begins with the specified string |
 | `bool <string>.EndsWith(string val, bool caseSensitive = true)` | Returns `true` if the string ends with the specified string |
-| `Array<string> <string>.Split(string separator)` | Splits the string into an array of substrings bounded by the specified separator string |
+| `arr<string> <string>.Split(string separator)` | Splits the string into an array of substrings bounded by the specified separator string |
 | `string <string>.ToLower()` | Returns a copy of the string with all characters converted to lowercase |
 | `string <string>.ToUpper()` | Returns a copy of the string with all characters converted to uppercase |
 | `string <string>.PadLeft(u32 totalWidth, char paddingChar = ' ')` | Pads the left side of the string with `paddingChar` until it reaches `totalWidth` length |
 | `string <string>.PadRight(u32 totalWidth, char paddingChar = ' ')` | Pads the right side of the string with `paddingChar` until it reaches `totalWidth` length |
-| `vec<len, byte> ToCStr(StringEncoding encoding = StringEncoding.UTF8) | Produces a byte array with the representation of the string as regular C string |
+| `arr<byte> <string>.ToCStr(StringEncoding encoding = StringEncoding.UTF8)` | Produces a byte array with the representation of the string as regular C string |
 
 `public enum String.StringEncoding { UTF8, UTF16, UTF32, UTF16BE, UTF32BE, ASCII, ISO88591 }`
 
@@ -704,7 +799,7 @@ bool onCache = r.Alignment.IsAlignedCache(samples)
 | `IsAligned<T>(p)` | `bool`, against `Type<T>()` |
 | `IsAlignedCache(p)` | `bool`, against `Cache` |
 
-- All values are compile-time constants, usable in `vec<…>` sizes and value parameters.
+- All values are compile-time constants, usable in array sizes and value parameters.
 - `Arch` comes from the target definition; `Cache` from a compiler option, default 64. Builds for other cache sizes use specific targeted compilations.
 
 ### 15.3 Volatile
@@ -725,7 +820,7 @@ fun wait(volatile &clock now) { }
 ## 16. Classes and traits
 
 ```
-public class Circle(r64 radius) : root.Class, Shape {
+public class Circle(r64 radius) : Root.Class, Shape {
   public Circle() : Circle(1.0), Named("circle")
   public override fun r64 Area() { r.Math.Pi * radius * radius }
 }
@@ -740,8 +835,9 @@ trait Shape : Named { fun r64 Area() }
 ```
 
 - No `new`: `Circle c = Circle(2.0)`.
+- `this` is the current object. It is optional (members are reachable by name) and needed only to disambiguate (`this.name = name`). It can be passed as an argument (`registry.Add(this)`), following the normal parameter rules; `->this` is a compile error (an object cannot give away its own ownership).
 - Primary constructor parameters become fields; secondary constructors chain `: Class(...)`, plus trait constructors.
-- Single parent class; any number of traits; base of everything: `root.Class`.
+- Single parent class; any number of traits; base of everything: `Root.Class`.
 - Traits are implemented only in the class header; a trait cannot be added to an existing type (built-in or library) from outside its declaration.
 - Construction order: parent, traits in listed order, class body.
 - `override` mandatory; `parent.Method()` reaches the overridden version.
@@ -788,7 +884,7 @@ trait Container<Item> {
   fun Add(->Item value)
 }
 
-class Names : root.Class, Container<string> { ... }
+class Names : Root.Class, Container<string> { ... }
 class Cache<Key : Hashable, Value> { hmap<Key, Value> entries }
 
 Stack<i32> numbers = Stack<i32>()
@@ -800,7 +896,7 @@ Stack<i32> numbers = Stack<i32>()
 ### 17.3 Value parameters
 
 ```
-class Grid<u64 Width, u64 Height, Cell> { vec<Width * Height, Cell> cells }
+class Grid<u64 Width, u64 Height, Cell> { arr<Cell>[Width * Height] cells }
 ```
 
 - A value parameter is declared with its type first; it is a compile-time constant and part of the type.
@@ -816,7 +912,7 @@ trait Sequence {
   fun Item? Next()
 }
 
-class Countdown : root.Class, Sequence with (Item is u32) { ... }
+class Countdown : Root.Class, Sequence with (Item is u32) { ... }
 
 fun printAll<Source : Sequence>(Source items) { ... }
 ```
@@ -835,6 +931,31 @@ fun printAll<Source : Sequence>(Source items) { ... }
 ## 18. Standard library (first sketch)
 - Type members live on the types: `d.Year`, `d.AddDays(3)`, `s.Split(",")`, `c.IsDigit`, `list.Sort()`.
 - To add: strings, chars, parsing, files, paths, environment, time.
+
+### Program
+
+| Definition | Example | Description |
+|---|---|---|
+| `arr<string> GetArgs()` | `arr<string> args = Root.GetArgs()` | Returns the command-line arguments; index 0 is the program name (as in C and Rust). Returns an empty array when there are no arguments and no program name (e.g. micro-controllers). Same object as the `args` parameter of `main` (9.5) |
+
+### Chars
+Tests follow Unicode categories. `ToUpper` / `ToLower` are culture-invariant for now (locale: open item).
+
+| Definition | Description |
+|---|---|
+| `bool <char>.IsLetter()` | Unicode letter |
+| `bool <char>.IsDigit()` | Unicode decimal digit |
+| `bool <char>.IsLetterOrDigit()` | Letter or digit |
+| `bool <char>.IsWhiteSpace()` | Unicode white space |
+| `bool <char>.IsUpper()` | Uppercase letter |
+| `bool <char>.IsLower()` | Lowercase letter |
+| `bool <char>.IsHexDigit()` | `0`–`9`, `a`–`f`, `A`–`F` |
+| `bool <char>.IsPunctuation()` | Unicode punctuation |
+| `bool <char>.IsSymbol()` | Unicode symbol |
+| `bool <char>.IsControl()` | Control character |
+| `bool <char>.IsAscii()` | Code point below 128 |
+| `char <char>.ToUpper()` | Uppercase form, culture-invariant |
+| `char <char>.ToLower()` | Lowercase form, culture-invariant |
 
 ### Console
 Access to stdinput and stdoutput and stderror
@@ -858,6 +979,8 @@ Mostly used to get current date and time and to measure elapsed at nanosecond sc
 | `` | `` |  |
 
 - `date`, `clock` and `lapse` are already nullable (`date?` is a compile error) and a variable of these types without a value starts as null. A `clock` prints as its number, a `lapse` as its number in its own unit, and null as `null`.
+- `time` (3.2) is the time of day, millisecond resolution; parsing in 6.1.
+- Calendar dates and zoned date-times are classes, `CalendarDate` and `ZonedDateTime`, in an optional DateTime library: available only when imported, so programs that don't need them stay small. Import path, timezone database and parsing: to be defined with the library. There is no local date-time type: a generic zone covers wall-clock values.
 - `date - date` and `clock - clock` give a `lapse`. Two values of the same type can be compared; a null date or clock sorts first.
 
 ### Math
@@ -914,7 +1037,7 @@ A simple random number generator is included in the standard library. The algori
 | `Int` | `i64 Int(i64 min, i64 max)` | Returns a random integer between the minimum number and the maximum number (both included, no bias); the two are swapped if `min` is greater than `max` |
 | `RealRange` | `r64 RealRange(r64 min, r64 max)` | Returns a random real number between the minimum number and the maximum number (max excluded) |
 | `Real` | `r64 Real()` | Returns a real value in the range [0, 1] (1 is included) |
-| `Shuffle` | `Shuffle(collection)` | Randomize the order of elements in an ordered collection. It is valid for lists, vectors, strings (needs collections: not available yet) |
+| `Shuffle` | `Shuffle(collection)` | Randomize the order of elements in an ordered collection. It is valid for arrays, vectors, lists, strings (needs collections: not available yet) |
 | `` | `` |  |
 
 ---
@@ -935,11 +1058,15 @@ Level 1 = most important, level 3 = least.
 | 1 | Unlisted local `const` auto-copied into a lambda | 9.3 |
 | 1 | Jump loop between switch cases | 8.1 |
 | 1 | Variable read before assignment | 4 |
+| 1 | Array element read before fill or assignment | 12.1 |
 | 2 | Cast out of range saturates | 6 |
 | 2 | Upward type check | 16 |
+| 2 | Type name not PascalCase | 2 |
 | 2 | `catch { }` without type or variable | 10.1 |
 | 2 | Char compared with an integer | 7 |
 | 3 | Unmatched `#region` / `#endregion` | 2.2 |
+| 3 | `const` name not UPPER_SNAKE_CASE | 2 |
+| 3 | Folder ignored (invalid name) | 4.1 |
 | 3 | Generic call chosen over comparisons | 17.5 |
 
 ---
@@ -954,8 +1081,11 @@ Level 1 = most important, level 3 = least.
 - Name of the missing-map-key exception
 - Whether standard messages keep the word "Exception"
 - Class `atEnd`: syntax, order with parent classes and traits
-- Stdlib: strings, files, time, collections extras (insert, clear, sets, queue/stack)
-- Pointers: automatic bound for `&` on `vec` / `list`; bound methods on unbounded pointers
+- Stdlib: strings, files, time, collections extras (insert, clear, queue/stack)
+- Writing a character by index into a string (`text[3] = 'x'`)
+- DateTime library: import path, timezone database, parsing for `CalendarDate` / `ZonedDateTime`
+- Import paths of the standard library parts (`import stdrnd`)
+- Pointers: automatic bound for `&` on `arr` / `vec` / `list`; bound methods on unbounded pointers
 - `addr` in `dfoot` (fixed memory maps ok, runtime addresses problematic)
 - Safe / unsafe logic
 - Function pointers (objects); C function tables (COM vtables, Vulkan dispatch tables)
@@ -1054,15 +1184,6 @@ Level 1 = most important, level 3 = least.
 - 19.1 Warnings: variable read before assignment (L1), `catch { }` (L2)
 - 20 Open items: variadic parameter details
 
-### Third update (same version)
-
-- 2 / 9.4 / 18 Variadic parameters are written `T name...` (was `...T name`)
-- 18 Standard library implemented: Console (`Read`, `ReadLine`), Time (`Now`, `Clock`), Math and Math32, Random
-- 18 Math: `Min`, `Max`, `Clamp` propagate NaN; `Round` halves away from zero; integer versions of `Abs`, `Sign`, `Min`, `Max`, `Clamp`
-- 18 Random: fixed algorithm, default seed from the time, `Int` swaps `min` and `max` if reversed; `Shuffle` waits for collections
-- 18 Time: `date` prints as ISO 8601 UTC; `date`, `clock` and `lapse` with null, comparison and subtraction
-- 4.1 `alias Root as r` is the form everywhere (the parser now reads it, with dotted names)
-
 ### Second update (same version)
 
 - 2 `as` is a reserved word (used in `alias`)
@@ -1074,3 +1195,57 @@ Level 1 = most important, level 3 = least.
 - 18 Typos: "prints a newline", `Console.GetChar()`
 - 19.1 Warning: char compared with an integer (L2)
 - 4.1 added the full definition for aliases that can also go to sub members
+
+### Third update (same version)
+
+- 2 / 9.4 / 18 Variadic parameters are written `T name...` (was `...T name`)
+- 18 Standard library implemented: Console (`Read`, `ReadLine`), Time (`Now`, `Clock`), Math and Math32, Random
+- 18 Math: `Min`, `Max`, `Clamp` propagate NaN; `Round` halves away from zero; integer versions of `Abs`, `Sign`, `Min`, `Max`, `Clamp`
+- 18 Random: fixed algorithm, default seed from the time, `Int` swaps `min` and `max` if reversed; `Shuffle` waits for collections
+- 18 Time: `date` prints as ISO 8601 UTC; `date`, `clock` and `lapse` with null, comparison and subtraction
+- 4.1 `alias Root as r` is the form everywhere (the parser now reads it, with dotted names)
+
+---
+
+## Changes in 0.0.6
+
+- 3.4 / 12.1 `arr<T>` (new): array, fixed size set at initialization (compile-time or runtime), not part of the type; replaces `vec<N, T>`
+- 3.4 / 12.1 `vec<T>` is now the growable vector (Rust `Vec` rules); `vec<T>[n]` is empty with capacity `n`
+- 12.1 Literals are arrays unless declared otherwise; size on either side of the declaration, mismatch is a compile error
+- 12.1 Arrays are not initialized automatically; `Fill(value)`; reading before fill or assignment is a level 1 warning; arrays of objects start as null
+- 5 Nullability: basic native types and tuples need `type?`; other native types, pointers and objects are nullable by default
+- 6 Implicit conversion to `string` when the target is a `string`; null `string` → `""`, other nulls → `"null"`
+- 9.2 Conversion to `string` always ranks last in overloading
+- 13 `Split` returns `arr<string>`; `ToCStr` returns `arr<byte>`
+- 15.2 / 17.3 / 18 / 20 `vec<N, T>` references updated to `arr`
+- 12.2 `indexOf` on arrays, vectors, lists; `remove` / `removeAt` not on arrays (vectors are now growable)
+- 19.1 Warning: array element read before fill or assignment (L1)
+- Changelog: 0.0.5 updates in order
+
+### Second update (same version)
+
+- 2 Naming rules: types PascalCase (L2 warning), methods camelCase or PascalCase, `const` UPPER_SNAKE_CASE (L3 warning), stdlib constants UPPERCASE or PascalCase, no imposed case for variables, parameters, fields, properties, enum entries; generic value parameters are not constants
+- 2 `Root` is a global static class (stdlib access), always written `Root`
+- 4 Example `const i32 LIMIT`
+- 4.1 Namespaces case-insensitive, Unicode allowed in code; folder names ASCII letters, digits and `_` only (others ignored, L3); folders differing only by case are a compile error
+- 10.3 / 10.7 / 10.9 / 16 / 17 Lowercase `root` fixed to `Root` (`Root.Class`, `Root.Exception`)
+- 19.1 Warnings: type name not PascalCase (L2), `const` not UPPER_SNAKE_CASE (L3), folder ignored (L3)
+
+### Third update (same version)
+
+- 2 / 16 `this`: reserved, optional, usable as an argument; `->this` is a compile error
+- 3.2 `date` is the UTC instant; new native type `time` (time of day, ms); `time` is nullable like the other non-basic native types (5)
+- 3.4 / 12.2.1 Sets (new): `set` (alias `bset`, B-tree) and `hset` (hash); members, new-set operations, in-place operators, subset tests, iteration order; `map` alias `bmap`
+- 4.1 `import` takes a full namespace path
+- 6.1 Parsing text (new): `Parse` / `TryParse` for integers, reals, `dec`; lenient rules without a format, strict format with alternatives; date and time default formats; no zone means UTC
+- 13 `text[pos]` reads a character; large strings behave like a StringBuilder
+- 18 `CalendarDate` and `ZonedDateTime` as classes in an optional DateTime library; no local date-time type
+- 20 Open items: writing by index into a string, DateTime library details, standard library import paths
+
+### Fourth update (same version)
+
+- 3.2 `time` stored as an `i32` (ms since midnight); null is `-1`
+- 6 Cast to `time`: out of range gives null, `OutOfRangeCastException` if a specific catch exists (silent)
+- 9.5 Entry point (new): top-level code or `main`, not both; `main` top-level function; `int` or void return; parameters none, `arr<string> args` or `string args...`; more than one `main`, or `main` in a library, is a compile error
+- 18 Program (new): `Root.GetArgs()` returns `arr<string>`, program name at index 0, empty array when there is none; same object as the `args` of `main`
+- 18 Chars (new): `IsLetter`, `IsDigit`, `IsLetterOrDigit`, `IsWhiteSpace`, `IsUpper`, `IsLower`, `IsHexDigit`, `IsPunctuation`, `IsSymbol`, `IsControl`, `IsAscii`, `ToUpper`, `ToLower`; Unicode tests; case conversion culture-invariant for now

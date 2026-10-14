@@ -4,9 +4,15 @@ namespace dfcompiler;
 
 // One standard library function (spec 18). Params are Dflat type names; "any" takes any value as text.
 // A variadic function repeats Params[0] (MinArgs or more) and folds the C function over the arguments.
-sealed record StdFun(string[] Params, string Ret, string CName, bool Variadic = false, int MinArgs = 0);
+// Tail: C arguments added after the given ones (the defaults of omitted parameters).
+// Silent: a silent standard exception the C function can leave a note of (spec 15.4).
+// Needs: runtime parts the C function uses ("text", "date", "u:<unicode table>").
+// Names: parameter names for named arguments (caseSensitive: false).
+sealed record StdFun(string[] Params, string Ret, string CName, bool Variadic = false, int MinArgs = 0,
+  string Tail = "", string? Silent = null, string[]? Needs = null, string[]? Names = null);
 
-// Standard library: Console, Time, Math, Math32, Random. Built into the compiler; the C side is in Runtime.cs.
+// Standard library: Program, Console, Time, Math, Math32, Random, the string and char functions and the date and time
+// members. Built into the compiler; the C side is in Runtime.cs, RuntimeText.cs, RuntimeDate.cs and UnicodeTables.cs.
 public sealed partial class CodeGen {
   static readonly string[] IntTypes = { "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64" };
 
@@ -33,6 +39,8 @@ public sealed partial class CodeGen {
       overloads.Add(fun);
     }
     StdFun Fixed(string ret, string cname, params string[] ps) => new(ps, ret, cname);
+
+    Add("Root.GetArgs", Fixed("arr<string>", "df_get_args"));
 
     Add("Root.Console.Log", Fixed("void", "df_console_log", "any"));
     Add("Root.Console.LogError", Fixed("void", "df_console_log_error", "any"));
@@ -77,12 +85,27 @@ public sealed partial class CodeGen {
         Add("Root.Math.Sign", Fixed(t, "df_sign_" + t, t));
       }
     }
+    AddDateStdlib(Add);
     return table;
   }
 
-  Expr StdCall(string path, List<StdFun> overloads, List<Node> args, Scope scope, Node at) {
+  // receiver: the C code of the value a method is called on (it becomes the first C argument)
+  Expr StdCall(string path, List<StdFun> overloads, List<Node> args, Scope scope, Node at, string? receiver = null) {
     if (args.Any(arg => arg.Kind == "Named")) {
-      throw Error("named arguments are not supported here", at);
+      // each overload orders the arguments its own way; the ones that cannot take these names drop out
+      var viable = new List<(StdFun Fun, List<Node> Args)>();
+      foreach (var overload in overloads) {
+        var ordered = NamedOrder(overload, args);
+        if (ordered != null) {
+          viable.Add((overload, ordered));
+        }
+      }
+      if (viable.Count == 0) {
+        throw Error($"no overload of {path} takes these argument names", at);
+      }
+      var picked = viable.Count == 1 ? viable[0] : PickByCost(path, viable, scope, at);
+      overloads = new List<StdFun> { picked.Fun };
+      args = picked.Args;
     }
     bool CountFits(StdFun f) => f.Variadic ? args.Count >= f.MinArgs : args.Count == f.Params.Length;
     var sameCount = overloads.Where(CountFits).ToList();
@@ -125,11 +148,20 @@ public sealed partial class CodeGen {
     }
 
     var codes = new List<string>();
+    if (receiver != null) {
+      codes.Add(receiver);
+    }
     for (int index = 0; index < args.Count; index++) {
       string paramType = chosen.Variadic ? chosen.Params[0] : chosen.Params[index];
       codes.Add(paramType == "any"
         ? StrOf(ExprOf(args[index], scope), args[index])
         : Convert(ExprOf(args[index], scope, paramType), paramType, args[index]));
+    }
+    if (chosen.Tail != "") {
+      codes.Add(chosen.Tail);
+    }
+    foreach (string need in chosen.Needs ?? Array.Empty<string>()) {
+      NeedChunk(need);
     }
     string call;
     if (chosen.Variadic) {
@@ -140,38 +172,91 @@ public sealed partial class CodeGen {
     } else {
       call = $"{chosen.CName}({string.Join(", ", codes)})";
     }
+    if (chosen.Silent != null) {
+      call = SilentCall(call, chosen.Ret, chosen.Silent, at);
+    }
     return new Expr(call, chosen.Ret);
   }
-}
 
-// Operators on date, clock and lapse (spec 3.2, 3.3).
-public sealed partial class CodeGen {
-  Expr TimeOp(string op, Expr l, Expr r, Node at) {
-    if (op is "==" or "!=") {
-      string equal = EqualsCode(l, r, at);
-      return new Expr(op == "==" ? equal : $"(!{equal})", "bool");
+  // the arguments in the order of the parameters, or null when the names do not fit
+  static List<Node>? NamedOrder(StdFun f, List<Node> args) {
+    if (f.Names == null || f.Variadic) {
+      return null;
     }
-    if (l.Type == "null") {
-      l = new Expr(NullCode(r.Type), r.Type);
-    }
-    if (r.Type == "null") {
-      r = new Expr(NullCode(l.Type), l.Type);
-    }
-    if (l.Type != r.Type) {
-      throw Error($"cannot apply '{op}' to {l.Type} and {r.Type}", at);
-    }
-    if (op is "<" or "<=" or ">" or ">=") {
-      if (l.Type == "lapse") {
-        throw Error("lapses of different units cannot be ordered yet", at);
+    var slots = new Node?[f.Params.Length];
+    int next = 0;
+    foreach (var arg in args.Where(arg => arg.Kind != "Named")) {
+      if (next >= slots.Length) {
+        return null;
       }
-      return new Expr($"({l.Code} {op} {r.Code})", "bool");   // a null date or clock sorts first
+      slots[next++] = arg;
     }
-    if (op == "-" && l.Type == "date") {
-      return new Expr($"df_date_diff({l.Code}, {r.Code})", "lapse");
+    foreach (var arg in args.Where(arg => arg.Kind == "Named")) {
+      int index = Array.IndexOf(f.Names, arg.Text);
+      if (index < 0 || index >= slots.Length || slots[index] != null) {
+        return null;
+      }
+      slots[index] = arg.Children[0];
     }
-    if (op == "-" && l.Type == "clock") {
-      return new Expr($"df_clock_diff({l.Code}, {r.Code})", "lapse");
+    return slots.Any(slot => slot == null) ? null : slots.Select(slot => slot!).ToList();
+  }
+
+  (StdFun Fun, List<Node> Args) PickByCost(string path, List<(StdFun Fun, List<Node> Args)> candidates, Scope scope, Node at) {
+    var costs = new List<((StdFun Fun, List<Node> Args) Candidate, int Cost)>();
+    foreach (var candidate in candidates) {
+      int total = 0;
+      bool fits = true;
+      for (int index = 0; index < candidate.Args.Count && fits; index++) {
+        int? cost = ArgCost(candidate.Args[index], candidate.Fun.Params[index], scope);
+        if (cost == null) {
+          fits = false;
+        } else {
+          total += cost.Value;
+        }
+      }
+      if (fits) {
+        costs.Add((candidate, total));
+      }
     }
-    throw Error($"operator '{op}' doesn't apply to {l.Type} and {r.Type}", at);
+    if (costs.Count == 0) {
+      throw Error($"no overload of {path} matches these arguments", at);
+    }
+    int best = costs.Min(entry => entry.Cost);
+    var winners = costs.Where(entry => entry.Cost == best).ToList();
+    if (winners.Count != 1) {
+      throw Error($"ambiguous call to {path}; use a cast or a suffix on the literal", at);
+    }
+    return winners[0].Candidate;
+  }
+
+  // A call that may leave a note of a silent exception: raised only when a catch for it can be reached
+  // from here (same function); otherwise the call just returns its fallback value (spec 15.4).
+  string SilentCall(string call, string type, string exceptionName, Node at) {
+    int id = ExceptionId(exceptionName) ?? throw Error($"unknown exception {exceptionName}", at);
+    string temp = NewTemp();
+    if (!SilentCaught(id)) {
+      return $"({{ {CType(type)} {temp} = {call}; df_silent_desc = NULL; {temp}; }})";
+    }
+    string note = NewTemp();
+    return $"({{ {CType(type)} {temp} = {call}; const df_descriptor* {note} = df_silent_desc; df_silent_desc = NULL; "
+      + $"if ({note}) {{ df_raise({note}, {fn!.NameConst}); {RaiseJump} }} {temp}; }})";
+  }
+
+  // is there a catch above this statement that handles this exception id (its own type, or catch all)?
+  bool SilentCaught(int id) {
+    if (handlerOverride != null || frames.Count == 0) {
+      return false;
+    }
+    for (var frame = frames.Peek(); frame != null; frame = frame.Parent) {
+      foreach (var (index, node) in frame.Catches) {
+        if (index > frame.CurrentIndex) {
+          var (caught, _) = CatchTarget(node);
+          if (caught == null || caught == id) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
   }
 }

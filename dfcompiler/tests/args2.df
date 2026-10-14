@@ -1,0 +1,4 @@
+alias Root as r
+fun main(arr<string> args) {
+  r.Console.Log("no int: " + args.len.toStr())
+}

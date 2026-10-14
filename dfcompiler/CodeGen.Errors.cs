@@ -93,7 +93,13 @@ public sealed partial class CodeGen {
     ["OutOfMemoryException"] = 15,
     ["ChangingRefCountTypeException"] = 16,
     ["OutOfRangeCastException"] = 17,
-    ["InvalidCharacterCodePointException"] = 18
+    ["InvalidCharacterCodePointException"] = 18,
+    ["IndexOutOfRangeException"] = 19,
+    ["ModifyingProtectedSourceException"] = 20,
+    ["NaNUsedAsKeyException"] = 21,
+    ["InvalidMapKeyException"] = 22,
+    ["EmptyVectorAccessException"] = 23,
+    ["InvalidDateTimeFormatException"] = 24
   };
 
   readonly Stack<Frame> frames = new();
@@ -148,6 +154,7 @@ public sealed partial class CodeGen {
       "Throw" => !(node.Children[0].Kind == "Call" && node.Children[0].Children[0].Kind == "Name"
         && node.Children[0].Children[0].Text == "Panic"),
       "Binary" => node.Text is "/" or "%",
+      "Index" => node.Children.Count == 2 && node.Children[0].Kind != "GenericRef" && node.Children[1].Kind != "Empty",
       "Assign" => node.Text is "/=" or "%=",
       _ => false
     };
@@ -238,7 +245,7 @@ public sealed partial class CodeGen {
       }
       var mods = decl.Children.FirstOrDefault(child => child.Kind == "Mods");
       bool isConst = mods?.Text?.Split(' ').Contains("const") == true;
-      string type = ResolveType(decl.Children.First(child => TypeNodeKinds.Contains(child.Kind)));
+      string type = ResolveDeclType(decl, frame.ParentScope);
       frame.Hoisted[name] = new VarInfo(type, $"v_{name}_{frame.Id}", isConst);
     }
     foreach (var statement in frame.Statements) {

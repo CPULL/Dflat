@@ -1,0 +1,15 @@
+alias Root as r
+fun LogAll(string level, string messages...) {
+  for string message in messages { r.Console.Log($"{level}: {message}") }
+}
+fun i32 total(i32 first, i32 numbers...) {
+  i32 sum = first
+  for i32 number in numbers { sum += number }
+  return sum
+}
+LogAll("info", "started", "ready")
+LogAll("warn")
+r.Console.Log(total(1))
+r.Console.Log(total(1, 2, 3))
+arr<i32> more = [10, 20]
+r.Console.Log(total(5, more))

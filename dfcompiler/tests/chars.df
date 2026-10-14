@@ -1,0 +1,43 @@
+// Char functions (spec 4.1)
+alias Root as r
+
+fun string describe(char c) {
+  string s = ""
+  if c.IsLetter() then s += "letter "
+  if c.IsDigit() then s += "digit "
+  if c.IsLetterOrDigit() then s += "alnum "
+  if c.IsWhiteSpace() then s += "space "
+  if c.IsUpper() then s += "upper "
+  if c.IsLower() then s += "lower "
+  if c.IsHexDigit() then s += "hex "
+  if c.IsPunctuation() then s += "punct "
+  if c.IsSymbol() then s += "symbol "
+  if c.IsControl() then s += "control "
+  if c.IsAscii() then s += "ascii "
+  return s.Trim()
+}
+
+r.Console.Log("a: " + describe('a'))
+r.Console.Log("Z: " + describe('Z'))
+r.Console.Log("7: " + describe('7'))
+r.Console.Log("f: " + describe('f'))
+r.Console.Log("g: " + describe('g'))
+r.Console.Log("space: " + describe(' '))
+r.Console.Log("!: " + describe('!'))
+r.Console.Log("+: " + describe('+'))
+r.Console.Log("$: " + describe('$'))
+r.Console.Log("tab: " + describe('\t'))
+r.Console.Log("é: " + describe('é'))
+r.Console.Log("Ω: " + describe('Ω'))
+r.Console.Log("٣: " + describe('٣'))
+r.Console.Log("€: " + describe('€'))
+r.Console.Log("nbsp: " + describe('\u{00A0}'))
+r.Console.Log("中: " + describe('中'))
+
+r.Console.Log('a'.ToUpper())
+r.Console.Log('Q'.ToLower())
+r.Console.Log('é'.ToUpper())
+r.Console.Log('Σ'.ToLower())
+r.Console.Log('1'.ToUpper())
+string word = "abc"
+r.Console.Log(word[0].ToUpper())

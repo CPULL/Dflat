@@ -4,7 +4,7 @@ using dfparser;
 namespace dfcompiler;
 
 public static class Program {
-  public const string Version = "0.0.1alpha";
+  public const string Version = "0.0.7alpha";
 
   public static int Main(string[] args) {
     string? path = null;
@@ -12,8 +12,14 @@ public static class Program {
     string? cc = Environment.GetEnvironmentVariable("DFLAT_CC");
     bool emitOnly = false;
     bool run = false;
+    var programArgs = new List<string>();
 
     for (int i = 0; i < args.Length; i++) {
+      if (args[i] == "--") {
+        // everything after -- goes to the program (with --run)
+        programArgs.AddRange(args.Skip(i + 1));
+        break;
+      }
       switch (args[i]) {
         case "-version":
         case "--version":
@@ -38,7 +44,7 @@ public static class Program {
     }
 
     if (path == null) {
-      Console.Error.WriteLine("usage: dfcompiler <file.df> [-o out] [--emit-c] [--run] [--cc path-to-clang] | -version");
+      Console.Error.WriteLine("usage: dfcompiler <file.df> [-o out] [--emit-c] [--run] [--cc path-to-clang] [-- program arguments] | -version");
       return 2;
     }
     if (!File.Exists(path)) {
@@ -97,7 +103,7 @@ public static class Program {
 
     if (run) {
       Console.WriteLine("---- run ----");
-      int exit = RunProcess(Path.GetFullPath(output), new List<string>());
+      int exit = RunProcess(Path.GetFullPath(output), programArgs);
       Console.WriteLine($"---- exit code {exit} ----");
     }
     return 0;

@@ -21,10 +21,14 @@ public sealed partial class CodeGen {
   static bool IsMulti(string type) => type.StartsWith('*');
   bool IsEnum(string type) => enums.ContainsKey(type);
 
-  static bool IsTimeType(string t) => t is "date" or "clock" or "lapse";
+  static bool IsTimeType(string t) => t is "date" or "time" or "clock" or "lapse";
 
-  // the null of date, clock and lapse (spec 3.2, 3.3)
-  static string NullCode(string t) => t == "date" ? "INT64_MIN" : $"(({PrimitiveCType(t)})0)";
+  // the null of date, time, clock and lapse (spec 3.2, 3.3)
+  static string NullCode(string t) => t switch {
+    "date" => "INT64_MIN",
+    "time" => "(-1)",
+    _ => $"(({PrimitiveCType(t)})0)"
+  };
 
   static bool IsInt(string t) => SignedTypes.Contains(t) || UnsignedTypes.Contains(t);
   static bool IsNumeric(string t) => IsInt(t) || RealTypes.Contains(t);
@@ -40,7 +44,7 @@ public sealed partial class CodeGen {
 
   bool IsKnownType(string t) {
     return SignedTypes.Contains(t) || UnsignedTypes.Contains(t) || RealTypes.Contains(t)
-      || t is "bool" or "char" or "string" or "byte" or "date" or "clock" or "lapse" || IsEnum(t);
+      || t is "bool" or "char" or "string" or "byte" or "date" or "time" or "clock" or "lapse" || IsEnum(t);
   }
 
   static string Normalize(string t) => t == "byte" ? "u8" : t;
@@ -140,6 +144,7 @@ public sealed partial class CodeGen {
       "char" => "uint32_t",
       "string" => "df_string",
       "date" => "int64_t",
+      "time" => "int32_t",
       "clock" => "uint64_t",
       "lapse" => "int64_t",
       "void" => "void",
@@ -159,6 +164,9 @@ public sealed partial class CodeGen {
     }
     if (IsTuple(type)) {
       return TupleCType(type);
+    }
+    if (IsArr(type)) {
+      return ArrCType(ArrElem(type));
     }
     if (enums.TryGetValue(type, out var info)) {
       return PrimitiveCType(info.ValueType);
@@ -219,6 +227,9 @@ public sealed partial class CodeGen {
     if (IsNullable(type)) {
       return $"(({CType(type)}){{0}})";
     }
+    if (IsArr(type)) {
+      return $"(({CType(type)}){{0}})";
+    }
     if (IsTuple(type) || IsMulti(type)) {
       var zeros = TupleElems(type).Select(elem => ZeroValue(elem.Type));
       return $"(({CType(type)}){{ {string.Join(", ", zeros)} }})";
@@ -244,6 +255,9 @@ public sealed partial class CodeGen {
         if (IsTimeType(inner)) {
           throw Error($"{inner} is already nullable; '{inner}?' is not allowed", n);
         }
+        if (IsArr(inner)) {
+          throw Error("collections are already nullable; 'arr<T>?' is not allowed", n);
+        }
         if (IsNullable(inner)) {
           throw Error($"'{inner}' is already nullable", n);
         }
@@ -263,6 +277,16 @@ public sealed partial class CodeGen {
         string t = n.Text!;
         if (TypeFeatures.TryGetValue(t, out var feature)) {
           throw NotSupported(feature, n);
+        }
+        if (t == "arr") {
+          if (n.Children.Count != 1) {
+            throw Error("arr needs one element type: arr<T>", n);
+          }
+          string element = ResolveType(n.Children[0]);
+          if (IsMulti(element)) {
+            throw Error("an array cannot hold multiple values", n);
+          }
+          return "arr<" + element + ">";
         }
         if (n.Children.Count > 0) {
           throw NotSupported("Generics", n);
@@ -298,7 +322,7 @@ public sealed partial class CodeGen {
       return false;
     }
     if (from == "null") {
-      return IsNullable(to) || to == "string" || IsTimeType(to);
+      return IsNullable(to) || to == "string" || IsTimeType(to) || IsArr(to);
     }
     if (IsNullable(to)) {
       string toBase = BaseOf(to);
@@ -345,6 +369,9 @@ public sealed partial class CodeGen {
       }
       if (IsTimeType(to)) {
         return NullCode(to);
+      }
+      if (IsArr(to)) {
+        return ZeroValue(to);
       }
       throw Error($"{to} is not nullable; declare it as {to}?", at);
     }
@@ -452,6 +479,12 @@ public sealed partial class CodeGen {
     if (e.Type == "date") {
       return $"(({e.Code}) != INT64_MIN)";
     }
+    if (e.Type == "time") {
+      return $"(({e.Code}) != -1)";
+    }
+    if (IsArr(e.Type)) {
+      throw Error("collections cannot be converted to bool", at);
+    }
     if (e.Type == "lapse") {
       return $"df_lapse_bool({e.Code})";
     }
@@ -491,6 +524,9 @@ public sealed partial class CodeGen {
     if (IsEnum(e.Type)) {
       return $"df_enum_str_{e.Type}({e.Code})";
     }
+    if (IsArr(e.Type)) {
+      return $"{ArrStrFunction(ArrElem(e.Type), at)}({e.Code})";
+    }
     if (e.Type == "Exception") {
       throw Error("Exception cannot be converted to a string yet; use its Message", at);
     }
@@ -506,6 +542,7 @@ public sealed partial class CodeGen {
       "bool" => $"df_str_from_bool({e.Code})",
       "char" => $"df_str_from_char({e.Code})",
       "date" => $"df_str_from_date({e.Code})",
+      "time" => Need("date", $"df_str_from_time({e.Code})"),
       "clock" => $"df_str_from_clock({e.Code})",
       "lapse" => $"df_str_from_lapse({e.Code})",
       _ => throw Error($"{e.Type} cannot be converted to a string yet", at)
@@ -530,6 +567,11 @@ public sealed partial class CodeGen {
         throw Error($"cannot compare {l.Type} and {r.Type}", at);
       }
       return $"({l.Code} == {r.Code})";
+    }
+    if (IsArr(l.Type) && (IsArr(r.Type) || r.Type == "null")) {
+      // collections compare by identity (spec 6.1)
+      return r.Type == "null" ? WithTemp(l, temp => $"({temp}.p == NULL)")
+        : WithTemp(l, leftTemp => WithTemp(r, rightTemp => $"({leftTemp}.p == {rightTemp}.p)"));
     }
     if (r.Type == "null") {
       if (IsNullable(l.Type)) {

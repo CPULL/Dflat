@@ -44,7 +44,7 @@ r.Console.Log($"(i32)1e300 = {(i32)huge}")
 // numbers and strings
 r64 x = 2
 r.Console.Log($"sqrt(2) = {r.Math.Sqrt(x)}")
-r.Console.Log($"pi = {r.Math.Pi}, lerp = {r.Math.Lerp(0, 10, 0.25)}")
+r.Console.Log($"pi = {r.Math.PI}, lerp = {r.Math.Lerp(0, 10, 0.25)}")
 r.Console.Log(1 + 2 + "a")
 r.Console.Log('a' + 'b')
 r.Console.Log($"square(12) = {square(12)}")

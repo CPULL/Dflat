@@ -1,10 +1,14 @@
-Done
+Compiler 0.0.7alpha (spec 0.0.7)
+
+Done -----------------------
 
 Numeric, bool, char, string types
 Literals with range checks
 Variables, const, zero init
 Functions, defaults, recursion
+Overloading, named arguments
 Multiple return values
+Variadic parameters (T name...)
 if, while, do-while, for
 break, continue, labels, jump
 switch and switch expressions
@@ -14,33 +18,49 @@ Tuples, multi-assign, swap
 Casts and transmutes
 Operators, checked division
 String interpolation, toStr
-Standard library: Console, Time, Math, Math32, Random
-date, clock, lapse (null, compare, subtract, print)
 alias Root as r
 catch, throw, Panic
-Standard exceptions with IDs
+Standard exceptions with IDs (10 to 24)
 Scope atEnd
+Entry point: top-level code, or main(), main(arr<string> args), main(string args...) with an int exit code
+Program arguments: Root.GetArgs(), --run -- args (UTF-8 on every target)
+Standard library: Console, Time (Now, Clock), Math, Math32 (PI, PI_HALF, E, SQRT2, R2D, D2R), Random (Seed, Int, Real, RealRange, Shuffle)
+String functions (all of 4.2): Trim*, Substr, Replace, IndexOf, LastIndexOf, Contains, StartsWith, EndsWith, Split, ToLower, ToUpper, PadLeft, PadRight, ToCStr with StringEncoding; case-insensitive options, named arguments
+Char functions (all of 4.1): Is* tests and ToUpper / ToLower, from the Unicode data of the compiler (no locale)
+date, clock, lapse (null, compare, subtract, print)
+date members and functions (3.3.1): year ... unixMilliseconds, DayOfWeek, date(string), date(i64), fromUnixTime, parse, add*, startOfDay
+time (3.3.2): null as -1, members, time(string), time(i32), parse, add* with wrap, time - time, date + time, date - time
+Date and time formatting: toStr(format) and {value:format} with the letters of 8.4, parsing with the same letters
+var for variables and for-loop items
+text[pos] reads a character
 
-Not yet
+Partial -----------------------
+
+Arrays arr<T>: literals, arr<T>[size], index read/write with IndexOutOfRangeException, .len, for-in, has, indexOf, fill, clear, reverse. Missing: sort, sortUnstable, copyFrom, views and ranges, .keys, sized declarations (arr<T>[n] x), warning for elements read before fill
+Silent exceptions: library calls (date(string), time(...), (time)n) raise them only when a catch in the same function can handle them; catches in callers do not see them yet; custom ones need classes
+Strings: every string is a pointer and a byte length, never freed; no small / block strings (4.3), no writing by index (open item)
+Parsing: date.parse and time.parse only (no i32.parse, r64.parse, tryParse: tryParse needs (&) parameters)
+Formatting: dates and times only; format specs of numbers and strings (8.1 - 8.3) are ignored with a warning
+Namespaces: the namespace line is accepted, names are not qualified
+Time zones: dates are UTC; z prints +0 and parses an offset
+
+Not yet -----------------------
 
 Classes, traits, inheritance
 Generics
-Collections and literals
+vec, list, map, hmap, set, hset, dfoot
 Ownership, move, copy, refcount
 Reference and move parameters
 Lambdas and captures
 Pointers, addr, alignment, volatile
-Silent exceptions
-Custom exception classes
+Custom exception classes, catch by trait
 Class atEnd
 128/256-bit ints, r16/r128
 dec
-int/uns/real, native size
-Format specs
-var inference
-Overloading, named arguments
-Imports, multiple files, namespaces
-Standard library beyond Console/Time/Math/Random (Random.Shuffle needs collections)
+int/uns/real, native size (main may return int: it is an i32)
+Number and string format specs (8.1 - 8.3)
+Imports, multiple files
+Files and Streams (17.6 is a TODO in the spec)
+DateTime library (CalendarDate, ZonedDateTime)
 Runtime without C library
-Parser update to 0.0.4
 Debug builds (line, stack trace)

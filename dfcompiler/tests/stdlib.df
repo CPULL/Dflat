@@ -27,7 +27,7 @@ r.Console.Log(r.Math.Min(neg, 3))
 r.Console.Log(r.Math.Max(1, 2, 3))
 u8 small = 200b
 r.Console.Log(r.Math.Clamp(small, 10b, 100b))
-r.Console.Log(r.Math.Pi)
+r.Console.Log(r.Math.PI)
 
 // Random: same seed, same sequence
 r.Random.Seed(42ul)

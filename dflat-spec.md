@@ -312,7 +312,7 @@ Signed 64-bit; raw value = `value × 8 + code`.
 | `100` | year lapse | beyond ±36M years |
 | `111` | clock lapse overflow | — |
 
-- `date − date` → date lapse; `clock − clock` → clock lapse; `date − clock` → date lapse. `date − time` → date lapse. `time − time` → date lapse.
+- `date − date` → date lapse; `clock − clock` → clock lapse; `date − clock` → date lapse. `date + time` → date. `date − time` → date. `time − time` → date lapse.
 - Mixed units convert to date lapse, rounding away from zero. Null propagates.
 - Lapses format as numbers in their own unit.
 

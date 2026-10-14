@@ -76,8 +76,7 @@ public sealed partial class CodeGen {
   static readonly Dictionary<string, string> ParamFeatures = new() {
     ["RefParam"] = "Pointers",
     ["WritableRefParam"] = "Pointers",
-    ["GiftParam"] = "Ownership",
-    ["VariadicParam"] = "Variadic parameters"
+    ["GiftParam"] = "Ownership"
   };
 
   static CompileException NotSupported(string feature, Node at) {
@@ -136,16 +135,30 @@ public sealed partial class CodeGen {
       }
       slots[index] = arg.Children[0];
     }
+    // T name...: the positional arguments past the other parameters make the array
+    int variadicIndex = f.Params.Count > 0 && f.Params[^1].IsVariadic ? f.Params.Count - 1 : -1;
+    var extra = new List<Node>();
     int next = 0;
     foreach (var arg in args.Where(arg => arg.Kind != "Named")) {
       while (next < slots.Length && slots[next] != null) {
         next++;
+      }
+      if (variadicIndex >= 0 && next >= variadicIndex && slots[variadicIndex] == null) {
+        extra.Add(arg);
+        continue;
       }
       if (next == slots.Length) {
         return (null, $"too many arguments for '{f.Name}'");
       }
       slots[next] = arg;
       next++;
+    }
+    if (variadicIndex >= 0 && slots[variadicIndex] == null) {
+      var list = Synthetic("List", extra.Count > 0 ? extra[0] : f.Node);
+      foreach (var arg in extra) {
+        list.Add(arg);
+      }
+      slots[variadicIndex] = list;
     }
     for (int index = 0; index < slots.Length; index++) {
       if (slots[index] == null) {
@@ -207,7 +220,8 @@ public sealed partial class CodeGen {
         var arg = args[argIndex];
         var argNode = arg.Kind == "Named" ? arg.Children[0] : arg;
         int paramIndex = Array.IndexOf(slots, argNode);
-        int? cost = ArgCost(argNode, candidate.Params[paramIndex].Type, scope);
+        string paramType = paramIndex >= 0 ? candidate.Params[paramIndex].Type : ArrElem(candidate.Params[^1].Type);
+        int? cost = ArgCost(argNode, paramType, scope);
         if (cost == null) {
           fits = false;
         } else {

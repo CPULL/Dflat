@@ -1,0 +1,15 @@
+// Program entry and arguments (spec 14.1, 17.1)
+alias Root as r
+
+fun int main(string args...) {
+  arr<string> same = r.GetArgs()
+  r.Console.Log(args.len == same.len)
+  r.Console.Log(args == same)
+  r.Console.Log(args.len)
+  i32 count = (i32)args.len
+  for i32 index = 1..count {
+    r.Console.Log($"arg {index}: {args[index]}")
+  }
+  r.Console.Log(args[0].Contains("args"))
+  return count
+}

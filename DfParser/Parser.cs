@@ -1022,6 +1022,14 @@ public sealed class Parser {
         }
         var type = ParseType();
         var name = ExpectIdent();
+        if (IsOp("...")) {
+          // T name...
+          if (kind != "Param" || isVolatile) {
+            throw Error("'...' takes a plain type: T name...");
+          }
+          Next();
+          kind = "VariadicParam";
+        }
         if (IsOp("!")) {
           throw Error("a copy is chosen by the caller: f(x!)");
         }
@@ -1496,6 +1504,12 @@ public sealed class Parser {
         SkipNewlines();
         generic.Add(ParseTypeArg());
       } while (AcceptOp(","));
+      // arr<i32>[100]: a collection created with a size
+      bool sized = target.Kind == "Name" && target.Text is "arr" or "vec" or "hmap" or "hset" && IsOp(">") && PeekAt(1).Is("[");
+      if (sized) {
+        Next();
+        return generic;
+      }
       if (IsOp(">") && PeekAt(1).Is("(")) {
         Next();
         // a<b>(c) also reads as two comparisons: warn when every argument could be a value

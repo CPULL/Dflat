@@ -88,7 +88,7 @@ public class Circle(r64 radius) : root.Class, Shape {
   public Circle() : Circle(1.0), Named("circle")
 
   public override fun r64 Area() {
-    return r.Math.Pi * radius * radius
+    return r.Math.PI * radius * radius
   }
 
   public override fun string Label() { "circle" }

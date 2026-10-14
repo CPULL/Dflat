@@ -76,6 +76,12 @@ static const df_descriptor df_desc_OutOfMemoryException = { 15, "OutOfMemoryExce
 static const df_descriptor df_desc_ChangingRefCountTypeException = { 16, "ChangingRefCountTypeException", &df_desc_Exception, false };
 static const df_descriptor df_desc_OutOfRangeCastException = { 17, "OutOfRangeCastException", &df_desc_Exception, true };
 static const df_descriptor df_desc_InvalidCharacterCodePointException = { 18, "InvalidCharacterCodePointException", &df_desc_Exception, true };
+static const df_descriptor df_desc_IndexOutOfRangeException = { 19, "IndexOutOfRangeException", &df_desc_Exception, false };
+static const df_descriptor df_desc_ModifyingProtectedSourceException = { 20, "ModifyingProtectedSourceException", &df_desc_Exception, false };
+static const df_descriptor df_desc_NaNUsedAsKeyException = { 21, "NaNUsedAsKeyException", &df_desc_Exception, true };
+static const df_descriptor df_desc_InvalidMapKeyException = { 22, "InvalidMapKeyException", &df_desc_Exception, true };
+static const df_descriptor df_desc_EmptyVectorAccessException = { 23, "EmptyVectorAccessException", &df_desc_Exception, true };
+static const df_descriptor df_desc_InvalidDateTimeFormatException = { 24, "InvalidDateTimeFormatException", &df_desc_Exception, true };
 
 /* 0 = no error; otherwise the exception being raised */
 static df_exception* df_err = NULL;
@@ -122,14 +128,21 @@ static void df_raise(const df_descriptor* descriptor, const char* function) {
   df_err_thrown = false;
 }
 
-/* true when the exception is of that type or a subtype */
+/* true when the exception is of that type or a subtype; a silent exception is not an 'Exception' catch (spec 15.4) */
 static bool df_exc_is(const df_exception* exception, uint64_t id) {
   for (const df_descriptor* descriptor = exception->descriptor; descriptor; descriptor = descriptor->parent) {
     if (descriptor->id == id) {
-      return true;
+      return !(id == 10 && exception->descriptor->silent);
     }
   }
   return false;
+}
+
+/* a library function that would raise a silent exception leaves a note; the caller raises it only when a catch exists */
+static const df_descriptor* df_silent_desc = NULL;
+
+static void df_silent_note(const df_descriptor* descriptor) {
+  df_silent_desc = descriptor;
 }
 
 /* unhandled exception: its message, then Panic -1000 */
@@ -169,6 +182,28 @@ static df_string df_str_from_cstr(const char* text) {
 
 static bool df_str_eq(df_string a, df_string b) {
   return a.len == b.len && memcmp(a.p, b.p, a.len) == 0;
+}
+
+/* ---- arrays (arr<T>): pointer and length; a null array has no pointer ---- */
+
+typedef struct { df_string* p; uint64_t len; } df_arr_string;
+typedef struct { uint8_t* p; uint64_t len; } df_arr_u8;
+
+static void* df_calloc(uint64_t count, uint64_t size) {
+  void* p = calloc(count ? count : 1, size ? size : 1);
+  if (!p) {
+    df_out_of_memory();
+  }
+  return p;
+}
+
+/* true when the index is inside; otherwise raises IndexOutOfRangeException and the caller checks df_err */
+static bool df_idx_ok(uint64_t len, uint64_t index, const char* function) {
+  if (index < len) {
+    return true;
+  }
+  df_raise(&df_desc_IndexOutOfRangeException, function);
+  return false;
 }
 
 /* character count (UTF-8 code points) */
@@ -426,6 +461,46 @@ static void df_init(void) {
 #endif
 }
 
+/* ---- program arguments (spec 17.1): index 0 is the program name ---- */
+
+#ifdef _WIN32
+#include <shellapi.h>
+#pragma comment(lib, "shell32.lib")
+#endif
+
+static df_arr_string df_args;
+
+static void df_set_args(int argc, char** argv) {
+#ifdef _WIN32
+  /* the C arguments use the ANSI code page: read the wide command line and convert it to UTF-8 */
+  int count = 0;
+  wchar_t** wide = CommandLineToArgvW(GetCommandLineW(), &count);
+  if (wide) {
+    df_args.p = (df_string*)df_calloc((uint64_t)count, sizeof(df_string));
+    df_args.len = (uint64_t)count;
+    for (int index = 0; index < count; index++) {
+      int bytes = WideCharToMultiByte(CP_UTF8, 0, wide[index], -1, NULL, 0, NULL, NULL);
+      char* text = (char*)df_alloc((uint64_t)bytes);
+      WideCharToMultiByte(CP_UTF8, 0, wide[index], -1, text, bytes, NULL, NULL);
+      df_args.p[index].p = text;
+      df_args.p[index].len = (uint64_t)(bytes > 0 ? bytes - 1 : 0);
+    }
+    LocalFree(wide);
+    return;
+  }
+#endif
+  df_args.p = (df_string*)df_calloc((uint64_t)argc, sizeof(df_string));
+  df_args.len = (uint64_t)argc;
+  for (int index = 0; index < argc; index++) {
+    df_args.p[index].p = argv[index];
+    df_args.p[index].len = strlen(argv[index]);
+  }
+}
+
+static df_arr_string df_get_args(void) {
+  return df_args;
+}
+
 /* ---- checked integer division ---- */
 
 /* on division by zero: raise DivisionByZeroException and return 0; the caller checks df_err */
@@ -575,12 +650,15 @@ static int64_t df_date_diff(int64_t a, int64_t b) {
   if (a == INT64_MIN || b == INT64_MIN) {
     return 0;
   }
-  __int128 d = (__int128)a - b;
-  const __int128 limit = (__int128)1 << 60;
-  if (d > -limit && d < limit) {
-    return (int64_t)(d * 8 + 2);
+  const int64_t limit = (int64_t)1 << 60;
+  int64_t d;
+  if (!__builtin_sub_overflow(a, b, &d)) {
+    if (d > -limit && d < limit) {
+      return d * 8 + 2;
+    }
+    return (d / 31556952000LL) * 8 + 4;
   }
-  return (int64_t)((d / 31556952000LL) * 8 + 4);
+  return ((a / 31556952000LL) - (b / 31556952000LL)) * 8 + 4;   /* years, beyond +-36 million */
 }
 
 static int64_t df_clock_diff(uint64_t a, uint64_t b) {

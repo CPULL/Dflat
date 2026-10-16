@@ -111,14 +111,18 @@ public sealed partial class CodeGen {
   // label an exception raised here jumps to
   string Handler => handlerOverride ?? frames.Peek().HandlerAt();
 
-  // standard exception name (also root.X / Root.X) → its id
-  static int? ExceptionId(string name) {
+  // exception name (also root.X / Root.X) → its id: a standard exception, an exception class, or -2 for the
+  // SilentException trait (every silent exception)
+  int? ExceptionId(string name) {
     foreach (var prefix in new[] { "Root.", "root." }) {
       if (name.StartsWith(prefix)) {
         name = name[prefix.Length..];
       }
     }
-    return StandardExceptions.TryGetValue(name, out int id) ? id : null;
+    if (StandardExceptions.TryGetValue(name, out int id) || customExceptionIds.TryGetValue(name, out id)) {
+      return id;
+    }
+    return name == "SilentException" ? -2 : null;
   }
 
   static string ExceptionName(int id) => StandardExceptions.First(pair => pair.Value == id).Key;
@@ -131,17 +135,45 @@ public sealed partial class CodeGen {
     var callees = new Dictionary<FunSig, HashSet<string>>();
     foreach (var fun in funs.Values.SelectMany(overloads => overloads)) {
       var called = new HashSet<string>();
-      if (ContainsRaise(fun.Node, fun.EnumName, called)) {
+      var prefixes = new List<string>();
+      if (fun.EnumName != null) {
+        prefixes.Add(fun.EnumName);
+      }
+      for (var c = fun.Class; c != null; c = c.Parent) {
+        prefixes.Add(c.Name);
+      }
+      if (ContainsRaise(fun.Node, prefixes, called)) {
         failingFuns.Add(fun);
       }
+      // a constructor runs its init function; an init function runs the init function of the parent
+      if (fun.IsCtor) {
+        called.Add(fun.Class!.Init!.Name);
+      }
+      if (fun.IsInit && fun.Class!.Parent != null) {
+        called.Add(fun.Class.Parent.Init!.Name);
+      }
       callees[fun] = called;
+    }
+    var allFuns = funs.Values.SelectMany(overloads => overloads).ToList();
+    // a destructor that can fail makes every end of scope able to fail
+    if (allFuns.Any(f => f.IsDtor && failingFuns.Contains(f))) {
+      failingFuns.UnionWith(allFuns);
     }
     bool changed = true;
     while (changed) {
       changed = false;
       foreach (var (fun, called) in callees) {
-        bool callsFailing = called.Any(name => funs.TryGetValue(name, out var overloads) && overloads.Any(failingFuns.Contains));
+        bool callsFailing = called.Any(name => name.StartsWith("?.")
+          ? allFuns.Any(other => other.Class != null && other.Name.EndsWith("." + name[2..]) && failingFuns.Contains(other))
+          : funs.TryGetValue(name, out var overloads) && overloads.Any(failingFuns.Contains));
         if (!failingFuns.Contains(fun) && callsFailing) {
+          failingFuns.Add(fun);
+          changed = true;
+        }
+      }
+      // functions that share a virtual slot are called through the same pointer: one fails, all count as failing
+      foreach (var fun in allFuns.Where(f => f.Class != null && !f.IsStatic && f.Slot >= 0 && f.Root.GroupSize > 0)) {
+        if (!failingFuns.Contains(fun) && allFuns.Any(other => other.Root == fun.Root && failingFuns.Contains(other))) {
           failingFuns.Add(fun);
           changed = true;
         }
@@ -149,11 +181,43 @@ public sealed partial class CodeGen {
     }
   }
 
-  bool ContainsRaise(Node node, string? enumName, HashSet<string> called) {
+  // a member access on an object may find null: NullPointerException (only when the program has classes)
+  bool MemberMayRaise(Node member) {
+    if (classes.Count == 0) {
+      return false;
+    }
+    int hops = 0;
+    var current = member.Children[0];
+    while (current.Kind == "Member") {
+      hops++;
+      current = current.Children[0];
+    }
+    if (current.Kind == "Name") {
+      string root = current.Text!;
+      if (hops == 0 && root is "this" or "parent") {
+        return false;
+      }
+      bool staticRoot = root is "Root" or "root" || nameAliases.ContainsKey(root) || IsEnum(root);
+      if (staticRoot) {
+        return false;
+      }
+      if (classes.ContainsKey(root)) {
+        return hops >= 1;
+      }
+      return true;
+    }
+    return current.Kind is not ("String" or "Interp" or "Int" or "Real" or "Char" or "Bool");
+  }
+
+  // a program with equals or an operator == in a class: any comparison may call it
+  bool hasObjectEquality => classes.Values.Any(cls => cls.EqualsNode != null || funs.ContainsKey(cls.Name + ".=="));
+
+  bool ContainsRaise(Node node, IReadOnlyList<string> prefixes, HashSet<string> called) {
     bool raises = node.Kind switch {
       "Throw" => !(node.Children[0].Kind == "Call" && node.Children[0].Children[0].Kind == "Name"
         && node.Children[0].Children[0].Text == "Panic"),
-      "Binary" => node.Text is "/" or "%",
+      "Binary" => node.Text is "/" or "%" || (node.Text is "==" or "!=" && hasObjectEquality),
+      "Member" => MemberMayRaise(node),
       "Index" => node.Children.Count == 2 && node.Children[0].Kind != "GenericRef" && node.Children[1].Kind != "Empty",
       "Assign" => node.Text is "/=" or "%=",
       _ => false
@@ -162,15 +226,19 @@ public sealed partial class CodeGen {
       var callee = node.Children[0];
       if (callee.Kind == "Name") {
         called.Add(callee.Text!);
-        if (enumName != null) {
-          called.Add(enumName + "." + callee.Text);
+        called.Add("?." + callee.Text);   // it may be a function of a trait of this class
+        foreach (string prefix in prefixes) {
+          called.Add(prefix + "." + callee.Text);
         }
       } else if (Path(callee) is string path) {
         called.Add(path);
       }
+      if (callee.Kind == "Member") {
+        called.Add("?." + callee.Text);   // a function of an object: any function with this name
+      }
     }
     foreach (var child in node.Children) {
-      raises |= ContainsRaise(child, enumName, called);
+      raises |= ContainsRaise(child, prefixes, called);
     }
     return raises;
   }
@@ -205,6 +273,7 @@ public sealed partial class CodeGen {
   // ---------------------------------------------------------------- frames
 
   Frame PrepareFrame(List<Node> statements, Scope parentScope, FrameKind kind) {
+    statements = statements.Select(statement => statement.Kind == "AtEndOf" ? NormalizeAtEndOf(statement) : statement).ToList();
     tempCounter++;
     var frame = new Frame(tempCounter, kind, frames.Count > 0 ? frames.Peek() : null, parentScope);
     frame.Statements.AddRange(statements);
@@ -225,8 +294,14 @@ public sealed partial class CodeGen {
     if (frames.Count > 0 && kind is FrameKind.Block or FrameKind.LoopBody) {
       frame.OuterHandler = Handler;
     }
+    // the objects of the scope end with it (after the atEnd blocks that were written)
+    bool writtenAtEnds = frame.AtEnds.Any(atEnd => atEnd.Text != "drop");
+    HashSet<Node>? ownerDecls = null;
+    if (kind is not (FrameKind.AtEndBody or FrameKind.LoopBody)) {
+      ownerDecls = AddImplicitDrops(frame, statements);
+    }
     if (frame.AtEnds.Count > 0) {
-      HoistDeclarations(frame);
+      HoistDeclarations(frame, writtenAtEnds ? null : ownerDecls);
       fn!.Decls.Append($"  df_exception* {frame.PendingVar} = NULL;\n");
       if (kind == FrameKind.LoopBody) {
         frame.RanFlag = $"f{frame.Id}_ran";
@@ -237,8 +312,11 @@ public sealed partial class CodeGen {
 
   // atEnd sees every variable of its scope, wherever declared: they are created at the start
   // of the scope with their default value
-  void HoistDeclarations(Frame frame) {
+  void HoistDeclarations(Frame frame, HashSet<Node>? only) {
     void Hoist(Node decl) {
+      if (only != null && !only.Contains(decl)) {
+        return;
+      }
       string name = decl.Text!;
       if (frame.Hoisted.ContainsKey(name)) {
         throw Error($"'{name}' is already declared in this scope", decl);
@@ -246,7 +324,10 @@ public sealed partial class CodeGen {
       var mods = decl.Children.FirstOrDefault(child => child.Kind == "Mods");
       bool isConst = mods?.Text?.Split(' ').Contains("const") == true;
       string type = ResolveDeclType(decl, frame.ParentScope);
-      frame.Hoisted[name] = new VarInfo(type, $"v_{name}_{frame.Id}", isConst);
+      frame.Hoisted[name] = new VarInfo(type, $"v_{name}_{frame.Id}", isConst) {
+        Own = declOwner.TryGetValue(decl, out bool owns) && owns,
+        IsWeak = decl.Children.Any(child => child.Kind == "WeakInit")
+      };
     }
     foreach (var statement in frame.Statements) {
       if (statement.Kind == "Decl") {
@@ -351,9 +432,6 @@ public sealed partial class CodeGen {
     if (ExceptionId(resolved) is int id) {
       return (id, null);                // catch DivisionByZeroException { }
     }
-    if (resolved == "SilentException") {
-      throw UnknownException(resolved, catchNode);
-    }
     return (StandardExceptions["Exception"], name);   // catch ex { } = catch Exception ex { }
   }
 
@@ -368,10 +446,17 @@ public sealed partial class CodeGen {
   }
 
   static CompileException UnknownException(string name, Node at) {
-    if (name == "SilentException") {
-      return Error("catching by trait (SilentException) needs classes; not supported yet", at);
+    return Error($"unknown exception type '{name}'", at);
+  }
+
+  // the class named by a catch (catch MyException ex), when the exception is a class of the program
+  ClassInfo? CatchClass(Node catchNode) {
+    var typeNode = catchNode.Children.FirstOrDefault(child => child.Kind == "Type");
+    if (typeNode == null) {
+      return null;
     }
-    return Error($"unknown exception type '{name}' (custom exceptions need classes; not supported yet)", at);
+    string typeName = ResolveCatchName(typeNode.Text!);
+    return classes.TryGetValue(typeName, out var cls) && cls.IsException ? cls : null;
   }
 
   void EmitCatch(Frame frame, int ordinal, Node catchNode, StringBuilder sb, int indent) {
@@ -393,8 +478,9 @@ public sealed partial class CodeGen {
       CheckNotShadowing(variable, catchScope, catchNode);
       tempCounter++;
       string cname = $"v_{variable}_{tempCounter}";
-      sb.Append($"{pad}  df_exception* {cname} = df_err;\n");
-      catchScope.Vars[variable] = new VarInfo("Exception", cname, true);
+      string variableType = CatchClass(catchNode)?.Name ?? "Exception";
+      sb.Append($"{pad}  {CType(variableType)} {cname} = ({CType(variableType)})df_err;\n");
+      catchScope.Vars[variable] = new VarInfo(variableType, cname, true);
     }
     sb.Append($"{pad}  df_err = NULL;\n");
     var block = catchNode.Children.First(child => child.Kind == "Block");
@@ -424,7 +510,8 @@ public sealed partial class CodeGen {
           caughtAll = true;
           break;
         }
-        sb.Append($"{pad}  if (df_exc_is(df_err, {id})) goto {frame.CatchLabel(next)};\n");
+        string test = id == -2 ? "df_err->descriptor->silent" : $"df_exc_is(df_err, {id})";
+        sb.Append($"{pad}  if ({test}) goto {frame.CatchLabel(next)};\n");
       }
       if (!caughtAll) {
         sb.Append($"{pad}  goto {frame.ExceptionExit};\n");
@@ -445,7 +532,8 @@ public sealed partial class CodeGen {
       sb.Append($"{pad}{frame.ExcLabel(step)}: if (df_err) {{ {frame.PendingVar} = df_err; df_err = NULL; }}\n");
       EmitAtEnd(frame, step, true, sb, indent);
     }
-    sb.Append($"{pad}{frame.ExcLabel(0)}: df_err = {frame.PendingVar}; {frame.PendingVar} = NULL;\n");
+    // reached with an error of its own (an atEnd that failed at the normal end) it keeps that error
+    sb.Append($"{pad}{frame.ExcLabel(0)}: if (df_err == NULL) {{ df_err = {frame.PendingVar}; }} {frame.PendingVar} = NULL;\n");
     sb.Append($"{pad}goto {frame.OuterHandler};\n");
   }
 
@@ -606,23 +694,27 @@ public sealed partial class CodeGen {
   // ---------------------------------------------------------------- throw
 
   // throw Exception("message") | throw DivisionByZeroException() | throw ex | throw Panic(code)
-  void EmitThrow(Node s, StringBuilder sb, Scope scope, string pad) {
+  // true when the statement leaves: a silent exception that nothing can catch does nothing
+  bool EmitThrow(Node s, StringBuilder sb, Scope scope, string pad) {
     var value = s.Children[0];
     if (value.Kind == "Name" && scope.Find(value.Text!) is VarInfo variable) {
-      if (variable.Type != "Exception") {
+      if (variable.Type != "Exception" && !IsExceptionClass(variable.Type)) {
         throw Error($"'{value.Text}' is not an exception", s);
       }
-      sb.Append($"{pad}{{ df_err = {variable.CName}; df_err_thrown = true; goto {Handler}; }}\n");
-      return;
+      sb.Append($"{pad}{{ df_err = (df_exception*){variable.CName}; df_err_thrown = true; goto {Handler}; }}\n");
+      return true;
     }
     if (value.Kind != "Call") {
       throw Error("throw needs an exception, e.g. throw Exception(\"message\")", s);
     }
     var args = value.Children[1].Children;
+    string name = Path(value.Children[0]) ?? throw Error("throw needs an exception, e.g. throw Exception(\"message\")", s);
+    if (classes.ContainsKey(name)) {
+      return ThrowObject(s, value, name, sb, scope, pad);
+    }
     if (args.Any(arg => arg.Kind == "Named")) {
       throw Error("exceptions take no named arguments yet", s);
     }
-    string name = Path(value.Children[0]) ?? throw Error("throw needs an exception, e.g. throw Exception(\"message\")", s);
     if (name == "Panic") {
       if (args.Count != 1) {
         throw Error("Panic takes one exit code", s);
@@ -632,9 +724,15 @@ public sealed partial class CodeGen {
         throw Error("the Panic exit code must be an integer", s);
       }
       sb.Append($"{pad}df_panic((int64_t)({code.Code}));\n");
-      return;
+      return true;
     }
     int id = ExceptionId(name) ?? throw UnknownException(name, s);
+    if (id < 0) {
+      throw Error("SilentException is a trait: throw an exception class", s);
+    }
+    if (SilentStandard.Contains(id) && !SilentCaught(id)) {
+      return false;
+    }
     if (args.Count > 1) {
       throw Error($"{ExceptionName(id)} takes only an optional message", s);
     }
@@ -643,6 +741,7 @@ public sealed partial class CodeGen {
     sb.Append($"{pad}{{ df_string {temp} = {message}; ");
     sb.Append($"df_err = df_new_exception(&df_desc_{ExceptionName(id)}, {temp}.p, {temp}.len, {fn!.NameConst}); ");
     sb.Append($"df_err_thrown = true; goto {Handler}; }}\n");
+    return true;
   }
 
   // ex.Id, ex.Message, ex.Function, ex.Line

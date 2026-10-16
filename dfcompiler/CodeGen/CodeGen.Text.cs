@@ -173,12 +173,21 @@ public sealed partial class CodeGen {
   // false for paths like Root.Console, date or Status: a type or a namespace, not a value
   bool IsValueReceiver(Node receiver, Scope scope) {
     string? path = Path(receiver);
-    return path == null || scope.Find(path.Split('.')[0]) != null;
+    if (path == null) {
+      return true;
+    }
+    string first = path.Split('.')[0];
+    // a local variable, or a field of the class being compiled
+    return scope.Find(first) != null || (currentClass != null && FindField(currentClass, first) != null)
+      || (traits.ContainsKey(first) && scope.Find("this") != null);
   }
 
   Expr? TryReceiverCall(Expr receiver, string name, List<Node> args, Scope scope, Node at) {
     if (IsArr(receiver.Type)) {
       return ArrayMethod(receiver, name, args, scope, at);
+    }
+    if (IsClass(receiver.Type)) {
+      return ObjectCall(receiver, name, args, scope, at);
     }
     if (Methods.TryGetValue(receiver.Type, out var byName) && byName.TryGetValue(name, out var overloads)) {
       return StdCall($"{receiver.Type}.{name}", overloads, args, scope, at, receiver.Code);
@@ -196,6 +205,9 @@ public sealed partial class CodeGen {
     if (!declared.Contains("DayOfWeek")
         && Mentions(program, node => node.Text == "DayOfWeek" || (node.Kind == "Member" && node.Text == "dayOfWeek"))) {
       source.Append("enum DayOfWeek { Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday }\n");
+    }
+    if (!declared.Contains("SilentException") && Mentions(program, node => node.Text == "SilentException")) {
+      source.Append("trait SilentException { }\n");
     }
     if (!declared.Contains("StringEncoding")
         && Mentions(program, node => node.Text == "StringEncoding" || (node.Kind == "Member" && node.Text == "ToCStr"))) {

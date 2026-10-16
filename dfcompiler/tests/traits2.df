@@ -1,0 +1,51 @@
+// Traits: the same member in two traits, qualified names, trait constructors and construction order
+alias Root as r
+
+trait TraitA {
+  string tag = "A"
+  fun string Who() { "A's who" }
+  fun string OnlyA() { "only A" }
+}
+trait TraitB {
+  string tag = "B"
+  fun string Who() { "B's who" }
+}
+trait Counted {
+  i32 made
+  Counted() { made = 100 }
+}
+
+public class Both : TraitA, TraitB {
+  override fun string Who() { "both: " + TraitA.Who() + " / " + TraitB.Who() + " / " + TraitA.tag + TraitB.tag }
+}
+
+public class Plain : TraitA, TraitB {
+  public i32 x
+}
+
+public class Order : Counted {
+  public i32 value = made + 1
+}
+
+Both b = Both()
+r.Console.Log(b.Who())
+r.Console.Log(b.TraitA.Who())
+r.Console.Log(b.TraitB.Who())
+r.Console.Log(b.TraitA.tag)
+r.Console.Log(b.TraitB.tag)
+b.TraitB.tag = "changed"
+r.Console.Log(b.TraitB.tag)
+r.Console.Log(b.TraitA.tag)
+r.Console.Log(b.OnlyA())
+
+Plain p = Plain()
+r.Console.Log(p.TraitA.Who())
+r.Console.Log(p.TraitB.Who())
+TraitA viewA = p
+r.Console.Log(viewA.Who())
+r.Console.Log(viewA.tag)
+
+// the trait constructor runs before the body of the class
+Order o = Order()
+r.Console.Log(o.value)
+r.Console.Log(o.made)

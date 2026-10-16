@@ -54,7 +54,7 @@ public sealed class DfException : Exception {
 public sealed class Lexer {
   static readonly HashSet<string> Keywords = new() {
     "fun", "class", "trait", "enum", "alias", "as", "namespace", "import",
-    "public", "internal", "private", "const", "override",
+    "public", "internal", "private", "const", "override", "static",
     "if", "then", "else", "while", "for", "in", "step", "switch", "default",
     "jump", "break", "continue", "return", "throw", "catch", "atEnd", "enforce",
     "is", "true", "false", "null"
@@ -184,7 +184,9 @@ public sealed class Lexer {
       return;
     }
     var last = tokens[^1];
-    if (last.Kind != TokenKind.Newline && EndsStatement(last)) {
+    // "f is atEnd." ends the statement with its dot
+    bool finalizer = last.Is(".") && tokens.Count > 1 && tokens[^2].Kind == TokenKind.Keyword && tokens[^2].Text == "atEnd";
+    if (last.Kind != TokenKind.Newline && (EndsStatement(last) || finalizer)) {
       tokens.Add(new Token(TokenKind.Newline, "\n", line, col));
     }
   }

@@ -20,15 +20,34 @@ sealed class FunSig {
     Params = ps;
     Node = node;
     EnumName = enumName;
+    Root = this;
   }
 
   public string Name { get; }
   public int OverloadIndex { get; set; }
-  public string CName => "f_" + Name.Replace('.', '_') + (OverloadIndex > 0 ? "_" + OverloadIndex : "");
+  public string CName => "f_" + Name.Replace('.', '_').Replace("==", "op_eq") + (OverloadIndex > 0 ? "_" + OverloadIndex : "");
   public string Ret { get; }
   public List<ParamSig> Params { get; }
   public Node Node { get; }
   public string? EnumName { get; }
+
+  // classes
+  public ClassInfo? Class { get; set; }
+  public bool IsStatic { get; set; }
+  public bool IsOverride { get; set; }
+  public bool IsCtor { get; set; }
+  public bool IsInit { get; set; }
+  public bool IsStaticInit { get; set; }
+  public Vis Visibility { get; set; } = Vis.Public;
+  public int Slot { get; set; } = -1;
+  public bool ReturnsOwned { get; set; }      // returns new or moved objects (false: borrowed ones)
+  public bool ReturnsOwnedSet { get; set; }
+  public bool IsDtor { get; set; }            // the atEnd of a class
+  public bool IsAbstract { get; set; }   // a trait function without a body
+  public int TSlot { get; set; } = -1;   // position among the functions of its trait
+  public string? GenericT { get; set; } // a copy of equals(T other) made for this T
+  public FunSig Root { get; set; }
+  public int GroupSize { get; set; }   // on a root: how many functions override it
 }
 
 sealed class ParamSig {
@@ -42,6 +61,7 @@ sealed class ParamSig {
   public string Type { get; }
   public Node? Default { get; }
   public bool IsVariadic { get; init; }   // T name...: an arr<T> filled from the extra arguments
+  public bool IsGift { get; init; }       // ->T name: the function owns the object it is given
 }
 
 sealed class VarInfo {
@@ -54,6 +74,8 @@ sealed class VarInfo {
   public string Type { get; }
   public string CName { get; }
   public bool IsConst { get; }
+  public bool Own { get; set; }       // the variable owns its object: it is destroyed when the scope ends
+  public bool IsWeak { get; set; }    // a weak reference: used only through enforce
 }
 
 sealed class Scope {
@@ -76,7 +98,8 @@ sealed class Scope {
 
 // Type strings: "i32", "string", "Status" (enum), "i32?" (nullable),
 // "(i32 id,string name)" (tuple), "*(i32,string)" (multiple return values), "null" (the null literal)
-readonly record struct Expr(string Code, string Type);
+// Fresh: the value is a new object or a moved one (its owner is whoever receives it)
+readonly record struct Expr(string Code, string Type, bool Fresh = false);
 
 // Type checks a Dflat syntax tree (first subset) and emits C.
 // Split in partial files: CodeGen.Types.cs, CodeGen.Switch.cs, CodeGen.Nulls.cs, CodeGen.Tuples.cs
@@ -140,6 +163,7 @@ public sealed partial class CodeGen {
         DeclareEnum(statement);
       }
     }
+    DeclareClasses(program);
     foreach (var statement in program.Children) {
       if (statement.Kind == "Alias") {
         RegisterAlias(statement);
@@ -150,24 +174,26 @@ public sealed partial class CodeGen {
         RegisterEnum(statement);
       }
     }
+    RegisterClasses();
     foreach (var statement in program.Children) {
       if (statement.Kind == "Fun") {
         RegisterFun(statement, null);
       }
     }
 
+    ClassifyReturns();
     FindFailingFunctions();
 
     var protos = new StringBuilder();
     var bodies = new StringBuilder();
-    foreach (var fun in funs.Values.SelectMany(overloads => overloads)) {
+    foreach (var fun in funs.Values.SelectMany(overloads => overloads).Where(fun => !fun.IsAbstract)) {
       protos.Append(Signature(fun)).Append(";\n");
-      bodies.Append(EmitFun(fun)).Append('\n');
+      bodies.Append(fun.IsCtor ? EmitConstructor(fun) : EmitFun(fun)).Append('\n');
     }
 
     // a main function is the entry point (spec 14.1); otherwise the top-level statements are
     var topLevel = program.Children.Where(statement =>
-      statement.Kind is not ("Fun" or "Alias" or "Enum" or "Namespace" or "NamespaceLocal")).ToList();
+      statement.Kind is not ("Fun" or "Alias" or "Enum" or "Class" or "Trait" or "Namespace" or "NamespaceLocal")).ToList();
     if (funs.TryGetValue("main", out var mains)) {
       if (topLevel.Count > 0) {
         throw Error("a program starts either from top-level code or from a main function, not both", topLevel[0]);
@@ -179,7 +205,7 @@ public sealed partial class CodeGen {
     fn = NewFunctionContext("main()", "i32", true);
     assign = new AssignState();
     currentRet = null;
-    var statements = program.Children.Where(statement => statement.Kind is not ("Fun" or "Alias" or "Enum")).ToList();
+    var statements = program.Children.Where(statement => statement.Kind is not ("Fun" or "Alias" or "Enum" or "Class" or "Trait")).ToList();
     var root = PrepareFrame(statements, new Scope(null), FrameKind.Function);
     root.OuterHandler = fn.PanicLabel;
     var mainBody = new StringBuilder();
@@ -188,6 +214,7 @@ public sealed partial class CodeGen {
     var main = new StringBuilder();
     main.Append("int main(int argc, char** argv) {\n");
     main.Append("  df_init();\n  df_set_args(argc, argv);\n");
+    main.Append(StaticInitCode());
     main.Append(fn.Decls);
     if (fn.UsesRetVar) {
       main.Append($"  int32_t {fn.RetVar} = 0;\n");
@@ -201,6 +228,14 @@ public sealed partial class CodeGen {
   }
 
   string Assemble(StringBuilder protos, StringBuilder bodies, StringBuilder main) {
+    // the copies of equals the program needs (found while compiling everything else), then the class tables
+    while (pendingInstances.Count > 0) {
+      var instance = pendingInstances[0];
+      pendingInstances.RemoveAt(0);
+      protos.Append(Signature(instance)).Append(";\n");
+      bodies.Append(EmitFun(instance)).Append('\n');
+    }
+    EmitClassTables();
     var output = new StringBuilder();
     output.Append("/* generated by dfcompiler */\n");
     output.Append(Runtime.Source).Append('\n');
@@ -210,7 +245,9 @@ public sealed partial class CodeGen {
     output.Append(functionNames).Append('\n');
     output.Append(enumCode);
     output.Append(arrayCode);
+    output.Append(classGlobals).Append('\n');
     output.Append(protos).Append('\n');
+    output.Append(classCode);
     output.Append(bodies);
     output.Append(main);
     return output.ToString();
@@ -231,6 +268,7 @@ public sealed partial class CodeGen {
     var main = new StringBuilder();
     main.Append("int main(int argc, char** argv) {\n");
     main.Append("  df_init();\n  df_set_args(argc, argv);\n");
+    main.Append(StaticInitCode());
     string call = $"{entry.CName}({(entry.Params.Count == 1 ? "df_args" : "")})";
     if (entry.Ret == "void") {
       main.Append($"  {call};\n");
@@ -256,8 +294,11 @@ public sealed partial class CodeGen {
   }
 
   // enumName: set for static methods declared inside an enum
-  void RegisterFun(Node funNode, string? enumName) {
-    string name = enumName == null ? funNode.Text! : enumName + "." + funNode.Text;
+  FunSig? RegisterFun(Node funNode, string? enumName, ClassInfo? cls = null) {
+    string name = cls != null ? cls.Name + "." + funNode.Text : enumName == null ? funNode.Text! : enumName + "." + funNode.Text;
+    if (cls == null && enumName == null && classes.ContainsKey(name)) {
+      throw Error($"a function cannot be named like the class '{name}'", funNode);
+    }
     foreach (var child in funNode.Children) {
       if (child.Kind is "GenericParams" or "Where") {
         throw NotSupported("Generics", child);
@@ -292,9 +333,12 @@ public sealed partial class CodeGen {
       var def = p.Children.FirstOrDefault(child => child.Kind == "Default");
       string paramType = ResolveType(p.Children[0]);
       bool variadic = p.Kind == "VariadicParam";
-      ps.Add(new ParamSig(p.Text!, variadic ? "arr<" + paramType + ">" : paramType, def?.Children[0]) { IsVariadic = variadic });
+      ps.Add(new ParamSig(p.Text!, variadic ? "arr<" + paramType + ">" : paramType, def?.Children[0]) {
+        IsVariadic = variadic,
+        IsGift = p.Kind == "GiftParam" && IsClass(paramType)
+      });
     }
-    if (funNode.Children.Any(child => child.Kind == "NoBody")) {
+    if (funNode.Children.Any(child => child.Kind == "NoBody") && cls?.IsTrait != true) {
       throw Error("functions without a body are only valid in traits", funNode);
     }
     if (!funs.TryGetValue(name, out var overloads)) {
@@ -307,12 +351,15 @@ public sealed partial class CodeGen {
     }
     var fun = new FunSig(name, ret, ps, funNode, enumName) { OverloadIndex = overloads.Count };
     overloads.Add(fun);
+    return fun;
   }
 
   string Signature(FunSig f) {
-    var ps = f.Params.Count == 0
-      ? "void"
-      : string.Join(", ", f.Params.Select(p => $"{CType(p.Type)} v_{p.Name}"));
+    var list = f.Params.Select(p => $"{CType(p.Type)} v_{p.Name}").ToList();
+    if (f.Class != null && !f.IsStatic && !f.IsCtor) {
+      list.Insert(0, $"{CType(f.Class.Name)} self");
+    }
+    string ps = list.Count == 0 ? "void" : string.Join(", ", list);
     return $"static {CType(f.Ret)} {f.CName}({ps})";
   }
 
@@ -321,25 +368,47 @@ public sealed partial class CodeGen {
     assign = new AssignState();
     currentRet = f.Ret;
     currentEnum = f.EnumName;
+    currentClass = f.Class;
+    currentFun = f;
+    currentGenericT = f.GenericT;
+    initializing = f.IsInit || f.IsStaticInit;
     var scope = new Scope(null);
+    if (f.Class != null && !f.IsStatic) {
+      scope.Vars["this"] = new VarInfo(f.Class.Name, "self", true);
+    }
     foreach (var p in f.Params) {
-      scope.Vars[p.Name] = new VarInfo(p.Type, "v_" + p.Name, false);
+      scope.Vars[p.Name] = new VarInfo(p.Type, "v_" + p.Name, false) { Own = p.IsGift };
     }
     var block = f.Node.Children.First(c => c.Kind == "Block");
-    var root = PrepareFrame(block.Children, scope, FrameKind.Function);
+    // the atEnd after the function body is its final cleanup; a parameter taken with -> ends with the function
+    var statements = new List<Node>(block.Children);
+    var trailing = f.Node.Children.FirstOrDefault(c => c.Kind == "AtEnd" && c.Text == "trailing");
+    if (trailing != null) {
+      statements.Insert(0, Synthetic("AtEnd", trailing).Add(trailing.Children[0]));
+    }
+    foreach (var p in f.Params.Where(p => p.IsGift)) {
+      statements.Insert(0, DropNode(p.Name, f.Node));
+    }
+    var root = PrepareFrame(statements, scope, FrameKind.Function);
     root.OuterHandler = fn.FailLabel;
     var body = new StringBuilder();
     // single-expression body returns its value
     bool singleValue = f.Ret != "void" && !IsMulti(f.Ret);
-    if (singleValue && block.Children.Count == 1 && block.Children[0].Kind == "ExprStmt") {
+    if (singleValue && statements.Count == 1 && statements[0].Kind == "ExprStmt") {
       frames.Push(root);
       root.CurrentIndex = 0;
       var e = Convert(ExprOf(block.Children[0].Children[0], scope, f.Ret), f.Ret, block.Children[0]);
       body.Append($"  return {e};\n");
       frames.Pop();
     } else {
+      if (f.IsInit) {
+        body.Append(InitPrologue(f.Class!));
+      }
       EmitHoists(root, body, "  ");
       EmitFrameBody(root, body, 1);
+      if (f.GenericT != null && !assign.Unreachable) {
+        throw Error($"every path of equals must return a value (checked for T = {f.GenericT})", f.Node);
+      }
     }
 
     var sb = new StringBuilder();
@@ -359,6 +428,10 @@ public sealed partial class CodeGen {
     sb.Append("}\n");
     currentRet = null;
     currentEnum = null;
+    currentClass = null;
+    currentFun = null;
+    currentGenericT = null;
+    initializing = false;
     fn = null;
     return sb.ToString();
   }
@@ -369,6 +442,9 @@ public sealed partial class CodeGen {
 
   void EmitStmt(Node s, StringBuilder sb, Scope scope, int indent) {
     string pad = Pad(indent);
+    if (s.Children.Any(child => child.Kind == "AtEnd" && child.Text == "trailing")) {
+      throw NotSupported("atEnd after a statement (14.2, form 3): only after a function or a class", s);
+    }
     switch (s.Kind) {
       case "Namespace":
       case "NamespaceLocal":
@@ -388,9 +464,16 @@ public sealed partial class CodeGen {
         return;
 
       case "ExprStmt": {
+        if (s.Children[0].Kind == "Finalize") {
+          EmitFinalize(s.Children[0], sb, scope, pad);
+          return;
+        }
         var e = ExprOf(s.Children[0], scope);
         string k = s.Children[0].Kind;
-        if (k is "Call" or "PostInc" or "PostDec" or "PreInc" or "PreDec") {
+        if (k == "Call" && e.Fresh && IsClass(e.Type)) {
+          // a new object nobody keeps ends here
+          sb.Append(pad).Append(CheckRaise($"df_drop((void*)({e.Code}))", "void")).Append(";\n");
+        } else if (k is "Call" or "PostInc" or "PostDec" or "PreInc" or "PreDec") {
           sb.Append(pad).Append(e.Code).Append(";\n");
         } else {
           Warn("expression result is not used", s);
@@ -406,13 +489,26 @@ public sealed partial class CodeGen {
         return;
 
       case "If":
+        if (TypeBranch(s, sb, scope, indent)) {
+          return;
+        }
         EmitIf(s, sb, scope, indent, false);
         return;
 
       case "IfThen": {
-        sb.Append($"{pad}if ({BoolOf(ExprOf(s.Children[0], scope), s)}) {{\n");
+        if (TypeBranch(s, sb, scope, indent)) {
+          return;
+        }
+        var thenScope = scope;
+        string condition;
+        if (s.Children[0].Kind == "Is" && s.Children[0].Text != null) {
+          (condition, thenScope) = IsBinding(s.Children[0], scope);   // if x is Circle c then ...
+        } else {
+          condition = BoolOf(ExprOf(s.Children[0], scope), s);
+        }
+        sb.Append($"{pad}if ({condition}) {{\n");
         var before = assign.Clone();
-        EmitStatementAsBlock(s.Children[1], sb, scope, indent + 1);
+        EmitStatementAsBlock(s.Children[1], sb, thenScope, indent + 1);
         assign = AssignState.Merge(new[] { assign, before });
         sb.Append(pad).Append("}\n");
         return;
@@ -480,8 +576,9 @@ public sealed partial class CodeGen {
         throw Error($"'{s.Kind}' must be written directly inside a block", s);
 
       case "Throw":
-        EmitThrow(s, sb, scope, pad);
-        assign.Unreachable = true;
+        if (EmitThrow(s, sb, scope, pad)) {
+          assign.Unreachable = true;
+        }
         return;
 
       case "Fun":
@@ -500,6 +597,9 @@ public sealed partial class CodeGen {
   void EmitDecl(Node s, StringBuilder sb, Scope scope, string pad) {
     var mods = s.Children.FirstOrDefault(c => c.Kind == "Mods");
     bool isConst = mods?.Text?.Split(' ').Contains("const") == true;
+    if (s.Children.Any(c => c.Kind == "Size")) {
+      throw NotSupported("Sized declarations (arr<T>[n] name)", s);
+    }
     string type = ResolveDeclType(s, scope);
     if (scope.Vars.ContainsKey(s.Text!)) {
       throw Error($"'{s.Text}' is already declared in this scope", s);
@@ -507,16 +607,30 @@ public sealed partial class CodeGen {
     CheckNotShadowing(s.Text!, scope, s);
     var init = s.Children.FirstOrDefault(c => c.Kind is "Init" or "WeakInit");
     string code;
+    Expr? initValue = null;
+    bool weak = init?.Kind == "WeakInit";
     if (init == null) {
       if (isConst) {
         throw Error("a const needs a value", s);
       }
       code = ZeroValue(type);
     } else {
-      if (init.Kind == "WeakInit") {
-        throw NotSupported("Ownership", init);
+      var value = ExprOf(init.Children[0], scope, type);
+      if (weak) {
+        if (!IsClass(type)) {
+          throw Error("only objects have weak references", s);
+        }
+        if (value.Fresh) {
+          throw Error("a weak reference needs an existing object: nobody would own a new one", s);
+        }
       }
-      code = Convert(ExprOf(init.Children[0], scope, type), type, init);
+      initValue = value;
+      code = Convert(value, type, init);
+    }
+    // an owner must receive an object nobody else owns (the same decision was made when the scope was prepared)
+    bool owns = declOwner.TryGetValue(s, out bool guessed) && guessed;
+    if (owns && IsClass(type) && initValue is Expr given && !(given.Fresh || given.Type == "null")) {
+      throw Error($"'{s.Text}' would own an object that something else owns: write ->x to move it, or start from a new object", s);
     }
     VarInfo variable;
     if (frames.Peek().Hoisted.TryGetValue(s.Text!, out var hoisted)) {
@@ -527,6 +641,7 @@ public sealed partial class CodeGen {
       variable = new VarInfo(type, "v_" + s.Text, isConst);
       sb.Append($"{pad}{(isConst ? "const " : "")}{CType(type)} {variable.CName} = {code};\n");
     }
+    variable.IsWeak = weak;
     scope.Vars[s.Text!] = variable;
     if (init == null) {
       assign.Unassigned.Add(variable);
@@ -537,10 +652,17 @@ public sealed partial class CodeGen {
 
   void EmitIf(Node s, StringBuilder sb, Scope scope, int indent, bool isElseIf) {
     string pad = Pad(indent);
-    string head = $"if ({BoolOf(ExprOf(s.Children[0], scope), s)}) {{\n";
+    var thenScope = scope;
+    string condition;
+    if (s.Children[0].Kind == "Is" && s.Children[0].Text != null) {
+      (condition, thenScope) = IsBinding(s.Children[0], scope);   // if v is Circle c { }
+    } else {
+      condition = BoolOf(ExprOf(s.Children[0], scope), s);
+    }
+    string head = $"if ({condition}) {{\n";
     sb.Append(isElseIf ? head : pad + head);
     var before = assign.Clone();
-    EmitBlock(s.Children[1], sb, scope, indent + 1);
+    EmitBlock(s.Children[1], sb, thenScope, indent + 1);
     var afterThen = assign;
     assign = before.Clone();
     sb.Append(pad).Append('}');
@@ -565,7 +687,7 @@ public sealed partial class CodeGen {
     string pad = Pad(indent);
     var block = doWhile ? s.Children[0] : s.Children[1];
     var condNode = doWhile ? s.Children[1] : s.Children[0];
-    var body = PrepareFrame(block.Children, scope, FrameKind.LoopBody);
+    var body = PrepareFrame(LoopStatements(block.Children), scope, FrameKind.LoopBody);
     bool cleanup = body.AtEnds.Count > 0;
     int inner = indent;
     if (cleanup) {
@@ -630,7 +752,7 @@ public sealed partial class CodeGen {
     var innerScope = new Scope(scope);
     string cname = "v_" + varNode.Text;
     innerScope.Vars[varNode.Text!] = new VarInfo(type, cname, false);
-    var body = PrepareFrame(block.Children, innerScope, FrameKind.LoopBody);
+    var body = PrepareFrame(LoopStatements(block.Children), innerScope, FrameKind.LoopBody);
     bool cleanup = body.AtEnds.Count > 0;
 
     tempCounter++;
@@ -745,18 +867,30 @@ public sealed partial class CodeGen {
     if (s.Children.Count > 1) {
       throw Error("this function returns one value", s);
     }
-    return Convert(ExprOf(s.Children[0], scope, currentRet), currentRet!, s);
+    var returned = ExprOf(s.Children[0], scope, currentRet);
+    returned = CheckReturnOwnership(returned, s.Children[0], scope, s);
+    return Convert(returned, currentRet!, s);
   }
 
   // Something that can be written: a variable or a tuple field
-  readonly record struct LValueInfo(string Code, string Type, bool IsConst, VarInfo? Variable = null);
+  readonly record struct LValueInfo(string Code, string Type, bool IsConst, VarInfo? Variable = null, bool IsField = false);
 
   LValueInfo LValue(Node target, Scope scope) {
     if (target.Kind == "Name") {
-      var variable = scope.Find(target.Text!) ?? throw Error($"unknown variable '{target.Text}'", target);
+      var variable = scope.Find(target.Text!);
+      if (variable == null && currentClass != null && FindField(currentClass, target.Text!) is FieldInfo ownField) {
+        var bare = BareField(target.Text!, scope, target)!.Value;
+        return new LValueInfo(bare.Code, bare.Type, ownField.IsConst && !initializing, null, !ownField.IsStatic);
+      }
+      if (variable == null) {
+        throw Error($"unknown variable '{target.Text}'", target);
+      }
       return new LValueInfo(variable.CName, variable.Type, variable.IsConst, variable);
     }
     if (target.Kind == "Member") {
+      if (ClassLValue(target, scope) is LValueInfo classTarget) {
+        return classTarget;
+      }
       var owner = LValue(target.Children[0], scope);
       if (!IsTuple(owner.Type)) {
         throw Error("only variables and tuple fields can be assigned for now", target);
@@ -778,12 +912,16 @@ public sealed partial class CodeGen {
     }
     string op = s.Text!;
     if (op == "=") {
-      string value = Convert(ExprOf(s.Children[1], scope, target.Type), target.Type, s);
+      var assigned = ExprOf(s.Children[1], scope, target.Type);
+      if (IsClass(target.Type) && (target.Variable != null || target.IsField)) {
+        return OwnedAssign(target, targetNode, assigned, s);
+      }
+      string value = Convert(assigned, target.Type, s);
       MarkAssigned(target.Variable);
       return $"{target.Code} = {value}";
     }
     if (op == "_=") {
-      throw NotSupported("Ownership", s);
+      return WeakAssign(target, targetNode, s.Children[1], scope, s);
     }
     ReadCheck(target.Variable, targetNode.Text ?? "", targetNode);
     if (op == "??=") {
@@ -818,15 +956,29 @@ public sealed partial class CodeGen {
       case "Name": {
         var v = scope.Find(n.Text!);
         if (v != null) {
+          if (v.IsWeak) {
+            throw Error($"'{n.Text}' is a weak reference: use it through enforce {n.Text} {{ }} else {{ }}", n);
+          }
           ReadCheck(v, n.Text!, n);
           return new Expr(v.CName, v.Type);
+        }
+        if (BareField(n.Text!, scope, n) is Expr field) {
+          return field;
+        }
+        if (traits.TryGetValue(n.Text!, out var viewed) && scope.Find("this") != null && IsSubtype(scope.Find("this")!.Type, viewed.Name)) {
+          return new Expr("self", viewed.Name);   // TraitName.member inside a class that implements it
+        }
+        if (n.Text == "parent" && currentClass?.Parent != null && scope.Find("this") != null) {
+          return new Expr($"(({CType(currentClass.Parent.Name)})self)", currentClass.Parent.Name);
         }
         return BareEnumEntry(n.Text!) ?? throw Error($"unknown name '{n.Text}'", n);
       }
       case "Paren": {
         var e = ExprOf(n.Children[0], scope, expected);
-        return new Expr($"({e.Code})", e.Type);
+        return new Expr($"({e.Code})", e.Type, e.Fresh);
       }
+      case "Gift":
+        return GiftExpr(n, scope);
       case "Tuple":
         return TupleLiteral(n, scope, expected);
       case "Interp":
@@ -879,6 +1031,8 @@ public sealed partial class CodeGen {
         return BoolSwitchExpr(n, scope, expected);
       case "IsNull":
         return new Expr(EqualsCode(ExprOf(n.Children[0], scope), new Expr("0", "null"), n), "bool");
+      case "Is":
+        return IsExpr(n, scope);
       case "List":
         if (expected != null && IsArr(expected)) {
           return ArrayLiteral(n, scope, expected);
@@ -1355,6 +1509,17 @@ public sealed partial class CodeGen {
       return SafeAccess(callee, n, scope);
     }
 
+    // parent.name(): the parent's version of an overridden function
+    if (callee.Kind == "Member" && callee.Children[0] is { Kind: "Name", Text: "parent" } && scope.Find("parent") == null) {
+      return ParentCall(callee.Text!, args, scope, n);
+    }
+
+    // TraitName.name(): the trait's own function, inside a class that implements it
+    if (callee.Kind == "Member" && callee.Children[0] is { Kind: "Name" } traitName && traits.TryGetValue(traitName.Text!, out var qualified)
+        && scope.Find(traitName.Text!) == null && scope.Find("this") != null) {
+      return TraitDirectCall(qualified, callee.Text!, args, scope, n);
+    }
+
     // x.toStr() and x.toStr(format)
     if (callee.Kind == "Member" && callee.Text == "toStr" && args.Count <= 1) {
       var value = ExprOf(callee.Children[0], scope);
@@ -1375,6 +1540,12 @@ public sealed partial class CodeGen {
       }
       if (Stdlib.TryGetValue(path, out var stdOverloads)) {
         return StdCall(path, stdOverloads, args, scope, n);
+      }
+      if (callee.Kind == "Name" && BareMethodCall(callee.Text!, args, scope, n) is Expr bare) {
+        return bare;
+      }
+      if (callee.Kind == "Member" && StaticCall(path, args, scope, n) is Expr staticCall) {
+        return staticCall;
       }
       bool enumMethod = callee.Kind == "Member" && IsEnum(path.Split('.')[0]);
       if ((callee.Kind == "Name" || enumMethod) && funs.TryGetValue(path, out var overloads)) {
@@ -1403,10 +1574,10 @@ public sealed partial class CodeGen {
           && ExprOf(arg.Children[0], scope).Type == param.Type) {
         arg = arg.Children[0];
       }
-      codes.Add(Convert(ExprOf(arg, scope, param.Type), param.Type, arg));
+      codes.Add(ArgCode(param, arg, scope));
     }
     string call = $"{f.CName}({string.Join(", ", codes)})";
-    return new Expr(failingFuns.Contains(f) ? CheckRaise(call, f.Ret) : call, f.Ret);
+    return new Expr(failingFuns.Contains(f) ? CheckRaise(call, f.Ret) : call, f.Ret, IsClass(f.Ret) && (f.IsCtor || f.ReturnsOwned));
   }
 
   Expr MemberValue(Node n, Scope scope) {
@@ -1420,6 +1591,9 @@ public sealed partial class CodeGen {
         return new Expr($"({v32}f)", "r32");
       }
       string[] parts = path.Split('.');
+      if (parts.Length == 2 && classes.TryGetValue(parts[0], out var staticOwner)) {
+        return StaticField(staticOwner, parts[1], n);
+      }
       if (parts.Length == 2 && IsEnum(parts[0])) {
         return EnumEntryExpr(parts[0], parts[1]) ?? throw Error($"'{parts[0]}' has no entry '{parts[1]}'", n);
       }
@@ -1434,6 +1608,9 @@ public sealed partial class CodeGen {
     }
     if (obj.Type == "Exception") {
       return ExceptionMember(obj, n.Text!, n);
+    }
+    if (IsClass(obj.Type)) {
+      return TraitView(obj, n.Text!, n) ?? ObjectField(obj, n.Text!, n);   // x.TraitName, x.field
     }
     if (obj.Type == "string" && n.Text == "len") {
       return new Expr($"df_str_chars({obj.Code})", "u64");

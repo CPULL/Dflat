@@ -1,0 +1,123 @@
+// Classes, phase 3: traits (properties, constructor, default methods, parent trait, dispatch)
+alias Root as r
+
+trait Named {
+  string name = "unnamed"
+  fun string Label()                          // must be implemented
+  fun string Hello() { "Hi " + Label() + " (" + name + ")" }
+}
+
+trait Shape : Named {
+  i32 sides
+  Shape() { sides = 3 }
+  fun r64 Area()
+  fun string Info() { Hello() + " area " + Area() + " sides " + sides }
+}
+
+public class Square : Shape {
+  public r64 side = 2.0
+  override fun string Label() { "square" }
+  override fun r64 Area() { side * side }
+  public fun SetName(string n) { name = n }
+}
+
+public class Circle : Shape {
+  public r64 radius = 1.0
+  override fun string Label() { "circle" }
+  override fun r64 Area() { 3.0 * radius * radius }
+  override fun string Hello() { "Hello from the circle" }
+}
+
+public class Base {
+  public fun string Label() { "base label" }
+}
+
+public class Derived : Base, Named {
+  public i32 extra = 5
+}
+
+public class Loud : Square {
+  override fun string Label() { "LOUD" }
+}
+
+// values of a trait type: dynamic dispatch
+fun string describe(Shape s) { s.Info() }
+fun string greet(any Named n) { n.Hello() }
+
+Square sq = Square()
+Circle ci = Circle()
+r.Console.Log(sq.Label())
+r.Console.Log(sq.Hello())
+r.Console.Log(sq.Info())
+r.Console.Log(ci.Hello())
+r.Console.Log(ci.Info())
+r.Console.Log(sq.sides)
+sq.SetName("my square")
+r.Console.Log(sq.name)
+r.Console.Log(describe(sq))
+r.Console.Log(describe(ci))
+r.Console.Log(greet(sq))
+r.Console.Log(greet(ci))
+
+// a class that gets the function from its parent class
+Derived d = Derived()
+r.Console.Log(d.Hello())
+r.Console.Log(greet(d))
+r.Console.Log(d.name)
+r.Console.Log(d.extra)
+
+// a subclass overriding a function that answers a trait
+Loud loud = Loud()
+loud.side = 3.0
+r.Console.Log(describe(loud))
+r.Console.Log(greet(loud))
+
+// properties through a trait-typed value
+Shape s = ci
+r.Console.Log(s.sides)
+s.sides = 8
+r.Console.Log(ci.sides)
+s.name = "renamed"
+r.Console.Log(ci.name)
+r.Console.Log(s.Hello())
+
+// a mixed array of any shape
+arr<any Shape> shapes = [sq, ci, loud]
+r64 total = 0.0
+for any Shape item in shapes { total += item.Area() }
+r.Console.Log(total)
+for var item in shapes { r.Console.Print(item.Label() + ";") }
+r.Console.Log("")
+
+// a trait value assigned to the parent trait
+Named n = s
+r.Console.Log(n.Label())
+n = d
+r.Console.Log(n.Label())
+Named none = null
+r.Console.Log(none == null)
+
+// is: with a class, and with a trait
+r.Console.Log(s is Circle)
+r.Console.Log(s is Square)
+r.Console.Log(sq is Shape)
+r.Console.Log(d is Shape)
+r.Console.Log(d is Named)
+r.Console.Log(n is Base)
+arr<Named> mixed = [sq, d, ci]
+for Named item in mixed {
+  if item is Shape sh {
+    r.Console.Log("shape " + sh.Area())
+  } else if item is Base b {
+    r.Console.Log("base " + b.Label())
+  }
+}
+
+// null access through a trait
+i32 caught = 0
+none.Hello()
+catch NullPointerException {
+  caught += 1
+}
+r.Console.Log(caught)
+r.Console.Log(sq)

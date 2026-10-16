@@ -1,0 +1,140 @@
+// Classes, phase 4: ownership. Objects end with their owner; the class atEnd runs; ->, is atEnd., weak references
+alias Root as r
+
+public class Res {
+  public string name = "res"
+} atEnd {
+  r.Console.Log("  end " + name)
+}
+
+public class Holder {
+  public string name = "holder"
+  public Res inner = Res()
+  public Res spare
+} atEnd {
+  r.Console.Log("  end holder, inner is " + (inner == null ? { "null", "set" }))
+}
+
+public class Base {
+  public string tag = "base"
+} atEnd {
+  r.Console.Log("  end Base part")
+}
+public class Derived : Base {
+  public Res part = Res()
+} atEnd {
+  r.Console.Log("  end Derived part")
+}
+
+fun Res make(string name) {
+  Res made = Res()
+  made.name = name
+  return made
+}
+
+fun Res firstOf(Holder h) { h.inner }
+
+fun use(Res borrowed) {
+  r.Console.Log("  using " + borrowed.name)
+}
+
+fun take(->Res given) {
+  r.Console.Log("  took " + given.name)
+}
+
+r.Console.Log("scope end")
+{
+  Res a = make("a")
+  Res b = make("b")
+  Res view = a
+  r.Console.Log("  inside, view " + view.name)
+}
+r.Console.Log("after the block")
+
+r.Console.Log("function end")
+fun scoped() {
+  Res x = make("x")
+  use(x)
+} atEnd {
+  r.Console.Log("  function final cleanup")
+}
+scoped()
+
+r.Console.Log("explicit release")
+Res c = make("c")
+c is atEnd.
+r.Console.Log("  c is null: " + (c == null))
+c is atEnd.
+
+r.Console.Log("move into a variable")
+Res d = make("d")
+Res e = ->d
+r.Console.Log("  d is null: " + (d == null) + ", e is " + e.name)
+
+r.Console.Log("move into a function")
+Res f = make("f")
+take(->f)
+r.Console.Log("  after take, f is null: " + (f == null))
+
+r.Console.Log("new value drops the old one")
+Res g = make("g1")
+g = make("g2")
+r.Console.Log("  g is " + g.name)
+
+r.Console.Log("fields, parent and child")
+{
+  Holder h = Holder()
+  h.spare = make("spare")
+  Derived dv = Derived()
+  r.Console.Log("  built " + dv.tag)
+}
+
+r.Console.Log("move a field out")
+{
+  Holder h2 = Holder()
+  Res taken = ->h2.inner
+  r.Console.Log("  taken " + taken.name + ", inner null: " + (h2.inner == null))
+}
+
+r.Console.Log("loop")
+for i32 i = 0..3 {
+  Res item = make("item" + i)
+}
+
+r.Console.Log("return and break")
+fun Res find(i32 n) {
+  for i32 i = 0..5 {
+    Res candidate = make("cand" + i)
+    if i == n { return candidate }
+  }
+  return null
+}
+Res found = find(1)
+r.Console.Log("  found " + found.name)
+
+r.Console.Log("weak")
+Res strong = make("strong")
+Res weak _= strong
+enforce weak {
+  r.Console.Log("  alive: " + weak.name)
+} else {
+  r.Console.Log("  gone")
+}
+strong is atEnd.
+enforce weak {
+  r.Console.Log("  alive: " + weak.name)
+} else {
+  r.Console.Log("  gone")
+}
+
+r.Console.Log("exception")
+fun fails() {
+  Res guard = make("guard")
+  throw Exception("boom")
+}
+fails()
+catch Exception ex {
+  r.Console.Log("  caught " + ex.Message)
+}
+
+r.Console.Log("program end")

@@ -44,7 +44,7 @@ public sealed partial class CodeGen {
 
   bool IsKnownType(string t) {
     return SignedTypes.Contains(t) || UnsignedTypes.Contains(t) || RealTypes.Contains(t)
-      || t is "bool" or "char" or "string" or "byte" or "date" or "time" or "clock" or "lapse" || IsEnum(t);
+      || t is "bool" or "char" or "string" or "byte" or "date" or "time" or "clock" or "lapse" or "Exception" || IsEnum(t) || IsClass(t);
   }
 
   static string Normalize(string t) => t == "byte" ? "u8" : t;
@@ -168,6 +168,12 @@ public sealed partial class CodeGen {
     if (IsArr(type)) {
       return ArrCType(ArrElem(type));
     }
+    if (IsTraitType(type)) {
+      return "void*";
+    }
+    if (IsClass(type)) {
+      return "c_" + type + "*";
+    }
     if (enums.TryGetValue(type, out var info)) {
       return PrimitiveCType(info.ValueType);
     }
@@ -230,6 +236,9 @@ public sealed partial class CodeGen {
     if (IsArr(type)) {
       return $"(({CType(type)}){{0}})";
     }
+    if (IsClass(type)) {
+      return "NULL";
+    }
     if (IsTuple(type) || IsMulti(type)) {
       var zeros = TupleElems(type).Select(elem => ZeroValue(elem.Type));
       return $"(({CType(type)}){{ {string.Join(", ", zeros)} }})";
@@ -258,6 +267,9 @@ public sealed partial class CodeGen {
         if (IsArr(inner)) {
           throw Error("collections are already nullable; 'arr<T>?' is not allowed", n);
         }
+        if (IsClass(inner)) {
+          throw Error($"objects are already nullable; '{inner}?' is not allowed", n);
+        }
         if (IsNullable(inner)) {
           throw Error($"'{inner}' is already nullable", n);
         }
@@ -275,6 +287,9 @@ public sealed partial class CodeGen {
       }
       case "Type": {
         string t = n.Text!;
+        if (t == "T" && n.Children.Count == 0 && currentGenericT != null) {
+          return currentGenericT;   // inside a copy of equals(T other)
+        }
         if (TypeFeatures.TryGetValue(t, out var feature)) {
           throw NotSupported(feature, n);
         }
@@ -299,6 +314,16 @@ public sealed partial class CodeGen {
         }
         return Normalize(t);
       }
+      case "Specific":
+      case "Any": {
+        // specific T: one type known at compile time, any T: any type that implements T. Both are
+        // handled as the trait itself: calls find the implementation at run time
+        string inner = ResolveType(n.Children[0]);
+        if (!IsTraitType(inner)) {
+          throw Error($"'{(n.Kind == "Any" ? "any" : "specific")}' applies to a trait, not to {inner}", n);
+        }
+        return inner;
+      }
       default:
         if (NodeFeatures.TryGetValue(n.Kind, out var nodeFeature)) {
           throw NotSupported(nodeFeature, n);
@@ -322,7 +347,13 @@ public sealed partial class CodeGen {
       return false;
     }
     if (from == "null") {
-      return IsNullable(to) || to == "string" || IsTimeType(to) || IsArr(to);
+      return IsNullable(to) || to == "string" || IsTimeType(to) || IsArr(to) || IsClass(to) || to == "Exception";
+    }
+    if (to == "Exception" && IsExceptionClass(from)) {
+      return true;
+    }
+    if (IsClass(to) || IsClass(from)) {
+      return IsClass(to) && IsClass(from) && IsSubtype(from, to);   // up the hierarchy only
     }
     if (IsNullable(to)) {
       string toBase = BaseOf(to);
@@ -370,8 +401,11 @@ public sealed partial class CodeGen {
       if (IsTimeType(to)) {
         return NullCode(to);
       }
-      if (IsArr(to)) {
+      if (IsArr(to) || IsClass(to)) {
         return ZeroValue(to);
+      }
+      if (to == "Exception") {
+        return "NULL";
       }
       throw Error($"{to} is not nullable; declare it as {to}?", at);
     }
@@ -485,6 +519,9 @@ public sealed partial class CodeGen {
     if (IsArr(e.Type)) {
       throw Error("collections cannot be converted to bool", at);
     }
+    if (IsClass(e.Type)) {
+      throw Error("objects cannot be converted to bool: compare with null", at);
+    }
     if (e.Type == "lapse") {
       return $"df_lapse_bool({e.Code})";
     }
@@ -527,6 +564,9 @@ public sealed partial class CodeGen {
     if (IsArr(e.Type)) {
       return $"{ArrStrFunction(ArrElem(e.Type), at)}({e.Code})";
     }
+    if (IsClass(e.Type)) {
+      return $"df_str_obj({e.Code})";
+    }
     if (e.Type == "Exception") {
       throw Error("Exception cannot be converted to a string yet; use its Message", at);
     }
@@ -568,12 +608,18 @@ public sealed partial class CodeGen {
       }
       return $"({l.Code} == {r.Code})";
     }
+    if (IsClass(l.Type)) {
+      return ObjectEquals(l, r, at);   // equals, the operator ==, or identity (11.1.3)
+    }
     if (IsArr(l.Type) && (IsArr(r.Type) || r.Type == "null")) {
       // collections compare by identity (spec 6.1)
       return r.Type == "null" ? WithTemp(l, temp => $"({temp}.p == NULL)")
         : WithTemp(l, leftTemp => WithTemp(r, rightTemp => $"({leftTemp}.p == {rightTemp}.p)"));
     }
     if (r.Type == "null") {
+      if (l.Type == "Exception") {
+        return $"(({l.Code}) == NULL)";
+      }
       if (IsNullable(l.Type)) {
         return WithTemp(l, temp => $"(!{temp}.has)");
       }

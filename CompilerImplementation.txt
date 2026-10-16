@@ -1,0 +1,222 @@
+Compiler implementation notes (dfcompiler 0.0.8alpha, spec 0.0.8)
+=====================================================================
+
+What this file is: the decisions the compiler makes where the spec leaves room, the way each part is built,
+and the limits of this version. Compiler status.txt says what is done; this file says how, and what is missing.
+Where a decision came from the spec the section is named; where I (Claude) chose, it is marked CHOICE.
+
+
+1. Overall shape
+-----------------
+- dfparser (Lexer, Parser, Node) is shared with dfcompiler: same source files, compiled into both.
+- dfcompiler reads one .df file, type checks it, writes a C file next to it and calls clang (not found: PATH, DFLAT_CC, --cc).
+- Options: -o out, --emit-c (only the C file), --run (run the program), --cc path, -version, "--" then the arguments of the program.
+- Output is one C file: the runtime (always), optional runtime parts (strings, dates, Unicode tables, only when used),
+  the types, the tables of classes, the function prototypes, the bodies, main.
+- Compiler version = spec version + "alpha" (0.0.8alpha).
+- Nothing is freed to the system yet (strings, arrays, objects): see section 10.
+- Source files: CodeGen/CodeGen.cs (core, statements, expressions), .Types, .Features (overloads, named arguments, definite
+  assignment), .Errors (catch, throw, atEnd frames), .Switch (enums, switch), .Nulls (nullables, ?., enforce), .Tuples,
+  .Stdlib, .Text (string/char/date tables), .DateTime, .Arrays, .Classes, .Traits, .Equality, .Exceptions, .Ownership;
+  Runtime.cs (always), RuntimeText.cs, RuntimeDate.cs, UnicodeTables.cs (optional parts).
+
+
+2. Types and values
+--------------------
+- A type is a string in the compiler: "i32", "string", "arr<i32>", "Status" (enum), "Circle" (class), "i32?" (nullable),
+  "(i32 id,string name)" (tuple), "*(...)" (several returned values).
+- Unsuffixed integer literals are i32 (the spec says native size: not done; there is no native int/uns/real yet).
+  `int` is accepted only as the return type of main, and means i32.
+- Not available: i128/i256/u128/u256, r16/r128, dec, int/uns/real, pointers, addr, vec/list/map/hmap/set/hset/dfoot, lambdas,
+  generics, imports, multiple files.
+- Casts: out of range saturates; a float to integer cast truncates. (spec 3.5)
+- `var`: for variables and for-loop items only; the type is the type of the value. Not allowed for fields.
+- Strings: UTF-8, a pointer and a byte length, never freed. Small / block strings of 4.3 are not implemented.
+  `text[i]` reads a character by position (IndexOutOfRangeException). Writing a character by index is an error (open in the spec).
+- date is milliseconds since 1970 UTC (null = minimum i64); time is milliseconds since midnight (null = -1);
+  clock and lapse follow the spec. date and time are nullable by default (`date?` is an error).
+
+
+3. Standard library
+--------------------
+- Built into the compiler: Root.GetArgs, Console, Time (Now, Clock), Math / Math32 (constants PI, PI_HALF, E, SQRT2, R2D, D2R),
+  Random (xoshiro256**, Seed, Int, Real, RealRange, Shuffle), string functions, char functions, date and time members.
+- Call on a value: `s.Trim()`, `c.IsDigit()`, `d.addDays(1)`. Library functions take named arguments (caseSensitive: false) using the
+  parameter names of the spec; `default` cannot be used as a name (it is a keyword).
+- Characters are code points. All string indices (IndexOf, Substr, PadLeft ...) count characters, not bytes. IndexOf and
+  LastIndexOf return -1 when not found.
+- Case: ToUpper / ToLower map one character to one character (no special cases: the ß stays ß). Case-insensitive search compares
+  lower(upper(c)) of both sides.
+- Trim() removes white space, control and format characters. Trim(string c) treats c as a set of characters.
+- Unicode data comes from the .NET database of the compiler and is written into the C file as range tables, only the tables used.
+  No locale is used.
+- Split with an empty separator gives one item (the whole string). Split keeps empty items.
+- ToCStr: the array ends with a terminator (one byte for UTF8/ASCII/ISO88591, two for UTF16, four for UTF32). UTF16 and UTF32
+  are little endian, the BE variants big endian. Characters that do not fit ASCII / ISO88591 become '?'. StringEncoding (and
+  String.StringEncoding) is declared by the compiler when named.
+- Program arguments: index 0 is the program name; on Windows they are read from the wide command line and converted to UTF-8.
+  `main` forms: none, arr<string> args, string args...; return void or int (exit code). Having top-level code and main is an error.
+- Random.Shuffle works on arrays and on string variables (the string is rebuilt and assigned back).
+- Dates: all UTC. dayOfWeek is the enum DayOfWeek (Monday = 0); month/day/etc. are i32; a null date gives 0 for its parts
+  (CHOICE). addMonths/addYears keep the day when it fits, otherwise the last day of the month. add* gives null when it overflows.
+- date(string) and time(string) parse the default formats of section 9 and give null plus a silent InvalidDateTimeFormatException
+  when invalid; time(i32) and (time)n give null plus a silent OutOfRangeCastException. parse(...) never raises.
+- date - time and date + time give a date (3.3.2); time - time gives a date lapse in milliseconds. (3.4 says date - time is a lapse:
+  contradiction in the spec, CHOICE: the 3.3.2 table and the changelog.)
+- Date and time formats (8.4): d f F g h H k m M s t y z, and w q i r e j. CHOICES where the spec is short: k = hour 1..24;
+  w = week of the year counting from January 1; z prints +0 / +00 / +00:00 (UTC); e = day of year, 3 wide, zero padded (doubled: space);
+  doubled w and i pad to 2 with a space; j = 1 (Monday) to 7; quoted text in '...' or "..." and \ escape; a<20 a>20 a^20 align.
+  A date-only letter used on a time is a compile error (when the format is a literal). Parsing with a format is strict and uses the
+  same letters; two-digit years: 00-29 = 2000s, 30-99 = 1900s.
+- Number and string format specs (8.1 - 8.3) are NOT implemented; `{x:spec}` on anything but date/time gives a warning and is ignored.
+  i32.parse, r64.parse, tryParse are not implemented (tryParse needs (&) parameters).
+- Silent exceptions of library calls are raised only when a catch that can handle them exists in the same function (see 7).
+
+
+4. Collections
+---------------
+- Only arr<T> exists: a pointer and a length, elements start zeroed. Literals need a declared type (`arr<T> a = [..]`, `arr a = [..]`);
+  a literal is the right side of an assignment. `arr<T>[n]` creates; the declaration form `arr<T>[n] name` parses but is rejected.
+- Supported: index read and write with a bounds check (IndexOutOfRangeException), .len, for-in, has, indexOf (maximum u64 when not
+  found), fill, clear, reverse, printing as [a, b, c]. Not supported: sort, copyFrom, views and ranges, keys, add, insert.
+- == between arrays compares identity; a null array has no pointer; `arr<T>?` is an error (arrays are nullable by default).
+- Arrays do not own their objects (section 9).
+
+
+5. Functions
+-------------
+- Overloading: exact type first, then the smallest widening in the same family; an integer literal prefers i64; ties are errors.
+  Named arguments and defaults work for functions, methods and constructors.
+- Variadic parameters (T name...): the extra arguments become an arr<T>; an existing array alone is passed as it is. Must be last.
+- A function whose calls may raise is marked "failing": its callers check the error register. This is computed from the source
+  (divisions, throw, index, calls) before generating code. In a program with classes it is deliberately wide: any member access
+  on a variable (it may be null), any call by name that matches a method name, and any == / != when a class defines equality.
+  A destructor that can fail makes every function failing.
+- The first line of a function with one expression returns it (single-expression body).
+
+
+6. Classes (spec 11.1)
+-----------------------
+- An object is a pointer to a C struct. The first member is the class descriptor (id, name, parent, vtable, print function,
+  trait table, drop function). Fields follow, the parent's first (so an upcast is a pointer cast), then the fields of the traits the
+  class adds, then the fields of the class. Objects are allocated zeroed; fields whose zero is not all-zero bits (date, time, enums,
+  tuples ...) are set in the constructor.
+- Names: a class cannot be named like a type, trait, enum, function or `Exception`. Words that cannot be names: step, alias, atEnd and
+  the other keywords (e.g. a field called `step` does not parse).
+- Constructors: ONLY the primary constructor (header parameters) or the default constructor. Secondary constructors, constructor chains,
+  private constructors and constructor atEnd fragments give "feature not supported". Header parameters are private fields; a body
+  declaration of the same name only sets its visibility (a different type is an error; an initializer gives a level 3 warning).
+  Construction order: parent, traits (parent trait first), then the header parameters and the field initializers in order.
+  An extended class cannot have header parameters in its parent (the child cannot pass arguments to the parent): CHOICE until decided.
+  An object parameter in a header must be written ->T (the object moves into the field).
+- Calling a constructor: a function with the name of the class. A function cannot be named like a class.
+- Visibility: private (default), public, internal. internal behaves as public until namespaces exist. Private is checked at compile
+  time: usable inside the class and in its subclasses (they see everything). Overriding functions take the visibility of the
+  original, and writing one on an override is an error. Trait members are public.
+- Statics: fields, static const, functions. Stored in C globals; initialized at program start in dependency order (a static that reads
+  another runs after it; a cycle is an error; dependencies are found in the initializer text, not through function calls).
+  Statics are inherited (Child.create()); a static function cannot be overridden or redeclared with the same signature.
+  The lazy-initialization option is not implemented. Statics are not tracked by ownership.
+- Methods: all instance methods are virtual (a vtable per class); a call is direct when nothing overrides the function.
+  `parent.f()` is a direct call. A function without a body is an error in a class (virtual and for traits only: decision of the user).
+- Null: reading a field or calling a function on null (or on a destroyed object) raises NullPointerException. `this` is never null.
+  `?.` works on objects. `==` on objects: see section 8. Objects cannot be converted to bool.
+- Printing an object: `Name { a: v, b: v, c: v, ... }` (first three fields, one level; a nested object prints `Name{}`;
+  no fields: `Name {}`; private fields are printed too). It uses the dynamic class.
+- `x is Class` and `x is Class c` (c scoped to the block, only as the condition of if / if-then / else-if); a check that is always
+  true (upward) is a level 2 warning. Downcast operators do not exist.
+- Exceptions caused by classes inside a class body: nested types, secondary constructors, atEnd inside the body: errors.
+
+
+7. Traits (spec 11.2) and exceptions (spec 15)
+-----------------------------------------------
+- A trait is registered like a class that is never created. A trait value is the object itself (void*). A call on a trait value finds
+  the function in the table of the class of the object (one table per class and trait); a property is found by offset.
+  Dispatch is always dynamic: `specific T` and `any T` are accepted and behave the same (specific is not enforced).
+- Implementing: `override` is required for every function that answers a trait function, also for default bodies; a function
+  inherited from the parent class counts; a missing implementation is an error; the return type must match.
+- The same member in two traits: unqualified use is an error; TraitName.member inside the class calls the trait's own body (not the
+  override of the class), x.TraitName.member outside sees the object as that trait.
+- Not supported: generic traits, placeholders, trait constructors with parameters, a trait that redeclares a function of its
+  parent trait, static members in traits, trait-typed `is` checks on non-objects.
+- Exception classes: class E(fields) : Exception [, SilentException]. The object keeps the layout of the runtime exception record
+  (after the class header), so the error register can hold it and a catch gets it back as the class. The constructor takes the message
+  first (optional) and then the fields (optional, zero by default). Id = hash of the class name (>= 256). Message, Function, Id, Line are
+  read-only members. A parent exception class with header fields cannot be extended yet. `Exception` is also a type (a variable can hold
+  any exception; it can be tested with `is`). Catch variables have the type of the class they catch.
+- SilentException is a trait the compiler declares when it is named. A silent exception that nothing in the same function can catch
+  does nothing (execution goes on). A catch ex / catch Exception never handles a silent exception; catch SilentException, its own
+  type, a parent below Exception, and catch all do. Silent exceptions are not seen by catches in callers (limit).
+- IDs 19 to 24 are defined (IndexOutOfRange, ModifyingProtectedSource, NaNUsedAsKey, InvalidMapKey, EmptyVectorAccess,
+  InvalidDateTimeFormat); only some are raised by this version.
+- An unhandled exception prints its message and `Panic -1000`.
+
+
+8. Equality (spec 11.1.3)
+--------------------------
+- Order for a == b with an object on the left: equals, then the operator `fun bool ==(V other)`, then identity. != is the negation.
+- Null is handled before either function runs (they never receive null): a null side gives an identity comparison.
+- `override fun bool equals(T other)` is written with override (Root.Class has equals). It is generic: the compiler makes one copy
+  for each type T of the right operand. `T is type` is decided at compile time (the other branch is not emitted); `other` has the type T
+  inside the copy (this is how "binding in generic checks" is solved: undecided in the spec, CHOICE). `other is Type` is a runtime
+  check. Every path must return a value (checked on the text even if unused, and again for every copy).
+- Which copy runs is chosen at run time by the class of the left operand, through one table per T (one entry per class).
+  A trait-typed left operand compares by identity. The operator `==` is an ordinary virtual function.
+- Warnings: level 2 when a class has both equals and the operator; level 3 when a later check can never run for a T because an
+  earlier one already matched and returned. The level 1 warning for hash collections cannot happen yet (no hash collections).
+
+
+9. Ownership (spec 12, 12.4, 14.2) - only the first part (4a)
+-----------------------------------------------------------------
+Owner or borrow is decided where a variable is declared:
+- `T x = new object / result that moves / ->y` : x owns. `T x = y` (a variable, field, parameter): x borrows.
+  `T x` without a value, `T x = null`: x owns. `T x _= y`: x is a weak reference.
+- Fields own. Parameters borrow, unless written ->T x (the callee owns; the call writes ->y or gives a new object).
+- A function that returns objects either always moves (a new object, ->x, or one of its own owner variables, which is moved out)
+  or always borrows (a field, a parameter, another variable). The compiler classifies each function from its return statements (by
+  names, then checks the real return statements) and every function that shares a virtual slot or answers a trait function must agree.
+  The result of a call is a new object only for constructors and moving functions.
+- Rules (errors): an owner cannot be assigned an object that something else owns (use ->x or a new object); a borrow cannot receive a
+  new object; a weak reference is read only through enforce and assigned only with _=; `->` works on owners and on fields of an object
+  the code owns (a field of a borrowed object cannot be moved out); `->this` is an error; `x is atEnd.` needs an owner;
+  `->` on a basic value is ignored with a level 1 warning.
+- Ending: when a scope ends (normal end, return, break, continue, jump, exception passing) its owners end, last declared first, after
+  the written atEnd blocks. A loop body that declares objects is wrapped as a block so each pass ends its objects. A function's
+  `} atEnd { }` runs as the final cleanup (after the written ones, before the objects). `atEnd of a, b { }` is a scope atEnd (the names
+  are not used). A new value assigned to an owner ends the old object. A call used as a statement ends the object it returns.
+- Ending an object: the destructor (the atEnd after the class) of the most derived class, the objects it owns, then the parent's
+  destructor and objects; then the object is marked dead (its descriptor is replaced) and keeps its memory.
+  A dead object: member access raises NullPointerException; enforce on a weak reference to it fails; ending it again is a Panic
+  ("Double free", exit -1000). A destructor that throws propagates from the end of the scope like any exception.
+- Not implemented: temporaries inside expressions (never ended), objects held by arrays and tuples (not owned, never ended), static
+  fields, constructor atEnd fragments, atEnd after statements other than functions and classes (form 3, an error), reference counting,
+  .clone(), x!, compile-time use-after-move, lifetimes (a borrow can outlive its owner; it then finds a dead object when used).
+- Memory is never given back. Safety against use after end comes from the dead mark, not from freeing.
+
+
+10. Errors and atEnd (spec 14.2, 15)
+------------------------------------
+- Exceptions use an error register (df_err): a failing function returns normally with it set; the caller jumps to its catch or
+  returns. Catches handle everything above them in their block, in order; a catch with no type is `catch all` with a level 2 warning.
+- Silent exceptions of the runtime (Overflow, OutOfRangeCast, InvalidCharacterCodePoint, 21 - 24) do not match `catch Exception`.
+- The old standalone `atEnd { }` on a line of its own is still accepted as a scope atEnd (the spec removed that form).
+  Trailing `} atEnd { }` is attached by the parser to the statement it follows; the compiler accepts it for functions and classes.
+- An error raised by an atEnd block at the normal end of a scope keeps propagating through the earlier blocks; an error raised while
+  another exception is passing is a Panic.
+- Loop bodies: legacy atEnd blocks in a loop run once after the loop (only if the body ran); objects end every pass.
+
+
+11. Parser changes made with the compiler
+------------------------------------------
+- T name... (variadic after the name), arr<T>[n] as an expression and as a declaration, `static`, trailing atEnd, atEnd of,
+  `f is atEnd.` (statement only; the dot ends the statement even at the end of a line), `fun bool ==(V o)` (`!=` is rejected).
+- Reserved words that surprised me: step, alias, atEnd, static, default.
+
+
+12. Summary of the main limits
+-------------------------------
+- No generics, collections other than arr, lambdas, pointers, references, imports, namespaces (the line is a comment).
+- Classes: primary constructors only; no parent constructor arguments; no secondary constructors.
+- Ownership: single owner and weak references only; no reference counting, clone or copy; borrows are not lifetime checked.
+- Library: no number/string formatting, no number parse, no files.
+- Memory is never freed.

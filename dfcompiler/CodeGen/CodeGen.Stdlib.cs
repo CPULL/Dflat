@@ -251,7 +251,7 @@ public sealed partial class CodeGen {
       foreach (var (index, node) in frame.Catches) {
         if (index > frame.CurrentIndex) {
           var (caught, _) = CatchTarget(node);
-          if (caught == null || caught == id) {
+          if (caught == null || caught == id || caught == -2) {
             return true;
           }
         }

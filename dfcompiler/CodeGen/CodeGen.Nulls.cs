@@ -134,7 +134,7 @@ public sealed partial class CodeGen {
     if (target.Type is "null" or "void" || IsMulti(target.Type)) {
       throw Error("'?.' needs a value", safeNode);
     }
-    bool canBeNull = IsNullable(target.Type) || target.Type == "string";
+    bool canBeNull = IsNullable(target.Type) || target.Type == "string" || IsClass(target.Type);
     string valueType = BaseOf(target.Type);
 
     // evaluate "hidden.member" with hidden bound to the unwrapped value; '?' keeps it out of Dflat names
@@ -155,8 +155,8 @@ public sealed partial class CodeGen {
       if (inner.Type == "void" || IsMulti(inner.Type)) {
         throw Error("'?.' needs a member with a single value", safeNode);
       }
-      resultType = inner.Type == "string" || IsNullable(inner.Type) ? inner.Type : inner.Type + "?";
-      string has = IsNullable(target.Type) ? $"{temp}.has" : $"{temp}.len != 0";
+      resultType = IsNullable(inner.Type) || IsClass(inner.Type) || NullByDefault(inner.Type) ? inner.Type : inner.Type + "?";
+      string has = IsNullable(target.Type) ? $"{temp}.has" : IsClass(target.Type) ? $"{temp} != NULL" : $"{temp}.len != 0";
       string whenNull = Convert(new Expr("0", "null"), resultType, safeNode);
       return $"(({has}) ? {Convert(inner, resultType, safeNode)} : {whenNull})";
     });
@@ -172,7 +172,11 @@ public sealed partial class CodeGen {
     var unwrapped = new Scope(scope);
     foreach (var name in s.Children.Where(child => child.Kind == "Name")) {
       var variable = scope.Find(name.Text!) ?? throw Error($"unknown variable '{name.Text}'", name);
-      if (IsNullable(variable.Type)) {
+      if (variable.IsWeak) {
+        // a weak reference: the object must still be alive; inside the block it is a plain borrow
+        conditions.Add($"({variable.CName} != NULL && !DF_IS_DEAD({variable.CName}))");
+        unwrapped.Vars[name.Text!] = new VarInfo(variable.Type, variable.CName, variable.IsConst);
+      } else if (IsNullable(variable.Type)) {
         conditions.Add($"{variable.CName}.has");
         unwrapped.Vars[name.Text!] = new VarInfo(BaseOf(variable.Type), variable.CName + ".val", variable.IsConst);
       } else if (variable.Type == "string") {

@@ -4,7 +4,7 @@ using dfparser;
 namespace dfcompiler;
 
 public static class Program {
-  public const string Version = "0.0.7alpha";
+  public const string Version = "0.0.8alpha";
 
   public static int Main(string[] args) {
     string? path = null;

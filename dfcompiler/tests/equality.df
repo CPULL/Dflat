@@ -1,0 +1,89 @@
+// Classes, phase 5: equals(T other), the operator ==, identity
+alias Root as r
+
+public class Plain(i32 id) {
+  public i32 id
+}
+
+// equals with several types of the right side
+public class Number {
+  public i32 value = 0
+  override fun bool equals(T other) {
+    if T is i32 then return value == other
+    if T is string then return value == (i32)other.len
+    if T is Number {
+      return value == other.value
+    }
+    return false
+  }
+}
+
+// a subclass inherits equals; another one replaces it
+public class Child : Number {
+}
+public class Odd : Number {
+  override fun bool equals(T other) {
+    if T is Number then return true
+    return false
+  }
+}
+
+// the operator
+public class Point(i32 x, i32 y) {
+  public i32 x
+  public i32 y
+  fun bool ==(Point other) { x == other.x && y == other.y }
+}
+
+Plain a = Plain(1)
+Plain b = Plain(1)
+Plain sameA = a
+r.Console.Log(a == b)
+r.Console.Log(a == sameA)
+r.Console.Log(a != b)
+
+fun Number num(i32 v) {
+  Number made = Number()
+  made.value = v
+  return made
+}
+Number n = num(5)
+Number m = num(5)
+Number k = num(6)
+r.Console.Log(n == m)
+r.Console.Log(n == k)
+r.Console.Log(n != k)
+r.Console.Log(n == 5)
+r.Console.Log(n == 6)
+r.Console.Log(n == "hello")
+r.Console.Log(n == "hi")
+r.Console.Log(n == 5.5)
+r.Console.Log(n == a)
+
+// null is handled before equals
+Number none = null
+r.Console.Log(n == none)
+r.Console.Log(none == n)
+r.Console.Log(none == none)
+r.Console.Log(n == null)
+r.Console.Log(null == n)
+
+// subclasses: the class of the left operand decides, also through a parent variable
+Child c = Child()
+Number asNumber = Odd()
+r.Console.Log(c == 0)
+r.Console.Log(asNumber == k)
+r.Console.Log(asNumber == 99)
+Number plainOne = Number()
+r.Console.Log(plainOne == c)
+
+Point p = Point(1, 2)
+Point q = Point(1, 2)
+Point z = Point(3, 4)
+r.Console.Log(p == q)
+r.Console.Log(p == z)
+r.Console.Log(p != z)
+Point nothing = null
+r.Console.Log(p == nothing)
+r.Console.Log(nothing == p)
+r.Console.Log(nothing == nothing)

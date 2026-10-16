@@ -7,6 +7,7 @@ public static class Runtime {
 #ifndef _WIN32
 #define _POSIX_C_SOURCE 200809L
 #endif
+#include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -59,7 +60,10 @@ typedef struct df_descriptor {
   bool silent;
 } df_descriptor;
 
+struct df_class;
+
 typedef struct {
+  const struct df_class* cls;   /* NULL for the exceptions raised by the runtime; the class of an exception object */
   uint64_t id;
   const df_descriptor* descriptor;
   char* message;     /* C-style, max 2 KB */
@@ -105,6 +109,7 @@ static char* df_cstr_truncated(const char* text, uint64_t length, uint64_t maxBy
 
 static df_exception* df_new_exception(const df_descriptor* descriptor, const char* message, uint64_t messageLength, const char* function) {
   df_exception* exception = (df_exception*)df_alloc(sizeof(df_exception));
+  exception->cls = NULL;
   exception->id = descriptor->id;
   exception->descriptor = descriptor;
   exception->message = df_cstr_truncated(message, messageLength, 2048);
@@ -182,6 +187,91 @@ static df_string df_str_from_cstr(const char* text) {
 
 static bool df_str_eq(df_string a, df_string b) {
   return a.len == b.len && memcmp(a.p, b.p, a.len) == 0;
+}
+
+/* ---- objects (classes): every object starts with its class descriptor ---- */
+
+typedef struct df_trait {
+  uint64_t id;
+  const char* name;
+} df_trait;
+
+/* how one class implements one trait: the function for each method and the offset of each property */
+typedef struct {
+  const df_trait* trait;
+  const void* const* methods;
+  const uint32_t* offsets;
+} df_impl;
+
+typedef struct df_class {
+  uint64_t id;
+  const char* name;
+  const struct df_class* parent;
+  const void* const* vtable;
+  df_string (*str)(const void*);
+  const df_impl* impls;
+  uint32_t nimpls;
+  void (*drop)(void*);   /* ends the object: its atEnd, then the objects it owns */
+} df_class;
+
+typedef struct { const df_class* cls; } df_object;
+
+/* x is Class: the class of the object, or one of its parents */
+static bool df_is(const void* obj, const df_class* cls) {
+  if (obj == NULL) {
+    return false;
+  }
+  for (const df_class* c = ((const df_object*)obj)->cls; c; c = c->parent) {
+    if (c == cls) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static const df_impl* df_impl_of(const void* obj, const df_trait* trait) {
+  const df_class* c = ((const df_object*)obj)->cls;
+  for (uint32_t i = 0; i < c->nimpls; i++) {
+    if (c->impls[i].trait == trait) {
+      return &c->impls[i];
+    }
+  }
+  return NULL;
+}
+
+/* x is TraitName */
+static bool df_has_trait(const void* obj, const df_trait* trait) {
+  return obj != NULL && df_impl_of(obj, trait) != NULL;
+}
+
+/* a destroyed object keeps its memory but points to this class */
+static df_string df_dead_str(const void* obj) {
+  (void)obj;
+  return df_str_lit("(destroyed)", 11);
+}
+
+static const df_class df_dead_class = { 0, "(destroyed)", NULL, NULL, df_dead_str, NULL, 0, NULL };
+
+#define DF_IS_DEAD(p) (((const df_object*)(p))->cls == &df_dead_class)
+
+/* releases the ownership held by a variable: the object ends; ending a destroyed object is a double free */
+static void df_drop(void* obj) {
+  if (obj == NULL) {
+    return;
+  }
+  const df_class* c = ((const df_object*)obj)->cls;
+  if (c == &df_dead_class) {
+    fflush(stdout);
+    printf("Double free\n");
+    df_panic(DF_PANIC_UNHANDLED);
+  }
+  if (c != NULL && c->drop != NULL) {
+    c->drop(obj);
+  }
+}
+
+static df_string df_str_obj(const void* obj) {
+  return obj ? ((const df_object*)obj)->cls->str(obj) : df_str_lit("null", 4);
 }
 
 /* ---- arrays (arr<T>): pointer and length; a null array has no pointer ---- */

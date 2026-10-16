@@ -275,7 +275,7 @@ public sealed partial class CodeGen {
     var innerScope = new Scope(scope);
     string cname = "v_" + varNode.Text;
     innerScope.Vars[varNode.Text!] = new VarInfo(type, cname, false);
-    var body = PrepareFrame(block.Children, innerScope, FrameKind.LoopBody);
+    var body = PrepareFrame(LoopStatements(block.Children), innerScope, FrameKind.LoopBody);
     bool cleanup = body.AtEnds.Count > 0;
 
     tempCounter++;

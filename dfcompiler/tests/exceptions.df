@@ -1,0 +1,161 @@
+// Classes, phase 6: exception classes, catch by class and by trait, silent exceptions
+alias Root as r
+
+public class AppException : Exception { }
+
+public class NetworkException(i32 code) : Exception {
+  public i32 code
+}
+
+public class TimeoutException : AppException {
+  public string host = "unknown"
+}
+
+public class AlertException(string what) : Exception, SilentException {
+  public string what
+}
+
+fun Fail(i32 kind) {
+  if kind == 1 then throw AppException("app failed")
+  if kind == 2 then throw NetworkException("net down", 503)
+  if kind == 3 then throw TimeoutException("too slow")
+  if kind == 4 then throw AppException()
+  if kind == 5 then throw NetworkException(code: 7)
+}
+
+fun string Try(i32 kind) {
+  Fail(kind)
+  return "ok"
+  catch TimeoutException ex {
+    return "timeout " + ex.host + ": " + ex.Message
+  }
+  catch NetworkException ex {
+    return "network " + ex.code + ": " + ex.Message
+  }
+  catch AppException ex {
+    return "app [" + ex.Message + "]"
+  }
+}
+r.Console.Log(Try(0))
+r.Console.Log(Try(1))
+r.Console.Log(Try(2))
+r.Console.Log(Try(3))
+r.Console.Log(Try(4))
+r.Console.Log(Try(5))
+
+// the base class catches the children; the properties of every exception
+fun string Describe(i32 kind) {
+  Fail(kind)
+  return "ok"
+  catch Exception ex {
+    return "any: " + ex.Message + " id>=256: " + (ex.Id >= 256)
+  }
+}
+r.Console.Log(Describe(2))
+r.Console.Log(Describe(3))
+
+// is, and the exception as the base type
+fun string Which(i32 kind) {
+  Fail(kind)
+  return "ok"
+  catch ex {
+    if ex is TimeoutException t then return "timeout/" + t.host
+    if ex is NetworkException n then return "network/" + n.code
+    return "other"
+  }
+}
+r.Console.Log(Which(3))
+r.Console.Log(Which(2))
+r.Console.Log(Which(1))
+
+// standard exceptions are caught by the same mechanism
+fun string Divide(i32 d) {
+  i32 q = 10 / d
+  return "q=" + q
+  catch DivisionByZeroException {
+    return "division"
+  }
+  catch Exception {
+    return "never"
+  }
+}
+r.Console.Log(Divide(2))
+r.Console.Log(Divide(0))
+
+// rethrow of a caught exception object, and a throw inside a catch
+fun Wrap(i32 kind) {
+  Fail(kind)
+  catch NetworkException ex {
+    throw ex
+  }
+}
+fun string Outer(i32 kind) {
+  Wrap(kind)
+  return "wrapped ok"
+  catch TimeoutException ex {
+    return "outer timeout " + ex.host
+  }
+  catch NetworkException ex {
+    return "outer network " + ex.code
+  }
+}
+r.Console.Log(Outer(0))
+r.Console.Log(Outer(2))
+r.Console.Log(Outer(3))
+
+// silent exceptions: raised only when a catch can handle them
+fun Alarm(string text) {
+  throw AlertException("alert", text)
+}
+
+fun string NoCatch() {
+  Alarm("a")
+  return "continued"
+}
+fun string CatchPlain() {
+  Alarm("b")
+  return "continued"
+  catch ex {
+    return "caught by plain catch (wrong)"
+  }
+}
+r.Console.Log(NoCatch())
+r.Console.Log(CatchPlain())
+
+fun string CatchOwn() {
+  throw AlertException("alert", "c")
+  return "continued"
+  catch AlertException ex {
+    return "own type: " + ex.what
+  }
+}
+fun string CatchTrait() {
+  throw AlertException("alert", "d")
+  return "continued"
+  catch SilentException ex {
+    return "by trait: " + ex.Message
+  }
+}
+fun string CatchAll() {
+  throw AlertException("alert", "e")
+  return "continued"
+  catch all {
+    return "catch all"
+  }
+}
+r.Console.Log(CatchOwn())
+r.Console.Log(CatchTrait())
+r.Console.Log(CatchAll())
+
+// a silent standard exception is caught by the trait too
+fun string Standard() {
+  time t = time(99999999)
+  return "no catch"
+  catch SilentException {
+    return "silent standard"
+  }
+}
+r.Console.Log(Standard())
+
+// an unhandled exception object ends the program with its message
+throw NetworkException("unhandled network", 1)

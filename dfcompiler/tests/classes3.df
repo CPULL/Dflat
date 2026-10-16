@@ -1,0 +1,40 @@
+// Classes with a main function; overloads, named arguments, defaults, statics calling statics
+alias Root as r
+
+public class Box(i32 width, i32 height) {
+  public i32 width
+  public i32 height
+  public static i32 made = 0
+  public fun i32 Area() { width * height }
+  public fun Box Grow(i32 by) { Box(width + by, height + by) }
+  public fun Box Grow(i32 w, i32 h) { Box(width + w, height + h) }
+  public fun string Show(string prefix = "box", i32 times = 1) { prefix + ":" + Area() * times }
+  public static fun Box Unit() { made += 1; return Box(1, 1) }
+  public static fun Box Two() { return Unit().Grow(1) }
+  public static fun i32 Count() { made }
+}
+
+public class Wrapper {
+  public Box box = Box.Unit()
+  public fun i32 Area() { box.Area() }
+}
+
+fun int main(string args...) {
+  Box b = Box(2, 3)
+  r.Console.Log(b.Area())
+  r.Console.Log(b.Grow(1).Area())
+  r.Console.Log(b.Grow(1, 2).Area())
+  r.Console.Log(b.Grow(w: 2, h: 0).Area())
+  r.Console.Log(b.Show())
+  r.Console.Log(b.Show("x"))
+  r.Console.Log(b.Show(times: 2))
+  r.Console.Log(b.Show(times: 3, prefix: "y"))
+  Box t = Box.Two()
+  r.Console.Log(t.Area())
+  r.Console.Log(Box.Count())
+  Wrapper w = Wrapper()
+  r.Console.Log(w.Area())
+  r.Console.Log(Box.made)
+  r.Console.Log(args.len)
+  return 7
+}

@@ -16,7 +16,7 @@ public sealed class Parser {
   };
 
   static readonly HashSet<string> Modifiers = new() {
-    "public", "internal", "private", "const", "override"
+    "public", "internal", "private", "const", "override", "static"
   };
 
   // Rust-style precedence, lowest first. "..", "??" and "? { }" sit below these.
@@ -242,7 +242,18 @@ public sealed class Parser {
       root.Add(ParseStatement());
       SkipTerminators();
     }
+    CheckFinalizers(root, null);
     return root;
+  }
+
+  // "f is atEnd." releases an object: a statement only, never part of an expression (spec 12.4)
+  static void CheckFinalizers(Node node, Node? parent) {
+    if (node.Kind == "Finalize" && parent?.Kind != "ExprStmt") {
+      throw new DfException("'is atEnd.' is a statement, not an expression", node.Line, 0);
+    }
+    foreach (var child in node.Children) {
+      CheckFinalizers(child, node);
+    }
   }
 
   List<Token> ParseModifiers() {
@@ -264,6 +275,10 @@ public sealed class Parser {
     if (IsNewline || IsOp(";") || IsOp("}") || AtEnd) {
       return;
     }
+    // File f = open() atEnd of f { ... }
+    if (IsKw("atEnd") && PeekAt(1).Kind == TokenKind.Ident && PeekAt(1).Text == "of") {
+      return;
+    }
     if (caseBody && IsOp(",")) {
       return;
     }
@@ -271,7 +286,20 @@ public sealed class Parser {
   }
 
   // ownerName: class or trait whose constructors may appear in this block
+  // A "} atEnd { }" on the same line as the closing brace belongs to what it follows: a function, a constructor,
+  // a class, or any other statement with a block (spec 14.2, forms 2 to 5). It becomes the last child, an
+  // AtEnd node with the text "trailing". An atEnd on a line of its own is the standalone block of the compiler.
   Node ParseStatement(string? ownerName = null, bool caseBody = false) {
+    var statement = ParseStatementCore(ownerName, caseBody);
+    while (IsKw("atEnd") && PeekAt(1).Is("{") && pos > 0 && toks[pos - 1].Is("}")
+           && statement.Kind is not ("AtEnd" or "AtEndOf")) {
+      var t = Next();
+      statement.Add(new Node("AtEnd", t, "trailing").Add(ParseBlock()));
+    }
+    return statement;
+  }
+
+  Node ParseStatementCore(string? ownerName, bool caseBody) {
     var mods = ParseModifiers();
     if (IsKw("fun")) {
       return WithMods(ParseFun(), mods);
@@ -342,7 +370,7 @@ public sealed class Parser {
         case "catch":
           return ParseCatch();
         case "atEnd":
-          return ParseAtEnd();
+          return PeekAt(1).Kind == TokenKind.Ident && PeekAt(1).Text == "of" ? ParseAtEndOf() : ParseAtEnd();
         case "enforce":
           return ParseEnforce();
       }
@@ -663,6 +691,19 @@ public sealed class Parser {
     return new Node("AtEnd", t).Add(ParseBlock());
   }
 
+  // atEnd of a, b { }: code tied to the listed variables (spec 14.2, form 1)
+  Node ParseAtEndOf() {
+    var t = Next();
+    Next();   // of
+    var node = new Node("AtEndOf", t);
+    do {
+      var name = ExpectIdent();
+      node.Add(new Node("Name", name, name.Text));
+    } while (AcceptOp(","));
+    node.Add(ParseBlock());
+    return node;
+  }
+
   // enforce a, b { } else { }
   Node ParseEnforce() {
     var t = Next();
@@ -753,6 +794,16 @@ public sealed class Parser {
     int save = pos;
     try {
       var type = ParseType();
+      // arr<i32>[100] samples: the size or capacity on the declaration (spec 6.3)
+      Node? size = null;
+      if (IsOp("[") && type.Kind == "Type" && type.Text is "arr" or "vec" or "hmap" or "hset" && type.Children.Count > 0) {
+        var open = Next();
+        bool savedBrace = noBrace;
+        noBrace = false;
+        size = new Node("Size", open).Add(ParseExpr());
+        noBrace = savedBrace;
+        ExpectOp("]");
+      }
       if (Peek.Kind == TokenKind.Ident) {
         var name = Peek;
         var after = PeekAt(1);
@@ -760,7 +811,8 @@ public sealed class Parser {
           || after.Is("=") || after.Is("_=") || after.Is(",") || after.Is(";") || after.Is("}");
         if (ends) {
           Next();
-          return new Node("Decl", name, name.Text).Add(type);
+          var decl = new Node("Decl", name, name.Text).Add(type);
+          return size == null ? decl : decl.Add(size);
         }
       }
     } catch (DfException) {
@@ -904,13 +956,18 @@ public sealed class Parser {
   Node ParseFun() {
     var t = Next();
     var rets = new Node("Returns", t);
-    while (!(Peek.Kind == TokenKind.Ident && (PeekAt(1).Is("(") || PeekAt(1).Is("=") || IsGenericCallAhead(0)))) {
+    while (!(Peek.Kind == TokenKind.Ident && (PeekAt(1).Is("(") || PeekAt(1).Is("=") || IsGenericCallAhead(0)))
+           && !((IsOp("==") || IsOp("!=")) && PeekAt(1).Is("("))) {
       rets.Add(ParseType(false));
       if (!AcceptOp(",")) {
         break;
       }
     }
-    var name = ExpectIdent();
+    // fun bool ==(V other): the equality operator of a class (spec 11.1.3)
+    if (IsOp("!=")) {
+      throw Error("'!=' is the negation of '==' and cannot be overloaded");
+    }
+    var name = IsOp("==") ? Next() : ExpectIdent();
     var node = new Node("Fun", name, name.Text);
     if (rets.Children.Count > 0) {
       node.Add(rets);
@@ -1308,6 +1365,18 @@ public sealed class Parser {
     if (IsKw("null")) {
       Next();
       return new Node("IsNull", t).Add(subject);
+    }
+    // f is atEnd.   (the final dot is mandatory; only the end of the statement may follow)
+    if (IsKw("atEnd")) {
+      Next();
+      if (!IsOp(".")) {
+        throw Error("the finalizer is written 'is atEnd.' with a final dot");
+      }
+      Next();
+      if (!(IsNewline || IsOp(";") || IsOp("}") || AtEnd)) {
+        throw Error("nothing can follow 'is atEnd.' on the same line");
+      }
+      return new Node("Finalize", t).Add(subject);
     }
     var type = ParseType(false);
     var node = new Node("Is", t).Add(subject).Add(type);

@@ -48,9 +48,7 @@ public sealed partial class CodeGen {
     ["Pointer"] = "Pointers",
     ["WritablePointer"] = "Pointers",
     ["Volatile"] = "Pointers",
-    ["Gift"] = "Ownership",
-    ["Copy"] = "Ownership",
-    ["WeakInit"] = "Ownership"
+    ["Copy"] = "Ownership"
   };
 
   static readonly Dictionary<string, string> TypeFeatures = new() {
@@ -76,7 +74,6 @@ public sealed partial class CodeGen {
   static readonly Dictionary<string, string> ParamFeatures = new() {
     ["RefParam"] = "Pointers",
     ["WritableRefParam"] = "Pointers",
-    ["GiftParam"] = "Ownership"
   };
 
   static CompileException NotSupported(string feature, Node at) {
@@ -86,7 +83,7 @@ public sealed partial class CodeGen {
   // unsupported top-level declarations, reported in source order before anything else
   static void CheckTopLevelFeatures(Node program) {
     foreach (var statement in program.Children) {
-      if (statement.Kind is "Class" or "Trait" or "Import" or "FunVar") {
+      if (statement.Kind is "Import" or "FunVar") {
         throw NotSupported(NodeFeatures[statement.Kind], statement);
       }
     }
@@ -193,6 +190,9 @@ public sealed partial class CodeGen {
     var type = ExprOf(arg, scope).Type;
     if (type == paramType) {
       return 0;
+    }
+    if (IsClass(type) && IsClass(target)) {
+      return IsSubtype(type, target) ? 10 + ClassDistance(type, target) : null;   // the nearest parent wins
     }
     if (IsNumeric(type) && IsNumeric(target)) {
       // exact type, then the smallest same-family widening; other families are not candidates

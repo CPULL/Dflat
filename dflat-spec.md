@@ -1,7 +1,7 @@
 # Dflat Language
 A new language D♭ that is the same as C# but easier to write and faster to execute
 
-**Version** 0.0.7  2026/10/13 by CPU
+**Version** 0.0.9  2026/10/16 by CPU
 
 ## D♭ — Dflat Language Specification (draft)
 
@@ -35,7 +35,7 @@ Status: design in progress. Decisions below reflect the latest choices; earlier 
   - Variables, parameters, fields, properties, enum entries: no imposed case (camelCase suggested for variables and parameters).
   - `Root` is a global static class giving access to the stdlib; always written `Root`, can be aliased.
 - **`...`**: variadic parameter suffix; no other use.
-- **Reserved words**: `as` (used in `alias` [Ref: Namespaces]; other uses to be defined), `this` [Ref: Classes].
+- **Reserved words**: `as` (used in `alias` [Ref: Namespaces]; other uses to be defined), `this` [Ref: Classes], `atEnd` [Ref: atEnd].
 
 ## 1.2 Labels
 Labels are used as target for jumping around (including controlled jumps like break and continue)
@@ -232,6 +232,37 @@ public enum Color Colors {
 
 The values are `i32` by default; values are constants (constant objects are allowed); aliases allowed; compared by value; methods are only static.
 
+### 3.1.1 Bitfields
+
+A bitfield is a named set of independent flags stored in one number.
+
+```
+bitfield32 Flags { CanRead: 0, CanWrite: 1, CanSeek: 2, IsNetwork: 3 }
+```
+
+- `bitfield8`, `bitfield16`, `bitfield32` and `bitfield64` set the size. The number after each flag name is its bit position, zero based; a position outside the size is a compile error (position 31 is valid in a `bitfield32`).
+- A bitfield value is considered a number. Flags combine with `|`.
+- `.None` and `.All` exist on every bitfield without declaring them. `.All` has only the defined bits set.
+- Methods (a flag or a combination of flags):
+
+| Method | Description |
+|---|---|
+| `set(flags)` | Sets the flags to 1 |
+| `clear(flags)` | Sets the flags to 0 |
+| `setAs(flags, bool value)` | Sets the flags to the boolean value |
+| `toggle(flags)` | Flips the flags |
+| `bool isSet(flags)` | True if all the flags are set |
+| `bool isAnySet(flags)` | True if at least one of the flags is set |
+
+- `_value` (bitwise not, 2.5) flips only the defined bits. Casting an integer to a bitfield masks off every bit that is not defined, so a bitfield never holds undefined bits: `[Flags]_[u32]value` is the same as `_value`.
+
+```
+Flags flag = Flags.None
+Flags updatedFlags = flag.set(Flags.CanRead).clear(Flags.CanSeek).toggle(Flags.IsNetwork)
+Flags both = flag.set(Flags.CanRead | Flags.CanWrite)
+```
+
+- Not decided: whether `set`, `clear`, `setAs` and `toggle` modify the value in place or return a new value (the chained example assumes they return a value); nullability of bitfields (7.1).
 
 ## 3.2 Tuples
 `(string name, i32 age, string address, dec salary)`
@@ -824,25 +855,87 @@ i32 sign = value ? { ..=-1: -1, 0: 0, 1..: 1 }
 ## 11.1 Classes
 
 ```
-public class Circle(r64 radius) : Root.Class, Shape {
+public class Circle(r64 radius) : Shape {
   public Circle() : Circle(1.0), Named("circle")
-  public override fun r64 Area() { r.Math.PI * radius * radius }
+  override fun r64 Area() { r.Math.PI * radius * radius }
 }
 ```
 
+- Header: `class Name(params) : [parent class], [traits]`. `Root.Class` is the implicit base of every class and is never written; writing it in a header is a level 1 warning.
+- The parent class, if any, goes before all traits; a class listed after a trait is a compile error. Names are resolved from the context; when a name is ambiguous the namespace qualifies it.
+- A class and a trait with the same name in the same namespace is a compile error.
+- `atEnd` is a reserved word: it cannot be the name of a type, trait, variable, parameter or field.
 - No `new`: `Circle c = Circle(2.0)`.
 - `this` is the current object. It is optional (members are reachable by name) and needed only to disambiguate (`this.name = name`). It can be passed as an argument (`registry.Add(this)`), following the normal parameter rules; `->this` is a compile error (an object cannot give away its own ownership).
 - Type checks: `if v is Circle c { }` (reference, `c` scoped to the block), `if v! is Circle c { }` (copy); upward checks are a level 2 warning.
 
 
 ## 11.1.1 Class constructors and default constructor
-- Primary constructor parameters become fields; secondary constructors chain `: Class(...)`, plus trait constructors.
+
+```
+public class Foo(i32 bar, string privateBaz) {
+  public i32 bar                       // sets the visibility of the field bar
+  u64 doubled = 2 * 2                  // field initializer
+
+  public Foo(i32 total) : Foo(total, "x") {
+    doubled = 7                        // specific initialization code
+  }
+}
+
+Foo foo = Foo(5, "a")
+```
+
+- A constructor has a visibility, the class name and parameters. Several constructors can exist as long as their parameters differ (13.2 rules, including the ambiguity error).
+- Primary constructor: written in the class header; its parameters become private fields. Redeclaring a name in the body (with or without `public`) does not create a new field: it sets the visibility of the existing one. The same name with a different type is a compile error. An initializer on the redeclaration is allowed (level 3 warning, the value in the body wins).
+- Primary constructors are better without default values in the parameters; secondary constructors can have them (style, not enforced).
+- Secondary constructors chain `: Class(...)`, plus parent and trait constructors, and can have a body with their own initialization code.
+- Default constructor: generated like in C#, when the class declares no constructor.
 - Construction order: parent, traits in listed order, class body.
-TODO
+- Private constructors are allowed; only the class body (its static functions included) can call them. A subclass cannot, so a class with only private constructors cannot be inherited.
+- A constructor that throws: the exception propagates and the object is destroyed; the `atEnd` blocks registered so far run, and fields not yet reached hold their zero value (null for objects).
+- A trailing `atEnd` after a constructor is a destructor fragment (11.4, 14.2). An `atEnd` written inside the constructor body is a normal scope cleanup.
 
 ## 11.1.2 Class functions and properties
-- `override` mandatory; `parent.Method()` reaches the overridden version.
-- Visibility: private by default, `public`, `internal` (namespace + sub-namespaces). A subclass sees everything when the parent's source is available, public only for compiled libraries (at its own risk). No `sealed`.
+
+```
+public class Foo(i32 a) {
+  public static i32 count = 0
+  public static const i32 MAX_ITEMS = 100
+  public static fun Foo create(i32 value) { Foo(value * 2) }
+}
+
+Foo foo = Foo.create(5)
+```
+
+- `override` mandatory; `parent.Method()` reaches the overridden version. An overriding function takes the visibility of the original: none is written on it.
+- Visibility: private by default, `public`, `internal` (namespace + sub-namespaces). A subclass sees everything when the parent's source is available, public only for compiled libraries (at its own risk). No `sealed` (private constructors give the same effect, 11.1.1).
+- Static members: `static` goes after the visibility and before `fun` or the field type. Functions and properties; accessed as `ClassName.name`.
+- A static function has no `this` and cannot touch instance fields; it can call the private constructors of its class.
+- Static members are inherited by subclasses (`Child.create()`). A static function cannot be overridden, and declaring one with the same signature in a subclass is a compile error.
+- A generic class has one copy of its static members per type instance (`Stack<i32>` and `Stack<string>`).
+- Static properties: an initializer is allowed, without one they hold the zero value. They are initialized at program start in declaration order (a compiler option allows lazy initialization on first use). An initializer that reads a static property of another class is evaluated on demand; a cycle is a compile error.
+- `static const` declares a class constant (UPPER_SNAKE_CASE, 1.1); a plain `static` property is mutable.
+- Static properties are never touched by `atEnd`.
+
+## 11.1.3 Equality
+
+```
+override fun bool equals(T other) {
+  if T is i32 then return value == other
+  if T is string then return value == i32.parse(other)
+  return false
+}
+```
+
+- `==` on class objects resolves in this order: `equals` if defined; otherwise an operator `==` overload; otherwise identity (same object).
+- `!=` is always the negation of what `==` resolves to and cannot be overloaded.
+- Defining both `equals` and an operator `==` is a level 2 warning (the overload is dead code).
+- A class with `equals` or `==` but no matching hash, used in a hash based collection (`hmap`, `hset`), is a level 1 warning.
+- `bool equals(T other)` is a generic function: `T` is implicit and is the type of the argument; inside a generated instance `other` has type `T`. This allows comparing with other types, and each type decides which ones it supports.
+- `T is type` checks the generic type at compile time (the branch that does not match is not emitted); `other is type` checks the value at runtime (11.1). Both can be used in the same function.
+- A more generic type can match before a more specific one, so the order of the checks matters. A branch that can never run because an earlier check always matches is a level 3 warning.
+- Every path of `equals` must return a value, otherwise it is a compile error. The upward-check warning (level 2) does not fire in generic code when a check is true for one `T` only.
+- Null is handled by the compiler before `equals` is called: the function never receives a null argument.
 
 ## 11.2 Traits
 They are similar to C# interfaces and Rust traits
@@ -857,7 +950,7 @@ trait Named {
 trait Shape : Named { fun r64 Area() }
 ```
 
-- Single parent class; any number of traits; base of everything: `Root.Class`.
+- Single parent class (listed first in the header); any number of traits; base of everything: `Root.Class` (implicit, never written, 11.1).
 - Traits are implemented only in the class header; a trait cannot be added to an existing type (built-in or library) from outside its declaration.
 - Traits: properties, methods with or without body, constructor when they have properties; one parent trait; a supertrait inherited twice exists once.
 - Same member in two traits: `TraitA.member` (inside), `px.TraitA.member` (outside), unqualified → compile error.
@@ -898,7 +991,7 @@ trait Container<Item> {
   fun Add(->Item value)
 }
 
-class Names : Root.Class, Container<string> { ... }
+class Names : Container<string> { ... }
 class Cache<Key : Hashable, Value> { hmap<Key, Value> entries }
 
 Stack<i32> numbers = Stack<i32>()
@@ -926,7 +1019,7 @@ trait Sequence {
   fun Item? Next()
 }
 
-class Countdown : Root.Class, Sequence with (Item is u32) { ... }
+class Countdown : Sequence with (Item is u32) { ... }
 
 fun printAll<Source : Sequence>(Source items) { ... }
 ```
@@ -944,14 +1037,29 @@ fun printAll<Source : Sequence>(Source items) { ... }
 ## 11.4 Class `atEnd` (Destructor code)
 
 ```
-class LogFile : Root.Class {
-  atEnd { handle?.Close() }      // syntax open
+public class Foo(i32 a) {
+  File file = File("c:/logs.txt")
+
+  public Foo(string path) {
+    File logs2 = File(path)
+    a = (i32)logs2.size
+  } atEnd {
+    logs2 is atEnd.
+  }
+} atEnd {
+  Root.Console.Log("Goodbye!")
+  file is atEnd.
 }
 ```
 
-- The class cleanup function, private (cannot be called), run when the object is freed; follows Rust `Drop` rules (the last owner going away, moves, reference counting).
+- The destructor of a class is the `atEnd` written after the closing brace of the class. It is private (cannot be called) and runs when the object is freed; it follows Rust `Drop` rules (the last owner going away, moves, reference counting).
+- A constructor can also have a trailing `atEnd`: a destructor fragment, registered when that constructor runs and executed when the object dies. It sees what is new inside that constructor (locals and parameters) and the class members, not the locals of other constructors.
+- Order when an object dies: the destructor fragments in reverse order of registration (the last constructor registered runs first, up to the first one encountered), then the class `atEnd` as the last one. A subclass runs all its own blocks first, then the parent's, then the traits' (the reverse of construction).
+- The variables used by a destructor fragment stay alive until it runs; the compiler sees which ones from the block.
+- Fields and constructor locals not reached (for example when a constructor throws) hold their zero value, so cleanup code uses `x is atEnd.`, which does nothing on null (12.4).
 - Order at scope end: scope `atEnd` blocks from last to first, then the class `atEnd` of every owned object still alive.
 - Once the final result is decided, ordinary exceptions raised by later class cleanup are ignored. A double free is a `Panic`.
+- Static properties are not touched by the class `atEnd`.
 
 
 ---
@@ -1051,6 +1159,28 @@ fun wait(volatile &clock now) { }
 - To keep a value, copy it into a normal variable.
 - Passing a volatile where a non-volatile is expected: no compile error, behavior undefined.
 
+
+## 12.4 Moving fields and finalizing variables
+
+```
+A a = ...
+function(->a.c)                    // a.c is null afterwards, a stays usable
+
+} atEnd {
+  c is atEnd.                      // finalizer: destructor, then null
+}
+```
+
+- `->a.c` moves a field out of an object (also chains such as `->a.c.d`). The field holds null afterwards and the object stays usable; its class `atEnd` sees the field as null.
+- The owner of `a`, or a writable borrow `(&)A a`, can move a field out; a read-only borrow cannot (compile error).
+- `->` on a variable or field of a basic type is ignored and behaves like a plain copy; it is a level 1 warning (`i32 a; call(->a)` is the same as `call(a)`).
+- Finalizer: `f is atEnd.` is a statement only, never an expression. The final dot is mandatory, and only a line break or `;` may follow it (`f is atEnd.close()` is a compile error).
+- `f is atEnd.` releases the ownership held by the variable `f`: a single owner is destroyed running its full destructor (11.4); a reference counted object drops the counter by one and is destroyed when it reaches zero. In every case `f` becomes null; on a null `f` it does nothing.
+- When the object is destroyed, weak references to it see null (through `enforce`).
+- On a borrowed variable (not an owner) it is a compile error. Using `f` after the finalizer is a normal null access.
+- It works on fields, locals and parameters that own the object, and replaces the explicit `close()` calls in cleanup code.
+- `atEnd of f { f is atEnd. }` is legal and not flagged: the block can use `f` first and release it explicitly.
+
 ---
 
 # 13. Functions
@@ -1136,27 +1266,58 @@ fun int main(string args...) { return 0 }
 - The command-line arguments are also available from `Root.GetArgs()` (17.1); with a parameter, `args` and `Root.GetArgs()` are the same object.
 - More than one `main` is a compile error; a `main` in a library is a compile error.
 
-## 14.2 Scope `atEnd`
+## 14.2 `atEnd`
+
+`atEnd` is code that runs at the end of something. It is not a function and cannot be called. `atEnd` is a reserved word and is written without parentheses. It has five forms:
+
+| # | Form | Attached to | Runs when |
+|---|---|---|---|
+| 1 | `atEnd of a, b { }` | the listed variables | the listed objects go out of scope; it still runs while at least one of them exists |
+| 2 | `} atEnd { }` | a function | the function exits |
+| 3 | `} atEnd { }` | any other statement or block | the statement exits |
+| 4 | `} atEnd { }` | a class | the object dies (destructor, 11.4) |
+| 5 | `} atEnd { }` | a constructor | the object dies (destructor fragment, 11.4) |
 
 ```
-mutex.Lock()
-atEnd { mutex.Unlock() }
+fun Item popQueue(Queue queue) {
+  mutex.Lock()
+  atEnd of mutex { mutex.Unlock() }
 
-if queue.len == 0 { return }      // unlocked
-Item next = queue.Pop()           // if it throws: unlocked
+  if queue.len == 0 { return }      // unlocked
+  Item next = queue.Pop()           // if it throws: unlocked
+  return next
+}
+
+fun blah() {
+  File f = abc atEnd of f { f is atEnd. }
+  Mutex mx
+} atEnd {
+  mx is atEnd.
+}
+
+if File.exists(name) {
+  File second = File(name + ".txt")
+  len = second.size
+} atEnd {
+  second is atEnd.
+}
 ```
 
-- A compile-time definition: it covers its whole scope wherever it is written, and runs automatically on every exit of the scope (normal end, `return`, `break`, `jump`, an exception passing through, a catch that leaves the scope). It cannot be called directly.
+- Form 1 can be written on its own line or right after a statement. It sees only the listed objects, which must be declared before it (or in the same statement).
+- Forms 2, 3, 4 and 5 are written after a closing brace and see everything inside what they follow: for a statement, the union of its scopes and subscopes (the branches of an `if` / `else` included). A local of a branch that was not taken holds its zero value (null for objects).
+- The same name declared with different types in two scopes of a statement that has an `atEnd` is a compile error.
+- A trailing `atEnd` always runs once its statement is reached, even if no branch was executed. After a loop it runs once, when the loop exits, not on every iteration.
+- Order at the exit of a scope or function: the form 1 blocks first (from last to first), then the trailing `atEnd` as the final cleanup. Several blocks of the same level run from the last to the first.
+- Only the variables used by an `atEnd` are kept alive until it runs.
+- A compile-time definition: it runs automatically on every exit (normal end, `return`, `break`, `jump`, an exception passing through, a catch that leaves the scope). It cannot be called directly.
 - If a catch handles an exception and execution continues, `atEnd` runs at the normal end of the scope.
 - Not run on `Panic`. On a non-panic exception that reaches the top level, it runs.
-- In a loop body, it runs once, when the loop exits, not on every iteration.
 - `return value`: the value is computed first, then `atEnd` runs.
 - May contain `break` and `jump` only within its own block. `return` and `throw` are allowed.
 - `return` inside `atEnd` overrides the function's result on a normal exit. While an exception is passing through, its return value is ignored and the exception keeps propagating.
 - `throw` inside `atEnd` while another exception is propagating → `Panic`.
-- Can use every variable of its scope, wherever declared; a variable whose declaration was not reached holds its zero value (null for objects).
-- Several `atEnd` blocks in a scope run from the last to the first; the last one to run sets the result.
-
+- The last block to run sets the result.
+- `atEnd of f { ...; f is atEnd. }` is legal and not flagged (12.4).
 
 # 15. Errors
 
@@ -1225,6 +1386,27 @@ class Exception {
 | 22 | `InvalidMapKeyException` | null or zero value (6.10) |
 | 23 | `EmptyVectorAccessException` | zero value, null for objects (6.6) |
 | 24 | `InvalidDateTimeFormatException` | null (3.3) |
+| 25 | `FileNotFoundException` | |
+| 26 | `InvalidFileAccessException` | |
+| 27 | `FileAccessException` | `false`, `0` or a null `date`, depending on the attribute (17.6.3.1) |
+| 28 | `DirectoryNotEmptyException` | `delete` returns `false` (17.6.5) |
+| 29 | `FileNameAlreadyExistsException` | the file is skipped; `createDirectory` returns the existing directory (17.6.5) |
+| 30 | `InvalidPathException` | |
+| 31 | `FullPathNotFoundException` | |
+| 32 | `SeekBeforeBeginException` | position 0 (17.6.8.5) |
+| 33 | `FileAlreadyExistsException` | |
+| 34 | `FileAccessToADirectoryException` | |
+| 35 | `ReadOnlyItemCannotBeWrittenException` | |
+| 36 | `ConflictingSharingException` | |
+| 37 | `InvalidStreamModesException` | |
+| 38 | `NoMoreResourcesException` | |
+| 39 | `AccessToAClosedStreamException` | |
+| 40 | `StreamModeNotAllowedException` | |
+| 41 | `SeekNotSupportedByStreamException` | |
+| 42 | `InvalidBufferRangeException` | |
+| 43 | `GenericIOErrorException` | |
+| 44 | `FileRemovedWhileOpenException` | |
+| 45 | `StreamCloseFailureException` | |
 
 - The list grows during development; each new standard exception takes the next ID.
 
@@ -1372,12 +1554,279 @@ A simple random number generator is included in the standard library. The algori
 | `RealRange` | `r64 RealRange(r64 min, r64 max)` | Returns a random real number between the minimum number and the maximum number (max excluded) |
 | `Real` | `r64 Real()` | Returns a real value in the range [0, 1] (1 is included) |
 | `Shuffle` | `Shuffle(collection)` | Randomize the order of elements in an ordered collection. It is valid for arrays, vectors, lists, strings (needs collections: TODO) |
-| `` | `` |  |
 
 ---
 
-## 17.6 Files and Streams
-TODO
+## 17.6 Root.IO - Files, Directories and Streams
+
+Status: design in progress. The `File` manager class and the `Stream` base class with `FileStream` are specified. Memory, console and text streams, network streams and the async syntax are not (17.6.9).
+
+### 17.6.1 Scope and general decisions
+
+- `Root.IO` holds the basics of file system access (the equivalent of C# `System.IO`): files, directories, paths and streams. In the examples `alias Root.IO as fs` is used.
+- `File` is the file manager class: it works at the level of a file manager (like Norton Commander) on files and directories. `Stream` accesses the contents of a file.
+- All streams are binary. Helpers (UTF converters) transform them to text.
+- `Stream` is the base class. The stream types (`FileStream`, `MemoryStream`, `ConsoleStream`) are subclasses, because one object cannot be a file, a memory and a console stream at the same time. `TextStream` is a trait that can be applied to any stream to add the text methods (17.6.8).
+- Memory streams are available on every target. Other parts of `Root.IO` can be unavailable on specific targets.
+- `Root.Console` is a special case: a shortcut to read and write. The console (standard input, standard output) is also reachable as streams (to be defined).
+- Big errors raise exceptions, but not every failure raises one, to keep async code manageable: many cases use silent exceptions (15.4, 17.6.6).
+
+### 17.6.2 Paths
+
+- Paths are normalized: `/` is the root and the separator on every OS, and a drive letter is the first folder: `/d:/folder/subfolder/file.txt`.
+- Paths written in the form of any OS are accepted and normalized (following C#). `.` and `..` are accepted as generic paths, as everywhere.
+- A path with illegal characters raises `InvalidPathException` (not silent) when the `File` is created.
+- `File.combinePaths(path1, path2)` joins exactly two paths and returns a `string`.
+- Drive letters on other OS and network paths: later.
+
+### 17.6.3 The `File` class
+
+`File(string path)` creates a `File` object that refers to a file or a directory. It opens nothing and does not check the path: a path that does not exist is valid, and its `exists()` returns `false`.
+
+A folder listing returns a list of single `File` objects; `isDirectory` tells whether an item is a file or a directory.
+
+#### 17.6.3.1 Properties (read-only)
+
+| Property | Type | Description |
+|---|---|---|
+| `path` | `string` | Normalized path |
+| `name` | `string` | Name of the file or directory |
+| `extension` | `string` | Extension of the name, without the dot |
+| `parent` | `File` | Containing directory |
+| `isDirectory` | `bool` | True for a directory |
+| `isFile` | `bool` | True for a file |
+| `size` | `u64` | Size in bytes |
+| `created` | `date` | Creation date |
+| `modified` | `date` | Last modification date |
+| `accessed` | `date` | Last access date |
+| `isReadOnly` | `bool` | True if the item is read-only (the only attribute in the standard library) |
+
+- If the item cannot be accessed, `size`, `created`, `modified`, `accessed` and `isReadOnly` raise the silent `FileAccessException` and give `0`, a null `date` and `false`.
+- For an item that does not exist they give the default values.
+
+#### 17.6.3.2 Static methods
+
+| Definition | Description |
+|---|---|
+| `bool exists(string path)` | True if the path exists |
+| `bool delete(string path, fs.DeleteOptions options = fs.DeleteOptions.None)` | Deletes a file or a directory; true if it was deleted, false if it was not |
+| `File copy(string from, string to, fs.OverwriteOptions options = fs.OverwriteOptions.None)` | Copies a file or a directory to the new location and returns the `File` at the new location |
+| `File move(string from, string to, fs.OverwriteOptions options = fs.OverwriteOptions.None)` | Moves a file or a directory to the new location and returns the `File` at the new location |
+| `File createDirectory(string path)` | Creates the directory and returns it |
+| `arr<File> getAllFiles(string path, bool recursive = false, fs.FileSystemObjectsType itemType = fs.FileSystemObjectsType.Files, string match = "*")` | Lists the items of a directory; `path` has no default and an empty path raises `InvalidPathException` |
+| `File getTempFile()` | A `File` for a temporary file |
+| `string getTempFileName()` | The fully qualified name and path of a temporary file; it does not create the file |
+| `string getTempDir()` | The path of the temporary directory |
+| `string combinePaths(string path1, string path2)` | Joins two paths |
+| `FileStream open(string path, fs.StreamReadWriteAccessMode readMode, fs.StreamReadWriteAccessMode writeMode, fs.StreamOpenMode openMode)` | Shortcut for `FileStream(path, readMode, writeMode, openMode)` (17.6.8.3) |
+
+#### 17.6.3.3 Object methods
+
+| Definition | Description |
+|---|---|
+| `bool exists()` | True if the item exists |
+| `bool delete(fs.DeleteOptions options = fs.DeleteOptions.None)` | As the static `delete`, on this item |
+| `File copyTo(string to, fs.OverwriteOptions options = fs.OverwriteOptions.None)` | As the static `copy`, from this item |
+| `File moveTo(string to, fs.OverwriteOptions options = fs.OverwriteOptions.None)` | As the static `move`, from this item |
+| `File createDirectory()` | As the static `createDirectory`, for this path |
+| `arr<File> getAllFiles(bool recursive = false, fs.FileSystemObjectsType itemType = fs.FileSystemObjectsType.Files, string match = "*")` | As the static `getAllFiles`, on this directory |
+| `arr<byte> readAll()` | The whole content as bytes |
+| `string readAllText(String.StringEncoding encoding = String.StringEncoding.UTF8)` | The whole content as text in the given encoding |
+| `writeAll(arr<byte> buffer, fs.FileWriteMode mode = fs.FileWriteMode.CreateReplace)` | Writes the bytes to the file following the write mode |
+| `writeAllText(string text, String.StringEncoding encoding = String.StringEncoding.UTF8, fs.FileWriteMode mode = fs.FileWriteMode.CreateReplace)` | Writes the text, in the given encoding, to the file following the write mode |
+| `FileStream open(fs.StreamReadWriteAccessMode readMode, fs.StreamReadWriteAccessMode writeMode, fs.StreamOpenMode openMode)` | Shortcut for `FileStream(path, readMode, writeMode, openMode)` on this file (17.6.8.3) |
+
+`readAll`, `readAllText`, `writeAll` and `writeAllText` exist only on the `File` object, not as static methods. They are a simplification: they ignore sharing and read only. Streams (17.6.8) give the finer control.
+
+### 17.6.4 Enums
+
+All the enums are in `Root.IO`.
+
+| Enum | Values |
+|---|---|
+| `fs.DeleteOptions` | bitfield (3.1.1) with `Recursive` and `ForceDelete`; `None` and `All` are built in; flags combine with `\|` (`Recursive \| ForceDelete`) |
+| `fs.OverwriteOptions` | `None`, `Overwrite` (used by `copy`, `copyTo`, `move` and `moveTo`) |
+| `fs.FileSystemObjectsType` | `Files`, `Dirs`, `Both` |
+| `fs.FileWriteMode` | `CreateOnly`, `ReplaceOnly`, `CreateReplace`, `AppendOnly`, `CreateAppend` (used by `writeAll` and `writeAllText`) |
+| `fs.StreamReadWriteAccessMode` | `None`, `Exclusive`, `Shared` (used for both `readMode` and `writeMode` of a stream) |
+| `fs.StreamOpenMode` | `OpenExisting`, `CreateOrOpen`, `CreateIfMissing`, `CreateOrTruncate`, `TruncateExisting`, `CreateOrAppend`, `AppendExisting` |
+| `fs.StreamSeekOrigin` | `Begin`, `CurrentPosition`, `End` |
+
+`String.StringEncoding` is the existing enum: `UTF8`, `UTF16`, `UTF32`, `UTF16BE`, `UTF32BE`, `ASCII`, `ISO88591`.
+
+File write modes (`fs.FileWriteMode`):
+
+| Value | Missing file | Existing file |
+|---|---|---|
+| `CreateOnly` | creates it | `FileAlreadyExistsException` |
+| `ReplaceOnly` | `FileNotFoundException` | replaces the content |
+| `CreateReplace` | creates it | replaces the content |
+| `AppendOnly` | `FileNotFoundException` | appends |
+| `CreateAppend` | creates it | appends |
+
+Stream open modes (`fs.StreamOpenMode`):
+
+| Value | Missing file | Existing file |
+|---|---|---|
+| `OpenExisting` | `FileNotFoundException` | opens it, keeps the content |
+| `CreateOrOpen` | creates it | opens it, keeps the content |
+| `CreateIfMissing` | creates it | `FileAlreadyExistsException` |
+| `CreateOrTruncate` | creates it | opens it and empties it |
+| `TruncateExisting` | `FileNotFoundException` | opens it and empties it |
+| `CreateOrAppend` | creates it | opens it, writes go to the end |
+| `AppendExisting` | `FileNotFoundException` | opens it, writes go to the end |
+
+Stream access modes (`fs.StreamReadWriteAccessMode`): `None` means the stream does not read (or does not write). `Exclusive` means the stream takes exclusive access for that operation. `Shared` means other streams can use the file for that operation too (exact meaning to be confirmed, 17.6.9).
+
+### 17.6.5 Behavior
+
+- `delete`: a directory that is not empty is deleted only with the `Recursive` flag; without it the silent `DirectoryNotEmptyException` is raised and `delete` returns `false`. A missing item returns `false`. `ForceDelete` tries its best to delete an item that is locked for some reason (for example used by another `File` object); the result depends on the OS.
+- `copy`, `move`: a directory is always copied or moved with everything inside it. If the target directory already exists, the contents are merged (as pasting a folder over a folder on Windows). With `Overwrite` files of the same name are replaced; with `None` those files are skipped and the silent `FileNameAlreadyExistsException` is raised. When the file itself is skipped, `copy` and `move` return nothing (a null `File`). A missing source raises `FileNotFoundException` (not silent).
+- `createDirectory`: it never creates missing parent folders; a missing parent raises `InvalidPathException`. If the directory already exists, the silent `FileNameAlreadyExistsException` is raised and the existing directory is returned as a `File`, so the code goes on without failing (a `catch` can still handle the case).
+- `getAllFiles`: returns an `arr<File>` in no defined order. A path that does not exist raises `FileNotFoundException`, not an empty result. `recursive` includes the subdirectories; `itemType` selects files, directories or both.
+- `match`: only the wildcards `*` and `?` are special; everything else is static text; case is ignored. It applies to the names of files only. Regular expressions: delayed until 0.1.0.
+- `readAll`, `readAllText`: a missing file raises `FileNotFoundException` (not silent).
+- `writeAll`, `writeAllText`: the write mode decides what happens with an existing or a missing file (table in 17.6.4). A missing parent folder raises `FullPathNotFoundException` (not silent).
+- Temporary files: nothing is deleted automatically (the OS usually handles temporary files); whether `getTempFile` creates the file on disk depends on the OS. Use `atEnd` when the file has to be removed, for example `File tempFile = File.getTempFile() atEnd of tempFile { tempFile.delete() }` (14.2).
+
+### 17.6.6 Exceptions
+
+The IDs continue the table in 15.3. For the stream exceptions (33 to 45) whether they are silent is still to be confirmed case by case; for now they are not silent.
+
+| ID | Exception | Silent | Raised by |
+|---|---|---|---|
+| 25 | `FileNotFoundException` | no | `copy`, `copyTo`, `move`, `moveTo` with a missing source; `readAll`, `readAllText` on a missing file; `getAllFiles` on a missing path; `writeAll`, `writeAllText` in `ReplaceOnly` or `AppendOnly` on a missing file; the `FileStream` constructor on a missing file with `OpenExisting`, `TruncateExisting` or `AppendExisting` |
+| 26 | `InvalidFileAccessException` | no | `copy`, `copyTo`, `move`, `moveTo`, `createDirectory`, `getAllFiles`, `readAll`, `readAllText`, `writeAll`, `writeAllText`, `getTempFile` and the `FileStream` constructor when the access is not allowed by the OS |
+| 27 | `FileAccessException` | yes | `exists`, `delete` and the attributes (`size`, `created`, `modified`, `accessed`, `isReadOnly`) when the access is not allowed |
+| 28 | `DirectoryNotEmptyException` | yes | `delete` of a directory that is not empty without `Recursive` |
+| 29 | `FileNameAlreadyExistsException` | yes | `createDirectory` on an existing directory; `copy` and `move` with `None` when the target exists |
+| 30 | `InvalidPathException` | no | `File(path)` with illegal characters; `getAllFiles` with an empty path; `createDirectory` with a missing parent folder; the `FileStream` constructor with an invalid path |
+| 31 | `FullPathNotFoundException` | no | `writeAll`, `writeAllText` and the `FileStream` constructor with a missing parent folder |
+| 32 | `SeekBeforeBeginException` | yes | `seek` to a position before the start of the stream |
+| 33 | `FileAlreadyExistsException` | no | `writeAll`, `writeAllText` in `CreateOnly` on an existing file; the `FileStream` constructor with `CreateIfMissing` on an existing file |
+| 34 | `FileAccessToADirectoryException` | no | the `FileStream` constructor when the path is a directory |
+| 35 | `ReadOnlyItemCannotBeWrittenException` | no | the `FileStream` constructor opening a read-only item for write |
+| 36 | `ConflictingSharingException` | no | the `FileStream` constructor when another stream or process has the file open in an incompatible mode |
+| 37 | `InvalidStreamModesException` | no | the stream constructor with an invalid combination of modes (write off with a truncate or append open mode, both read and write off) |
+| 38 | `NoMoreResourcesException` | no | too many open files or other resource limits; disk full |
+| 39 | `AccessToAClosedStreamException` | no | `read`, `write`, `readByte`, `writeByte`, `seek` and `flush` on a closed stream |
+| 40 | `StreamModeNotAllowedException` | no | `read` when the read mode is `None`, `write` when the write mode is `None` |
+| 41 | `SeekNotSupportedByStreamException` | no | `seek` on a stream with `canSeek` false |
+| 42 | `InvalidBufferRangeException` | no | `read`, `write` with `start` or `length` out of the bounds of the buffer, or `readAtLeast` or `writeAtLeast` larger than `length` |
+| 43 | `GenericIOErrorException` | no | an I/O error while reading, writing or flushing (hardware failure, dropped network connection) |
+| 44 | `FileRemovedWhileOpenException` | no | the file was deleted or moved while the stream was open |
+| 45 | `StreamCloseFailureException` | no | an error while closing (for example the final flush fails) |
+
+Silent fallbacks: `exists` and `delete` give `false`; `size` gives `0`; the dates give a null `date`; `isReadOnly` gives `false`; `createDirectory` gives the existing directory; the skipped files of `copy` and `move` are not copied; a timeout of a stream read gives `0`; `seek` before the start gives position `0`.
+
+Not an error: a timeout of a read (silent), the end of the stream (`null`), and a second `close()`. Exceptions for memory and text streams: later.
+
+### 17.6.7 Examples
+
+```
+alias Root.IO as fs
+
+File directory = File.createDirectory("/d:/data/reports")
+string filePath = File.combinePaths("/d:/data/reports", "report.txt")
+File.delete(filePath)
+File report = File(filePath)
+report.writeAllText("Done")
+report.writeAllText("More", String.StringEncoding.UTF8, fs.FileWriteMode.AppendOnly)
+
+u64 fileCount = 0
+u64 directoryCount = 0
+for File item in File.getAllFiles("/d:/data", recursive: false, itemType: fs.FileSystemObjectsType.Both, match: "*.txt") {
+  if item.isDirectory {
+    directoryCount++
+  } else {
+    fileCount++
+  }
+}
+
+File tempFile = File.getTempFile() atEnd of tempFile { tempFile.delete() }
+
+// buffer is an arr<byte>
+FileStream input = FileStream("/d:/data/in.bin", fs.StreamReadWriteAccessMode.Shared, fs.StreamReadWriteAccessMode.None, fs.StreamOpenMode.OpenExisting)
+if input != null {
+  uns count = input.read(buffer) ?? 0
+  uns newPosition = input.seek(-16, fs.StreamSeekOrigin.End)
+  input is atEnd.     // closes the stream now (12.4); otherwise it closes at the end of the scope
+}
+```
+
+### 17.6.8 Streams
+
+Status: the base class and `FileStream` are defined. Memory, console and text streams, network streams and the async syntax are not.
+
+#### 17.6.8.1 Classes
+
+- `Stream` is the base class. It offers only the basics: close, flush, seek (if supported), read and write.
+- `FileStream : Stream` accesses the contents of a file. `MemoryStream` and `ConsoleStream` are other subclasses (later).
+- `TextStream` is a trait applicable to any stream; it adds the specific text methods (later).
+- All streams are binary; helpers convert them to text.
+- Sync and async are both supported. The async version is real async: a callback is called when the operation completes. Its syntax is defined in the rest of the language specification (not for now).
+- Sources considered: files, memory, console (standard input and output). Network (sockets, websockets) later: websockets are message based, so they may need a different shape.
+
+#### 17.6.8.2 Opening and closing
+
+- There is no `open` in the base class: the constructor of each stream type opens the stream, as in `FileStream stream = FileStream(path, readMode, writeMode, openMode)`.
+- `File.open(readMode, writeMode, openMode)` is a shortcut for `FileStream(path, readMode, writeMode, openMode)`.
+- If the constructor fails it returns `null` (objects are nullable by default) and raises the exception that describes the problem (17.6.6).
+- A stream follows the Rust memory model: it is closed when its owner is lost. `stream is atEnd.` (12.4) or `close()` closes it earlier; the stream is then marked as closed, so a stream is never closed twice and a second `close()` does nothing.
+- A closed stream cannot be reopened. Using it raises `AccessToAClosedStreamException`.
+- Example: `FileStream stream = FileStream(path, readMode, writeMode, openMode)`; the stream is closed at the end of the scope, or earlier with `stream is atEnd.` or `stream.close()`.
+
+#### 17.6.8.3 Constructor and modes
+
+`FileStream(string path, fs.StreamReadWriteAccessMode readMode, fs.StreamReadWriteAccessMode writeMode, fs.StreamOpenMode openMode)`
+
+- `readMode`, `writeMode`: `None`, `Exclusive` or `Shared` (17.6.4). They are separate parameters of the same enum type.
+- `openMode`: what to do when the file is missing or already exists (table in 17.6.4).
+- The three modes are shared by all the stream types and defined once with the base class. Every other constructor parameter belongs to the stream type: `path` exists only in `FileStream`.
+- The modes are exposed as read-only constants of the object, with the name of the parameter in upper case: `READ_MODE`, `WRITE_MODE`, `OPEN_MODE`. They cannot be changed once the stream is open.
+- Invalid combinations (write off with `CreateOrTruncate`, `TruncateExisting`, `CreateOrAppend` or `AppendExisting`; read and write both off) raise `InvalidStreamModesException`.
+
+#### 17.6.8.4 Base class members
+
+| Definition | Description |
+|---|---|
+| `bool canRead` | True if the stream can be read |
+| `bool canWrite` | True if the stream can be written |
+| `bool canSeek` | True if the stream supports seeking |
+| `bool hasLength` | True if the stream can tell its length |
+| `uns position` | Current position, always available; on a stream that cannot seek it grows as new data arrives |
+| `uns length` | Length of the stream; `0` if the stream cannot provide it (see `hasLength`) |
+| `uns? read(arr<byte> buffer, uns start = 0, uns length = <rest of the buffer>, uns readAtLeast = 0)` | Reads into the buffer; returns the number of bytes read, `0` if nothing is available, `null` at the end of the stream |
+| `uns write(arr<byte> buffer, uns start = 0, uns length = <rest of the buffer>, uns writeAtLeast = 0)` | Writes from the buffer; returns the number of bytes written |
+| `byte? readByte()` | Reads one byte; `null` at the end of the stream |
+| `bool writeByte(byte value)` | Writes one byte; true if the byte was written |
+| `uns seek(int position, fs.StreamSeekOrigin origin)` | Moves the position (only if `canSeek`) and returns the new absolute position |
+| `flush(bool forcePhysical = false)` | Writes any buffered data to the destination (the OS, for a file); with `forcePhysical` the OS is also asked to write it to the physical device |
+| `close()` | Closes the stream |
+
+`uns` and `int` are the target-dependent unsigned and signed sizes (64 bits on x64, 32 on x32, 16 on 8-bit machines). For now they are used everywhere; before 0.1.0 they will be split by use (17.6.9). Async versions of `read` and `write` exist (for example `readAsync`); names and callback syntax come with the language async syntax.
+
+#### 17.6.8.5 Behavior of read, write, seek and flush
+
+- `read`, `write`: the buffer can be a whole array (it is used from the beginning for its full length) or a view of it, such as `(&)buffer[10..20]`. `start` and `length` select a part and are relative to the buffer passed: if a view is passed, the view is the buffer. Example: `read((&)buffer[10..20], start: 2, length: 4)` fills the elements 12 to 15 of `buffer`.
+- `readAtLeast`: the minimum number of bytes to read before returning. The default `0` means do not wait: `read` returns what is available now, possibly nothing.
+- `writeAtLeast`: the minimum number of bytes to write before returning. The default `0` means write what you can, with no limitation; the returned value tells how much was written.
+- A timeout of a read raises a silent exception and `read` returns `0`.
+- `seek` to a position before the start raises the silent `SeekBeforeBeginException` and the position becomes `0`, which is returned. `seek` to a position past the end is allowed, as in C# and Rust: reads return the end of the stream and a write extends the file.
+- `flush()` pushes the library buffers to the OS, as in C# and Rust. `flush(forcePhysical: true)` also asks the OS to write the data to the physical device (C# `Flush(true)`, Rust `sync_all`).
+
+### 17.6.9 Open items
+
+- Memory streams, console as streams (standard input and output), text streams (`TextStream` trait), network streams: later
+- Async: names and callback syntax for `read` and `write` (language async syntax): not for now
+- Streams: exact meaning of `Exclusive` and `Shared` (for example, with an exclusive write can others still read?); other invalid mode combinations (for example creating a file with the write mode `None`)
+- Streams: silent or not for each stream exception (for now all not silent); exceptions of the memory and text streams
+- Before 0.1.0: split `int` and `uns` by use (calculation, memory offsets, file offsets); parser and compiler support for `uns` in normal code (not in `dfoot`)
+- Before 0.1.0: regular expressions in `match`
+- Normalization details: drive letters on other OS, network paths
+- The full list of exceptions of the File manager and their final names
+
+---
 
 # 18 RESERVED
 
@@ -1411,15 +1860,21 @@ Level 1 = most important, level 3 = least.
 | 1 | Jump loop between switch cases | 10.5 |
 | 1 | Variable read before assignment | 1.5 |
 | 1 | Array element read before fill or assignment | 6.7 |
+| 1 | `Root.Class` written in a class header | 11.1 |
+| 1 | Equality without hash on a key of a hash collection | 11.1.3 |
+| 1 | `->` on a variable or field of a basic type | 12.4 |
 | 2 | Cast out of range saturates | 3.5 |
 | 2 | Upward type check | 11.1 |
 | 2 | Type name not PascalCase | 1.1 |
 | 2 | `catch { }` without type or variable | 15.1 |
 | 2 | Char compared with an integer | 2.5 |
+| 2 | `equals` and operator `==` both defined | 11.1.3 |
 | 3 | Unmatched `#region` / `#endregion` | 19.1 |
 | 3 | `const` name not UPPER_SNAKE_CASE | 1.1 |
 | 3 | Folder ignored (invalid name) | 16 |
 | 3 | Generic call chosen over comparisons | 11.3.5 |
+| 3 | Primary parameter redeclared with an initializer | 11.1.1 |
+| 3 | Unreachable branch of a generic check | 11.1.3 |
 
 ---
 
@@ -1434,8 +1889,11 @@ Level 1 = most important, level 3 = least.
 - Conditional compilation (`#if` family)
 - Panic exit codes (all -1000 for now)
 - Whether standard messages keep the word "Exception"
-- Class `atEnd`: syntax, order with parent classes and traits
+- Class destructor that throws (15.x)
+- Lexing of reals ending in a dot (`0.`): a real needs digits on both sides of the dot
+- Binding in generic checks (`T is i32`: type of `other` inside the branch)
 - Stdlib: strings, files, time, collections extras (queue/stack)
+- Bitfields: whether `set`, `clear`, `setAs` and `toggle` modify the value in place or return a new value; nullability of bitfields (3.1.1, 7.1)
 - `.sizeof` for all types (whether it counts the items of a collection)
 - Functional collection members (`filter`, `map`, `reduce`)
 - Order of enum keys in sorted collections (declaration order or value)
@@ -1625,3 +2083,66 @@ Level 1 = most important, level 3 = least.
 - 99 Open items: `.sizeof` for all types, `filter` / `map` / `reduce`, order of enum keys, `tryGet` return value; removed the missing-map-key exception name and the collections extras that are now decided
 - Changelog: the updates of each version are collapsed into a single block
 - Header date 2026/10/13
+
+---
+
+## Changes in 0.0.8
+
+- 11.1 Classes: `Root.Class` is the implicit base of every class and is never written; writing it in a header is a level 1 warning
+- 11.1 Class header: `class Name(params) : [parent class], [traits]`; the parent class goes before all traits (a class after a trait is a compile error); names are resolved from context and the namespace removes any ambiguity
+- 11.1 A class and a trait with the same name in the same namespace is a compile error
+- 11.1.1 Constructors: visibility, class name and parameters; several constructors allowed when the parameters differ (13.2 rules); the default constructor is generated like in C#
+- 11.1.1 Private constructors are allowed; only the class body (including its static functions) can call them
+- 11.1.1 A constructor that throws: the exception propagates, the object is destroyed, `atEnd` blocks run, fields not yet reached hold their zero value
+- 11.1.1 Primary constructor parameters are private fields; redeclaring the same name in the body (public or not) does not create a new field, it sets the visibility of the existing one; a different type is a compile error; an initializer is allowed (level 3 warning, the body value wins)
+- 11.1.2 An overriding function inherits the visibility of the original; no visibility is written on it
+- 11.1.2 Static members: `static` after the visibility; functions and properties; inherited by subclasses; static functions cannot be overridden and redeclaring one with the same signature in a subclass is a compile error; generic classes get one copy per type instance
+- 11.1.2 Static properties: initializer allowed, zero value without one; initialized at program start in declaration order (a compiler option allows lazy initialization); initializers reading other classes' statics are evaluated on demand, a cycle is a compile error; `static const` for class constants; `atEnd` never touches statics
+- 11.1.3 Equality: `==` on classes resolves in this order: `equals`, then an operator `==` overload, then identity; `!=` is always the negation and cannot be overloaded; defining both `equals` and an operator `==` is a level 2 warning; a class with `equals` or `==` but no hash, used in a hash collection, is a level 1 warning; null is handled by the compiler before `equals` is called
+- 11.1.3 `bool equals(T other)` is a generic function with an implicit `T`; `T is type` checks the generic type at compile time, `other is type` checks the value at runtime; both are allowed in the same function; every path must return a value; the upward-check warning does not fire when a check is true for one `T` only; an unreachable branch is a level 3 warning
+- 12.4 (new) `->` on a field: `->a.c` moves the field out, `a.c` is null afterwards and `a` stays usable; the owner or a writable borrow `(&)A` can do it, a read-only borrow cannot
+- 12.4 `->` on a variable or field of a basic type is ignored and behaves like a plain copy; level 1 warning
+- 12.4 Finalizer: `f is atEnd.` is a statement only; the final dot is mandatory and only a line break or `;` may follow; `f is atEnd.close()` is a compile error
+- 12.4 `f is atEnd.` releases the ownership held by `f`: a single owner is destroyed with its full destructor, a counted object drops the counter and is destroyed at zero; `f` becomes null; null is a no-op; weak references see null after destruction; on a borrowed variable it is a compile error; it replaces `f?.close()` in cleanup code
+- 1.1 `atEnd` is a reserved word; it cannot be a type, trait, variable, parameter or field name
+- 14.2 / 11.4 `atEnd` has five forms, without parentheses:
+  1. `atEnd of a, b { }` ties the code to the listed variables; it sees only the listed objects, declared before it; it runs when they go out of scope and still runs while at least one of them exists
+  2. `} atEnd { }` after a function: function cleanup
+  3. `} atEnd { }` after any other statement or scope: scope cleanup; it sees the union of all scopes and subscopes of the statement; it always runs once the statement is reached; locals of branches not taken hold their zero value; the same name with different types in two branches is a compile error
+  4. `} atEnd { }` after a class: the class destructor, always the last one to run
+  5. `} atEnd { }` after a constructor: a destructor fragment, registered when that constructor runs and executed when the object dies, in reverse order of registration; it sees the constructor locals and parameters plus the class members
+- 14.2 Order at scope or function exit: the `atEnd of` blocks first, then the trailing `atEnd` as the final cleanup
+- 14.2 Only the variables used by an `atEnd` are kept alive until it runs
+- 14.2 A subclass runs all its own `atEnd` blocks first, then the parent's, then the traits' (reverse of construction)
+- 14.2 `atEnd of f { ...; f is atEnd. }` is legal and not flagged
+- 14.2 An `atEnd` placed inside a constructor body is normal scope cleanup; only the one after the constructor is a destructor fragment
+- 19.3 Warnings: L1 `Root.Class` written in a header; L1 equality without hash on a hash-collection key; L1 `->` on a basic type; L2 `equals` and operator `==` both defined; L3 primary parameter redeclared with an initializer; L3 unreachable generic branch
+- Examples updated: `Root.Class` removed from the headers of the 11.1, 11.3 and 11.4 examples; `?.close()` replaced by `is atEnd.`; the old standalone `atEnd { }` example of 14.2 is now `atEnd of mutex { }`
+- 99 Open items: `atEnd` that throws inside a class destructor (15.x); lexing of reals ending in a dot (`0.`); `File.close()` still existing as a method; binding in generic checks
+- Header date 2026/10/15
+
+
+## Changes in the next version (version and date set when merging)
+
+- 17.6 `Root.IO` File manager (new): `File` class with constructor, properties (`path`, `name`, `extension` without the dot, `parent`, `isDirectory`, `isFile`, `size`, `created`, `modified`, `accessed`, `isReadOnly`), static methods (`exists`, `delete`, `copy`, `move`, `createDirectory`, `getAllFiles`, `getTempFile`, `getTempFileName`, `getTempDir`, `combinePaths`, `open`) and object methods (`exists`, `delete`, `copyTo`, `moveTo`, `createDirectory`, `getAllFiles`, `readAll`, `readAllText`, `writeAll`, `writeAllText`, `open`)
+- 17.6 Paths normalized with `/` as root and separator, drive as first folder (`/d:/folder/file.txt`); paths of any OS accepted and normalized; `.` and `..` accepted
+- 17.6 Enums `fs.DeleteOptions` (bitfield), `fs.OverwriteOptions`, `fs.FileSystemObjectsType`, `fs.FileWriteMode`, `fs.StreamReadWriteAccessMode`, `fs.StreamOpenMode`, `fs.StreamSeekOrigin`
+- 17.6 Defaults: `delete` with `None`, `copy` and `move` with `OverwriteOptions.None`, `getAllFiles` with `recursive` false, `Files` and `"*"` (the path is required), text encoding UTF8, write mode `CreateReplace`
+- 17.6 `copy` and `move` always include the content of a directory, merge into an existing directory and return nothing when the file is skipped; `createDirectory` never creates parent folders (missing parent: `InvalidPathException`) and returns the existing directory when it already exists
+- 17.6 `getAllFiles` returns an `arr<File>` without order; a missing path raises `FileNotFoundException`, an empty path `InvalidPathException`; `match` with `*` and `?`, case-insensitive, on file names; regular expressions delayed until 0.1.0
+- 17.6 `writeAll` and `writeAllText` follow a `fs.FileWriteMode` (renamed from `fs.WriteMode`); a missing parent folder raises `FullPathNotFoundException`; a mode that cannot be met raises `FileNotFoundException` (`ReplaceOnly`, `AppendOnly`) or `FileAlreadyExistsException` (`CreateOnly`)
+- 17.6 `ForceDelete` tries its best to delete a locked item (OS dependent); no automatic deletion of temporary files (use `atEnd`); whether `getTempFile` creates the file is OS dependent
+- 17.6 Attributes and `size` of an item that does not exist give the default values
+- 17.6 `fs.DeleteOptions` becomes a bitfield with `Recursive` and `ForceDelete` (`RecursiveAndForceDelete` removed)
+- 17.6 Streams (new): `Stream` base class with `canRead`, `canWrite`, `canSeek`, `hasLength`, `position`, `length`, `read`, `write`, `readByte`, `writeByte` (returns `bool`), `seek`, `flush(bool forcePhysical = false)`, `close`; `FileStream : Stream`; `TextStream` trait for any stream; `MemoryStream` and `ConsoleStream` later
+- 17.6 The constructor of each stream type opens the stream and takes `readMode` and `writeMode` (`fs.StreamReadWriteAccessMode`: `None`, `Exclusive`, `Shared`) and `openMode` (`fs.StreamOpenMode`, seven values); `File.open` is a shortcut for `FileStream(path, readMode, writeMode, openMode)`; a failed constructor returns null with exceptions; the modes are exposed as read-only constants `READ_MODE`, `WRITE_MODE`, `OPEN_MODE`
+- 17.6 A stream is closed when its owner is lost (Rust model); `stream is atEnd.` or `close()` closes it earlier and a second `close()` does nothing; a closed stream cannot be reopened
+- 17.6 `read` and `write` accept a whole array or a view, with `start` and `length` relative to the buffer passed; `readAtLeast` and `writeAtLeast` (default 0); `read` returns `uns?` (null at the end of the stream, 0 if nothing is available); a read timeout is a silent exception; `uns` and `int` for sizes and positions (split by use before 0.1.0)
+- 17.6 `seek(int position, fs.StreamSeekOrigin origin)` returns the new `uns` position; before the start: silent `SeekBeforeBeginException`, position 0; past the end allowed; `position` always available, `length` 0 when `hasLength` is false
+- 17.6 General decisions: binary streams with text helpers, memory streams on every target, `Root.Console` as a shortcut
+- 15.3 New exceptions, added to the table: `FileNotFoundException` (25), `InvalidFileAccessException` (26), `FileAccessException` (27, silent), `DirectoryNotEmptyException` (28, silent), `FileNameAlreadyExistsException` (29, silent), `InvalidPathException` (30), `FullPathNotFoundException` (31), `SeekBeforeBeginException` (32, silent), `FileAlreadyExistsException` (33), `FileAccessToADirectoryException` (34), `ReadOnlyItemCannotBeWrittenException` (35), `ConflictingSharingException` (36), `InvalidStreamModesException` (37), `NoMoreResourcesException` (38), `AccessToAClosedStreamException` (39), `StreamModeNotAllowedException` (40), `SeekNotSupportedByStreamException` (41), `InvalidBufferRangeException` (42), `GenericIOErrorException` (43), `FileRemovedWhileOpenException` (44), `StreamCloseFailureException` (45)
+- 3.1.1 Bitfields (new, next to the enums): `bitfield8`, `bitfield16`, `bitfield32`, `bitfield64`, zero-based bit positions, `.None`, `.All`, `set`, `clear`, `setAs`, `toggle`, `isSet`, `isAnySet`, `_value` flips only the defined bits, an integer cast to a bitfield masks undefined bits
+- 17.6 The cross-references use the numbers of the main spec; the examples use `atEnd of x { }` (14.2) and `x is atEnd.` (12.4); the intro pasted from the standalone file is removed
+- 11.4, 14.2 Examples updated to the new `File` API (`size`, `File.exists`)
+- 17.5 Empty table row removed
+- 99 Open items: `close()` as a method of `File` removed (streams have `close()`); bitfield in-place or new-value decision and nullability added; the open items of files and streams are in 17.6.9

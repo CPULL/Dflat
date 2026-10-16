@@ -1,4 +1,4 @@
-Compiler 0.0.7alpha (spec 0.0.7)
+Compiler 0.0.8alpha (spec 0.0.8)
 
 Done -----------------------
 
@@ -46,7 +46,6 @@ Time zones: dates are UTC; z prints +0 and parses an offset
 
 Not yet -----------------------
 
-Classes, traits, inheritance
 Generics
 vec, list, map, hmap, set, hset, dfoot
 Ownership, move, copy, refcount
@@ -64,3 +63,87 @@ Files and Streams (17.6 is a TODO in the spec)
 DateTime library (CalendarDate, ZonedDateTime)
 Runtime without C library
 Debug builds (line, stack trace)
+
+
+Classes and traits (spec 0.0.8, section 11, 12, 14.2) -----------------------
+
+Phase 0  Parser                                                   DONE
+  static members (public static, static const, static fun)
+  trailing "} atEnd { }" attached to the statement before it (function, constructor, class, if, for ...)
+  atEnd of a, b { }
+  finalizer "f is atEnd." (statement only, final dot, nothing after it)
+  equality operator "fun bool ==(V other)" ("!=" is an error)
+  arr<T>[n] name / vec<T>[n] name declarations (the compiler rejects them for now)
+  already parsed: class headers, primary and secondary constructors with chains, traits, is, specific / any,
+  generics, where, placeholder / with, ->a.c
+  note: an atEnd alone on its line is still the standalone block the compiler uses today (spec 0.0.8 removed that form)
+Phase 1  Classes core                                              DONE
+  objects (pointer, header with the class descriptor), fields, zero values, null by default
+  primary constructor (header parameters are private fields; redeclaring one in the body sets its visibility),
+  default constructor, field initializers, parameter defaults and named arguments
+  methods (overloads, defaults, named arguments), this, bare field and method names inside methods
+  visibility private / public (internal acts as public until namespaces exist), checked at compile time
+  statics: properties, static const, static functions, initialized at program start in dependency order (cycle = error)
+  ?. on objects, NullPointerException on null access (catchable), identity ==, objects in arrays, tuples, parameters
+  default toStr: Px { a: .., b: .., c: .., ... } (first 3 fields, dots when more)
+  not yet: secondary constructors, constructor chains, class atEnd, private constructors, operator ==
+Phase 2  Inheritance                                               DONE
+  single parent (Root.Class in a header is a level 1 warning), fields of the parent first, construction order parent -> class
+  override (mandatory; the visibility of the original; same return type), parent.Method(), virtual calls through a vtable
+  (direct call when nothing overrides), inherited statics, static functions cannot be overridden or redeclared
+  is checks and "if v is Circle c { }" (c scoped to the block), upward check = level 2 warning, upcasts, identity == between parent and child
+  limits: a parent with constructor parameters cannot be extended yet; no downcast operator; "x is Circle c" only as an if condition;
+  a function without a body is an error in classes (it is virtual and for traits only)
+Phase 3  Traits                                                    DONE
+  trait declarations: properties (with initializers), functions with or without a body, a constructor without parameters,
+  one parent trait; a class lists its traits after the parent class (a class after a trait is an error)
+  implementing: override is mandatory (also for the default functions); a function inherited from the parent class counts;
+  a missing implementation is an error; the properties live in the object (parent first, traits, then the class)
+  construction order: parent class, traits in the listed order (parent trait first), class body
+  values of a trait type (parameters, variables, arr<any Shape>): calls and properties are found at run time through the class descriptor
+  specific T / any T are accepted for traits (both dispatch at run time)
+  the same member in two traits: unqualified is an error; TraitName.member inside the class (the trait's own body), x.TraitName.member outside
+  is with classes and traits (binding allowed), assigning a class to a trait it implements, trait to parent trait
+  limits: generic traits, placeholders, trait constructors with parameters (they need secondary constructors),
+  a trait redeclaring a function of its parent trait, static members in traits, static / specific dispatch is not chosen (always dynamic)
+Phase 4  Ownership                                                 IN PROGRESS
+ 4a  one owner, destruction, moves                                 DONE
+  an object variable owns what it is given a new object or a ->x for; "T x = y" borrows; parameters borrow; fields own;
+  a function returns objects that move (a new object, ->x, an owned local) or objects that borrow (a field, a parameter): the
+  compiler works it out from the returns and checks them (mixing is an error)
+  the objects of a scope end with it, after the written atEnd blocks, last declared first: on a normal end, return, break,
+  continue, jump and when an exception passes; each pass of a loop body is a scope; a new value drops the old object
+  the class atEnd (after the closing brace) is the destructor: it runs, then the objects the class owns end; a child ends
+  before its parent; a destroyed object keeps its memory and is marked dead: reaching it raises NullPointerException,
+  ending it twice is a Panic ("Double free"); a destructor that throws propagates from the end of the scope like any exception
+  x is atEnd. (owners only: a borrowed or weak variable is an error), ->x and ->a.c (the source becomes null; only owners move),
+  ->T parameters (the callee owns; the call writes ->x), ->T in the header of a class (the object moves into the field)
+  weak references: T w _= x, used only through enforce w { } else { } (the object must be alive)
+  atEnd after a function (final cleanup, runs before the objects of the function end), atEnd of a, b { } (as a scope atEnd)
+  a result that nobody keeps (a call used as a statement) ends at once
+  not yet in 4a: temporaries inside an expression (they are never destroyed), objects in arrays and tuples (not owned,
+  not destroyed), static fields (not tracked), constructor atEnd fragments (need secondary constructors), atEnd after other statements (form 3),
+  use after a move is found when it runs (NullPointerException), not at compile time, no lifetime check for borrows
+ 4b  reference counting (.asRefCount, .asSharedRefCount, .isRC), .clone(), x! copy, ChangingRefCountTypeException    TODO
+ 4c  collections that own their elements (needs collections), compile-time use-after-move and lifetimes                 TODO
+Phase 5  Equality                                                  DONE
+  == on objects: equals(T other), then the operator "fun bool ==(V other)", then identity; != is always the negation
+  equals is generic: one copy per type T of the right operand; "T is type" is decided at compile time (the other branch is not emitted),
+  "other is type" at run time; the copy is chosen at run time by the class of the left operand (children inherit or replace equals)
+  null is handled before equals / the operator are called; every path of equals must return (checked even if unused)
+  warnings: L2 equals and operator == both defined, L3 a check that an earlier check already answered (this T)
+  limits: the warning for hash collections does not exist yet (no hash collections); trait-typed left operands compare by identity;
+  the operator == is an ordinary function (virtual, overridable)
+Phase 6  Custom exception classes                                  DONE
+  class MyException(i32 code) : Exception { }; the constructor takes the message first (optional), then the fields (also optional)
+  throw MyException("message", 3), throw ex (rethrow), catch by class (the variable is the class: ex.code, ex.Message, ex.Id ...),
+  catch by parent class, catch SilentException, catch all, "ex is MyException m" on a caught exception, Exception as a type
+  silent: class MyException : Exception, SilentException (SilentException is declared by the compiler when named); a silent
+  exception does nothing when no catch of the function can handle it (a plain catch ex does not); standard silent ones are caught by the trait too
+  limits: a parent exception class with fields cannot be extended yet (same limit as the other parents); a silent exception is only
+  seen by the catches of its own function
+Phase 7  Generics    TODO (not decided)
+
+Decisions: operator is "fun bool ==(V o)"; only primary constructors for now; default toStr is
+"Px { a: Py{}, b: 3, c: BTree{}, ... }" (first 3 fields, one level, "..." when there are more);
+a function without a body is virtual and is usable only in traits.

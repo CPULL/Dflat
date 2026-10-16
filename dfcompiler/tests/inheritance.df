@@ -1,0 +1,101 @@
+// Classes, phase 2: single inheritance, override, parent., virtual calls, is, upcasts, inherited statics
+alias Root as r
+
+public class Shape {
+  string label = "shape"
+  public static i32 count = 0
+  public static fun i32 Total() { count }
+  public fun string Describe() { "I am a " + Kind() + " " + label }
+  public fun string Kind() { "shape" }
+  public fun r64 Area() { 0.0 }
+  public fun Touch() { count += 1 }
+}
+
+public class Circle : Shape {
+  public r64 radius = 2.0
+  override fun string Kind() { "circle" }
+  override fun r64 Area() { 3.0 * radius * radius }
+  public fun r64 Radius() { radius }
+}
+
+public class Ring(r64 hole) : Circle {
+  i32 depth = 2
+  override fun string Kind() { "ring/" + parent.Kind() }
+  public fun i32 Depth() { depth }
+}
+
+public class Square : Shape {
+  public r64 side = 2.0
+  override fun r64 Area() { side * side }
+}
+
+// virtual calls through the parent type
+fun string show(Shape s) { s.Describe() + " area " + s.Area() }
+
+Circle c = Circle()
+r.Console.Log(c.Kind())
+r.Console.Log(c.Area())
+r.Console.Log(c.Describe())
+
+Shape s = c
+r.Console.Log(s.Kind())
+r.Console.Log(s.Area())
+r.Console.Log(show(c))
+r.Console.Log(show(Square()))
+r.Console.Log(show(Shape()))
+r.Console.Log(show(Ring(0.5)))
+
+Ring ring = Ring(0.5)
+ring.radius = 1.0
+r.Console.Log(ring.Kind())
+r.Console.Log(ring.Depth())
+r.Console.Log(ring.Radius())
+r.Console.Log(ring.Area())
+
+// array of mixed shapes
+arr<Shape> shapes = [Circle(), Square(), Shape(), Ring(1.0)]
+r64 total = 0.0
+for Shape item in shapes { total += item.Area() }
+r.Console.Log(total)
+for var item in shapes { r.Console.Print(item.Kind() + ";") }
+r.Console.Log("")
+
+// is
+r.Console.Log(shapes[0] is Circle)
+r.Console.Log(shapes[1] is Circle)
+r.Console.Log(shapes[3] is Circle)
+r.Console.Log(shapes[3] is Ring)
+r.Console.Log(shapes[2] is Ring)
+Shape nothing = null
+r.Console.Log(nothing is Shape)
+for Shape item in shapes {
+  if item is Ring big {
+    r.Console.Log("ring with depth " + big.Depth())
+  } else if item is Circle round {
+    r.Console.Log("circle " + round.Radius())
+  } else {
+    r.Console.Log("other " + item.Kind())
+  }
+}
+
+// statics are inherited
+Shape.count = 0
+c.Touch()
+ring.Touch()
+r.Console.Log(Shape.Total())
+r.Console.Log(Circle.Total())
+r.Console.Log(Ring.count)
+Circle.count = 10
+r.Console.Log(Shape.count)
+
+// a parent field set through the child, and the printing of a child
+Square sq = Square()
+sq.side = 3.0
+r.Console.Log(sq.Area())
+r.Console.Log(sq)
+r.Console.Log(ring)
+
+// comparing parent and child references
+Shape same = ring
+r.Console.Log(same == ring)
+r.Console.Log(same == c)

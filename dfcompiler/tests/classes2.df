@@ -1,0 +1,89 @@
+// Classes: static initialization order, exceptions, linked objects, enums and tuples in classes
+alias Root as r
+
+public class A {
+  public static i32 a = B.b + 1
+  public static i32 plain
+  public static date when
+  public static string text = "t" + B.b
+}
+public class B {
+  public static i32 b = 5
+  public static const i32 LIMIT = C.base * 2
+}
+public class C {
+  public static const i32 base = 21
+}
+
+r.Console.Log(A.a)
+r.Console.Log(A.plain)
+r.Console.Log(A.when == null)
+r.Console.Log(A.text)
+r.Console.Log(B.LIMIT)
+
+enum Color { Red, Green, Blue }
+
+public class Node(i32 value) {
+  public i32 value
+  public Node next
+  public Color color = Color.Green
+  public (i32 low, i32 high) range = (1, 9)
+
+  public fun i32 Sum() {
+    if next == null then return value
+    return value + next.Sum()
+  }
+  public fun i32 Length() { next == null ? { 1, 1 + next.Length() } }
+  public fun Node Add(i32 more) {
+    next = Node(more)
+    return next
+  }
+}
+
+Node head = Node(1)
+head.Add(2).Add(3).Add(4)
+r.Console.Log(head.Sum())
+r.Console.Log(head.Length())
+r.Console.Log(head.next.next.color)
+r.Console.Log(head.range.high)
+head.color = Color.Blue
+r.Console.Log(head.color)
+head.range = (3, 4)
+r.Console.Log(head.range.low)
+
+// exceptions: in a constructor initializer, in a method, through a virtual call
+public class Divider(i32 by) {
+  public i32 quotient = 100 / by
+}
+public class Base {
+  public fun i32 Run(i32 n) { 10 / n }
+}
+public class Derived : Base {
+  override fun i32 Run(i32 n) { 20 / n }
+}
+
+fun i32 tryDivider(i32 by) {
+  Divider d = Divider(by)
+  return d.quotient
+  catch DivisionByZeroException {
+    return -1
+  }
+}
+r.Console.Log(tryDivider(5))
+r.Console.Log(tryDivider(0))
+
+fun i32 viaParent(Base b, i32 n) {
+  return b.Run(n)
+  catch DivisionByZeroException ex {
+    r.Console.Log("caught " + ex.Message)
+    return -2
+  }
+}
+r.Console.Log(viaParent(Base(), 5))
+r.Console.Log(viaParent(Derived(), 5))
+r.Console.Log(viaParent(Derived(), 0))
+r.Console.Log(viaParent(Base(), 0))
+
+// an unhandled exception from a constructor
+Divider bad = Divider(0)
+r.Console.Log("not reached")

@@ -1,0 +1,65 @@
+// Ownership: constructor parameters that move in, traits, discarded results, dead objects, errors at run time
+alias Root as r
+
+public class Engine(string model) {
+  public string model
+} atEnd {
+  r.Console.Log("  engine " + model + " stops")
+}
+
+public class Car(->Engine engine, string plate) {
+  public Engine engine
+  public string plate
+} atEnd {
+  r.Console.Log("  car " + plate + " parked")
+}
+
+trait Shape {
+  fun string Name()
+}
+public class Square : Shape {
+  override fun string Name() { "square" }
+} atEnd {
+  r.Console.Log("  square ends")
+}
+public class Circle : Shape {
+  override fun string Name() { "circle" }
+} atEnd {
+  r.Console.Log("  circle ends")
+}
+
+fun Shape pick(bool square) {
+  if square { return Square() }
+  return Circle()
+}
+
+r.Console.Log("a constructor takes the object")
+{
+  Engine e = Engine("v8")
+  Car car = Car(->e, "AB-1")
+  r.Console.Log("  e is null after the move: " + (e == null))
+  r.Console.Log("  car has " + car.engine.model)
+}
+
+r.Console.Log("trait values")
+{
+  Shape s1 = pick(true)
+  Shape s2 = pick(false)
+  r.Console.Log("  " + s1.Name() + " and " + s2.Name())
+}
+
+r.Console.Log("a result nobody keeps ends at once")
+pick(true)
+r.Console.Log("  after the statement")
+
+r.Console.Log("a dead object")
+Square sq = Square()
+Square view = sq
+sq is atEnd.
+r.Console.Log("  the owner is null: " + (sq == null))
+i32 caught = 0
+r.Console.Log(view.Name())
+catch NullPointerException {
+  caught += 1
+}
+r.Console.Log("  the borrow found the object dead: " + caught)

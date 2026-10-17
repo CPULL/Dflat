@@ -15,7 +15,7 @@ fun nothingCaught() {
 fun plainCatch() {
   date b = date("bad")
   r.Console.log(b == null)
-  catch ex {
+  catch Exception ex {
     r.Console.log("wrong: catch ex must not see a silent exception")
   }
 }

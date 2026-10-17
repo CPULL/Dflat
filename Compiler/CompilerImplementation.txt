@@ -156,7 +156,7 @@ Where a decision came from the spec the section is named; where I (Claude) chose
   read-only members. A parent exception class with header fields cannot be extended yet. `Exception` is also a type (a variable can hold
   any exception; it can be tested with `is`). Catch variables have the type of the class they catch.
 - SilentException is a trait the compiler declares when it is named. A silent exception that nothing in the same function can catch
-  does nothing (execution goes on). A catch ex / catch Exception never handles a silent exception; catch SilentException, its own
+  does nothing (execution goes on). A catch Exception never handles a silent exception; catch SilentException, its own
   type, a parent below Exception, and catch all do. Silent exceptions are not seen by catches in callers (limit).
 - IDs 19 to 24 are defined (IndexOutOfRange, ModifyingProtectedSource, NaNUsedAsKey, InvalidMapKey, EmptyVectorAccess,
   InvalidDateTimeFormat); only some are raised by this version.
@@ -614,7 +614,7 @@ does not change.
 10. Open points
 - The exact definition of the SilentException trait.
 - Whether library functions without a declared list in dflat-stdlib.md (only the IO section lists "raised by" today) need to be completed before the model is built.
-- (closed) Spec 15.4: a catch of Exception, and the bare catch, do NOT handle silent exceptions. The compiler follows it since 2026-10-17.
+- (closed) Spec 15.4: a catch of Exception does NOT handle silent exceptions. The compiler follows it since 2026-10-17.
 
 11. Plan and tests (for when it is built)
 - Stage 1: the two-slot return for FAILING functions (replaces df_err), the PURE / SAFE / FAILING analysis (including fully handled exceptions).
@@ -697,7 +697,7 @@ Library functions
   FileNameAlreadyExistsException, SeekBeforeBeginException); File.check only throws what is not silent and gives back the silent id. The wrappers (delete, copyTo,
   moveTo, createDirectory of the object) catch the silent exceptions of the static functions and throw them again.
 
-FIXED (2026-10-17): catch Exception and the bare catch ex do NOT handle silent exceptions, as the specification says (15.1, 15.4, 15.8.2). CatchHandles
+FIXED (2026-10-17): catch Exception does NOT handle silent exceptions, as the specification says (15.1, 15.4, 15.8.2). CatchHandles
 (CodeGen.Leaks.cs) returns false for the target Exception when the exception is silent and df_exc_is (Runtime.cs) keeps its exclusion; a silent exception is handled by a
 catch of its own class, of a parent class below Exception, of the SilentException trait, or by catch all. tests/silent.df and tests/exceptions.df are back to the original
 rule; tests/silentmodel.df has sink (catch Exception does not observe) and a parent class below Exception (Family / Cousin).
@@ -725,10 +725,15 @@ anything that depends on the machine or on the time (paths, now): silentfiles.df
 Tests that must not compile (tests\errors, 2026-10-17)
 - tests\errors\<name>.df is a small program (one or two lines) that the compiler must refuse; errors\expected\<name>.txt holds the error line(s):
   "<name>.df(<line>): error: <message>", with no folder. The runner compiles it with --emit-c, so no C compiler is involved. A program that compiles is a
-  FAIL ("NO ERROR"). 53 cases today: bitfields, tryParse, reference parameters, string formats, copyFrom and sort, throw, and the basic errors of the language.
+  FAIL ("NO ERROR"). 55 cases today: bitfields, tryParse, reference parameters, string formats, copyFrom and sort, throw, and the basic errors of the language.
   Adding a case: write the .df file, run .\run-tests.ps1 -Only <name> -Update, read the message in the expected file, and keep it only if it is the right one.
-- The messages are locked as they are today. Three things found while writing them, not changed:
-  * catch NoSuchException { } is accepted with no error: a single unknown name after catch is taken as the name of the variable of catch Exception.
-    A capitalized name that is no exception could be reported as an unknown exception.
+- The messages are locked as they are today. Two things found while writing them, not changed:
   * File() reports "missing argument 'rawPath' for 'File'": the constructor parameter of the File class written in Dflat is called rawPath (the spec says path).
   * increment((&)3) reports "only variables and tuple fields can be assigned for now": the message of the general assignment, not one about (&).
+
+A catch always names an exception type (2026-10-18)
+- Spec 15.1: after catch comes an exception type (or all), then an optional variable. The shorthand catch ex { } (= catch Exception ex) no longer exists;
+  catch Exception { } is the sinkhole of the exceptions that are not silent, without the exception. CatchTarget (CodeGen.Errors.cs) reports a name that is not an
+  exception type as "unknown exception type 'X': a catch names an exception type, then an optional variable (catch Exception X gets any exception)".
+  Tests: tests/errors/catch_unknown_exception.df and catch_variable_without_type.df. The 8 uses of catch ex in the tests and the two sample.df examples now
+  write catch Exception ex.

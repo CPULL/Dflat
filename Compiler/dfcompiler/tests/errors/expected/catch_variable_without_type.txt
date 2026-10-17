@@ -1,0 +1,1 @@
+catch_variable_without_type.df(3): error: unknown exception type 'ex': a catch names an exception type, then an optional variable (catch Exception ex gets any exception)

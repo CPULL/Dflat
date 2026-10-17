@@ -24,7 +24,7 @@ fun check(i32 mode) {
   catch DivisionByZeroException {
     r.Console.log($"  mode {mode}: division by zero catch")
   }
-  catch ex {
+  catch Exception ex {
     r.Console.log($"  mode {mode}: generic catch, message '{ex.Message}'")
   }
   r.Console.log($"  mode {mode}: code after the catches runs")
@@ -39,7 +39,7 @@ fun fail(string message) {
 }
 fun relay() {
   fail("from fail()")
-  catch ex {
+  catch Exception ex {
     r.Console.log("relay saw: " + ex.Message)
     throw ex
   }
@@ -56,7 +56,7 @@ catch all ex {
     r.Console.log("never runs")
   }
   fail("below the catch")
-  catch ex {
+  catch Exception ex {
     r.Console.log("second catch: " + ex.Message)
   }
 }
@@ -72,7 +72,7 @@ fun i32 cleanup(i32 mode) {
 r.Console.log($"cleanup(1) = {cleanup(1)}")
 r.Console.log($"cleanup(3) = {cleanup(3)}")
 i32 failed = cleanup(2)
-catch ex {
+catch Exception ex {
   r.Console.log("cleanup(2) raised: " + ex.Message)
 }
 

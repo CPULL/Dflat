@@ -144,3 +144,31 @@ fun string hardCatcher(i64 a) {
 }
 r.Console.log(hardCatcher(3))                               // hard 4
 r.Console.log(hardCatcher(0))                               // Trouble: zero
+
+// catch SilentException e { throw e } passes any silent exception up one level, whatever its class
+fun i64 forwardNotice(i64 a) {
+  if a > 0 then throw Notice("forwarded notice")
+  return a
+}
+fun i64 forwardWarning(i64 a) {
+  if a > 0 then throw Warning("forwarded warning")
+  return a
+}
+fun i64 forwarder(i64 which, i64 a) {
+  if which == 0 then return forwardNotice(a)
+  return forwardWarning(a)
+  catch SilentException e { throw e }
+}
+fun string seeForwarded(i64 which, i64 a) {
+  return "forwarded " + forwarder(which, a)
+  catch Notice n { return "Notice seen: " + n.Message }
+  catch Warning w { return "Warning seen: " + w.Message }
+}
+fun string ignoreForwarded(i64 which, i64 a) {
+  return "ignored " + forwarder(which, a)
+}
+r.Console.log(seeForwarded(0, 5))                           // Notice seen: forwarded notice
+r.Console.log(seeForwarded(1, 5))                           // Warning seen: forwarded warning
+r.Console.log(seeForwarded(0, 0))                           // forwarded 0
+r.Console.log(ignoreForwarded(0, 5))                        // ignored 0: nobody observes the re-thrown exception, the function goes on and returns the default
+r.Console.log(ignoreForwarded(1, 5))                        // ignored 0

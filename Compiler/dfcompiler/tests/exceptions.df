@@ -58,7 +58,7 @@ r.Console.log(Describe(3))
 fun string Which(i32 kind) {
   Fail(kind)
   return "ok"
-  catch ex {
+  catch Exception ex {
     if ex is TimeoutException t then return "timeout/" + t.host
     if ex is NetworkException n then return "network/" + n.code
     return "other"
@@ -115,7 +115,7 @@ fun string NoCatch() {
 fun string CatchPlain() {
   Alarm("b")
   return "continued"
-  catch ex {
+  catch Exception ex {
     return "caught by plain catch (wrong)"
   }
 }

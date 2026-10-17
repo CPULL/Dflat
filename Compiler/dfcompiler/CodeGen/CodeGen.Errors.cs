@@ -374,7 +374,8 @@ public sealed partial class CodeGen {
     if (ExceptionId(resolved) is int id) {
       return (id, null);                // catch DivisionByZeroException { }
     }
-    return (StandardExceptions["Exception"], name);   // catch ex { } = catch Exception ex { }
+    // a catch starts with an exception type: there is no shorthand with the variable alone (spec 15.1)
+    throw Error($"unknown exception type '{name}': a catch names an exception type, then an optional variable (catch Exception {name} gets any exception)", catchNode);
   }
 
   // first segment through name aliases: r.DivisionByZeroException → Root.DivisionByZeroException

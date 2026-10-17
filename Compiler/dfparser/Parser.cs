@@ -673,7 +673,7 @@ public sealed class Parser {
     return node;
   }
 
-  // catch { }   |   catch ex { }   |   catch OverflowException ex { }   |   catch my.lib.Err e { }
+  // catch { }   |   catch Exception { }   |   catch OverflowException ex { }   |   catch all ex { }   |   catch my.lib.Err e { }
   Node ParseCatch() {
     var t = Next();
     var node = new Node("Catch", t);

@@ -141,23 +141,22 @@ public class File(string rawPath) {
   // object methods
   //OPEN-OBJECT
   public fun bool exists() { File.exists(full) }
-  // the wrappers pass the silent exceptions of the static functions on: they catch them and throw them again
+  // the wrappers pass the silent exceptions of the static functions on, whatever their class: they catch them and throw them again
   public fun bool delete(Root.IO.DeleteOptions options = Root.IO.DeleteOptions.None) {
     return File.delete(full, options)
-    catch FileAccessException e { throw e }
-    catch DirectoryNotEmptyException e { throw e }
+    catch SilentException e { throw e }
   }
   public fun File copyTo(string to, Root.IO.OverwriteOptions options = Root.IO.OverwriteOptions.None) {
     return File.copy(full, to, options)
-    catch FileNameAlreadyExistsException e { throw e }
+    catch SilentException e { throw e }
   }
   public fun File moveTo(string to, Root.IO.OverwriteOptions options = Root.IO.OverwriteOptions.None) {
     return File.move(full, to, options)
-    catch FileNameAlreadyExistsException e { throw e }
+    catch SilentException e { throw e }
   }
   public fun File createDirectory() {
     return File.createDirectory(full)
-    catch FileNameAlreadyExistsException e { throw e }
+    catch SilentException e { throw e }
   }
   public fun arr<File> getAllFiles(bool recursive = false, Root.IO.FileSystemObjectsType itemType = Root.IO.FileSystemObjectsType.Files, string match = "*") {
     File.getAllFiles(full, recursive, itemType, match)

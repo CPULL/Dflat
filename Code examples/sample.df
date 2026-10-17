@@ -205,7 +205,7 @@ i32 q = 10 / b
 catch DivisionByZeroException ex {
   r.Console.logError(ex.message)
 }
-catch ex {
+catch Exception ex {
   throw Exception("unexpected")
 }
 if b < 0 then throw Panic(3)

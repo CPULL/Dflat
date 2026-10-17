@@ -30,4 +30,9 @@ level 8
 probe warning: below zero
 hard 4
 Trouble: zero
+Notice seen: forwarded notice
+Warning seen: forwarded warning
+forwarded 0
+ignored 0
+ignored 0
 ---- exit code 0 ----

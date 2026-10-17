@@ -1,0 +1,1 @@
+catch_unknown_exception.df(3): error: unknown exception type 'NoSuchException': a catch names an exception type, then an optional variable (catch Exception NoSuchException gets any exception)

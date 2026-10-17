@@ -1,6 +1,6 @@
 **Standard library**
 Version 0.0.9 2026/10/17 by CPU
-- Type members live on the types: `d.year`, `d.addDays(3)`, `s.Split(",")`, `c.IsDigit`, `list.sort()`.
+- Type members live on the types: `d.year`, `d.addDays(3)`, `s.split(",")`, `c.isDigit`, `list.sort()`.
 
 # 1 Program
 
@@ -13,12 +13,11 @@ Access to stdinput and stdoutput and stderror
 
 | Definition | Example | Description |
 |---|---|---|
-| `log(string)` | `Root.Console.log("Hello")` | Converts the object to string if needed, prints on stdout appending a newline |
-| `logError(string)` | `Root.Console.logError("Hello")` | Converts the object to string if needed, prints on stderr appending a newline |
-| `print(string)` | `Root.Console.print("Hello")` | Converts the object to string if needed, prints on stdout |
+| `log(any value)` | `Root.Console.log("Hello")` | Converts the object to string if needed, prints on stdout appending a newline |
+| `logError(any value)` | `Root.Console.logError("Hello")` | Converts the object to string if needed, prints on stderr appending a newline |
+| `print(any value)` | `Root.Console.print("Hello")` | Converts the object to string if needed, prints on stdout |
 | `char read()` | `char c = Root.Console.read()` | Reads a character from stdin and returns it, returns '\0' at end of input |
 | `string readLine()` | `string line = Root.Console.readLine()` | Reads a line from stdin and returns it, the line is not stripped of the newline character, if any. Returns "" at end of input |
-| `` | `` |  |
 
 # 3 Date and Time
 Mostly used to get current date and time and to measure elapsed at nanosecond scale
@@ -27,7 +26,6 @@ Mostly used to get current date and time and to measure elapsed at nanosecond sc
 |---|---|---|
 | `date now()` | `date d = Root.Time.now()` | Gets the current time in UTC. A `date` prints as ISO 8601, UTC, to the millisecond: `2026-10-11T14:03:22.123Z` |
 | `clock clock()` | `Root.Time.clock()` | Returns a u64 monotonic counter with a resolution of 0.1 ns; `clock()` never returns 0 |
-| `` | `` |  |
 
 - `date`, `time`, `clock` and `lapse` are already nullable (`type?` is a compile error on them) and a variable of these types without a value starts as null. A `clock` prints as its number, a `lapse` as its number in its own unit, and null as `null`.
 - `time` [3.3](dflat-spec.md#33-date-and-time) is the time of day, millisecond resolution; parsing in section 9.
@@ -42,10 +40,10 @@ Standard mathematical functions. `Root.Math` operates on `r64` while `Root.Math3
 | `sin` | `r64 sin(r64 v)` | Computes the trigonometric sine of an angle in radians. |
 | `cos` | `r64 cos(r64 v)` | Computes the trigonometric cosine of an angle in radians. |
 | `tan` | `r64 tan(r64 v)` | Computes the trigonometric tangent of an angle in radians. |
-| `asin` | `r64 aSin(r64 v)` | Computes the arcsine (inverse sine) in radians, returning a value between $-\pi/2$ and $\pi/2$. |
-| `acos` | `r64 aCos(r64 v)` | Computes the arccosine (inverse cosine) in radians, returning a value between $0$ and $\pi$. |
-| `atan` | `r64 aTan(r64 v)` | Computes the arctangent (inverse tangent) in radians, returning a value between $-\pi/2$ and $\pi/2$. |
-| `atan2` | `r64 aTan2(r64 y, r64 x)` | Computes the 4-quadrant arctangent of $y / x$ using the signs of both arguments to determine the correct quadrant. |
+| `asin` | `r64 asin(r64 v)` | Computes the arcsine (inverse sine) in radians, returning a value between $-\pi/2$ and $\pi/2$. |
+| `acos` | `r64 acos(r64 v)` | Computes the arccosine (inverse cosine) in radians, returning a value between $0$ and $\pi$. |
+| `atan` | `r64 atan(r64 v)` | Computes the arctangent (inverse tangent) in radians, returning a value between $-\pi/2$ and $\pi/2$. |
+| `atan2` | `r64 atan2(r64 y, r64 x)` | Computes the 4-quadrant arctangent of $y / x$ using the signs of both arguments to determine the correct quadrant. |
 | `sinh` | `r64 sinh(r64 v)` | Computes the hyperbolic sine of a value. |
 | `cosh` | `r64 cosh(r64 v)` | Computes the hyperbolic cosine of a value. |
 | `tanh` | `r64 tanh(r64 v)` | Computes the hyperbolic tangent of a value. |
@@ -71,41 +69,41 @@ Standard mathematical functions. `Root.Math` operates on `r64` while `Root.Math3
 | `inverseLerp(a, b, v)` | `r64 inverseLerp(r64 a, r64 b, r64 v)` | Finds the interpolation factor $t$ for value $v$ between range $a$ and $b$. |
 | `PI` | `r64 PI` | Mathematical constant Pi ($\pi \approx 3.14159$). |
 | `PI_HALF` | `r64 PI_HALF` | Mathematical constant Pi divided by two ($\pi/2 \approx 1.57079$). |
-| `PI2F` | `r64 PI2` | Mathematical constant Pi multiplied by two ($\pi*2 \approx 6.28318$). |
+| `PI2` | `r64 PI2` | Mathematical constant Pi multiplied by two ($\pi*2 \approx 6.28318$). |
 | `E` | `r64 E` | Mathematical constant Euler's number ($e \approx 2.71828$). |
 | `SQRT2` | `r64 SQRT2` | Mathematical constant square root of two ($\sqrt{2} \approx 1.41421$). |
 | `R2D` | `r64 R2D` | Conversion factor from radians to degrees ($180 / \pi$). |
 | `D2R` | `r64 D2R` | Conversion factor from degrees to radians ($\pi / 180$). |
 
-- Math functions never raise exceptions: `Sqrt(-1)` is NaN, `Ln(0)` is `-∞`.
-- `Abs`, `Sign`, `Min`, `Max` and `Clamp` also exist for every integer type (`Abs` and `Sign` for signed ones only) and return that type; the argument types pick the version (13.2 rules). `Math32` has the real versions only.
+- Math functions never raise exceptions: `sqrt(-1)` is NaN, `ln(0)` is `-∞`.
+- `abs`, `sign`, `min`, `max` and `clamp` also exist for every integer type (`abs` and `sign` for signed ones only) and return that type; the argument types pick the version (13.2 rules). `Math32` has the real versions only.
 
 # 5 Random
-A simple random number generator is included in the standard library. The algorithm is fixed (xoshiro256\*\*, seeded with splitmix64), so the same seed gives the same sequence on every target. Without a call to `Seed` it starts from the current time.
+A simple random number generator is included in the standard library. The algorithm is fixed (xoshiro256\*\*, seeded with splitmix64), so the same seed gives the same sequence on every target. Without a call to `seed` it starts from the current time.
 
 | Name | Definition | Description |
 |---|---|---|
 | `seed` | `Root.Random.seed(u64)` | Initialize the seed of the generator with the provided value |
 | `int` | `i64 int(i64 min, i64 max)` | Returns a random integer between the minimum number and the maximum number (both included, no bias); the two are swapped if `min` is greater than `max` |
 | `realRange` | `r64 realRange(r64 min, r64 max)` | Returns a random real number between the minimum number and the maximum number (max excluded) |
-| `real` | `r64 Real()` | Returns a real value in the range [0, 1] (1 is included) |
+| `real` | `r64 real()` | Returns a real value in the range [0, 1] (1 is included) |
 | `shuffle` | `shuffle(collection)` | Randomize the order of elements in an ordered collection. It is valid for arrays, vectors, lists, strings |
 
 ---
 
 # 6 IO - Files, Directories and Streams
 
-The `File` manager class and the `Stream` base class with `FileStream` are specified. Memory, console and text streams, network streams and the async syntax are not [6.9](dflat-spec.md#69-lists-list).
+The `File` manager class and the `Stream` base class with `FileStream` are specified. Memory, console and text streams, network streams and the async syntax are not [6.9](#69-open-items).
 
 ## 6.1 Scope and general decisions
 
 - `Root.IO` holds the basics of file system access (the equivalent of C# `System.IO`): files, directories, paths and streams. In the examples `alias Root.IO as fs` is used.
 - `File` is the file manager class: it works at the level of a file manager (like Norton Commander) on files and directories. `Stream` accesses the contents of a file.
 - All streams are binary. Helpers (UTF converters) transform them to text.
-- `Stream` is the base class. The stream types (`FileStream`, `MemoryStream`, `ConsoleStream`) are subclasses, because one object cannot be a file, a memory and a console stream at the same time. `TextStream` is a trait that can be applied to any stream to add the text methods (17.6.8).
+- `Stream` is the base class. The stream types (`FileStream`, `MemoryStream`, `ConsoleStream`) are subclasses, because one object cannot be a file, a memory and a console stream at the same time. `TextStream` is a trait that can be applied to any stream to add the text methods (6.8).
 - Memory streams are available on every target. Other parts of `Root.IO` can be unavailable on specific targets.
 - `Root.Console` is a special case: a shortcut to read and write. The console (standard input, standard output) is also reachable as streams (to be defined).
-- Big errors raise exceptions, but not every failure raises one, to keep async code manageable: many cases use silent exceptions [([15.4](dflat-spec.md#154-silent-exceptions), [6.6](#66-exceptions)).
+- Big errors raise exceptions, but not every failure raises one, to keep async code manageable: many cases use silent exceptions (see [15.4](dflat-spec.md#154-silent-exceptions) and [6.6](#66-exceptions)).
 
 ## 6.2 Paths
 
@@ -154,7 +152,7 @@ A folder listing returns a list of single `File` objects; `isDirectory` tells wh
 | `string getTempFileName()` | The fully qualified name and path of a temporary file; it does not create the file |
 | `string getTempDir()` | The path of the temporary directory |
 | `string combinePaths(string path1, string path2)` | Joins two paths |
-| `FileStream open(string path, fs.StreamReadWriteAccessMode readMode, fs.StreamReadWriteAccessMode writeMode, fs.StreamOpenMode openMode)` | Shortcut for `FileStream(path, readMode, writeMode, openMode)` [6.8.3](#683-object-methods) |
+| `FileStream open(string path, fs.StreamReadWriteAccessMode readMode, fs.StreamReadWriteAccessMode writeMode, fs.StreamOpenMode openMode)` | Shortcut for `FileStream(path, readMode, writeMode, openMode)` [6.8.3](#683-constructor-and-modes) |
 
 ### 6.3.3 Object methods
 
@@ -222,7 +220,7 @@ Stream access modes (`fs.StreamReadWriteAccessMode`): `None` means the stream do
 - `getAllFiles`: returns an `arr<File>` in no defined order. A path that does not exist raises `FileNotFoundException`, not an empty result. `recursive` includes the subdirectories; `itemType` selects files, directories or both.
 - `match`: only the wildcards `*` and `?` are special; everything else is static text; case is ignored. It applies to the names of files only. Regular expressions: delayed until 0.1.0.
 - `readAll`, `readAllText`: a missing file raises `FileNotFoundException` (not silent).
-- `writeAll`, `writeAllText`: the write mode decides what happens with an existing or a missing file (table in 17.6.4). A missing parent folder raises `FullPathNotFoundException` (not silent).
+- `writeAll`, `writeAllText`: the write mode decides what happens with an existing or a missing file (table in 6.4). A missing parent folder raises `FullPathNotFoundException` (not silent).
 - Temporary files: nothing is deleted automatically (the OS usually handles temporary files); whether `getTempFile` creates the file on disk depends on the OS. Use `atEnd` when the file has to be removed, for example `File tempFile = File.getTempFile() atEnd of tempFile { tempFile.delete() }` [14.2](dflat-spec.md#142-atend).
 
 ## 6.6 Exceptions
@@ -307,7 +305,7 @@ Status: the base class and `FileStream` are defined. Memory, console and text st
 
 - There is no `open` in the base class: the constructor of each stream type opens the stream, as in `FileStream stream = FileStream(path, readMode, writeMode, openMode)`.
 - `File.open(readMode, writeMode, openMode)` is a shortcut for `FileStream(path, readMode, writeMode, openMode)`.
-- If the constructor fails it returns `null` (objects are nullable by default) and raises the exception that describes the problem (17.6.6).
+- If the constructor fails it returns `null` (objects are nullable by default) and raises the exception that describes the problem (6.6).
 - A stream follows the Rust memory model: it is closed when its owner is lost. `stream is atEnd.` [12.4](dflat-spec.md#124-moving-fields-and-finalizing-variables) or `close()` closes it earlier; the stream is then marked as closed, so a stream is never closed twice and a second `close()` does nothing.
 - A closed stream cannot be reopened. Using it raises `AccessToAClosedStreamException`.
 - Example: `FileStream stream = FileStream(path, readMode, writeMode, openMode)`; the stream is closed at the end of the scope, or earlier with `stream is atEnd.` or `stream.close()`.

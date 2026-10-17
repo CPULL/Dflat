@@ -1,0 +1,52 @@
+scope end
+  inside, view a
+  end b
+  end a
+after the block
+function end
+  using x
+  function final cleanup
+  end x
+explicit release
+  end c
+  c is null: true
+move into a variable
+  d is null: true, e is d
+move into a function
+  took f
+  end f
+  after take, f is null: true
+new value drops the old one
+  end g1
+  g is g2
+fields, parent and child
+  built base
+  end Derived part
+  end res
+  end Base part
+  end holder, inner is set
+  end res
+  end spare
+move a field out
+  taken res, inner null: true
+  end res
+  end holder, inner is null
+loop
+  end item0
+  end item1
+  end item2
+return and break
+  end cand0
+  found cand1
+weak
+  alive: strong
+  end strong
+  gone
+exception
+  end guard
+  caught boom
+program end
+  end cand1
+  end g2
+  end d
+---- exit code 0 ----

@@ -1,0 +1,1 @@
+tryparse_without_marker.df(2): error: the result of i32.tryParse is passed as (&)variable

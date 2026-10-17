@@ -1,0 +1,1 @@
+duplicate_function.df(2): error: function 'f' with these parameter types is already defined

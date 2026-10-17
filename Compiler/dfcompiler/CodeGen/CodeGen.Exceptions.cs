@@ -15,7 +15,7 @@ public sealed partial class CodeGen {
     "  uint64_t id;\n  const df_descriptor* descriptor;\n  char* message;\n  char* function;\n  uint64_t line;\n";
 
   // exceptions that do nothing when no catch can handle them (spec 15.3)
-  static readonly HashSet<int> SilentStandard = new() { 12, 17, 18, 21, 22, 23, 24 };
+  static readonly HashSet<int> SilentStandard = new() { 12, 17, 18, 21, 22, 23, 24, 27, 28, 29, 32 };
 
   bool IsExceptionClass(string type) => classes.TryGetValue(type, out var cls) && cls.IsException;
 
@@ -101,14 +101,16 @@ public sealed partial class CodeGen {
       throw Error($"{name} is not an exception class: derive it from Exception", s);
     }
     int id = customExceptionIds[name];
-    if (IsSilentClass(cls) && !SilentCaught(id)) {
-      return false;      // a silent exception without a catch that can handle it: execution goes on
+    string? condition = IsSilentClass(cls) ? SilentThrowCondition(id) : "";
+    if (condition == null) {
+      return false;      // a silent exception nobody observes: execution goes on
     }
     var created = ExprOf(call, scope);
     string temp = NewTemp();
-    sb.Append($"{pad}{{ {CType(name)} {temp} = {created.Code}; ");
-    sb.Append($"{temp}->function = df_cstr_truncated({fn!.NameConst}, strlen({fn.NameConst}), 1024); ");
-    sb.Append($"df_err = (df_exception*){temp}; df_err_thrown = true; goto {Handler}; }}\n");
-    return true;
+    string raise = $"{{ {CType(name)} {temp} = {created.Code}; "
+      + $"{temp}->function = df_cstr_truncated({fn!.NameConst}, strlen({fn.NameConst}), 1024); "
+      + $"df_err = (df_exception*){temp}; df_err_thrown = true; goto {Handler}; }}";
+    sb.Append(condition == "" ? $"{pad}{raise}\n" : $"{pad}if ({condition}) {raise}\n");
+    return condition == "";
   }
 }

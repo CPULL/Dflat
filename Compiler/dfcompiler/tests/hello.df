@@ -1,4 +1,4 @@
 namespace hello
 alias Root as r
 
-r.Console.Log("Hello world!")
+r.Console.log("Hello world!")

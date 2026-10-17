@@ -1,8 +1,8 @@
 namespace features
 
 // Root is global: no alias needed
-Root.Console.Print("Print adds no newline, ")
-Root.Console.Log("Log does")
+Root.Console.print("Print adds no newline, ")
+Root.Console.log("Log does")
 
 // overloading by number, order and types of parameters
 fun string describe(i32 value) { "i32 " + value }
@@ -12,39 +12,39 @@ fun string describe(string text, i32 count) { $"text {text} x{count}" }
 fun string describe(i32 count, string text) { $"count {count} then {text}" }
 i8 small = 5
 i32 medium = 6
-Root.Console.Log(describe(7))              // literal: the native-size i64 wins
-Root.Console.Log(describe(small))          // i8: smallest widening is i32
-Root.Console.Log(describe(medium))
-Root.Console.Log(describe(1, 2))
-Root.Console.Log(describe("a", 3))
-Root.Console.Log(describe(4, "b"))
+Root.Console.log(describe(7))              // literal: the native-size i64 wins
+Root.Console.log(describe(small))          // i8: smallest widening is i32
+Root.Console.log(describe(medium))
+Root.Console.log(describe(1, 2))
+Root.Console.log(describe("a", 3))
+Root.Console.log(describe(4, "b"))
 
 // named arguments in any position, defaults for the rest
 fun string connect(string host = "localhost", u16 port = 80, bool secure = false) {
   $"{host}:{port} secure={secure}"
 }
-Root.Console.Log(connect())
-Root.Console.Log(connect(port: 443, secure: true))
-Root.Console.Log(connect(secure: true, "example.org"))
+Root.Console.log(connect())
+Root.Console.log(connect(port: 443, secure: true))
+Root.Console.log(connect(secure: true, "example.org"))
 
 // ranges that count down
-Root.Console.Print("10..=7:")
+Root.Console.print("10..=7:")
 for u8 down = 10..=7 {
-  Root.Console.Print($" {down}")
+  Root.Console.print($" {down}")
 }
-Root.Console.Print(" | 3..=0 unsigned:")
+Root.Console.print(" | 3..=0 unsigned:")
 for u8 toZero = 3..=0 {
-  Root.Console.Print($" {toZero}")
+  Root.Console.print($" {toZero}")
 }
-Root.Console.Print(" | 5..2:")
+Root.Console.print(" | 5..2:")
 for i32 exclusive = 5..2 {
-  Root.Console.Print($" {exclusive}")
+  Root.Console.print($" {exclusive}")
 }
-Root.Console.Print(" | 0..=6 step 2:")
+Root.Console.print(" | 0..=6 step 2:")
 for i32 stepped = 0..=6 step stepped += 2 {
-  Root.Console.Print($" {stepped}")
+  Root.Console.print($" {stepped}")
 }
-Root.Console.Log("")
+Root.Console.log("")
 
 // switch case ranges, multi-line bodies, jump into a range
 fun string httpClass(i32 code) {
@@ -63,28 +63,28 @@ fun string httpClass(i32 code) {
   }
   return result
 }
-Root.Console.Log($"201 {httpClass(201)}, 404 {httpClass(404)}, 0 {httpClass(0)}, 5 {httpClass(5)}, 999 {httpClass(999)}")
+Root.Console.log($"201 {httpClass(201)}, 404 {httpClass(404)}, 0 {httpClass(0)}, 5 {httpClass(5)}, 999 {httpClass(999)}")
 
 // switch expressions with ranges: complete without default
 for i32 value = -2..=2 {
   i32 sign = value ? { ..=-1: -1, 0: 0, 1..: 1 }
-  Root.Console.Print($"{value}->{sign} ")
+  Root.Console.print($"{value}->{sign} ")
 }
-Root.Console.Log("")
+Root.Console.log("")
 char letter = 'q'
 bool isAlphaNum = letter ? { 'a'..='z': true, 'A'..='Z': true, '0'..='9': true, default: false }
-Root.Console.Log($"'q' alphanumeric: {isAlphaNum}")
+Root.Console.log($"'q' alphanumeric: {isAlphaNum}")
 
 // unsigned widens to a larger signed type
 u16 port = 8080
 i32 widened = port
 i64 total = widened + port
-Root.Console.Log($"widened = {widened}, total = {total}")
+Root.Console.log($"widened = {widened}, total = {total}")
 
 // [bool] transmute
 string empty = ""
 r64 notANumber = 0.0 / 0.0
-Root.Console.Log($"[bool]0 = {[bool]0}, [bool]7 = {[bool]7}, [bool]\"\" = {[bool]empty}, [bool]NaN = {[bool]notANumber}, [bool]'x' = {[bool]letter}")
+Root.Console.log($"[bool]0 = {[bool]0}, [bool]7 = {[bool]7}, [bool]\"\" = {[bool]empty}, [bool]NaN = {[bool]notANumber}, [bool]'x' = {[bool]letter}")
 
 // definite assignment: no warning when every path assigns
 i32 assigned
@@ -93,16 +93,16 @@ if total > 0 {
 } else {
   assigned = 2
 }
-Root.Console.Log($"assigned = {assigned}")
+Root.Console.log($"assigned = {assigned}")
 
 // Console input
-Root.Console.Print("ReadLine: ")
-string line = Root.Console.ReadLine()
-Root.Console.Print($"[{line}]")
-char first = Root.Console.Read()
-char second = Root.Console.Read()
-Root.Console.Log($" Read: '{first}' '{second}'")
-string rest = Root.Console.ReadLine()
-string afterEnd = Root.Console.ReadLine()
-char noMore = Root.Console.Read()
-Root.Console.Log($"rest [{rest}], at end [{afterEnd}], Read at end is \\0: {noMore == '\0'}")
+Root.Console.print("ReadLine: ")
+string line = Root.Console.readLine()
+Root.Console.print($"[{line}]")
+char first = Root.Console.read()
+char second = Root.Console.read()
+Root.Console.log($" Read: '{first}' '{second}'")
+string rest = Root.Console.readLine()
+string afterEnd = Root.Console.readLine()
+char noMore = Root.Console.read()
+Root.Console.log($"rest [{rest}], at end [{afterEnd}], Read at end is \\0: {noMore == '\0'}")

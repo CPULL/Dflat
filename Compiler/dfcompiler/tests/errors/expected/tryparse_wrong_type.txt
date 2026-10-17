@@ -1,0 +1,1 @@
+tryparse_wrong_type.df(2): error: i64.tryParse needs a i64 variable, not i32

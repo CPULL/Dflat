@@ -1,0 +1,1 @@
+generic_without_arguments.df(2): error: 'Stack' is generic: write its type arguments, Stack<...>

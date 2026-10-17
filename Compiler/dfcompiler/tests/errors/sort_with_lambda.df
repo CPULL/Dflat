@@ -1,0 +1,2 @@
+arr<string> n = ["a"]
+n.sort((a, b) { a.len < b.len })

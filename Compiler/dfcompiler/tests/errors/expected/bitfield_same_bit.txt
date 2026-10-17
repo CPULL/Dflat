@@ -1,0 +1,1 @@
+bitfield_same_bit.df(1): error: flags 'A' and 'B' use the same bit

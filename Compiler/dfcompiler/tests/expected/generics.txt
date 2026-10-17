@@ -1,0 +1,20 @@
+3
+4
+1.5
+3.75
+text:hi
+text:c
+same
+kept
+rex
+10
+15
+hello
+2
+0
+(1, one)
+7
+fido
+2.5
+Box<i32> { value: 15 }
+---- exit code 0 ----

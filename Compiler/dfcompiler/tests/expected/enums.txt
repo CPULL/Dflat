@@ -1,0 +1,13 @@
+current = Pending, value 10
+fresh = Active
+Waiting = 11
+OnHold prints as Pending, equals Pending: true
+Active < Pending: true
+describe(Inactive) = stopped
+describe(OnHold) = waiting
+next of Low = Mid, top = false
+next of Mid = High, top = true
+(Status)11 = Waiting, (Status)3 = 3
+Big: Min -9223372036854775808 Max
+enum to bool: true
+---- exit code 0 ----

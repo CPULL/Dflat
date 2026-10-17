@@ -1,0 +1,1 @@
+enum_duplicate_entry.df(1): error: duplicate entry 'Red' in enum 'Color'

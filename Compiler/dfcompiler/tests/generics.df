@@ -61,38 +61,38 @@ public class Registry<Item : Named>(->Item first) {
   public fun string Describe() { first.Name() }
 }
 
-r.Console.Log(smaller(3, 5))
-r.Console.Log(smaller<u8>(9, 4))
-r.Console.Log(smaller(2.5, 1.5))
-r.Console.Log(average(3, 4.5))
-r.Console.Log(describe("hi"))
-r.Console.Log(describe('c'))
-r.Console.Log(identity("same"))
-r.Console.Log(firstOf("kept", 7))
-r.Console.Log(nameOf(Dog("rex")))
-r.Console.Log(total(1, 2, 3, 4))
+r.Console.log(smaller(3, 5))
+r.Console.log(smaller<u8>(9, 4))
+r.Console.log(smaller(2.5, 1.5))
+r.Console.log(average(3, 4.5))
+r.Console.log(describe("hi"))
+r.Console.log(describe('c'))
+r.Console.log(identity("same"))
+r.Console.log(firstOf("kept", 7))
+r.Console.log(nameOf(Dog("rex")))
+r.Console.log(total(1, 2, 3, 4))
 
 Box<i32> a = Box<i32>(10)
 a.Set(a.Get() + 5)
-r.Console.Log(a.Get())
+r.Console.log(a.Get())
 Box<string> b = Box<string>("hello")
-r.Console.Log(b.Get())
+r.Console.log(b.Get())
 Box<i32>.Bump()
 Box<i32>.Bump()
-r.Console.Log(Box<i32>.created)
-r.Console.Log(Box<string>.created)
+r.Console.log(Box<i32>.created)
+r.Console.log(Box<string>.created)
 
 Pair<i32, string> p = Pair<i32, string>(1, "one")
-r.Console.Log(p.Show())
+r.Console.log(p.Show())
 
 Box<Box<i32>> nested = Box<Box<i32>>(Box<i32>(7))
-r.Console.Log(nested.Get().Get())
+r.Console.log(nested.Get().Get())
 
 Registry<Dog> registry = Registry<Dog>(Dog("fido"))
-r.Console.Log(registry.Describe())
+r.Console.log(registry.Describe())
 var inferred = Box<r64>(2.5)
-r.Console.Log(inferred.Get())
-r.Console.Log(a)
+r.Console.log(inferred.Get())
+r.Console.log(a)
 
 // Errors (each one alone): smaller("a", "b")  -> string does not satisfy Numeric
 //   Registry<i32>(5) -> i32 does not satisfy Named

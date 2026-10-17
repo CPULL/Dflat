@@ -1,0 +1,6 @@
+info: started
+info: ready
+1
+6
+35
+---- exit code 0 ----

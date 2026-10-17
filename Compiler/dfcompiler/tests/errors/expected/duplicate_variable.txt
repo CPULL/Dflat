@@ -1,0 +1,1 @@
+duplicate_variable.df(2): error: 'a' is already declared in this scope

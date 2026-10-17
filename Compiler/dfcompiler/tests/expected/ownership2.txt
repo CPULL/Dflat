@@ -1,0 +1,17 @@
+a constructor takes the object
+  e is null after the move: true
+  car has v8
+  car AB-1 parked
+  engine v8 stops
+trait values
+  square and circle
+  circle ends
+  square ends
+a result nobody keeps ends at once
+  square ends
+  after the statement
+a dead object
+  square ends
+  the owner is null: true
+  the borrow found the object dead: 1
+---- exit code 0 ----

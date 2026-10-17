@@ -1,0 +1,1 @@
+ref_literal.df(2): error: only variables and tuple fields can be assigned for now

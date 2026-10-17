@@ -1,0 +1,27 @@
+out: canRead false, canWrite true, canSeek true, position 0
+written 8, partial 3, position 12, length 12
+closed: canWrite false
+length 12, canRead true, canWrite false
+read 6: 1 6
+read part 3: 7 8 9
+seek from end: 9
+readByte 3
+read to the end 2
+at the end: true, readByte null: true
+back to 1, byte 2, position 2
+input ended
+after write at 0: 100, 2
+size after append: 13
+modes: read Shared, write Exclusive, open CreateOrOpen
+true
+after close: Shared, Exclusive
+FileNotFoundException 25
+FileAlreadyExistsException 33
+InvalidStreamModesException 37
+FileAccessToADirectoryException 34
+StreamModeNotAllowedException 40
+InvalidBufferRangeException 42
+AccessToAClosedStreamException 39
+in scope, length 13
+deleted after scope: true
+---- exit code 0 ----

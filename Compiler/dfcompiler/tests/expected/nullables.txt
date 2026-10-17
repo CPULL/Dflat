@@ -1,0 +1,20 @@
+empty = null, some = 5
+empty == null: true, some is null: false, some == 5: true
+some + 1 = 6, empty + 1 = null, -some = -5
+half(some) = 2, half(null) = null
+empty ?? 7 = 7, maybeSmall ?? 0 = 0, find(2) ?? 0 = 20, find(-1) ?? -1 = -1
+chain = 30
+after ??=: empty = 42, some = 5
+first is 10, doubled 20
+second is null
+null < 1: true, 1 < null: false, null <= null: true, 2 > 1: true
+null is false
+some is true
+text?.len = 5, blank?.len = null, blank == null: true
+some?.toStr() = 5, nothing?.toStr() = ''
+blank ?? anonymous = anonymous
+wider = 5, narrowed = 5, (i64)nothing = null
+mode = null
+mode = On, is On: true
+mode on
+---- exit code 0 ----

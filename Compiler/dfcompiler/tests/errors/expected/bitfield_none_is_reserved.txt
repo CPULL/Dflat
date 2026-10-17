@@ -1,0 +1,1 @@
+bitfield_none_is_reserved.df(1): error: 'None' exists on every bitfield: it cannot be declared

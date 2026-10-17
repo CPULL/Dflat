@@ -1,0 +1,21 @@
+12
+2 1
+true: 3 remainder 2
+false: still 3 and 2
+HELLO!
+[7, 7, 7]
+[7, 9, 7]
+5
+3.75
+14
+5 BOX!
+2 2
+23
+HELLO!x14
+literalx7
+42
+16
+by value
+by reference
+1 2
+---- exit code 0 ----

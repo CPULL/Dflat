@@ -1,0 +1,1 @@
+return_in_void.df(1): error: this function returns nothing

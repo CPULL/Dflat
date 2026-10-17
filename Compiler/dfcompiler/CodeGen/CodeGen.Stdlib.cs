@@ -17,14 +17,14 @@ public sealed partial class CodeGen {
   static readonly string[] IntTypes = { "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64" };
 
   static readonly Dictionary<string, string> RealUnary = new() {
-    ["Sqrt"] = "sqrt", ["Cbrt"] = "cbrt", ["Sin"] = "sin", ["Cos"] = "cos", ["Tan"] = "tan",
-    ["Asin"] = "asin", ["Acos"] = "acos", ["Atan"] = "atan", ["Sinh"] = "sinh", ["Cosh"] = "cosh",
-    ["Tanh"] = "tanh", ["Exp"] = "exp", ["Ln"] = "log", ["Log10"] = "log10", ["Floor"] = "floor",
-    ["Ceil"] = "ceil", ["Round"] = "round", ["Trunc"] = "trunc", ["Abs"] = "fabs"
+    ["sqrt"] = "sqrt", ["cbrt"] = "cbrt", ["sin"] = "sin", ["cos"] = "cos", ["tan"] = "tan",
+    ["asin"] = "asin", ["acos"] = "acos", ["atan"] = "atan", ["sinh"] = "sinh", ["cosh"] = "cosh",
+    ["tanh"] = "tanh", ["exp"] = "exp", ["ln"] = "log", ["log10"] = "log10", ["floor"] = "floor",
+    ["ceil"] = "ceil", ["round"] = "round", ["trunc"] = "trunc", ["abs"] = "fabs"
   };
 
   static readonly Dictionary<string, string> RealBinary = new() {
-    ["Atan2"] = "atan2", ["Pow"] = "pow", ["Fmod"] = "fmod"
+    ["atan2"] = "atan2", ["pow"] = "pow", ["fmod"] = "fmod"
   };
 
   static readonly Dictionary<string, List<StdFun>> Stdlib = BuildStdlib();
@@ -40,54 +40,104 @@ public sealed partial class CodeGen {
     }
     StdFun Fixed(string ret, string cname, params string[] ps) => new(ps, ret, cname);
 
-    Add("Root.GetArgs", Fixed("arr<string>", "df_get_args"));
+    Add("Root.getArgs", Fixed("arr<string>", "df_get_args"));
 
-    Add("Root.Console.Log", Fixed("void", "df_console_log", "any"));
-    Add("Root.Console.LogError", Fixed("void", "df_console_log_error", "any"));
-    Add("Root.Console.Print", Fixed("void", "df_console_print", "any"));
-    Add("Root.Console.Read", Fixed("char", "df_console_get_char"));
-    Add("Root.Console.ReadLine", Fixed("string", "df_console_get_input"));
+    Add("Root.Console.log", Fixed("void", "df_console_log", "any"));
+    Add("Root.Console.logError", Fixed("void", "df_console_log_error", "any"));
+    Add("Root.Console.print", Fixed("void", "df_console_print", "any"));
+    Add("Root.Console.read", Fixed("char", "df_console_get_char"));
+    Add("Root.Console.readLine", Fixed("string", "df_console_get_input"));
 
-    Add("Root.Time.Now", Fixed("date", "df_time_now"));
-    Add("Root.Time.Clock", Fixed("clock", "df_time_clock"));
+    Add("Root.Time.now", Fixed("date", "df_time_now"));
+    Add("Root.Time.clock", Fixed("clock", "df_time_clock"));
 
-    Add("Root.Random.Seed", Fixed("void", "df_rand_seed", "u64"));
-    Add("Root.Random.Int", Fixed("i64", "df_rand_int", "i64", "i64"));
-    Add("Root.Random.RealRange", Fixed("r64", "df_rand_real_range", "r64", "r64"));
-    Add("Root.Random.Real", Fixed("r64", "df_rand_real"));
+    Add("Root.Random.seed", Fixed("void", "df_rand_seed", "u64"));
+    Add("Root.Random.int", Fixed("i64", "df_rand_int", "i64", "i64"));
+    Add("Root.Random.realRange", Fixed("r64", "df_rand_real_range", "r64", "r64"));
+    Add("Root.Random.real", Fixed("r64", "df_rand_real"));
 
     foreach (var (ns, rt) in new[] { ("Math", "r64"), ("Math32", "r32") }) {
       string f = rt == "r32" ? "f" : "";
       string root = "Root." + ns + ".";
       foreach (var (name, c) in RealUnary) {
         Add(root + name, Fixed(rt, c + f, rt));
+        if (name is "asin" or "acos" or "atan") {
+          Add(root + "a" + char.ToUpperInvariant(name[1]) + name[2..], Fixed(rt, c + f, rt));   // aSin, aCos, aTan as the stdlib file writes them
+        }
       }
       foreach (var (name, c) in RealBinary) {
         Add(root + name, Fixed(rt, c + f, rt, rt));
+        if (name == "atan2") {
+          Add(root + "aTan2", Fixed(rt, c + f, rt, rt));
+        }
       }
-      Add(root + "Log", Fixed(rt, "df_logbase_" + rt, rt, rt));
-      Add(root + "Sign", Fixed(rt, "df_sign_" + rt, rt));
-      Add(root + "Clamp", Fixed(rt, "df_clamp_" + rt, rt, rt, rt));
-      Add(root + "Lerp", Fixed(rt, "df_lerp_" + rt, rt, rt, rt));
-      Add(root + "InverseLerp", Fixed(rt, "df_invlerp_" + rt, rt, rt, rt));
-      Add(root + "Min", new StdFun(new[] { rt }, rt, "df_min_" + rt, true, 2));
-      Add(root + "Max", new StdFun(new[] { rt }, rt, "df_max_" + rt, true, 2));
-      Add(root + "Hypot", new StdFun(new[] { rt }, rt, "hypot" + f, true, 1));
+      Add(root + "log", Fixed(rt, "df_logbase_" + rt, rt, rt));
+      Add(root + "sign", Fixed(rt, "df_sign_" + rt, rt));
+      Add(root + "clamp", Fixed(rt, "df_clamp_" + rt, rt, rt, rt));
+      Add(root + "lerp", Fixed(rt, "df_lerp_" + rt, rt, rt, rt));
+      Add(root + "inverseLerp", Fixed(rt, "df_invlerp_" + rt, rt, rt, rt));
+      Add(root + "min", new StdFun(new[] { rt }, rt, "df_min_" + rt, true, 2));
+      Add(root + "max", new StdFun(new[] { rt }, rt, "df_max_" + rt, true, 2));
+      Add(root + "hypot", new StdFun(new[] { rt }, rt, "hypot" + f, true, 1));
     }
 
     // integer versions (Math only): Abs and Sign for signed types, Min, Max and Clamp for all
     foreach (string t in IntTypes) {
-      Add("Root.Math.Min", new StdFun(new[] { t }, t, "df_min_" + t, true, 2));
-      Add("Root.Math.Max", new StdFun(new[] { t }, t, "df_max_" + t, true, 2));
-      Add("Root.Math.Clamp", Fixed(t, "df_clamp_" + t, t, t, t));
+      Add("Root.Math.min", new StdFun(new[] { t }, t, "df_min_" + t, true, 2));
+      Add("Root.Math.max", new StdFun(new[] { t }, t, "df_max_" + t, true, 2));
+      Add("Root.Math.clamp", Fixed(t, "df_clamp_" + t, t, t, t));
       if (SignedTypes.Contains(t)) {
-        Add("Root.Math.Abs", Fixed(t, "df_abs_" + t, t));
-        Add("Root.Math.Sign", Fixed(t, "df_sign_" + t, t));
+        Add("Root.Math.abs", Fixed(t, "df_abs_" + t, t));
+        Add("Root.Math.sign", Fixed(t, "df_sign_" + t, t));
       }
     }
     AddDateStdlib(Add);
     AddNumberStdlib(Add);
+    AddIoStdlib(Add);
     return table;
+  }
+
+  // Root.IO.Native: the C side of the File class (RuntimeIO). The File class itself is Dflat code added by AddPrelude (IoPrelude);
+  // these functions report failures through Error(), which the class reads after each call.
+  static void AddIoStdlib(Action<string, StdFun> add) {
+    var io = new[] { "io" };
+    void Native(string name, string ret, string cname, params string[] ps) {
+      add("Root.IO.Native." + name, new StdFun(ps, ret, cname, false, 0, "", null, io));
+    }
+    Native("Error", "u64", "df_io_error");
+    Native("Normalize", "string", "df_io_normalize", "string");
+    Native("Name", "string", "df_io_name", "string");
+    Native("Extension", "string", "df_io_extension", "string");
+    Native("ParentPath", "string", "df_io_parent_path", "string");
+    Native("Combine", "string", "df_io_combine", "string", "string");
+    Native("Kind", "i32", "df_io_kind", "string");
+    Native("Exists", "bool", "df_io_exists", "string");
+    Native("Size", "u64", "df_io_size", "string");
+    Native("Created", "date", "df_io_created", "string");
+    Native("Modified", "date", "df_io_modified", "string");
+    Native("Accessed", "date", "df_io_accessed", "string");
+    Native("ReadOnly", "bool", "df_io_readonly", "string");
+    Native("Delete", "bool", "df_io_delete", "string", "i32");
+    Native("Copy", "bool", "df_io_copy", "string", "string", "bool");
+    Native("Move", "bool", "df_io_move", "string", "string", "bool");
+    Native("MakeDir", "i32", "df_io_mkdir", "string");
+    Native("List", "arr<string>", "df_io_list", "string", "bool", "i32", "string");
+    Native("TempDir", "string", "df_io_temp_dir");
+    Native("TempName", "string", "df_io_temp_name");
+    Native("ReadAll", "arr<u8>", "df_io_read_all", "string");
+    Native("ReadAllText", "string", "df_io_read_all_text", "string", "i32");
+    Native("WriteAll", "bool", "df_io_write_all", "string", "arr<u8>", "i32");
+    Native("WriteAllText", "bool", "df_io_write_all_text", "string", "string", "i32", "i32");
+    Native("StreamOpen", "u64", "df_io_stream_open", "string", "i32", "i32", "i32");
+    Native("StreamRead", "i64", "df_io_stream_read", "u64", "arr<u8>", "u64", "u64", "u64");
+    Native("StreamWrite", "i64", "df_io_stream_write", "u64", "arr<u8>", "u64", "u64");
+    Native("StreamReadByte", "i32", "df_io_stream_read_byte", "u64");
+    Native("StreamWriteByte", "bool", "df_io_stream_write_byte", "u64", "u8");
+    Native("StreamLength", "u64", "df_io_stream_length", "u64");
+    Native("StreamPosition", "u64", "df_io_stream_position", "u64");
+    Native("StreamSeek", "u64", "df_io_stream_seek", "u64", "i64", "i32");
+    Native("StreamFlush", "bool", "df_io_stream_flush", "u64", "bool");
+    Native("StreamClose", "bool", "df_io_stream_close", "u64");
   }
 
   // receiver: the C code of the value a method is called on (it becomes the first C argument)
@@ -250,21 +300,46 @@ public sealed partial class CodeGen {
       + $"if ({test}) {{ df_raise({note}, {fn!.NameConst}); {RaiseJump} }} {temp}; }})";
   }
 
-  // is there a catch above this statement that handles this exception id (its own type, or catch all)?
+  // is there a catch above this statement, in this function, that handles this silent exception id? (its own class or a parent,
+  // Exception, the SilentException trait, or catch all; the catches of a block do not see what their own bodies throw)
   bool SilentCaught(int id) {
     if (handlerOverride != null || frames.Count == 0) {
       return false;
     }
+    bool skipCatches = false;
     for (var frame = frames.Peek(); frame != null; frame = frame.Parent) {
-      foreach (var (index, node) in frame.Catches) {
-        if (index > frame.CurrentIndex) {
-          var (caught, _) = CatchTarget(node);
-          if (caught == null || caught == id || caught == -2) {
+      if (!skipCatches) {
+        foreach (var (index, node) in frame.Catches) {
+          if (index > frame.CurrentIndex && CatchHandles(CatchTarget(node).Id, id, true)) {
             return true;
           }
         }
       }
+      skipCatches = frame.Kind == FrameKind.CatchBody;
     }
     return false;
+  }
+
+  // the silent exceptions that the catches around this call observe, as the C mask passed to the functions that take one
+  string ObservedMask() {
+    ulong mask = 0;
+    foreach (var (id, bit) in silentBit) {
+      if (SilentCaught(id)) {
+        mask |= 1UL << bit;
+      }
+    }
+    return mask == 0 ? "0" : $"UINT64_C({mask})";
+  }
+
+  // a throw of a silent exception: null when nobody can observe it (the statement does nothing and the function goes on), "" when a
+  // catch of this function handles it (an ordinary raise), otherwise the C condition under which the caller observes it
+  string? SilentThrowCondition(int id) {
+    if (SilentCaught(id)) {
+      return "";
+    }
+    if (silentBit.TryGetValue(id, out int bit) && currentFun?.TakesMask == true) {
+      return $"(df_obs & UINT64_C({1UL << bit}))";
+    }
+    return null;
   }
 }

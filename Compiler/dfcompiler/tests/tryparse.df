@@ -1,0 +1,55 @@
+namespace tryparse
+alias Root as r
+
+// tryParse (spec 9)
+i32 count
+bool ok = i32.tryParse("42", (&)count)
+r.Console.log($"i32 '42': {ok}, {count}")                             // true, 42
+ok = i32.tryParse("abc", (&)count)
+r.Console.log($"i32 'abc': {ok}, unchanged {count}")                   // false, 42
+ok = i32.tryParse("  -17 apples", (&)count)
+r.Console.log($"i32 '  -17 apples': {ok}, {count}")                    // true, -17
+ok = i32.tryParse("99999999999", (&)count)
+r.Console.log($"i32 out of range: {ok}, unchanged {count}")            // false, -17
+u8 small
+ok = u8.tryParse("-5", (&)small)
+r.Console.log($"u8 '-5': {ok}, {small}")                                // false, 0
+ok = u8.tryParse("200", (&)small)
+r.Console.log($"u8 '200': {ok}, {small}")                               // true, 200
+r64 amount
+ok = r64.tryParse("12.3", (&)amount)
+r.Console.log($"r64 '12.3': {ok}, {amount}")                            // true, 12.3
+ok = r64.tryParse("1.5e3", (&)amount)
+r.Console.log($"r64 '1.5e3': {ok}, {amount}")                           // true, 1500
+ok = r64.tryParse("", (&)amount)
+r.Console.log($"r64 '': {ok}, {amount}")                                // false, 1500
+i32 code
+ok = i32.tryParse("0x2A", (&)code, "0x{bh}")
+r.Console.log($"with a format: {ok}, {code}")                           // true, 42
+ok = i32.tryParse("0x2A", (&)code, format: "{S}")
+r.Console.log($"format that does not match: {ok}, {code}")              // false, 42
+
+// dates and times
+date when
+ok = date.tryParse("2026-10-17 14:30", (&)when)
+r.Console.log($"date: {ok}, {when}")                                    // true, 2026-10-17T14:30:00.000Z
+ok = date.tryParse("not a date", (&)when)
+r.Console.log($"bad date: {ok}, unchanged {when}")                       // false, same date
+time clockTime
+ok = time.tryParse("13:45", (&)clockTime)
+r.Console.log($"time: {ok}, {clockTime}")                                // true
+ok = time.tryParse("25:00", (&)clockTime)
+r.Console.log($"bad time: {ok}")                                         // false
+
+// the holes of an interpolated string run left to right
+fun i32 counter(string label) {
+  r.Console.print(label)
+  return 1
+}
+string order = $"{counter("a")}{counter("b")}{counter("c")}"
+r.Console.log("")
+r.Console.log(order)                                                     // abc then 111
+
+// errors it should give (one at a time):
+// i64.tryParse("7", (&)code)          i64.tryParse needs a i64 variable, not i32
+// i32.tryParse("7", code)             the result of i32.tryParse is passed as (&)variable

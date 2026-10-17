@@ -1,0 +1,37 @@
+[3, 1, 2]
+3
+5
+[3, 10, 7]
+BOB
+[0, 0, 0, 0]
+[7, 7, 7, 7]
+[0, 0, 0, 0]
+[1, 2.5]
+2.5
+[x, y, z]
+true
+false
+3
+true
+[8, 7, 6, 5]
+26
+ann;bob;
+[h][é][!]
+5
+2
+[[1, 2], [3, 4, 5]]
+true
+false
+true
+false
+0
+false
+7
+caught: Index Out Of Range Exception
+4
+36
+8
+true
+6
+true
+---- exit code 0 ----

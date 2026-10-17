@@ -1,0 +1,30 @@
+Hello world!
+Hello Dflat!
+fib(0) = 0
+fib(1) = 1
+fib(2) = 1
+fib(3) = 2
+fib(4) = 3
+fib(5) = 5
+fib(6) = 8
+fib(7) = 13
+fib(8) = 21
+fib(9) = 34
+sum 1..100 = 5050
+count = 1
+(i8)257 = 127, [i8]257 = 1
+(i32)1e300 = 2147483647
+sqrt(2) = 1.4142135623730951
+pi = 3.141592653589793, lerp = 2.5
+3a
+ab
+square(12) = 144
+smile 😀
+héllo has 5 chars and 6 bytes
+literal braces: {ok}
+big total
+found a * b == 6
+dividing by zero...
+Division By Zero Exception
+Panic -1000
+---- exit code -1000 ----

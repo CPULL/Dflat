@@ -68,7 +68,12 @@ sealed class FunctionContext {
     Header = header;
     RetType = retType;
     IsMain = isMain;
+    // every function has its own exception: the handlers of the scopes look at these
+    Decls.Append("  df_exception* df_err = NULL;\n  bool df_err_thrown = false;\n  (void)df_err;\n  (void)df_err_thrown;\n");
   }
+
+  // the function returns its result and its exception (see CodeGen.ExcFlow.cs); the function, for the name of the pair
+  public FunSig? PairOf { get; set; }
 
   public int Id { get; }
   public string Header { get; }
@@ -99,7 +104,29 @@ public sealed partial class CodeGen {
     ["NaNUsedAsKeyException"] = 21,
     ["InvalidMapKeyException"] = 22,
     ["EmptyVectorAccessException"] = 23,
-    ["InvalidDateTimeFormatException"] = 24
+    ["InvalidDateTimeFormatException"] = 24,
+    // Root.IO (spec 17.6.6)
+    ["FileNotFoundException"] = 25,
+    ["InvalidFileAccessException"] = 26,
+    ["FileAccessException"] = 27,
+    ["DirectoryNotEmptyException"] = 28,
+    ["FileNameAlreadyExistsException"] = 29,
+    ["InvalidPathException"] = 30,
+    ["FullPathNotFoundException"] = 31,
+    ["SeekBeforeBeginException"] = 32,
+    ["FileAlreadyExistsException"] = 33,
+    ["FileAccessToADirectoryException"] = 34,
+    ["ReadOnlyItemCannotBeWrittenException"] = 35,
+    ["ConflictingSharingException"] = 36,
+    ["InvalidStreamModesException"] = 37,
+    ["NoMoreResourcesException"] = 38,
+    ["AccessToAClosedStreamException"] = 39,
+    ["StreamModeNotAllowedException"] = 40,
+    ["SeekNotSupportedByStreamException"] = 41,
+    ["InvalidBufferRangeException"] = 42,
+    ["GenericIOErrorException"] = 43,
+    ["FileRemovedWhileOpenException"] = 44,
+    ["StreamCloseFailureException"] = 45
   };
 
   readonly Stack<Frame> frames = new();
@@ -126,63 +153,6 @@ public sealed partial class CodeGen {
   }
 
   static string ExceptionName(int id) => StandardExceptions.First(pair => pair.Value == id).Key;
-
-  // ---------------------------------------------------------------- functions that can fail
-
-  // A function can fail when it throws, divides integers, or calls a function that can fail.
-  // (any overload of a called name counts)
-  void FindFailingFunctions() {
-    var callees = new Dictionary<FunSig, HashSet<string>>();
-    foreach (var fun in funs.Values.SelectMany(overloads => overloads)) {
-      var called = new HashSet<string>();
-      var prefixes = new List<string>();
-      if (fun.EnumName != null) {
-        prefixes.Add(fun.EnumName);
-      }
-      for (var c = fun.Class; c != null; c = c.Parent) {
-        prefixes.Add(c.Name);
-      }
-      if (ContainsRaise(fun.Node, prefixes, called)) {
-        failingFuns.Add(fun);
-      }
-      // a constructor runs its init function; an init function runs the init function of the parent
-      if (fun.IsCtor) {
-        called.Add(fun.Class!.Init!.Name);
-      }
-      if (fun.IsInit && fun.Class!.Parent != null) {
-        called.Add(fun.Class.Parent.Init!.Name);
-      }
-      callees[fun] = called;
-    }
-    var allFuns = funs.Values.SelectMany(overloads => overloads).ToList();
-    // a destructor that can fail makes every end of scope able to fail
-    if (allFuns.Any(f => f.IsDtor && failingFuns.Contains(f))) {
-      failingFuns.UnionWith(allFuns);
-    }
-    bool changed = true;
-    while (changed) {
-      changed = false;
-      foreach (var (fun, called) in callees) {
-        bool callsFailing = called.Any(name => name.StartsWith("?.")
-          ? allFuns.Any(other => other.Class != null && other.Name.EndsWith("." + name[2..]) && failingFuns.Contains(other))
-          : genericFuns.ContainsKey(name)
-            || (genericClasses.ContainsKey(name) && allFuns.Any(other => other.IsCtor && classInstanceArgs.TryGetValue(other.Class!.Name, out var made)
-              && made.Template.Name == name && failingFuns.Contains(other)))
-            || (funs.TryGetValue(name, out var overloads) && overloads.Any(failingFuns.Contains)));
-        if (!failingFuns.Contains(fun) && callsFailing) {
-          failingFuns.Add(fun);
-          changed = true;
-        }
-      }
-      // functions that share a virtual slot are called through the same pointer: one fails, all count as failing
-      foreach (var fun in allFuns.Where(f => f.Class != null && !f.IsStatic && f.Slot >= 0 && f.Root.GroupSize > 0)) {
-        if (!failingFuns.Contains(fun) && allFuns.Any(other => other.Root == fun.Root && failingFuns.Contains(other))) {
-          failingFuns.Add(fun);
-          changed = true;
-        }
-      }
-    }
-  }
 
   // a member access on an object may find null: NullPointerException (only when the program has classes)
   bool MemberMayRaise(Node member) {
@@ -215,47 +185,14 @@ public sealed partial class CodeGen {
   // a program with equals or an operator == in a class: any comparison may call it
   bool hasObjectEquality => classes.Values.Any(cls => cls.EqualsNode != null || funs.ContainsKey(cls.Name + ".=="));
 
-  bool ContainsRaise(Node node, IReadOnlyList<string> prefixes, HashSet<string> called) {
-    bool raises = node.Kind switch {
-      "Throw" => !(node.Children[0].Kind == "Call" && node.Children[0].Children[0].Kind == "Name"
-        && node.Children[0].Children[0].Text == "Panic"),
-      "Binary" => node.Text is "/" or "%" || (node.Text is "==" or "!=" && hasObjectEquality),
-      "Member" => MemberMayRaise(node),
-      "Index" => node.Children.Count == 2 && node.Children[0].Kind != "GenericRef" && node.Children[1].Kind != "Empty",
-      "Assign" => node.Text is "/=" or "%=",
-      _ => false
-    };
-    if (node.Kind == "Call") {
-      var callee = node.Children[0];
-      if (callee.Kind == "Name") {
-        called.Add(callee.Text!);
-        called.Add("?." + callee.Text);   // it may be a function of a trait of this class
-        foreach (string prefix in prefixes) {
-          called.Add(prefix + "." + callee.Text);
-        }
-      } else if (callee.Kind == "GenericRef" && callee.Children[0] is { Kind: "Name" } genericCallee) {
-        called.Add(genericCallee.Text!);   // a generic function or the constructor of a generic class
-      } else if (Path(callee) is string path) {
-        called.Add(path);
-      }
-      if (callee.Kind == "Member") {
-        called.Add("?." + callee.Text);   // a function of an object: any function with this name
-      }
-    }
-    foreach (var child in node.Children) {
-      raises |= ContainsRaise(child, prefixes, called);
-    }
-    return raises;
-  }
-
-  // after code that may raise: jump to the handler when the error register is set
+  // after code of the runtime that may raise: it left the exception in df_pending; take it into df_err and go to the handler
   string CheckRaise(string code, string type) {
-    string jump = $"{{ df_err_thrown = false; goto {Handler}; }}";
+    string jump = $"{{ df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto {Handler}; }}";
     if (type == "void") {
-      return $"({{ {code}; if (df_err) {jump} }})";
+      return $"({{ {code}; if (df_pending) {jump} }})";
     }
     string temp = NewTemp();
-    return $"({{ {CType(type)} {temp} = {code}; if (df_err) {jump} {temp}; }})";
+    return $"({{ {CType(type)} {temp} = {code}; if (df_pending) {jump} {temp}; }})";
   }
 
   // "i32 divide(i32, i32)"
@@ -689,6 +626,8 @@ public sealed partial class CodeGen {
     }
     if (fn!.IsMain) {
       sb.Append($"{pad}return (int){fn.RetVar};\n");
+    } else if (fn.PairOf != null) {
+      sb.Append($"{pad}return {PairValue(fn.PairOf, fn.RetVar)};\n");
     } else if (fn.RetType == "void") {
       sb.Append($"{pad}return;\n");
     } else {
@@ -706,8 +645,16 @@ public sealed partial class CodeGen {
       if (variable.Type != "Exception" && !IsExceptionClass(variable.Type)) {
         throw Error($"'{value.Text}' is not an exception", s);
       }
-      sb.Append($"{pad}{{ df_err = (df_exception*){variable.CName}; df_err_thrown = true; goto {Handler}; }}\n");
-      return true;
+      string rethrow = $"{{ df_err = (df_exception*){variable.CName}; df_err_thrown = true; goto {Handler}; }}";
+      bool mayBeSilent = silentBit.Count > 0 && (variable.Type == "Exception" || (IsExceptionClass(variable.Type) && IsSilentClass(classes[variable.Type])));
+      if (!mayBeSilent) {
+        sb.Append($"{pad}{rethrow}\n");
+        return true;
+      }
+      // the variable may hold a silent exception: it leaves only where somebody observes it
+      string observed = currentFun?.TakesMask == true ? $"({ObservedMask()} | df_obs)" : ObservedMask();
+      sb.Append($"{pad}if (!((df_exception*){variable.CName})->descriptor->silent || ({observed} & df_obs_bit((df_exception*){variable.CName}))) {rethrow}\n");
+      return false;
     }
     if (value.Kind != "Call") {
       throw Error("throw needs an exception, e.g. throw Exception(\"message\")", s);
@@ -735,7 +682,8 @@ public sealed partial class CodeGen {
     if (id < 0) {
       throw Error("SilentException is a trait: throw an exception class", s);
     }
-    if (SilentStandard.Contains(id) && !SilentCaught(id)) {
+    string? condition = SilentStandard.Contains(id) ? SilentThrowCondition(id) : "";
+    if (condition == null) {
       return false;
     }
     if (args.Count > 1) {
@@ -743,10 +691,11 @@ public sealed partial class CodeGen {
     }
     string message = args.Count == 1 ? Convert(ExprOf(args[0], scope, "string"), "string", s) : "df_str_lit(\"\", 0)";
     string temp = NewTemp();
-    sb.Append($"{pad}{{ df_string {temp} = {message}; ");
-    sb.Append($"df_err = df_new_exception(&df_desc_{ExceptionName(id)}, {temp}.p, {temp}.len, {fn!.NameConst}); ");
-    sb.Append($"df_err_thrown = true; goto {Handler}; }}\n");
-    return true;
+    string raise = $"{{ df_string {temp} = {message}; "
+      + $"df_err = df_new_exception(&df_desc_{ExceptionName(id)}, {temp}.p, {temp}.len, {fn!.NameConst}); "
+      + $"df_err_thrown = true; goto {Handler}; }}";
+    sb.Append(condition == "" ? $"{pad}{raise}\n" : $"{pad}if ({condition}) {raise}\n");
+    return condition == "";
   }
 
   // ex.Id, ex.Message, ex.Function, ex.Line

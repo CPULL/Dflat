@@ -71,10 +71,7 @@ public sealed partial class CodeGen {
     ["real"] = "real"
   };
 
-  static readonly Dictionary<string, string> ParamFeatures = new() {
-    ["RefParam"] = "Pointers",
-    ["WritableRefParam"] = "Pointers",
-  };
+  static readonly Dictionary<string, string> ParamFeatures = new();
 
   static CompileException NotSupported(string feature, Node at) {
     return Error($"feature not supported: {feature}", at);
@@ -187,7 +184,10 @@ public sealed partial class CodeGen {
       }
       return target == "r64" ? 0 : target == "r32" ? 1 : null;
     }
-    var type = ExprOf(arg, scope).Type;
+    if (valueNode.Kind == "WritableAddressOf") {
+      valueNode = valueNode.Children[0];   // (&)x: the type of x
+    }
+    var type = ExprOf(valueNode, scope).Type;
     if (type == paramType) {
       return 0;
     }

@@ -20,7 +20,17 @@ Operators, checked division
 String interpolation, toStr
 alias Root as r
 catch, throw, Panic
-Standard exceptions with IDs (10 to 24)
+Standard exceptions with IDs (10 to 45, the Root.IO ones 25 to 45 are declared but nothing raises them yet)
+Exceptions as returned values (stage 1): a function that can let a non-silent exception out returns its result and its exception (Rust model); pure and safe functions (nothing can leave them, also when it is fully handled inside) return the result only; no global error register
+Silent exceptions (stage 2): a silent exception leaves a function only for a caller whose catch handles it (its class, a parent below Exception, SilentException or catch all) and never goes on through a function that does not catch it; the function goes on after a throw nobody observes; explicit throw e passes it up; built as a run-time observed mask (hidden parameter of the functions that throw silent exceptions)
+Bitfields (3.1.1): bitfield8/16/32/64, None, All, | & ^ _, set, clear, setAs, toggle, isSet, isAnySet (they return the new value), cast and transmute mask the undefined bits, toStr prints the flags; a bitfield is not nullable (undecided in the spec)
+Root.IO enums (17.6.4): DeleteOptions (bitfield8), OverwriteOptions, FileSystemObjectsType, FileWriteMode, StreamReadWriteAccessMode, StreamOpenMode, StreamSeekOrigin; written as fs.X (alias Root.IO as fs), Root.IO.X or the bare name
+File class (17.6.3): properties path, name, extension, parent, isDirectory, isFile, size, created, modified, accessed, isReadOnly; static and object exists, delete, copy / copyTo, move / moveTo, createDirectory, getAllFiles; getTempFile, getTempFileName, getTempDir, combinePaths; object readAll, readAllText, writeAll, writeAllText (all encodings). File.open is a shortcut for FileStream
+Stream and FileStream (stdlib 6.8): read, write, readByte, writeByte, seek, flush, close, canRead / canWrite / canSeek / hasLength, position, length; modes and open modes with their exceptions; closed at the end of the scope or with stream is atEnd. readMode / writeMode / openMode read-only properties. Not yet: Exclusive / Shared are accepted but not enforced, u64 stands for uns
+String formats (8.3): w / wc width in characters / columns, f fill, a< a^ a>, t<'marker' / t>'marker' (needs a width), cU cL cS cT, q, s sl sr; a width never cuts; wc uses an approximate table of wide East Asian and emoji ranges
+Reference parameters (13.1): &T x (read-only, no marker in the call) and (&)T x (writable, the call writes (&)x) for variables, fields, tuple fields and array items; also through another reference parameter; with overloads, named arguments and defaults (read-only only). tryParse still has its own library form
+Test runner: tests\run-tests.ps1 compares the output of every test program with tests\expected\<name>.txt, and the compiler errors of the programs in tests\errors (53 cases that must not compile) with tests\errors\expected (see CompilerImplementation.txt, THE TEST RUNNER)
+Naming: the standard library functions are camelCase (Root.Console.log, Root.getArgs, Root.Time.now, Root.Random.int, Math.sqrt, string.trim, char.isDigit ...); namespaces and types stay PascalCase, constants UPPERCASE. aSin, aCos, aTan, aTan2 are accepted next to asin, acos, atan, atan2; Math.PI2 added
 Scope atEnd
 Entry point: top-level code, or main(), main(arr<string> args), main(string args...) with an int exit code
 Program arguments: Root.GetArgs(), --run -- args (UTF-8 on every target)
@@ -36,30 +46,31 @@ text[pos] reads a character
 
 Partial -----------------------
 
-Arrays arr<T>: literals, arr<T>[size], index read/write with IndexOutOfRangeException, .len, for-in, has, indexOf, fill, clear, reverse. Missing: sort, sortUnstable, copyFrom, views and ranges, .keys, sized declarations (arr<T>[n] x), warning for elements read before fill
+Arrays arr<T>: literals, arr<T>[size], index read/write with IndexOutOfRangeException, .len, for-in, has, indexOf, fill, clear, reverse, sort / sortUnstable (default order, SortDirection.ASC / DESC; numbers, bool, char, string, date, time, clock, lapse, enums), copyFrom (count or range form). Missing: sort with a lambda (no lambdas yet), sort and copyFrom of objects (a comparer, cloning), views and ranges as values, sized declarations (arr<T>[n] x), warning for elements read before fill
 Silent exceptions: library calls (date(string), time(...), (time)n) raise them only when a catch in the same function can handle them; catches in callers do not see them yet; custom ones need classes
 Strings: every string is a pointer and a byte length, never freed; no small / block strings (4.3), no writing by index (open item)
-Parsing: date.parse, time.parse and <integer or real type>.parse(text, default, format) (all of section 9 for numbers); no tryParse (it needs (&) parameters), no dec
-Formatting: dates and times (8.4) and integers and reals (8.1, 8.2: toStr(format) and {x:format}, nullables too); string specs (8.3) are ignored with a warning
+Parsing: date.parse, time.parse and <integer or real type>.parse(text, default, format) (all of section 9 for numbers); tryParse for integers, reals, date and time with (&)variable (a library form, not general (&) parameters); no dec
+Formatting: dates and times (8.4), integers and reals (8.1, 8.2) and strings (8.3), all as toStr(format) and {x:format}; the other types (char, bool ...) ignore a spec with a warning
 Namespaces: the namespace line is accepted, names are not qualified
 Time zones: dates are UTC; z prints +0 and parses an offset
 
 Not yet -----------------------
+Exceptions stage 2 leftovers: library functions with a declared list of exceptions (the natives keep the same-function rule), silent exceptions from constructors, field initializers and destructors, silent operations of the language (overflow) that do not emit yet. See CompilerImplementation.txt
 
 Generics: type switch, value parameters, generic traits, placeholders (7b); definition-time checking of bodies
 vec, list, map, hmap, set, hset, dfoot (7c)
 Ownership, move, copy, refcount
-Reference and move parameters
+Move parameters on non-objects, volatile references, reference parameters on constructors, (&) borrows that replace an object
 Lambdas and captures
-Pointers, addr, alignment, volatile
+Pointers, addr, alignment, volatile (the pointer types *T and (*)T)
 Custom exception classes, catch by trait
 Class atEnd
 128/256-bit ints, r16/r128
 dec
 int/uns/real, native size (main may return int: it is an i32)
-String format specs (8.3), tryParse, parse of dec
+parse of dec
 Imports, multiple files
-Files and Streams (17.6 is a TODO in the spec)
+TextStream, MemoryStream, ConsoleStream, async read / write, array views as buffers
 DateTime library (CalendarDate, ZonedDateTime)
 Runtime without C library
 Debug builds (line, stack trace)

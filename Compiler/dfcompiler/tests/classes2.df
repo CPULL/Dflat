@@ -15,11 +15,11 @@ public class C {
   public static const i32 base = 21
 }
 
-r.Console.Log(A.a)
-r.Console.Log(A.plain)
-r.Console.Log(A.when == null)
-r.Console.Log(A.text)
-r.Console.Log(B.LIMIT)
+r.Console.log(A.a)
+r.Console.log(A.plain)
+r.Console.log(A.when == null)
+r.Console.log(A.text)
+r.Console.log(B.LIMIT)
 
 enum Color { Red, Green, Blue }
 
@@ -42,14 +42,14 @@ public class Node(i32 value) {
 
 Node head = Node(1)
 head.Add(2).Add(3).Add(4)
-r.Console.Log(head.Sum())
-r.Console.Log(head.Length())
-r.Console.Log(head.next.next.color)
-r.Console.Log(head.range.high)
+r.Console.log(head.Sum())
+r.Console.log(head.Length())
+r.Console.log(head.next.next.color)
+r.Console.log(head.range.high)
 head.color = Color.Blue
-r.Console.Log(head.color)
+r.Console.log(head.color)
 head.range = (3, 4)
-r.Console.Log(head.range.low)
+r.Console.log(head.range.low)
 
 // exceptions: in a constructor initializer, in a method, through a virtual call
 public class Divider(i32 by) {
@@ -69,21 +69,21 @@ fun i32 tryDivider(i32 by) {
     return -1
   }
 }
-r.Console.Log(tryDivider(5))
-r.Console.Log(tryDivider(0))
+r.Console.log(tryDivider(5))
+r.Console.log(tryDivider(0))
 
 fun i32 viaParent(Base b, i32 n) {
   return b.Run(n)
   catch DivisionByZeroException ex {
-    r.Console.Log("caught " + ex.Message)
+    r.Console.log("caught " + ex.Message)
     return -2
   }
 }
-r.Console.Log(viaParent(Base(), 5))
-r.Console.Log(viaParent(Derived(), 5))
-r.Console.Log(viaParent(Derived(), 0))
-r.Console.Log(viaParent(Base(), 0))
+r.Console.log(viaParent(Base(), 5))
+r.Console.log(viaParent(Derived(), 5))
+r.Console.log(viaParent(Derived(), 0))
+r.Console.log(viaParent(Base(), 0))
 
 // an unhandled exception from a constructor
 Divider bad = Divider(0)
-r.Console.Log("not reached")
+r.Console.log("not reached")

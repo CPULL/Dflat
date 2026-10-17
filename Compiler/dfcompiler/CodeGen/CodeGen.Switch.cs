@@ -12,6 +12,8 @@ sealed class EnumInfo {
 
   public string Name { get; }
   public string ValueType { get; set; } = "i32";
+  public bool Bitfield { get; set; }            // bitfield8..64 (spec 3.1.1): flags are bits, None and All are built in
+  public BigInteger Mask { get; set; }          // the defined bits of a bitfield
   public List<(string Name, BigInteger Value)> Entries { get; } = new();
 
   public BigInteger? Find(string entryName) {
@@ -65,6 +67,11 @@ public sealed partial class CodeGen {
   // enum [ValueType] Name { A, B: 10, C: A, fun ... }
   void RegisterEnum(Node node) {
     var info = enums[node.Text!];
+    var bitfieldNode = node.Children.FirstOrDefault(child => child.Kind == "Bitfield");
+    if (bitfieldNode != null) {
+      RegisterBitfield(node, info, bitfieldNode.Text!);
+      return;
+    }
     var valueTypeNode = node.Children.FirstOrDefault(child => child.Kind == "ValueType");
     if (valueTypeNode != null) {
       var typeNode = valueTypeNode.Children[0];
@@ -113,6 +120,57 @@ public sealed partial class CodeGen {
       }
     }
     enumCode.Append($"  }}\n  return {fallback};\n}}\n\n");
+  }
+
+  // bitfield32 Name { Flag: bitPosition, ... }: the value is an unsigned number of the given size; None (0) and All
+  // (every defined bit) exist on every bitfield
+  void RegisterBitfield(Node node, EnumInfo info, string keyword) {
+    int bits = int.Parse(keyword["bitfield".Length..]);
+    info.Bitfield = true;
+    info.ValueType = "u" + bits;
+    info.Entries.Add(("None", 0));
+    var used = new Dictionary<int, string>();
+    foreach (var entry in node.Children.Where(child => child.Kind == "Entry")) {
+      if (entry.Text is "None" or "All") {
+        throw Error($"'{entry.Text}' exists on every bitfield: it cannot be declared", entry);
+      }
+      if (info.Find(entry.Text!) != null) {
+        throw Error($"duplicate flag '{entry.Text}' in bitfield '{info.Name}'", entry);
+      }
+      var position = entry.Children.Count == 0 ? null : IntLiteralValue(entry.Children[0]);
+      if (position == null) {
+        throw Error($"flag '{entry.Text}' needs its bit position: {entry.Text}: 0", entry);
+      }
+      if (position < 0 || position >= bits) {
+        throw Error($"bit position {position} is outside {keyword} (0 to {bits - 1})", entry);
+      }
+      if (used.TryGetValue((int)position.Value, out var other)) {
+        throw Error($"flags '{other}' and '{entry.Text}' use the same bit", entry);
+      }
+      used[(int)position.Value] = entry.Text!;
+      var value = BigInteger.One << (int)position.Value;
+      info.Mask |= value;
+      info.Entries.Add((entry.Text!, value));
+    }
+    if (info.Entries.Count == 1) {
+      throw Error($"bitfield '{info.Name}' needs at least one flag", node);
+    }
+    if (node.Children.Any(child => child.Kind == "Fun")) {
+      throw Error("a bitfield cannot have functions", node);
+    }
+    info.Entries.Add(("All", info.Mask));
+
+    // toStr: None, or the flags that are set joined with " | "
+    string cType = CType(info.Name);
+    var text = new StringBuilder($"static df_string df_enum_str_{info.Name}({cType} value) {{\n  df_string result = df_str_lit(\"\", 0);\n  bool first = true;\n");
+    text.Append($"  if (value == 0) {{ return {CString(CodePoints("None"))}; }}\n");
+    foreach (var entry in info.Entries.Where(entry => entry.Name is not ("None" or "All"))) {
+      text.Append($"  if (value & {IntConstCode(entry.Value, info.ValueType)}) {{\n");
+      text.Append($"    result = first ? {CString(CodePoints(entry.Name))} : df_str_concat(result, {CString(CodePoints(" | " + entry.Name))});\n");
+      text.Append("    first = false;\n  }\n");
+    }
+    text.Append("  return result;\n}\n\n");
+    enumCode.Append(text);
   }
 
   // an integer literal, or another entry (alias)

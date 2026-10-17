@@ -1,0 +1,22 @@
+created dflat-files-test, isDirectory true, exists true
+report: name report.txt, extension txt, exists false, parent dflat-files-test
+text = Done more, size 9, isFile true, readonly false
+modified is not null: true, created true
+utf16 size 10, read back héllo
+bytes 10: 104 0
+writeAll: Hi
+copied copy.txt, parent sub, text Hi
+moved moved.txt, copy exists false
+sub2 holds true
+all items: 5
+txt files: 3
+directories: 2
+delete sub without Recursive: false
+delete sub recursive: true
+delete missing: false
+FileNotFoundException id 25
+InvalidPathException id 30
+FileAlreadyExistsException id 33
+InvalidPathException id 30
+cleaned: true
+---- exit code 0 ----

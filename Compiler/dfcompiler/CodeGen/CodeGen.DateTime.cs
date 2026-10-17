@@ -49,6 +49,9 @@ public sealed partial class CodeGen {
     if (NumberFormat(value, literal, formatCode, at) is Expr number) {
       return number;
     }
+    if (StringFormat(value, literal, formatCode, at) is Expr text) {
+      return text;
+    }
     if (value.Type is not ("date" or "time")) {
       throw Error($"toStr(format) is not supported on {value.Type} yet", at);
     }
@@ -88,6 +91,9 @@ public sealed partial class CodeGen {
   Expr? FormattedHole(Expr value, Node spec, Node at) {
     if (IsNumberType(BaseOf(value.Type))) {
       return NumberFormat(value, spec.Text, CString(CodePoints(spec.Text!)), at);
+    }
+    if (value.Type == "string") {
+      return StringFormat(value, spec.Text, CString(CodePoints(spec.Text!)), at);
     }
     if (value.Type is not ("date" or "time")) {
       return null;

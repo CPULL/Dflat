@@ -48,7 +48,7 @@ public sealed partial class CodeGen {
     return SignedTypes.Contains(index.Type) ? $"((uint64_t)(int64_t)({index.Code}))" : $"((uint64_t)({index.Code}))";
   }
 
-  string RaiseJump => $"{{ df_err_thrown = false; goto {Handler}; }}";
+  string RaiseJump => $"{{ df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto {Handler}; }}";
 
   // arr<T>[size]: elements start as zero
   Expr ArrayNew(Node generic, Node sizeNode, Scope scope) {
@@ -218,15 +218,116 @@ public sealed partial class CodeGen {
           $"({{ for (uint64_t {i} = 0; {i} < {a}.len / 2; {i}++) {{ {CType(elem)} {swap} = {Elem(a, i)}; {Elem(a, i)} = {a}.p[{a}.len - 1 - {i}]; {a}.p[{a}.len - 1 - {i}] = {swap}; }} }})");
         return new Expr(code, "void");
       }
+      case "sort":
+      case "sortUnstable": {
+        if (args.Count > 1) {
+          throw Error($"{name} takes no argument or a SortDirection", at);
+        }
+        string? compare = CompareFunction(elem);
+        if (compare == null) {
+          throw Error($"{name} cannot order {elem} yet (objects and tuples need a comparer)", at);
+        }
+        string descending = "false";
+        if (args.Count == 1) {
+          if (args[0].Kind is "Lambda" or "Fun" or "Closure") {
+            throw NotSupported("Lambdas", args[0]);
+          }
+          var direction = ExprOf(args[0], scope);
+          if (direction.Type != "SortDirection") {
+            throw Error($"{name} takes SortDirection.ASC or SortDirection.DESC, not {direction.Type}", args[0]);
+          }
+          descending = $"(({direction.Code}) == {enums["SortDirection"].Find("DESC")})";
+        }
+        NeedChunk("sort");
+        string code = WithTemp(array, a =>
+          $"df_sort({a}.p, {a}.len, sizeof(*{a}.p), {compare}, {(name == "sort" ? "true" : "false")}, {descending})");
+        return new Expr(code, "void");
+      }
+      case "copyFrom":
+        return CopyFrom(array, args, scope, at);
       default:
         return null;
     }
   }
 
-  // Root.Random.Shuffle(array or string variable)
+  // the comparer of the runtime for an item type (RuntimeSort), or null when there is none
+  string? CompareFunction(string elem) {
+    if (enums.TryGetValue(elem, out var info)) {
+      return CompareFunction(info.ValueType);
+    }
+    return elem switch {
+      "i8" or "i16" or "i32" or "i64" or "u8" or "u16" or "u32" or "u64" or "r32" or "r64" => "df_cmp_" + elem,
+      "bool" => "df_cmp_bool",
+      "char" => "df_cmp_u32",
+      "string" => "df_cmp_str",
+      "date" or "lapse" => "df_cmp_i64",
+      "time" => "df_cmp_i32",
+      "clock" => "df_cmp_u64",
+      _ => null
+    };
+  }
+
+  // destination.copyFrom(dstIndex, source, srcIndex, count) and destination.copyFrom(dstIndex, source, range) (spec 6.6)
+  Expr CopyFrom(Expr destination, List<Node> args, Scope scope, Node at) {
+    if (args.Any(arg => arg.Kind == "Named") || args.Count is not (3 or 4)) {
+      throw Error("copyFrom takes (dstIndex, source, srcIndex, count) or (dstIndex, source, range)", at);
+    }
+    string elem = ArrElem(destination.Type);
+    if (IsClass(elem)) {
+      throw Error("copyFrom clones object items, which needs cloning (not built yet)", at);
+    }
+    var source = ExprOf(args[1], scope);
+    if (!IsArr(source.Type) || ArrElem(source.Type) != elem) {
+      throw Error($"copyFrom needs an {destination.Type} as the source, not {source.Type}", args[1]);
+    }
+    if (destination.Code == source.Code && SimpleCode.IsMatch(source.Code)) {
+      throw Error("copyFrom cannot use the same array as source and destination", at);
+    }
+    string Index(Node node) {
+      var value = ExprOf(node, scope, "u64");
+      if (!IsInt(value.Type)) {
+        throw Error($"an index must be an integer, not {value.Type}", node);
+      }
+      return SignedTypes.Contains(value.Type) ? $"df_idx_arg((int64_t)({value.Code}))" : $"((uint64_t)({value.Code}))";
+    }
+    NeedChunk("sort");
+    string dstIndex = Index(args[0]);
+    string source0 = NewTemp();
+    string srcIndex;
+    string count;
+    if (args.Count == 4) {
+      srcIndex = Index(args[2]);
+      count = Index(args[3]);
+    } else {
+      var range = args[2];
+      if (range.Kind != "Range") {
+        throw Error("copyFrom takes a count or a range after the source", range);
+      }
+      srcIndex = range.Children[0].Kind == "Open" ? "0" : Index(range.Children[0]);
+      if (range.Children[1].Kind == "Open") {
+        count = $"({source0}.len < ({srcIndex}) ? UINT64_MAX : {source0}.len - ({srcIndex}))";
+      } else {
+        string end = Index(range.Children[1]);
+        string last = range.Text == "..=" ? $"({end}) + 1" : $"({end})";
+        count = $"(({last}) < ({srcIndex}) ? UINT64_MAX : ({last}) - ({srcIndex}))";
+      }
+    }
+    string d = NewTemp();
+    string di = NewTemp();
+    string si = NewTemp();
+    string n = NewTemp();
+    string code = $"({{ {CType(destination.Type)} {d} = {destination.Code}; {CType(source.Type)} {source0} = {source.Code}; "
+      + $"uint64_t {di} = {dstIndex}; uint64_t {si} = {srcIndex}; uint64_t {n} = {count}; "
+      + $"if ({d}.p != NULL && {d}.p == {source0}.p) {{ df_raise(&df_desc_ModifyingProtectedSourceException, {fn!.NameConst}); {RaiseJump} }} "
+      + $"if ({di} > {d}.len || {n} > {d}.len - {di} || {si} > {source0}.len || {n} > {source0}.len - {si}) {{ df_raise(&df_desc_IndexOutOfRangeException, {fn!.NameConst}); {RaiseJump} }} "
+      + $"if ({n} > 0) {{ memcpy({d}.p + {di}, {source0}.p + {si}, {n} * sizeof(*{d}.p)); }} }})";
+    return new Expr(code, "void");
+  }
+
+  // Root.Random.shuffle(array or string variable)
   Expr ShuffleCall(List<Node> args, Scope scope, Node at) {
     if (args.Count != 1 || args[0].Kind == "Named") {
-      throw Error("Shuffle takes one collection", at);
+      throw Error("shuffle takes one collection", at);
     }
     var arg = args[0];
     var value = ExprOf(arg, scope);
@@ -236,7 +337,7 @@ public sealed partial class CodeGen {
     }
     if (value.Type == "string") {
       if (arg.Kind != "Name" && arg.Kind != "Member") {
-        throw Error("Shuffle of a string needs a variable to hold the result", at);
+        throw Error("shuffle of a string needs a variable to hold the result", at);
       }
       var target = LValue(arg, scope);
       if (target.IsConst) {
@@ -245,7 +346,7 @@ public sealed partial class CodeGen {
       MarkAssigned(target.Variable);
       return new Expr(Need("text", $"({target.Code} = df_str_shuffle({target.Code}))"), "void");
     }
-    throw Error($"Shuffle works on arrays and strings, not {value.Type}", at);
+    throw Error($"shuffle works on arrays and strings, not {value.Type}", at);
   }
 
   // for T item in collection { }: arrays by position, strings by character

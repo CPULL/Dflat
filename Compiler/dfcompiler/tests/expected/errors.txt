@@ -1,0 +1,38 @@
+safeDivide(10, 2) = 5
+caught: Division By Zero Exception | id 14 | in i32 divide(i32, i32) | line 0
+safeDivide(10, 0) = -1
+  mode 1: generic catch, message 'plain'
+  mode 1: code after the catches runs
+  mode 2: division by zero catch
+  mode 2: code after the catches runs
+  mode 3: division by zero catch
+  mode 3: code after the catches runs
+relay saw: from fail()
+top level got it again: from fail(), thrown in fail(string)
+before
+second catch: below the catch
+  second atEnd, mode 1
+  first atEnd, mode 1
+cleanup(1) = 10
+  second atEnd, mode 3
+  first atEnd, mode 3
+cleanup(3) = 20
+  second atEnd, mode 2
+  first atEnd, mode 2
+cleanup(2) raised: failing in cleanup
+  atEnd sees count = 2
+counter() = 200
+  early(true): total = 0
+  early(false): total = 5
+iteration 0
+iteration 1
+iteration 2
+loop atEnd after the loop, i = 3
+break: atEnd once, turns = 4
+inner block atEnd, outer = 0
+inner block atEnd, outer = 1
+after #done#
+  leaving(): catch returns
+  leaving(): atEnd
+done
+---- exit code 0 ----

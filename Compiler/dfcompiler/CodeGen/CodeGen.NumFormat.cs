@@ -242,4 +242,66 @@ public sealed partial class CodeGen {
       add($"{type}.parse", Fun(type, c + "_fmt", new[] { "string", "string" }, "", NumNeed, silent) with { Names = new[] { "text", "format" } });
     }
   }
+
+  // T.tryParse(text, (&)result[, format]) for integers, reals, date and time (spec 9): the library takes the address of a
+  // variable; (&) is required in the call. True and the value in the variable, or false and the variable unchanged.
+  Expr? TryParseCall(string path, List<Node> args, Scope scope, Node at) {
+    string type = path[..^".tryParse".Length];
+    bool number = IntTypes.Contains(type) || type is "r32" or "r64";
+    if (!number && type is not ("date" or "time")) {
+      return null;
+    }
+    // named arguments: text, result, format
+    var slots = new Node?[3];
+    int next = 0;
+    foreach (var arg in args.Where(arg => arg.Kind != "Named")) {
+      if (next >= 3) {
+        throw Error($"{type}.tryParse takes the text, (&)result and an optional format", at);
+      }
+      slots[next++] = arg;
+    }
+    foreach (var arg in args.Where(arg => arg.Kind == "Named")) {
+      int index = Array.IndexOf(new[] { "text", "result", "format" }, arg.Text);
+      if (index < 0 || slots[index] != null) {
+        throw Error($"{type}.tryParse has no argument '{arg.Text}'", arg);
+      }
+      slots[index] = arg.Children[0];
+    }
+    if (slots[0] == null || slots[1] == null) {
+      throw Error($"{type}.tryParse takes the text, (&)result and an optional format", at);
+    }
+    if (slots[1]!.Kind != "WritableAddressOf") {
+      throw Error($"the result of {type}.tryParse is passed as (&)variable", slots[1]!);
+    }
+    var target = LValue(slots[1]!.Children[0], scope);
+    if (target.IsConst) {
+      throw Error("the result of tryParse cannot be const", slots[1]!);
+    }
+    if (target.Type != type) {
+      throw Error($"{type}.tryParse needs a {type} variable, not {target.Type}", slots[1]!);
+    }
+    string text = Convert(ExprOf(slots[0]!, scope, "string"), "string", slots[0]!);
+    string? format = null;
+    if (slots[2] != null) {
+      if (slots[2]!.Kind == "String") {
+        CheckParseFormat(FromCodePoints(Unescape(slots[2]!.Text![1..^1], slots[2]!)), slots[2]!);
+      }
+      format = Convert(ExprOf(slots[2]!, scope, "string"), "string", slots[2]!);
+    }
+    MarkAssigned(target.Variable);
+    if (number) {
+      NeedChunk("numfmt");
+      string call = format == null
+        ? $"df_tryparse_{type}({text}, &{target.Code})"
+        : $"df_tryparse_{type}_f({text}, &{target.Code}, {format})";
+      return new Expr(call, "bool");
+    }
+    NeedChunk("date");
+    string nullCode = type == "date" ? "INT64_MIN" : "(-1)";
+    string parse = format == null
+      ? $"df_{type}_parse({text}, {nullCode})"
+      : $"df_{type}_parse_f({text}, {nullCode}, {format})";
+    string temp = NewTemp();
+    return new Expr($"({{ {CType(type)} {temp} = {parse}; bool {temp}_ok = {temp} != {nullCode}; if ({temp}_ok) {{ {target.Code} = {temp}; }} {temp}_ok; }})", "bool");
+  }
 }

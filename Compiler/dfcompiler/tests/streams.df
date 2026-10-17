@@ -1,0 +1,125 @@
+namespace streams
+alias Root as r
+alias Root.IO as fs
+
+string base = File.combinePaths(File.getTempDir(), "dflat-streams-test")
+File.delete(base, fs.DeleteOptions.Recursive)
+File.createDirectory(base)
+string path = File.combinePaths(base, "data.bin")
+
+// write: create the file, bytes and single bytes
+FileStream out = FileStream(path, fs.StreamReadWriteAccessMode.None, fs.StreamReadWriteAccessMode.Exclusive, fs.StreamOpenMode.CreateOrTruncate)
+r.Console.log($"out: canRead {out.canRead}, canWrite {out.canWrite}, canSeek {out.canSeek}, position {out.position}")
+arr<u8> data = [1, 2, 3, 4, 5, 6, 7, 8]
+u64 written = out.write(data)
+out.writeByte(9)
+u64 partial = out.write(data, 2, 3)          // 3, 4, 5
+r.Console.log($"written {written}, partial {partial}, position {out.position}, length {out.length}")
+out.flush()
+out.close()
+out.close()                                    // a second close does nothing
+r.Console.log($"closed: canWrite {out.canWrite}")
+
+// read: whole buffer, parts, end of stream, seek
+FileStream input = File(path).open(fs.StreamReadWriteAccessMode.Shared, fs.StreamReadWriteAccessMode.None, fs.StreamOpenMode.OpenExisting)
+r.Console.log($"length {input.length}, canRead {input.canRead}, canWrite {input.canWrite}")
+arr<u8> buffer = arr<u8>[6]
+u64? got = input.read(buffer)
+r.Console.log($"read {got}: {buffer[0]} {buffer[5]}")
+got = input.read(buffer, 2, 3)
+r.Console.log($"read part {got}: {buffer[2]} {buffer[3]} {buffer[4]}")
+u64 newPosition = input.seek(-3, fs.StreamSeekOrigin.End)
+r.Console.log($"seek from end: {newPosition}")
+u8? one = input.readByte()
+r.Console.log($"readByte {one}")
+got = input.read(buffer)
+r.Console.log($"read to the end {got}")
+got = input.read(buffer)
+u8? last = input.readByte()
+r.Console.log($"at the end: {got == null}, readByte null: {last == null}")
+u64 back = input.seek(1, fs.StreamSeekOrigin.Begin)
+u8? second = input.readByte()
+r.Console.log($"back to {back}, byte {second}, position {input.position}")
+input is atEnd.
+r.Console.log("input ended")
+
+// read and write on one stream, append
+FileStream both = FileStream(path, fs.StreamReadWriteAccessMode.Exclusive, fs.StreamReadWriteAccessMode.Exclusive, fs.StreamOpenMode.OpenExisting)
+both.seek(0, fs.StreamSeekOrigin.Begin)
+both.writeByte(100)
+both.seek(0, fs.StreamSeekOrigin.Begin)
+u8? first = both.readByte()
+u8? next = both.readByte()
+r.Console.log($"after write at 0: {first}, {next}")
+both.close()
+FileStream app = FileStream(path, fs.StreamReadWriteAccessMode.None, fs.StreamReadWriteAccessMode.Shared, fs.StreamOpenMode.AppendExisting)
+app.writeByte(200)
+app.close()
+r.Console.log($"size after append: {File(path).size}")
+
+// the modes a stream was opened with (read-only properties, spec 6.8.3)
+FileStream modes = FileStream(path, fs.StreamReadWriteAccessMode.Shared, fs.StreamReadWriteAccessMode.Exclusive, fs.StreamOpenMode.CreateOrOpen)
+r.Console.log($"modes: read {modes.readMode}, write {modes.writeMode}, open {modes.openMode}")   // modes: read Shared, write Exclusive, open CreateOrOpen
+r.Console.log(modes.canRead && modes.canWrite)                                                    // true
+modes.close()
+r.Console.log($"after close: {modes.readMode}, {modes.writeMode}")                                // the modes stay: Shared, Exclusive
+
+// errors
+fun string tryOpen(string p, fs.StreamOpenMode mode) {
+  FileStream s = FileStream(p, fs.StreamReadWriteAccessMode.Shared, fs.StreamReadWriteAccessMode.None, mode)
+  return "opened"
+  catch FileNotFoundException ex { return "FileNotFoundException " + ex.Id }
+  catch FileAlreadyExistsException ex { return "FileAlreadyExistsException " + ex.Id }
+}
+r.Console.log(tryOpen(File.combinePaths(base, "nothing.bin"), fs.StreamOpenMode.OpenExisting))
+r.Console.log(tryOpen(path, fs.StreamOpenMode.CreateIfMissing))
+
+fun string badModes(string p) {
+  FileStream s = FileStream(p, fs.StreamReadWriteAccessMode.Shared, fs.StreamReadWriteAccessMode.None, fs.StreamOpenMode.AppendExisting)
+  return "opened"
+  catch InvalidStreamModesException ex { return "InvalidStreamModesException " + ex.Id }
+}
+r.Console.log(badModes(path))
+
+fun string directory(string p) {
+  FileStream s = FileStream(p, fs.StreamReadWriteAccessMode.Shared, fs.StreamReadWriteAccessMode.None, fs.StreamOpenMode.OpenExisting)
+  return "opened"
+  catch FileAccessToADirectoryException ex { return "FileAccessToADirectoryException " + ex.Id }
+}
+r.Console.log(directory(base))
+
+fun string usage(string p) {
+  FileStream s = FileStream(p, fs.StreamReadWriteAccessMode.Shared, fs.StreamReadWriteAccessMode.None, fs.StreamOpenMode.OpenExisting)
+  arr<u8> small = arr<u8>[2]
+  s.write(small)
+  return "wrote"
+  catch StreamModeNotAllowedException ex { return "StreamModeNotAllowedException " + ex.Id }
+}
+r.Console.log(usage(path))
+
+fun string range(string p) {
+  FileStream s = FileStream(p, fs.StreamReadWriteAccessMode.Shared, fs.StreamReadWriteAccessMode.None, fs.StreamOpenMode.OpenExisting)
+  arr<u8> small = arr<u8>[2]
+  s.read(small, 1, 5)
+  return "read"
+  catch InvalidBufferRangeException ex { return "InvalidBufferRangeException " + ex.Id }
+}
+r.Console.log(range(path))
+
+fun string closed(string p) {
+  FileStream s = FileStream(p, fs.StreamReadWriteAccessMode.Shared, fs.StreamReadWriteAccessMode.None, fs.StreamOpenMode.OpenExisting)
+  s.close()
+  s.readByte()
+  return "read"
+  catch AccessToAClosedStreamException ex { return "AccessToAClosedStreamException " + ex.Id }
+}
+r.Console.log(closed(path))
+
+// the stream closes at the end of its scope: the file can be deleted afterwards
+fun scoped(string p) {
+  FileStream s = FileStream(p, fs.StreamReadWriteAccessMode.Shared, fs.StreamReadWriteAccessMode.None, fs.StreamOpenMode.OpenExisting)
+  r.Console.log("in scope, length " + s.length)
+}
+scoped(path)
+r.Console.log($"deleted after scope: {File.delete(path)}")
+File.delete(base, fs.DeleteOptions.Recursive)

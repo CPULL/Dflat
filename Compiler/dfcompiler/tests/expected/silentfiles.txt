@@ -1,0 +1,12 @@
+DirectoryNotEmptyException (silent, id 28)
+deleted: false
+false
+FileNameAlreadyExistsException (silent, id 29)
+created fresh
+through the object, id 28
+FileNameAlreadyExistsException on the second copy
+second copy: skipped
+SeekBeforeBeginException (silent, id 32)
+position 0
+FileNotFoundException id 25
+---- exit code 0 ----

@@ -1,0 +1,61 @@
+namespace strformat
+alias Root as r
+
+// string formats (spec 8.3); the expected text is in the comment of each line (| marks the ends)
+string word = "Hello"
+r.Console.log($"|{word:w10}|")                        // |Hello     |
+r.Console.log($"|{word:w10a>}|")                      // |     Hello|
+r.Console.log($"|{word:w10a^}|")                      // |  Hello   |
+r.Console.log($"|{word:w10f*a>}|")                    // |*****Hello|
+r.Console.log($"|{word:f.w9a^}|")                     // |..Hello..|
+r.Console.log($"|{word:w3}|")                         // |Hello| (a width never cuts)
+
+// case
+string mixed = "hello woRLD. how ARE you"
+r.Console.log(mixed.toStr("cU"))                       // HELLO WORLD. HOW ARE YOU
+r.Console.log(mixed.toStr("cL"))                       // hello world. how are you
+r.Console.log(mixed.toStr("cS"))                       // Hello world. how are you
+r.Console.log(mixed.toStr("cT"))                       // Hello World. How Are You
+
+// trim
+string padded = "  \t spaced out  "
+r.Console.log($"|{padded:s}|")                         // |spaced out|
+r.Console.log($"|{padded:sl}|")                        // |spaced out  |
+r.Console.log($"|{padded:sr}|")                        // |  \t spaced out|  (the tab is printed as it is)
+
+// quoted and escaped
+string tricky = "He said \"hi\"\n\\ end"
+r.Console.log(tricky.toStr("q"))                       // "He said \"hi\"\n\\ end"
+r.Console.log($"{word:q}")                             // "Hello"
+
+// truncate: the marker counts in the width
+string long = "Hello world"
+r.Console.log($"|{long:w8t<'…'}|")                     // |Hello w…|
+r.Console.log($"|{long:w8t>'…'}|")                     // |…o world|
+r.Console.log($"|{long:w8t<'...'}|")                   // |Hello...|
+r.Console.log($"|{long:w20t<'...'}|")                  // |Hello world         |  (short enough: no marker)
+r.Console.log($"|{long:w3t<'....'}|")                  // |...|  (the marker alone, cut to the width)
+
+// display columns
+string wide = "日本語"
+r.Console.log($"|{wide:wc8}|")                         // |日本語  |  (6 columns + 2)
+r.Console.log($"|{wide:w8}|")                          // |日本語     |  (3 characters + 5)
+r.Console.log($"|{wide:wc4t<'…'}|")                    // |日…|  (2 + 1 column of the marker, then 1 padding)
+
+// several options, in any order
+string raw = "  hello world  "
+r.Console.log($"|{raw:w15cTsa^f_}|")                   // |__Hello World__|  (trim, then title, then center)
+r.Console.log("abc".toStr("w6a>"))                      //    abc
+
+// null is the empty string; a spec that is not valid at run time leaves the text as it is
+string nothing = null
+r.Console.log($"|{nothing:w4}|")                       // |    |
+string badSpec = "zz"
+r.Console.log(word.toStr(badSpec))                     // Hello
+
+// errors it should give (one at a time):
+// "x".toStr("w")            w needs a number (wc for display columns)
+// "x".toStr("t<'..'")       t needs a width (w or wc)
+// "x".toStr("a.")           a needs <, ^ or >
+// "x".toStr("cX")           c needs U, L, S or T
+// "x".toStr("f")            f needs a fill character

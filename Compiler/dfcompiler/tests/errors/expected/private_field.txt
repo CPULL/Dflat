@@ -1,0 +1,1 @@
+private_field.df(3): error: 'size' is private in Box

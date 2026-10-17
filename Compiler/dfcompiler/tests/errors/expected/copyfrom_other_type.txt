@@ -1,0 +1,1 @@
+copyfrom_other_type.df(3): error: copyFrom needs an arr<r32> as the source, not arr<i32>

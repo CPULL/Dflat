@@ -28,24 +28,24 @@ public class Order : Counted {
 }
 
 Both b = Both()
-r.Console.Log(b.Who())
-r.Console.Log(b.TraitA.Who())
-r.Console.Log(b.TraitB.Who())
-r.Console.Log(b.TraitA.tag)
-r.Console.Log(b.TraitB.tag)
+r.Console.log(b.Who())
+r.Console.log(b.TraitA.Who())
+r.Console.log(b.TraitB.Who())
+r.Console.log(b.TraitA.tag)
+r.Console.log(b.TraitB.tag)
 b.TraitB.tag = "changed"
-r.Console.Log(b.TraitB.tag)
-r.Console.Log(b.TraitA.tag)
-r.Console.Log(b.OnlyA())
+r.Console.log(b.TraitB.tag)
+r.Console.log(b.TraitA.tag)
+r.Console.log(b.OnlyA())
 
 Plain p = Plain()
-r.Console.Log(p.TraitA.Who())
-r.Console.Log(p.TraitB.Who())
+r.Console.log(p.TraitA.Who())
+r.Console.log(p.TraitB.Who())
 TraitA viewA = p
-r.Console.Log(viewA.Who())
-r.Console.Log(viewA.tag)
+r.Console.log(viewA.Who())
+r.Console.log(viewA.tag)
 
 // the trait constructor runs before the body of the class
 Order o = Order()
-r.Console.Log(o.value)
-r.Console.Log(o.made)
+r.Console.log(o.value)
+r.Console.log(o.made)

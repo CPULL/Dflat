@@ -1,0 +1,21 @@
+5
+1
+5
+-1
+4
+2
+5
+100
+2
+-1
+nested 2: 5
+nested 0: 1
+ok 5
+caught negative
+outer 2
+outer caught Division By Zero Exception
+outer2 caught Division By Zero Exception
+outer3 caught Index Out Of Range Exception
+Division By Zero Exception
+Panic -1000
+---- exit code -1000 ----

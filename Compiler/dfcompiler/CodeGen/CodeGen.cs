@@ -43,6 +43,7 @@ sealed class FunSig {
   public bool ReturnsOwned { get; set; }      // returns new or moved objects (false: borrowed ones)
   public bool ReturnsOwnedSet { get; set; }
   public bool IsDtor { get; set; }            // the atEnd of a class
+  public bool TakesMask { get; set; }    // can throw a silent exception that a caller observes: takes the observed mask (CodeGen.Leaks.cs)
   public bool IsAbstract { get; set; }   // a trait function without a body
   public int TSlot { get; set; } = -1;   // position among the functions of its trait
   public string? GenericT { get; set; } // a copy of equals(T other) made for this T
@@ -64,6 +65,7 @@ sealed class ParamSig {
   public Node? Default { get; }
   public bool IsVariadic { get; init; }   // T name...: an arr<T> filled from the extra arguments
   public bool IsGift { get; init; }       // ->T name: the function owns the object it is given
+  public int Ref { get; init; }           // 0 a copy, 1 &T name (read-only reference), 2 (&)T name (writable reference, the call writes (&)x)
 }
 
 sealed class VarInfo {
@@ -116,6 +118,7 @@ public sealed partial class CodeGen {
   static readonly Dictionary<string, string> MathConsts = new() {
     ["PI"] = "3.141592653589793",
     ["PI_HALF"] = "1.5707963267948966",
+    ["PI2"] = "6.283185307179586",
     ["E"] = "2.718281828459045",
     ["SQRT2"] = "1.4142135623730951",
     ["R2D"] = "57.29577951308232",
@@ -158,6 +161,7 @@ public sealed partial class CodeGen {
   public string Generate(Node program) {
     CheckTopLevelFeatures(program);
     AddPrelude(program);
+    ProgramNode = program;
     definedTypes.Add("df_arr_string");   // defined by the runtime
     definedTypes.Add("df_arr_u8");
     foreach (var statement in program.Children) {
@@ -230,7 +234,7 @@ public sealed partial class CodeGen {
     }
     main.Append(mainBody);
     main.Append("  return 0;\n");
-    main.Append($"  {fn.PanicLabel}: df_panic_unhandled();\n");
+    main.Append($"  {fn.PanicLabel}: df_panic_unhandled(df_err);\n");
     main.Append("  return 0;\n}\n");
     fn = null;
     return Assemble(protos, bodies, main);
@@ -251,6 +255,7 @@ public sealed partial class CodeGen {
     output.Append(OptionalRuntime());
     output.Append("/* ---- program ---- */\n\n");
     output.Append(typeDefs);
+    output.Append(ObservedBitTable());
     output.Append(functionNames).Append('\n');
     output.Append(enumCode);
     output.Append(arrayCode);
@@ -278,13 +283,27 @@ public sealed partial class CodeGen {
     main.Append("int main(int argc, char** argv) {\n");
     main.Append("  df_init();\n  df_set_args(argc, argv);\n");
     main.Append(StaticInitCode());
-    string call = $"{entry.CName}({(entry.Params.Count == 1 ? "df_args" : "")})";
-    if (entry.Ret == "void") {
+    var entryArgs = new List<string>();
+    if (entry.Params.Count == 1) {
+      entryArgs.Add("df_args");
+    }
+    if (entry.TakesMask) {
+      entryArgs.Add("0");   // nothing above main observes a silent exception
+    }
+    string call = $"{entry.CName}({string.Join(", ", entryArgs)})";
+    if (PairReturn(entry)) {
+      // main returns its exit code with its exception: an exception nobody handled is a panic
+      if (entry.Ret == "void") {
+        main.Append($"  df_exception* error = {call};\n");
+      } else {
+        main.Append($"  {ResultPair("int32_t")} result = {call};\n  df_exception* error = result.err;\n  int32_t code = result.value;\n");
+      }
+      main.Append("  if (error) {\n    df_panic_unhandled(error);\n  }\n");
+    } else if (entry.Ret == "void") {
       main.Append($"  {call};\n");
     } else {
       main.Append($"  int32_t code = {call};\n");
     }
-    main.Append("  if (df_err) {\n    df_panic_unhandled();\n  }\n");
     main.Append(entry.Ret == "void" ? "  return 0;\n}\n" : "  return (int)code;\n}\n");
     return main;
   }
@@ -342,9 +361,14 @@ public sealed partial class CodeGen {
       var def = p.Children.FirstOrDefault(child => child.Kind == "Default");
       string paramType = ResolveType(p.Children[0]);
       bool variadic = p.Kind == "VariadicParam";
+      int reference = p.Kind == "RefParam" ? 1 : p.Kind == "WritableRefParam" ? 2 : 0;
+      if (reference == 2 && def != null) {
+        throw Error($"the writable reference '{p.Text}' cannot have a default value: it needs a variable", p);
+      }
       ps.Add(new ParamSig(p.Text!, variadic ? "arr<" + paramType + ">" : paramType, def?.Children[0]) {
         IsVariadic = variadic,
-        IsGift = p.Kind == "GiftParam" && IsClass(paramType)
+        IsGift = p.Kind == "GiftParam" && IsClass(paramType),
+        Ref = reference
       });
     }
     if (funNode.Children.Any(child => child.Kind == "NoBody") && cls?.IsTrait != true) {
@@ -363,17 +387,26 @@ public sealed partial class CodeGen {
     return fun;
   }
 
+  // references to objects are the object pointer itself; every other type is passed by the address of the variable
+  bool IsByPointer(ParamSig p) => p.Ref != 0 && !IsClass(p.Type);
+  string ParamCType(ParamSig p) => IsByPointer(p) ? (p.Ref == 1 ? "const " : "") + CType(p.Type) + "*" : CType(p.Type);
+  string ParamName(ParamSig p) => (IsByPointer(p) ? "p_" : "v_") + p.Name;
+
   string Signature(FunSig f) {
-    var list = f.Params.Select(p => $"{CType(p.Type)} v_{p.Name}").ToList();
+    var list = f.Params.Select(p => $"{ParamCType(p)} {ParamName(p)}").ToList();
+    if (f.TakesMask) {
+      list.Add("uint64_t df_obs");
+    }
     if (f.Class != null && !f.IsStatic && !f.IsCtor) {
       list.Insert(0, $"{CType(f.Class.Name)} self");
     }
     string ps = list.Count == 0 ? "void" : string.Join(", ", list);
-    return $"static {CType(f.Ret)} {f.CName}({ps})";
+    return $"static {RetCType(f)} {f.CName}({ps})";
   }
 
   string EmitFun(FunSig f) {
     fn = NewFunctionContext(FunHeader(f), f.Ret, false);
+    fn.PairOf = PairReturn(f) ? f : null;
     assign = new AssignState();
     currentRet = f.Ret;
     currentEnum = f.EnumName;
@@ -386,7 +419,10 @@ public sealed partial class CodeGen {
       scope.Vars["this"] = new VarInfo(f.Class.Name, "self", true);
     }
     foreach (var p in f.Params) {
-      scope.Vars[p.Name] = new VarInfo(p.Type, "v_" + p.Name, false) { Own = p.IsGift };
+      // a reference parameter is a pointer in C; the body reads and writes through it, a read-only one cannot be assigned
+      scope.Vars[p.Name] = IsByPointer(p)
+        ? new VarInfo(p.Type, $"(*{ParamName(p)})", p.Ref == 1)
+        : new VarInfo(p.Type, "v_" + p.Name, false) { Own = p.IsGift };
     }
     var block = f.Node.Children.First(c => c.Kind == "Block");
     // the atEnd after the function body is its final cleanup; a parameter taken with -> ends with the function
@@ -407,7 +443,7 @@ public sealed partial class CodeGen {
       frames.Push(root);
       root.CurrentIndex = 0;
       var e = Convert(ExprOf(block.Children[0].Children[0], scope, f.Ret), f.Ret, block.Children[0]);
-      body.Append($"  return {e};\n");
+      body.Append(fn.PairOf != null ? $"  return {PairValue(f, e)};\n" : $"  return {e};\n");
       frames.Pop();
     } else {
       if (f.IsInit) {
@@ -427,11 +463,20 @@ public sealed partial class CodeGen {
       sb.Append($"  {CType(f.Ret)} {fn.RetVar} = {ZeroValue(f.Ret)};\n");
     }
     sb.Append(body);
-    // an exception leaving the function: return with the error register set
+    // an exception leaving the function is returned with it. A destructor leaves it for the runtime that called it; a function that
+    // returns only its result cannot let one out (the analysis said so): reaching here is an internal error, a panic.
     string failValue = f.Ret == "void" ? "" : " " + ZeroValue(f.Ret);
-    sb.Append($"  {fn.FailLabel}: return{failValue};\n");
-    sb.Append($"  {fn.PanicLabel}: df_panic_unhandled();\n");
-    if (f.Ret != "void") {
+    if (fn.PairOf != null) {
+      sb.Append($"  {fn.FailLabel}: return {PairError(f)};\n");
+    } else if (f.IsDtor && failingFuns.Contains(f)) {
+      sb.Append($"  return{failValue};\n  {fn.FailLabel}: df_pending = df_err; return{failValue};\n");
+    } else {
+      sb.Append($"  return{failValue};\n  {fn.FailLabel}: df_panic_unhandled(df_err);\n");
+    }
+    sb.Append($"  {fn.PanicLabel}: df_panic_unhandled(df_err);\n");
+    if (fn.PairOf != null) {
+      sb.Append($"  return {PairError(f)};\n");
+    } else if (f.Ret != "void") {
       sb.Append($"  return{failValue};\n");
     }
     sb.Append("}\n");
@@ -483,7 +528,8 @@ public sealed partial class CodeGen {
           // a new object nobody keeps ends here
           sb.Append(pad).Append(CheckRaise($"df_drop((void*)({e.Code}))", "void")).Append(";\n");
         } else if (k is "Call" or "PostInc" or "PostDec" or "PreInc" or "PreDec") {
-          sb.Append(pad).Append(e.Code).Append(";\n");
+          // a result nobody keeps: say so to the C compiler (a call that checks an exception is a statement expression)
+          sb.Append(pad).Append(e.Type == "void" || IsMulti(e.Type) ? e.Code : $"(void)({e.Code})").Append(";\n");
         } else {
           Warn("expression result is not used", s);
           sb.Append(pad).Append($"(void)({e.Code});\n");
@@ -829,6 +875,8 @@ public sealed partial class CodeGen {
     if (!ReturnPassesAtEnd()) {
       if (fn!.IsMain) {
         sb.Append($"{pad}return {value ?? "0"};\n");
+      } else if (fn.PairOf != null) {
+        sb.Append($"{pad}return {PairValue(fn.PairOf, value ?? "0")};\n");
       } else {
         sb.Append(value == null ? $"{pad}return;\n" : $"{pad}return {value};\n");
       }
@@ -1068,6 +1116,10 @@ public sealed partial class CodeGen {
   }
 
   Expr BitNot(Expr e, Node at) {
+    if (IsBitfield(e.Type)) {
+      // flips only the defined bits
+      return new Expr($"(({CType(e.Type)})(~{e.Code} & {IntConstCode(enums[e.Type].Mask, enums[e.Type].ValueType)}))", e.Type);
+    }
     if (!IsInt(e.Type)) {
       throw Error("'_' (bitwise not) needs an integer", at);
     }
@@ -1260,9 +1312,14 @@ public sealed partial class CodeGen {
     return sb.ToString();
   }
 
+  // The holes are evaluated one after the other, left to right: C leaves the order of function arguments open, so with two or
+  // more holes each one goes into a temporary first.
   Expr Interpolated(Node n, Scope scope) {
     string code = "df_str_lit(\"\", 0)";
     bool first = true;
+    var pieces = new List<string>();
+    var setup = new StringBuilder();
+    bool ordered = n.Children.Count(part => part.Kind != "Text") > 1;
     foreach (var part in n.Children) {
       string piece;
       if (part.Kind == "Text") {
@@ -1275,11 +1332,19 @@ public sealed partial class CodeGen {
           specWarned = true;
         }
         piece = formatted?.Code ?? StrOf(hole, part);
+        if (ordered) {
+          string temp = NewTemp();
+          setup.Append($"df_string {temp} = {piece}; ");
+          piece = temp;
+        }
       }
+      pieces.Add(piece);
+    }
+    foreach (string piece in pieces) {
       code = first ? piece : $"df_str_concat({code}, {piece})";
       first = false;
     }
-    return new Expr(code, "string");
+    return new Expr(ordered ? $"({{ {setup}{code}; }})" : code, "string");
   }
 
   // ---------------------------------------------------------------- operators
@@ -1341,6 +1406,15 @@ public sealed partial class CodeGen {
     }
     if (IsTuple(l.Type) || IsTuple(r.Type)) {
       throw Error($"operator '{op}' doesn't apply to tuples", at);
+    }
+    if (IsBitfield(l.Type) || IsBitfield(r.Type)) {
+      if (op is not ("|" or "&" or "^")) {
+        throw Error($"operator '{op}' doesn't apply to a bitfield; combine flags with | & ^ or cast to an integer", at);
+      }
+      if (l.Type != r.Type) {
+        throw Error($"cannot apply '{op}' to {l.Type} and {r.Type}", at);
+      }
+      return new Expr($"(({CType(l.Type)})({l.Code} {op} {r.Code}))", l.Type);
     }
     if (op is "<<" or ">>") {
       if (!IsInt(l.Type) || !IsInt(r.Type)) {
@@ -1426,7 +1500,8 @@ public sealed partial class CodeGen {
     }
     if (enums.TryGetValue(to, out var target)) {
       var inner = CastExpr(e, target.ValueType, n);
-      return new Expr(inner.Code, to);
+      // a bitfield never holds undefined bits
+      return new Expr(target.Bitfield ? $"(({CType(to)})({inner.Code} & {IntConstCode(target.Mask, target.ValueType)}))" : inner.Code, to);
     }
     if (enums.TryGetValue(e.Type, out var source)) {
       return CastExpr(new Expr(e.Code, source.ValueType), to, n);
@@ -1480,7 +1555,11 @@ public sealed partial class CodeGen {
     bool fromInt = IsInt(sourceType) || sourceType is "char" or "bool";
     if (fromInt && (IsInt(targetType) || targetType is "char")) {
       int bits = sourceType is "char" ? 32 : sourceType is "bool" ? 8 : Bits(sourceType);
-      return new Expr($"(({CType(targetType)})(uint{bits}_t)({e.Code}))", to);
+      string converted = $"(({CType(targetType)})(uint{bits}_t)({e.Code}))";
+      if (enums.TryGetValue(to, out var bitfield) && bitfield.Bitfield) {
+        converted = $"(({CType(targetType)})({converted} & {IntConstCode(bitfield.Mask, bitfield.ValueType)}))";
+      }
+      return new Expr(converted, to);
     }
     if (fromInt && targetType == "bool") {
       return new Expr($"(({e.Code}) != 0)", "bool");
@@ -1505,6 +1584,9 @@ public sealed partial class CodeGen {
       var p = Path(n.Children[0]);
       if (p == "String" && n.Text == "StringEncoding") {
         return "StringEncoding";   // String.StringEncoding.UTF16
+      }
+      if (p == "Root.IO" && IsEnum(n.Text!)) {
+        return n.Text;             // fs.StreamOpenMode.OpenExisting with alias Root.IO as fs
       }
       return p == null ? null : p + "." + n.Text;
     }
@@ -1557,8 +1639,11 @@ public sealed partial class CodeGen {
 
     string? path = Path(callee);
     if (path != null && scope.Find(path.Split('.')[0]) == null) {
-      if (path == "Root.Random.Shuffle") {
+      if (path == "Root.Random.shuffle") {
         return ShuffleCall(args, scope, n);
+      }
+      if (path.EndsWith(".tryParse") && TryParseCall(path, args, scope, n) is Expr tried) {
+        return tried;
       }
       if (Stdlib.TryGetValue(path, out var stdOverloads)) {
         return StdCall(path, stdOverloads, args, scope, n);
@@ -1601,8 +1686,11 @@ public sealed partial class CodeGen {
       }
       codes.Add(ArgCode(param, arg, scope));
     }
+    if (f.TakesMask) {
+      codes.Add(ObservedMask());
+    }
     string call = $"{f.CName}({string.Join(", ", codes)})";
-    return new Expr(failingFuns.Contains(f) ? CheckRaise(call, f.Ret) : call, f.Ret, IsClass(f.Ret) && (f.IsCtor || f.ReturnsOwned));
+    return new Expr(UserCallCode(f, call), f.Ret, IsClass(f.Ret) && (f.IsCtor || f.ReturnsOwned));
   }
 
   Expr MemberValue(Node n, Scope scope) {
@@ -1635,6 +1723,15 @@ public sealed partial class CodeGen {
       return ExceptionMember(obj, n.Text!, n);
     }
     if (IsClass(obj.Type)) {
+      // a read-only property of a library class: x.size calls its get_size()
+      var owner = ObjInfo(obj.Type);
+      // (a private field of the same name does not hide the property from outside the class: readMode of a stream)
+      var named = FindField(owner, n.Text!);
+      bool reachable = named != null && (named.Visibility != Vis.Private
+        || (currentClass != null && (currentClass == named.Owner || IsSubclass(currentClass.Name, named.Owner.Name))));
+      if (!reachable && LookupMethods(owner, "get_" + n.Text).Count > 0) {
+        return ObjectCall(obj, "get_" + n.Text, new List<Node>(), scope, n) ?? throw Error("no property", n);
+      }
       return TraitView(obj, n.Text!, n) ?? ObjectField(obj, n.Text!, n);   // x.TraitName, x.field
     }
     if (obj.Type == "string" && n.Text == "len") {

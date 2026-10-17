@@ -1,0 +1,1 @@
+ref_const_variable.df(3): error: 'fixed' is const and cannot be passed as (&)

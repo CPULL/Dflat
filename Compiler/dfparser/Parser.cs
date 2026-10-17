@@ -313,6 +313,11 @@ public sealed class Parser {
     if (IsKw("enum")) {
       return WithMods(ParseEnum(), mods);
     }
+    // bitfield32 Name { Flag: bitPosition, ... } (spec 3.1.1)
+    if (Peek.Kind == TokenKind.Ident && Peek.Text is "bitfield8" or "bitfield16" or "bitfield32" or "bitfield64"
+        && PeekAt(1).Kind == TokenKind.Ident) {
+      return WithMods(ParseEnum(), mods);
+    }
     // Generic Name { type, type, Set }: a named set of types (spec 11.3.6)
     if (Peek.Kind == TokenKind.Ident && Peek.Text == "Generic" && PeekAt(1).Kind == TokenKind.Ident && PeekAt(2).Is("{")) {
       return WithMods(ParseGenericSet(), mods);
@@ -1219,15 +1224,20 @@ public sealed class Parser {
   }
 
   // enum [ValueType] Name { A, B: value, ..., fun ... }
+  // bitfield32 Name { Flag: position, ... } is an Enum node with a Bitfield child (text: bitfield32)
   Node ParseEnum() {
     var t = Next();
     Node? valueType = null;
-    bool nameOnly = Peek.Kind == TokenKind.Ident && (PeekAt(1).Is("{") || PeekAt(1).Kind == TokenKind.Newline);
+    bool bitfield = t.Kind == TokenKind.Ident;
+    bool nameOnly = bitfield || Peek.Kind == TokenKind.Ident && (PeekAt(1).Is("{") || PeekAt(1).Kind == TokenKind.Newline);
     if (!nameOnly) {
       valueType = ParseType(false);
     }
     var name = ExpectIdent();
     var node = new Node("Enum", name, name.Text);
+    if (bitfield) {
+      node.Add(new Node("Bitfield", t, t.Text));
+    }
     if (valueType != null) {
       node.Add(new Node("ValueType", t).Add(valueType));
     }

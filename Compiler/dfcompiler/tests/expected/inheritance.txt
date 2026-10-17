@@ -1,0 +1,35 @@
+circle
+12
+I am a circle shape
+circle
+12
+I am a circle shape area 12
+I am a shape shape area 4
+I am a shape shape area 0
+I am a ring/circle shape area 12
+ring/circle
+2
+1
+3
+28
+circle;shape;shape;ring/circle;
+true
+false
+true
+true
+false
+false
+circle 2
+other shape
+other shape
+ring with depth 2
+2
+2
+2
+10
+9
+Square { label: shape, side: 3 }
+Ring { label: shape, radius: 1, hole: 0.5, ... }
+true
+false
+---- exit code 0 ----

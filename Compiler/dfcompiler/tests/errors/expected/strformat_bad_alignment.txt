@@ -1,0 +1,1 @@
+strformat_bad_alignment.df(1): error: invalid string format "a.": a needs <, ^ or >

@@ -1,0 +1,15 @@
+getUser: 1 ada
+forward id: 1
+stats(5): 10 2.5 true
+name = carl, level = 3
+after swap: x = 2, y = 1
+pair = (2, bob), pair.id = 2, pair.name = bob, pair.1 = bob
+changed pair = (20, bob!)
+plain = (20, bob!), equal: true
+widened = (3, 1.5)
+nested = (1, (true, z)), nested.inner.letter = z
+zero = (0, 0)
+literal equal: true, different: true
+maybePair = null
+maybePair = (4, 5), first = 4
+---- exit code 0 ----

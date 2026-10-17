@@ -1,0 +1,104 @@
+namespace safety2
+alias Root as r
+
+// classes, traits, constructors and statics with the two-slot return
+
+public class Shape {
+  public fun i64 area(i64 k) { k }                  // the base does not fail ...
+}
+public class Square : Shape {
+  override fun i64 area(i64 k) { 100 / k }          // ... this one can: the whole slot returns its exception
+}
+public class Flat : Shape {
+  override fun i64 area(i64 k) { 0 }
+}
+
+fun string describe(Shape s, i64 k) {
+  return "area " + s.area(k)
+  catch DivisionByZeroException { return "division by zero" }
+}
+r.Console.log(describe(Shape(), 0))                 // area 0
+r.Console.log(describe(Square(), 5))                // area 20
+r.Console.log(describe(Square(), 0))                // division by zero
+r.Console.log(describe(Flat(), 0))                  // area 0
+
+trait Measure {
+  fun i64 size(i64 k)
+}
+public class Wide : Measure {
+  override fun i64 size(i64 k) { k * 2 }
+}
+public class Thin : Measure {
+  override fun i64 size(i64 k) { 60 / k }
+}
+fun string measure(Measure m, i64 k) {
+  return "size " + m.size(k)
+  catch Exception e { return "failed: " + e.Message }
+}
+r.Console.log(measure(Wide(), 0))                   // size 0
+r.Console.log(measure(Thin(), 4))                   // size 15
+r.Console.log(measure(Thin(), 0))                   // failed: Division By Zero Exception
+
+// a constructor whose field initializer can fail
+public class Ratio(i64 top, i64 bottom) {
+  public i64 value = top / bottom
+}
+fun string ratio(i64 top, i64 bottom) {
+  Ratio q = Ratio(top, bottom)
+  return "ratio " + q.value
+  catch DivisionByZeroException { return "no ratio" }
+}
+r.Console.log(ratio(10, 2))                         // ratio 5
+r.Console.log(ratio(1, 0))                          // no ratio
+
+// an exception class, thrown through two levels and caught by its parent
+public class AppError : Exception { }
+public class DiskError(i64 code) : AppError { }
+fun fail(i64 code) {
+  if code > 0 then throw DiskError("disk", code)
+}
+fun middle(i64 code) {
+  fail(code)
+  r.Console.log("middle: no error")
+}
+fun string top(i64 code) {
+  middle(code)
+  return "top: ok"
+  catch AppError e { return "top caught " + e.Message }
+}
+r.Console.log(top(0))                               // middle: no error / top: ok
+r.Console.log(top(3))                               // top caught disk
+
+// a function with atEnd that fails
+public class Guard(string name) {
+} atEnd {
+  r.Console.log("guard released")
+}
+fun i64 guarded(i64 k) {
+  Guard g = Guard("g")
+  return 100 / k
+}
+fun string runGuarded(i64 k) {
+  return "guarded " + guarded(k)
+  catch DivisionByZeroException { return "guarded failed" }
+}
+r.Console.log(runGuarded(4))                        // guard released / guarded 25
+r.Console.log(runGuarded(0))                        // guard released / guarded failed
+
+// loops, switch and recursion
+fun i64 sumTo(i64 n) {
+  if n == 0 then return 0
+  return n + sumTo(n - 1)
+}
+fun i64 total(arr<i64> items) {
+  i64 sum = 0
+  for i64 item in items { sum += 100 / item }
+  return sum
+}
+r.Console.log(sumTo(10))                            // 55
+fun string safeTotal(arr<i64> items) {
+  return "total " + total(items)
+  catch DivisionByZeroException { return "zero in the list" }
+}
+r.Console.log(safeTotal([1, 2, 5]))                 // total 170
+r.Console.log(safeTotal([1, 0, 5]))                 // zero in the list

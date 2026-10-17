@@ -1,0 +1,3 @@
+arr<r32> s = [1.0]
+arr<i32> t = [1]
+s.copyFrom(0, t, 0, 1)

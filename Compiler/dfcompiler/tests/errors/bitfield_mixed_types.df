@@ -1,0 +1,3 @@
+bitfield32 F { A: 0 }
+bitfield8 G { A: 0 }
+F x = F.A | G.A

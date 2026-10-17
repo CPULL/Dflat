@@ -1207,5 +1207,43 @@ DF_PARSE_UNSIGNED(uint64_t, u64, 64)
 DF_PARSE_REAL(float, r32)
 DF_PARSE_REAL(double, r64)
 
+/* tryParse (spec 9): true and the value in *result, or false (result unchanged). A number that does not fit its type is a failure
+   here (C# TryParse), not a saturated value: the silent notes of parse are dropped. */
+#define DF_TRYPARSE(T, N, REAL, CONV) \
+static bool df_tryparse_##N##_f(df_string text, T* result, df_string fmt) { \
+  df_pv r; \
+  if (!df_np_run(text, fmt, &r, REAL)) { \
+    return false; \
+  } \
+  if (!REAL) { \
+    df_np_int_fix(&r); \
+  } \
+  const df_descriptor* saved = df_silent_desc; \
+  df_silent_desc = NULL; \
+  T value = (T)(CONV); \
+  bool fits = df_silent_desc == NULL; \
+  df_silent_desc = saved; \
+  if (fits) { \
+    *result = value; \
+  } \
+  return fits; \
+} \
+static bool df_tryparse_##N(df_string text, T* result) { \
+  df_string none = { "", 0 }; \
+  return df_tryparse_##N##_f(text, result, none); \
+}
+
+DF_TRYPARSE(int8_t, i8, false, df_np_signed(&r, 8))
+DF_TRYPARSE(int16_t, i16, false, df_np_signed(&r, 16))
+DF_TRYPARSE(int32_t, i32, false, df_np_signed(&r, 32))
+DF_TRYPARSE(int64_t, i64, false, df_np_signed(&r, 64))
+DF_TRYPARSE(uint8_t, u8, false, df_np_unsigned(&r, 8))
+DF_TRYPARSE(uint16_t, u16, false, df_np_unsigned(&r, 16))
+DF_TRYPARSE(uint32_t, u32, false, df_np_unsigned(&r, 32))
+DF_TRYPARSE(uint64_t, u64, false, df_np_unsigned(&r, 64))
+DF_TRYPARSE(float, r32, true, df_np_real(&r))
+DF_TRYPARSE(double, r64, true, df_np_real(&r))
+
+
 """;
 }

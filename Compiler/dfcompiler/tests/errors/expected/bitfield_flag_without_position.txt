@@ -1,0 +1,1 @@
+bitfield_flag_without_position.df(1): error: flag 'A' needs its bit position: A: 0

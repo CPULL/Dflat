@@ -1,0 +1,1 @@
+silent_trait_thrown.df(1): error: SilentException is a trait: throw an exception class

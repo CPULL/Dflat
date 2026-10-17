@@ -4,61 +4,61 @@ alias Root as r
 // no catch: the value falls back to null and nothing is raised
 fun nothingCaught() {
   date a = date("not a date")
-  r.Console.Log(a == null)
+  r.Console.log(a == null)
   time none = time(-1)
-  r.Console.Log(none == null)
+  r.Console.log(none == null)
   time big = (time)90000000
-  r.Console.Log(big == null)
+  r.Console.log(big == null)
 }
 
 // a plain catch does not handle a silent exception
 fun plainCatch() {
   date b = date("bad")
-  r.Console.Log(b == null)
+  r.Console.log(b == null)
   catch ex {
-    r.Console.Log("wrong: catch ex must not see a silent exception")
+    r.Console.log("wrong: catch ex must not see a silent exception")
   }
 }
 
 // a catch for its own type does (it covers the statements above it)
 fun ownType() {
   date c = date("still bad")
-  r.Console.Log("not printed when raised")
+  r.Console.log("not printed when raised")
   catch InvalidDateTimeFormatException ex {
-    r.Console.Log("caught: " + ex.Message)
+    r.Console.log("caught: " + ex.Message)
   }
 }
 
 fun otherType() {
   time late = time(90000000)
-  r.Console.Log("not printed either")
+  r.Console.log("not printed either")
   catch OutOfRangeCastException ex {
-    r.Console.Log("caught: " + ex.Message)
+    r.Console.log("caught: " + ex.Message)
   }
 }
 
 // the other silent exception is not handled by a catch for a different one
 fun wrongType() {
   date d = date("bad again")
-  r.Console.Log(d == null)
+  r.Console.log(d == null)
   catch OutOfRangeCastException {
-    r.Console.Log("wrong: different exception")
+    r.Console.log("wrong: different exception")
   }
 }
 
 fun catchAll() {
   time t = (time)(-3)
-  r.Console.Log("skipped")
+  r.Console.log("skipped")
   catch all {
-    r.Console.Log("catch all sees it")
+    r.Console.log("catch all sees it")
   }
 }
 
 fun valid() {
   date fine = date("2024-02-02")
-  r.Console.Log(fine)
+  r.Console.log(fine)
   catch InvalidDateTimeFormatException {
-    r.Console.Log("wrong: valid date")
+    r.Console.log("wrong: valid date")
   }
 }
 
@@ -77,5 +77,5 @@ otherType()
 wrongType()
 catchAll()
 valid()
-r.Console.Log(safe("08:15"))
-r.Console.Log(safe("garbage"))
+r.Console.log(safe("08:15"))
+r.Console.log(safe("garbage"))

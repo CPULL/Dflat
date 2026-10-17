@@ -1,0 +1,15 @@
+both: A's who / B's who / AB
+both: A's who / B's who / AB
+both: A's who / B's who / AB
+A
+B
+changed
+A
+only A
+A's who
+B's who
+A's who
+A
+101
+100
+---- exit code 0 ----

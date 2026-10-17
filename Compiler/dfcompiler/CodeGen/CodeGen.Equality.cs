@@ -107,6 +107,7 @@ public sealed partial class CodeGen {
       Visibility = Vis.Public
     };
     equalsInstances[(definer, type)] = f;
+    failingFuns.Add(f);   // the copies of equals return their exception: the tables and the calls rely on one signature
     pendingInstances.Add(f);
     return f;
   }
@@ -153,10 +154,12 @@ public sealed partial class CodeGen {
   }
 
   // null is handled here: equals and == never receive null
-  string NullGuarded(string left, string right, string rightType, string call) {
+  // pair: the call returns its result with its exception, so the answers decided here are returned the same way
+  string NullGuarded(string left, string right, string rightType, string call, bool pair) {
+    string Answer(string value) => pair ? $"({ResultPair("bool")}){{ {value}, NULL }}" : value;
     return IsClass(rightType)
-      ? $"(({left} == NULL || {right} == NULL) ? ((const void*){left} == (const void*){right}) : {call})"
-      : $"({left} == NULL ? false : {call})";
+      ? $"(({left} == NULL || {right} == NULL) ? {Answer($"((const void*){left} == (const void*){right})")} : {call})"
+      : $"({left} == NULL ? {Answer("false")} : {call})";
   }
 
   string EqualsByTable(Expr l, Expr r, ClassInfo cls) {
@@ -164,9 +167,9 @@ public sealed partial class CodeGen {
     string left = NewTemp();
     string right = NewTemp();
     string valueType = CType(r.Type);
-    string call = $"((bool(*)(void*, {valueType}))({table}[{left}->cls->id - 256]))((void*){left}, {right})";
-    string code = $"({{ {CType(cls.Name)} {left} = {l.Code}; {valueType} {right} = {r.Code}; {NullGuarded(left, right, r.Type, call)}; }})";
-    return CheckRaise(code, "bool");
+    string call = $"(({ResultPair("bool")}(*)(void*, {valueType}))({table}[{left}->cls->id - 256]))((void*){left}, {right})";
+    string code = $"({{ {CType(cls.Name)} {left} = {l.Code}; {valueType} {right} = {r.Code}; {NullGuarded(left, right, r.Type, call, true)}; }})";
+    return PairCheck(code, "bool");
   }
 
   string EqualsByOperator(Expr l, Expr r, ClassInfo cls, FunSig op) {
@@ -177,12 +180,12 @@ public sealed partial class CodeGen {
     string declarer = CType(op.Class!.Name);
     string call;
     if (op.Root.GroupSize > 0) {
-      call = $"((bool(*)({declarer}, {CType(paramType)}))({left}->cls->vtable[{op.Slot}]))(({declarer}){left}, {argument})";
+      call = $"(({RetCType(op)}(*)({declarer}, {CType(paramType)}))({left}->cls->vtable[{op.Slot}]))(({declarer}){left}, {argument})";
     } else {
       call = $"{op.CName}(({declarer}){left}, {argument})";
     }
-    string code = $"({{ {CType(cls.Name)} {left} = {l.Code}; {CType(r.Type)} {right} = {r.Code}; {NullGuarded(left, right, r.Type, call)}; }})";
-    return failingFuns.Contains(op) ? CheckRaise(code, "bool") : code;
+    string code = $"({{ {CType(cls.Name)} {left} = {l.Code}; {CType(r.Type)} {right} = {r.Code}; {NullGuarded(left, right, r.Type, call, PairReturn(op))}; }})";
+    return PairReturn(op) ? PairCheck(code, "bool") : failingFuns.Contains(op) ? CheckRaise(code, "bool") : code;
   }
 
   // if T is type ... : decided now, while the copy of equals for this T is compiled
@@ -232,9 +235,9 @@ public sealed partial class CodeGen {
       var entries = new List<string>();
       foreach (var cls in ordered) {
         var definer = FindEqualsClass(cls);
-        entries.Add(definer == null ? "NULL" : $"(bool(*)(void*, {valueType})){equalsInstances[(definer, type)].CName}");
+        entries.Add(definer == null ? "NULL" : $"({ResultPair("bool")}(*)(void*, {valueType})){equalsInstances[(definer, type)].CName}");
       }
-      classCode.Append($"static bool (*const df_eqt_{SanitizeName(type)}[])(void*, {valueType}) = {{ {string.Join(", ", entries)} }};\n");
+      classCode.Append($"static {ResultPair("bool")} (*const df_eqt_{SanitizeName(type)}[])(void*, {valueType}) = {{ {string.Join(", ", entries)} }};\n");
     }
     classCode.Append('\n');
   }

@@ -1,0 +1,23 @@
+a: letter alnum lower hex ascii
+Z: letter alnum upper ascii
+7: digit alnum hex ascii
+f: letter alnum lower hex ascii
+g: letter alnum lower ascii
+space: space ascii
+!: punct ascii
++: symbol ascii
+$: symbol ascii
+tab: space control ascii
+é: letter alnum lower
+Ω: letter alnum upper
+٣: digit alnum
+€: symbol
+nbsp: space
+中: letter alnum
+A
+q
+É
+σ
+1
+A
+---- exit code 0 ----

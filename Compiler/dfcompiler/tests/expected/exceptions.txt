@@ -1,0 +1,25 @@
+ok
+app [app failed]
+network 503: net down
+timeout unknown: too slow
+app []
+network 7: 
+any: net down id>=256: true
+any: too slow id>=256: true
+timeout/unknown
+network/503
+other
+q=5
+division
+wrapped ok
+outer network 503
+outer timeout unknown
+continued
+continued
+own type: c
+by trait: alert
+catch all
+silent standard
+unhandled network
+Panic -1000
+---- exit code -1000 ----

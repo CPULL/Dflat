@@ -1,0 +1,1 @@
+copyfrom_bad_arguments.df(3): error: copyFrom takes (dstIndex, source, srcIndex, count) or (dstIndex, source, range)

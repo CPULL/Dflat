@@ -236,6 +236,9 @@ public sealed partial class CodeGen {
         if (cls.PrimaryParams.Any(existing => existing.Name == p.Text)) {
           throw Error($"duplicate parameter '{p.Text}'", p);
         }
+        if (p.Kind is "RefParam" or "WritableRefParam") {
+          throw NotSupported("Reference parameters on constructors", p);
+        }
         if (IsClass(type) && p.Kind != "GiftParam") {
           throw Error($"the object '{p.Text}' goes into a field of {cls.Name}, which owns it: write ->{type} {p.Text}", p);
         }
@@ -577,7 +580,11 @@ public sealed partial class CodeGen {
       sb.Append($"  {field.CName} = {ZeroValue(field.Type)};\n");
     }
     foreach (var field in staticOrder.Where(field => field.StaticInit != null)) {
-      sb.Append($"  {field.StaticInit!.CName}();\n  if (df_err) {{\n    df_panic_unhandled();\n  }}\n");
+      if (PairReturn(field.StaticInit!)) {
+        sb.Append($"  {{\n    df_exception* error = {field.StaticInit!.CName}();\n    if (error) {{\n      df_panic_unhandled(error);\n    }}\n  }}\n");
+      } else {
+        sb.Append($"  {field.StaticInit!.CName}();\n");
+      }
     }
     return sb.ToString();
   }
@@ -717,11 +724,74 @@ public sealed partial class CodeGen {
       }
       codes.Add(ArgCode(param, arg, scope));
     }
+    if (f.TakesMask) {
+      codes.Add(ObservedMask());
+    }
     return codes;
+  }
+
+  // &T x gets the address of a variable, or of a temporary holding the value; (&)T x gets the address of a variable, a field or an
+  // array item, written (&)x in the call
+  string ReferenceArg(ParamSig param, Node arg, Scope scope) {
+    if (param.Ref == 2) {
+      if (arg.Kind != "WritableAddressOf") {
+        throw Error($"'{param.Name}' is written by the function: pass it as (&)variable", arg);
+      }
+      return WritableAddress(arg.Children[0], scope, param.Type, arg);
+    }
+    if (arg.Kind == "WritableAddressOf") {
+      throw Error($"'{param.Name}' is a read-only reference: remove the (&)", arg);
+    }
+    var value = ExprOf(arg, scope, param.Type);
+    string code = Convert(value, param.Type, arg);
+    if (arg.Kind == "Name" && value.Type == param.Type && scope.Find(arg.Text!) is VarInfo variable) {
+      ReadCheck(variable, arg.Text!, arg);
+      return "&" + variable.CName;
+    }
+    return $"((const {CType(param.Type)}[1]){{ {code} }})";
+  }
+
+  // the C address of what (&)x names; the type must be the one of the parameter
+  string WritableAddress(Node target, Scope scope, string type, Node at) {
+    if (target.Kind == "Index") {
+      var obj = ExprOf(target.Children[0], scope);
+      if (!IsArr(obj.Type) || target.Children[0].Kind == "GenericRef") {
+        throw Error("(&) needs a variable, a field or an array item", at);
+      }
+      if (ArrElem(obj.Type) != type) {
+        throw Error($"the parameter is a {type}, not a {ArrElem(obj.Type)}", at);
+      }
+      var index = ExprOf(target.Children[1], scope, "u64");
+      string array = NewTemp();
+      string position = NewTemp();
+      return $"({{ {CType(obj.Type)} {array} = {obj.Code}; uint64_t {position} = {IndexValue(index, target)}; "
+        + $"if (!df_idx_ok({array}.len, {position}, {fn!.NameConst})) {RaiseJump} &{array}.p[{position}]; }})";
+    }
+    var lvalue = LValue(target, scope);
+    if (lvalue.IsConst) {
+      throw Error($"'{target.Text}' is const and cannot be passed as (&)", at);
+    }
+    if (lvalue.Type != type) {
+      throw Error($"the parameter is a {type}, but '{target.Text}' is a {lvalue.Type}", at);
+    }
+    MarkAssigned(lvalue.Variable);
+    return "&" + lvalue.Code;
   }
 
   // one argument: an object given to a parameter written ->T moves (the call writes ->x); the others only borrow
   string ArgCode(ParamSig param, Node arg, Scope scope) {
+    if (IsByPointer(param)) {
+      return ReferenceArg(param, arg, scope);
+    }
+    if (param.Ref == 2 && IsClass(param.Type)) {
+      // (&)Item o: the object is already a pointer; the call still writes (&)o
+      if (arg.Kind != "WritableAddressOf") {
+        throw Error($"'{param.Name}' is a writable borrow: pass it as (&)object", arg);
+      }
+      arg = arg.Children[0];
+    } else if (arg.Kind == "WritableAddressOf") {
+      throw Error($"'{param.Name}' is not a (&) parameter: remove the (&)", arg);
+    }
     var value = ExprOf(arg, scope, param.Type);
     if (IsClass(param.Type)) {
       if (param.IsGift && !value.Fresh && value.Type != "null") {
@@ -761,13 +831,15 @@ public sealed partial class CodeGen {
         // a function of a trait: the class of the object says which function answers
         string temp = NewTemp();
         var paramTypes = new List<string> { "void*" };
-        paramTypes.AddRange(chosen.Params.Select(param => CType(param.Type)));
+        paramTypes.AddRange(chosen.Params.Select(param => ParamCType(param)));
+        if (chosen.TakesMask) {
+          paramTypes.Add("uint64_t");
+        }
         codes.Insert(0, temp);
-        call = $"({{ void* {temp} = (void*)({self}); (({CType(chosen.Ret)}(*)({string.Join(", ", paramTypes)}))"
+        call = $"({{ void* {temp} = (void*)({self}); (({RetCType(chosen)}(*)({string.Join(", ", paramTypes)}))"
           + $"(df_impl_of({temp}, &df_trait_{chosen.Class.Name})->methods[{chosen.TSlot}]))({string.Join(", ", codes)}); }})";
-        bool anyFails = failingFuns.Any(other => other.Class != null && !other.IsStatic
-          && other.Name.EndsWith("." + name) && ParamTypes(other).SequenceEqual(ParamTypes(chosen)));
-        return new Expr(anyFails ? CheckRaise(call, chosen.Ret) : call, chosen.Ret, IsClass(chosen.Ret) && chosen.ReturnsOwned);
+        // the trait function and its implementations are one group (same name and parameters): they fail together
+        return new Expr(UserCallCode(chosen, call), chosen.Ret, IsClass(chosen.Ret) && chosen.ReturnsOwned);
       }
       if (!virtualCall) {
         codes.Insert(0, $"(({declarer}){self})");
@@ -775,12 +847,15 @@ public sealed partial class CodeGen {
       } else {
         string temp = NewTemp();
         var paramTypes = new List<string> { CType(chosen.Class!.Name) };
-        paramTypes.AddRange(chosen.Params.Select(param => CType(param.Type)));
+        paramTypes.AddRange(chosen.Params.Select(param => ParamCType(param)));
+        if (chosen.TakesMask) {
+          paramTypes.Add("uint64_t");
+        }
         codes.Insert(0, $"(({declarer}){temp})");
-        call = $"({{ {CType(cls.Name)} {temp} = {self}; (({CType(chosen.Ret)}(*)({string.Join(", ", paramTypes)}))({temp}->cls->vtable[{chosen.Slot}]))({string.Join(", ", codes)}); }})";
+        call = $"({{ {CType(cls.Name)} {temp} = {self}; (({RetCType(chosen)}(*)({string.Join(", ", paramTypes)}))({temp}->cls->vtable[{chosen.Slot}]))({string.Join(", ", codes)}); }})";
       }
     }
-    return new Expr(failingFuns.Contains(chosen) ? CheckRaise(call, chosen.Ret) : call, chosen.Ret, IsClass(chosen.Ret) && chosen.ReturnsOwned);
+    return new Expr(UserCallCode(chosen, call), chosen.Ret, IsClass(chosen.Ret) && chosen.ReturnsOwned);
   }
 
   // x.name(args) on an object, or name(args) inside a method
@@ -946,8 +1021,17 @@ public sealed partial class CodeGen {
     if (cls.IsException) {
       sb.Append($"  self->descriptor = &df_desc_{cls.Name};\n  self->id = df_desc_{cls.Name}.id;\n");
     }
-    sb.Append($"  {cls.Init!.CName}({callArgs});\n");
-    sb.Append("  if (df_err) {\n    return NULL;\n  }\n  return self;\n}\n");
+    // a constructor returns the object with its exception when the init functions can let one out
+    string initCall = $"{cls.Init!.CName}({callArgs})";
+    if (PairReturn(cls.Init)) {
+      sb.Append($"  df_exception* error = {initCall};\n");
+      sb.Append(PairReturn(ctor)
+        ? $"  if (error) {{\n    return ({ResultPair(CType(cls.Name))}){{ NULL, error }};\n  }}\n"
+        : "  if (error) {\n    df_panic_unhandled(error);\n  }\n");
+    } else {
+      sb.Append($"  {initCall};\n");
+    }
+    sb.Append(PairReturn(ctor) ? $"  return ({ResultPair(CType(cls.Name))}){{ self, NULL }};\n}}\n" : "  return self;\n}\n");
     return sb.ToString();
   }
 
@@ -960,8 +1044,13 @@ public sealed partial class CodeGen {
     }
     if (cls.Parent != null) {
       string forwarded = cls.Parent.IsException ? ", v_message" : "";
-      sb.Append($"  {cls.Parent.Init!.CName}(({CType(cls.Parent.Name)})self{forwarded});\n");
-      sb.Append($"  if (df_err) {{ df_err_thrown = false; goto {fn!.FailLabel}; }}\n");
+      string parentInit = $"{cls.Parent.Init!.CName}(({CType(cls.Parent.Name)})self{forwarded})";
+      if (PairReturn(cls.Parent.Init)) {
+        sb.Append($"  df_err = {parentInit};\n");
+        sb.Append($"  if (df_err) {{ df_err_thrown = false; goto {fn!.FailLabel}; }}\n");
+      } else {
+        sb.Append($"  {parentInit};\n");
+      }
     }
     var ownFields = IntroducedTraits(cls).SelectMany(trait => trait.Fields).Concat(cls.Fields).Where(field => !field.IsStatic);
     foreach (var field in ownFields) {

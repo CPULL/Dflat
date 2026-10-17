@@ -1,0 +1,1 @@
+bitfield_mixed_types.df(3): error: cannot apply '|' to F and G

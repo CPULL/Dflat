@@ -36,12 +36,12 @@ fun string Try(i32 kind) {
     return "app [" + ex.Message + "]"
   }
 }
-r.Console.Log(Try(0))
-r.Console.Log(Try(1))
-r.Console.Log(Try(2))
-r.Console.Log(Try(3))
-r.Console.Log(Try(4))
-r.Console.Log(Try(5))
+r.Console.log(Try(0))
+r.Console.log(Try(1))
+r.Console.log(Try(2))
+r.Console.log(Try(3))
+r.Console.log(Try(4))
+r.Console.log(Try(5))
 
 // the base class catches the children; the properties of every exception
 fun string Describe(i32 kind) {
@@ -51,8 +51,8 @@ fun string Describe(i32 kind) {
     return "any: " + ex.Message + " id>=256: " + (ex.Id >= 256)
   }
 }
-r.Console.Log(Describe(2))
-r.Console.Log(Describe(3))
+r.Console.log(Describe(2))
+r.Console.log(Describe(3))
 
 // is, and the exception as the base type
 fun string Which(i32 kind) {
@@ -64,9 +64,9 @@ fun string Which(i32 kind) {
     return "other"
   }
 }
-r.Console.Log(Which(3))
-r.Console.Log(Which(2))
-r.Console.Log(Which(1))
+r.Console.log(Which(3))
+r.Console.log(Which(2))
+r.Console.log(Which(1))
 
 // standard exceptions are caught by the same mechanism
 fun string Divide(i32 d) {
@@ -79,8 +79,8 @@ fun string Divide(i32 d) {
     return "never"
   }
 }
-r.Console.Log(Divide(2))
-r.Console.Log(Divide(0))
+r.Console.log(Divide(2))
+r.Console.log(Divide(0))
 
 // rethrow of a caught exception object, and a throw inside a catch
 fun Wrap(i32 kind) {
@@ -99,11 +99,11 @@ fun string Outer(i32 kind) {
     return "outer network " + ex.code
   }
 }
-r.Console.Log(Outer(0))
-r.Console.Log(Outer(2))
-r.Console.Log(Outer(3))
+r.Console.log(Outer(0))
+r.Console.log(Outer(2))
+r.Console.log(Outer(3))
 
-// silent exceptions: raised only when a catch can handle them
+// silent exceptions: they leave a function only when a catch of its caller handles them (catch Exception included)
 fun Alarm(string text) {
   throw AlertException("alert", text)
 }
@@ -119,8 +119,8 @@ fun string CatchPlain() {
     return "caught by plain catch (wrong)"
   }
 }
-r.Console.Log(NoCatch())
-r.Console.Log(CatchPlain())
+r.Console.log(NoCatch())
+r.Console.log(CatchPlain())
 
 fun string CatchOwn() {
   throw AlertException("alert", "c")
@@ -143,9 +143,9 @@ fun string CatchAll() {
     return "catch all"
   }
 }
-r.Console.Log(CatchOwn())
-r.Console.Log(CatchTrait())
-r.Console.Log(CatchAll())
+r.Console.log(CatchOwn())
+r.Console.log(CatchTrait())
+r.Console.log(CatchAll())
 
 // a silent standard exception is caught by the trait too
 fun string Standard() {
@@ -155,7 +155,7 @@ fun string Standard() {
     return "silent standard"
   }
 }
-r.Console.Log(Standard())
+r.Console.log(Standard())
 
 // an unhandled exception object ends the program with its message
 throw NetworkException("unhandled network", 1)

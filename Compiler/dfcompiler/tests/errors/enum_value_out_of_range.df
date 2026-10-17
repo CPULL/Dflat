@@ -1,0 +1,1 @@
+enum u8 Level { Low: 300 }

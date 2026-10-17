@@ -1,0 +1,45 @@
+10
+12
+14
+counter-a
+34
+4
+100
+7
+11
+1
+100
+50
+counter-z
+42
+false
+true
+true
+true
+false
+false
+Ann 30
+true
+0
+true
+true
+Bob
+true
+2020-01-02T00:00:00.000Z
+3
+true
+Ann
+true
+31
+true
+caught: Null Pointer Exception
+3
+Empty {}
+Counter { start: 0, label: z, increment: 2, ... }
+Person { name: Ann, age: 30, partner: Person{}, ... }
+null
+p is Person { name: Bob, age: 31, partner: null, ... }
+B
+A:1
+2
+---- exit code 0 ----

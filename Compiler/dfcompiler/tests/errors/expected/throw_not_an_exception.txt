@@ -1,0 +1,1 @@
+throw_not_an_exception.df(2): error: Plain is not an exception class: derive it from Exception

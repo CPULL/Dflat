@@ -1,0 +1,103 @@
+namespace safety
+alias Root as r
+
+// pure, safe and failing functions (EXCEPTIONS: THE MODEL, stage 1); the C signatures are checked by the test runner of the notes
+
+fun i64 pureAdd(i64 a, i64 b) { a + b }                     // PURE: raises nothing
+
+fun i64 safeDivide(i64 a, i64 b) {                          // SAFE: the division raises, the catch handles it, nothing leaves
+  return a / b
+  catch DivisionByZeroException { return 1 }
+}
+
+fun i64 sinkhole(i64 a, i64 b) {                            // SAFE: catch Exception handles everything
+  return a / b
+  catch Exception e { return -1 }
+}
+
+fun i64 wrongCatch(i64 a, i64 b) {                          // FAILING: the catch is for another class
+  return a / b
+  catch IndexOutOfRangeException { return 2 }
+}
+
+fun i64 plainDivide(i64 a, i64 b) { a / b }                 // FAILING
+
+fun i64 rethrows(i64 a, i64 b) {                            // FAILING: the catch throws again
+  return a / b
+  catch DivisionByZeroException ex { throw ex }
+}
+
+fun i64 callsSafe(i64 a, i64 b) { safeDivide(a, b) + 1 }    // SAFE: it only calls safe functions
+
+fun i64 callsFailing(i64 a, i64 b) { plainDivide(a, b) + 1 } // FAILING
+
+fun i64 handlesCallee(i64 a, i64 b) {                       // SAFE: the exception of the callee is handled here
+  return plainDivide(a, b) + 1
+  catch DivisionByZeroException { return 100 }
+}
+
+fun i64 indexes(arr<i64> items, i64 at) { items[at] }       // FAILING: IndexOutOfRangeException can leave
+
+fun i64 guardedIndex(arr<i64> items, i64 at) {              // SAFE
+  return items[at]
+  catch IndexOutOfRangeException { return -1 }
+}
+
+fun i64 partlyHandled(i64 a, arr<i64> items) {              // FAILING: the division is handled, the index is not
+  i64 q = 0
+  q = 10 / a
+  return items[q]
+  catch DivisionByZeroException { return 0 }
+}
+
+fun nested(i64 a) {                                         // SAFE: the inner catch handles the inner division, the outer one the rest
+  i64 x = 1
+  if a > 0 {
+    x = 10 / a
+    catch DivisionByZeroException { x = 7 }
+  }
+  r.Console.log($"nested {a}: {x}")
+}
+
+fun i64 userThrow(i64 a) {                                  // FAILING: throws a standard exception
+  if a < 0 then throw Exception("negative")
+  return a
+}
+
+fun string wrapped(i64 a) {                                 // SAFE: handles what userThrow throws
+  return "ok " + userThrow(a)
+  catch Exception e { return "caught " + e.Message }
+}
+
+r.Console.log(pureAdd(2, 3))                                // 5
+r.Console.log(safeDivide(10, 0))                            // 1
+r.Console.log(safeDivide(10, 2))                            // 5
+r.Console.log(sinkhole(1, 0))                               // -1
+r.Console.log(callsSafe(9, 3))                              // 4
+r.Console.log(callsSafe(9, 0))                              // 2
+r.Console.log(handlesCallee(8, 2))                          // 5
+r.Console.log(handlesCallee(8, 0))                          // 100
+r.Console.log(guardedIndex([1, 2, 3], 1))                   // 2
+r.Console.log(guardedIndex([1, 2, 3], 9))                   // -1
+nested(2)                                                   // nested 2: 5
+nested(0)                                                   // nested 0: 1
+r.Console.log(wrapped(5))                                   // ok 5
+r.Console.log(wrapped(-1))                                  // caught negative
+
+fun string outer(i64 a, i64 b) {
+  return "outer " + plainDivide(a, b)
+  catch DivisionByZeroException ex { return "outer caught " + ex.Message }
+}
+fun string outer2(i64 a, i64 b) {
+  return "outer2 " + rethrows(a, b)
+  catch DivisionByZeroException ex { return "outer2 caught " + ex.Message }
+}
+fun string outer3(arr<i64> items) {
+  return "outer3 " + partlyHandled(1, items)
+  catch IndexOutOfRangeException ex { return "outer3 caught " + ex.Message }
+}
+r.Console.log(outer(4, 2))                                  // outer 2
+r.Console.log(outer(4, 0))                                  // outer caught Division By Zero Exception
+r.Console.log(outer2(4, 0))                                 // outer2 caught Division By Zero Exception
+r.Console.log(outer3([5, 6]))                               // outer3 caught Index Out Of Range Exception
+r.Console.log(wrongCatch(1, 0))                             // never reached: the exception leaves wrongCatch

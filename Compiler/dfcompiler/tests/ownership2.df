@@ -4,14 +4,14 @@ alias Root as r
 public class Engine(string model) {
   public string model
 } atEnd {
-  r.Console.Log("  engine " + model + " stops")
+  r.Console.log("  engine " + model + " stops")
 }
 
 public class Car(->Engine engine, string plate) {
   public Engine engine
   public string plate
 } atEnd {
-  r.Console.Log("  car " + plate + " parked")
+  r.Console.log("  car " + plate + " parked")
 }
 
 trait Shape {
@@ -20,12 +20,12 @@ trait Shape {
 public class Square : Shape {
   override fun string Name() { "square" }
 } atEnd {
-  r.Console.Log("  square ends")
+  r.Console.log("  square ends")
 }
 public class Circle : Shape {
   override fun string Name() { "circle" }
 } atEnd {
-  r.Console.Log("  circle ends")
+  r.Console.log("  circle ends")
 }
 
 fun Shape pick(bool square) {
@@ -33,33 +33,33 @@ fun Shape pick(bool square) {
   return Circle()
 }
 
-r.Console.Log("a constructor takes the object")
+r.Console.log("a constructor takes the object")
 {
   Engine e = Engine("v8")
   Car car = Car(->e, "AB-1")
-  r.Console.Log("  e is null after the move: " + (e == null))
-  r.Console.Log("  car has " + car.engine.model)
+  r.Console.log("  e is null after the move: " + (e == null))
+  r.Console.log("  car has " + car.engine.model)
 }
 
-r.Console.Log("trait values")
+r.Console.log("trait values")
 {
   Shape s1 = pick(true)
   Shape s2 = pick(false)
-  r.Console.Log("  " + s1.Name() + " and " + s2.Name())
+  r.Console.log("  " + s1.Name() + " and " + s2.Name())
 }
 
-r.Console.Log("a result nobody keeps ends at once")
+r.Console.log("a result nobody keeps ends at once")
 pick(true)
-r.Console.Log("  after the statement")
+r.Console.log("  after the statement")
 
-r.Console.Log("a dead object")
+r.Console.log("a dead object")
 Square sq = Square()
 Square view = sq
 sq is atEnd.
-r.Console.Log("  the owner is null: " + (sq == null))
+r.Console.log("  the owner is null: " + (sq == null))
 i32 caught = 0
-r.Console.Log(view.Name())
+r.Console.log(view.Name())
 catch NullPointerException {
   caught += 1
 }
-r.Console.Log("  the borrow found the object dead: " + caught)
+r.Console.log("  the borrow found the object dead: " + caught)

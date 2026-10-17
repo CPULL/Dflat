@@ -1,0 +1,1 @@
+sort_objects.df(3): error: sort cannot order Box yet (objects and tuples need a comparer)

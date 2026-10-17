@@ -1,0 +1,24 @@
+classify(0) = other
+classify(1) = one
+classify(2) = two
+classify(3) = three to five
+classify(4) = three to five
+classify(5) = three to five
+classify(6) = other
+walk(1) = 1 3 
+walk(2) = 2 default 
+green, then...
+blue
+jumped to #after#
+loop stopped at 4, seen = 4
+next(0) is 1
+0: odd = false, name = zero
+1: odd = true, name = one
+2: odd = false, name = many
+3: odd = true, name = many
+flag ? yes/no = yes
+count ? = none
+hue = natural
+wide = 1
+mixed = 1
+---- exit code 0 ----

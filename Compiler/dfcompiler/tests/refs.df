@@ -1,0 +1,122 @@
+namespace refs
+alias Root as r
+
+// writable reference: the call writes (&)x
+fun increment((&)i32 value) {
+  value += 1
+}
+fun swap((&)i32 a, (&)i32 b) {
+  i32 saved = a
+  a = b
+  b = saved
+}
+fun bool divide(i32 top, i32 bottom, (&)i32 quotient, (&)i32 remainder) {
+  if bottom == 0 then return false
+  quotient = top / bottom
+  remainder = top % bottom
+  return true
+}
+fun shout((&)string text) {
+  text = text.toUpper() + "!"
+}
+fun fillAll((&)arr<i32> items, i32 value) {
+  items.fill(value)
+}
+fun maybe((&)i32? slot) {
+  slot = 5
+}
+fun add((&)r64 total, r64 amount) { total += amount }
+
+i32 counter = 10
+increment((&)counter)
+increment((&)counter)
+r.Console.log(counter)                                   // 12
+
+i32 left = 1
+i32 right = 2
+swap((&)left, (&)right)
+r.Console.log($"{left} {right}")                         // 2 1
+
+i32 q
+i32 rest
+bool ok = divide(17, 5, (&)q, (&)rest)
+r.Console.log($"{ok}: {q} remainder {rest}")             // true: 3 remainder 2
+ok = divide(1, 0, (&)q, (&)rest)
+r.Console.log($"{ok}: still {q} and {rest}")             // false: still 3 and 2
+
+string word = "hello"
+shout((&)word)
+r.Console.log(word)                                      // HELLO!
+
+arr<i32> numbers = [1, 2, 3]
+fillAll((&)numbers, 7)
+r.Console.log(numbers)                                   // [7, 7, 7]
+increment((&)numbers[1])
+increment((&)numbers[1])
+r.Console.log(numbers)                                   // [7, 9, 7]
+
+i32? holder
+maybe((&)holder)
+r.Console.log(holder)                                    // 5
+
+r64 sum = 0.5
+add((&)sum, 1.25)
+add((&)sum, 2.0)
+r.Console.log(sum)                                       // 3.75
+
+// the reference parameter passes on to another function
+fun twice((&)i32 value) {
+  increment((&)value)
+  increment((&)value)
+}
+twice((&)counter)
+r.Console.log(counter)                                   // 14
+
+// a field, a tuple field and a class field
+public class Box(i32 size) {
+  public i32 size
+  public string label = "box"
+  public fun grow() {
+    increment((&)size)
+  }
+}
+Box box = Box(3)
+increment((&)box.size)
+box.grow()
+shout((&)box.label)
+r.Console.log($"{box.size} {box.label}")                 // 5 BOX!
+
+(i32 a, i32 b) pair = (1, 2)
+increment((&)pair.a)
+r.Console.log($"{pair.a} {pair.b}")                      // 2 2
+
+// read-only references: no copy, no marker in the call
+fun i32 total(&arr<i32> items) {
+  i32 sum = 0
+  for i32 item in items { sum += item }
+  return sum
+}
+fun string describe(&string text, &i32 times) {
+  return text + "x" + times
+}
+r.Console.log(total(numbers))                            // 23
+r.Console.log(describe(word, counter))                   // HELLO!x14
+r.Console.log(describe("literal", 3 + 4))                // literalx7  (a temporary holds the value)
+fun i32 fromDefault(&i32 value = 40) { value + 2 }
+r.Console.log(fromDefault())                             // 42
+r.Console.log(fromDefault(counter))                      // 16
+
+// overloads and named arguments
+fun kind(i32 value) { r.Console.log("by value") }
+fun kind((&)string text) { r.Console.log("by reference") }
+kind(5)                                                  // by value
+kind((&)word)                                            // by reference
+swap(b: (&)left, a: (&)right)
+r.Console.log($"{left} {right}")                         // 1 2  (swapped back; the names a and b can come in any order)
+
+// errors it should give (one at a time):
+// increment(counter)                    'value' is written by the function: pass it as (&)variable
+// total((&)numbers)                     'items' is a read-only reference: remove the (&)
+// increment((&)3)                       only variables ... can be assigned
+// const i32 fixed = 1  increment((&)fixed)    'fixed' is const and cannot be passed as (&)
+// string text  increment((&)text)       the parameter is a i32, but 'text' is a string

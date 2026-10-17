@@ -377,3 +377,358 @@ CHOICES where the spec is short or unclear
   compile time when it is a literal, otherwise the default is returned.
 - parse signature: parse(text, default = 0, format = none), also parse(text, format) as a named form (text:, default:, format:).
   A second argument that is a string is the format.
+
+
+Bitfields and Root.IO enums (spec 3.1.1, 17.6.4, 15.3)
+STATE (2026-10-17): built and tested with dfcompiler/tests/bitfields.df (the expected text of the lines is in comments or obvious).
+- Parser: "bitfield8|16|32|64 Name { Flag: position, ... }" is an Enum node with a Bitfield child (text bitfield32). The words
+  bitfieldN are not reserved: they are identifiers recognised only before a name and "{".
+- A bitfield is an enum (EnumInfo.Bitfield, Mask) whose type is the unsigned number of the size; None (0) is entry 0 and All (the
+  Mask) is the last, so zero values, ==, switch and toStr work as for enums. Declaring None or All, two flags on one bit, a missing
+  or out of range position, functions inside, or no flags are compile errors.
+- | & ^ need the same bitfield on both sides (CHOICE: no integer literals); other operators are errors. _x flips only the defined bits.
+  A cast or transmute from an integer masks the undefined bits (the cast saturates to the source type first, as every cast).
+- set, clear, setAs, toggle RETURN the new value and do not change the variable (CHOICE: the spec has not decided; the chained
+  example needs a value). isSet / isAnySet return bool. Receivers: variables, calls, Flags.None.set(...).
+- toStr prints None, or the set flags joined with " | " in declaration order (also All, as every flag).
+- A bitfield cannot be nullable (CHOICE: the spec has not decided).
+- Root.IO enums are declared (prelude) when the program mentions their name: DeleteOptions is a bitfield8 (Recursive: 0,
+  ForceDelete: 1); the others are plain enums. fs.X with "alias Root.IO as fs", Root.IO.X and the bare name all work, as types and
+  in expressions (StripLibraryQualifier and Path); String.StringEncoding is also accepted as a type now.
+- Exceptions 25 to 45 (17.6.6) are in StandardExceptions, SilentStandard (27, 28, 29, 32) and the runtime descriptors. Nothing
+  raises them yet; they can be thrown and caught like the other standard ones.
+- Not done: "[Flags]_[u32]x" (a transmute followed by "_" does not parse: write [Flags]x or (Flags)x).
+
+
+Root.IO.File (spec 17.6.3 to 17.6.6)
+STATE (2026-10-17): built and tested with dfcompiler/tests/files.df (a scratch folder in the temp directory, removed at the end).
+- File is a class written in Dflat (CodeGen.Io.cs, IoPrelude), added by AddPrelude when the program mentions File and does not declare
+  its own File class. It sits on the natives Root.IO.Native.* (Stdlib table, AddIoStdlib) whose C side is RuntimeIO.cs (chunk "io").
+  A native that fails returns a fallback and leaves the exception id in df_io_err; File.check() reads it with Native.Error() after
+  each call and throws. A silent exception is thrown the same way, so it does nothing unless a catch of the same function (the
+  prelude function, not the caller's) can handle it: the known limit of silent exceptions (callers do not see them yet). Because a
+  silent throw does not stop the function, check() returns right after each silent throw.
+- Read-only properties: a method get_<name>() of a class is read as x.<name> when the class has no field of that name (MemberValue).
+  The spec's properties (size, parent ...) are get_ methods of File; assigning to them is an error. x?.size is not handled yet.
+- Paths (17.6.2): normalized by df_io_normalize: "/" separator, a drive letter as the first folder (/c:/x, lower case), no repeated or
+  trailing separators; "." and ".." are kept as they are; on Windows \ is a separator and < > " | ? * : (outside the drive) and
+  control characters raise InvalidPathException when the File is created. On Linux and macOS only NUL is illegal and \ is a name
+  character. Relative paths stay relative. The OS form is built for each call (UTF-16 on Windows, UTF-8 elsewhere).
+- File(path) normalizes in a field initializer (full = File.fixPath(rawPath)); File.path gives the normalized text.
+- parent: a File, or null for a root ("/" or a drive) and for "." / ".."; a bare relative name has the parent ".". extension: after the
+  last dot of the name, "" when there is none or the name only starts with the dot.
+- delete: a missing item is false without an exception; a folder that is not empty needs Recursive (else the silent
+  DirectoryNotEmptyException and false); ForceDelete removes the read-only attribute first (Windows). copy and move: a folder is merged
+  (the contents of an existing target folder stay); a file that exists is skipped (silent FileNameAlreadyExistsException, a null
+  File is returned) unless Overwrite; a missing source is FileNotFoundException; a missing parent of the target is
+  FullPathNotFoundException (CHOICE); a folder inside itself is InvalidFileAccessException (CHOICE). move of two folders copies,
+  then deletes the source (it stays when a file was skipped). `to` is the full new path, never "the folder to copy into".
+- createDirectory: the silent FileNameAlreadyExistsException for an existing folder (the existing one is returned); a missing parent is
+  InvalidPathException; it never creates the parents.
+- getAllFiles: unordered; a missing path is FileNotFoundException, an empty path or a file is InvalidPathException; match (* and ?,
+  case ignored, ASCII) applies to files only, folders are listed whatever the match.
+- readAllText skips a byte order mark of the encoding; bad sequences become U+FFFD; ASCII writes ? for other characters. writeAll
+  modes follow the table of 17.6.4; an I/O failure while writing is NoMoreResourcesException (CHOICE: the usual cause is a full disk).
+- Dates are UTC milliseconds. "created" is the creation time on Windows and the status change time (ctime) on Linux and macOS.
+- Linux and macOS parts of RuntimeIO.cs (opendir, stat, rename ...) were written but never compiled, like the rest of the runtime there.
+- File.open and FileStream come with the streams (next).
+
+
+Library names in camelCase, and streams (2026-10-17)
+- The standard library functions were renamed to camelCase (Console log / logError / print / read / readLine, getArgs, Time now / clock,
+  Random seed / int / realRange / real / shuffle, Math and Math32 functions, string and char functions). Clean break: the PascalCase
+  names no longer exist. The docs still show some PascalCase string and char functions (dflat-spec 4.1, 4.2): the compiler follows
+  the camelCase rule there too (toCStr for ToCStr). CHOICE: aSin, aCos, aTan, aTan2 (stdlib file definitions) and asin, acos, atan,
+  atan2 (its name column) are both accepted until the file agrees with itself; PI2 is the constant (the name column says PI2F).
+- Stream / FileStream (CodeGen.IoStreams.cs, Dflat code over the stream natives of RuntimeIO.cs):
+  Stream has no constructor parameters (a parent with parameters cannot be extended yet), so the modes live in FileStream. Stream's
+  members are defaults (a base stream reads and writes nothing, seek raises SeekNotSupportedByStreamException); FileStream overrides them.
+  The properties are get_ functions. The handle is a C stream (FILE) with the direction of its last operation (C needs a seek between
+  a read and a write). The constructor opens in a field initializer: when it throws the variable stays null. close() and the class
+  atEnd close the file once. read / write take u64 for uns; a length of 18446744073709551615 means the rest of the buffer.
+  Open modes follow the table of 6.4; both access modes None, or write None with a truncate / append open mode, is
+  InvalidStreamModesException; a folder is FileAccessToADirectoryException; a read-only file opened for write is
+  ReadOnlyItemCannotBeWrittenException. Exclusive and Shared are not enforced (open item of the spec). Reading and writing the same
+  stream works. Append modes write at the end whatever the position. seek before the start: the silent SeekBeforeBeginException and 0.
+  The modes are read-only properties readMode, writeMode and openMode (spec 6.8.3): get_ functions of Stream (the defaults None, None, OpenExisting) overridden by FileStream. A private
+  field of the same name does not hide the property from outside the class (MemberValue); assigning to it is an error ('readMode' is private).
+
+
+tryParse and the order of interpolation (2026-10-17)
+- Interpolation: with two or more holes each hole goes into a temporary first, so they run left to right (C leaves the order of
+  function arguments open; clang on Windows went right to left). One hole, or only text, is generated as before.
+- T.tryParse(text, (&)result[, format]) for integers, reals, date and time (TryParseCall): the library takes the address of a plain
+  variable (the call must write (&), the type must match exactly, not const; named arguments text, result, format). It is NOT the
+  general reference parameter: your own functions still cannot take (&) parameters. The variable counts as assigned afterwards.
+  CHOICE: a number that does not fit the type is a failure (false, variable unchanged, no silent exception), as in C# TryParse;
+  parse still saturates. Negative text for an unsigned type is a failure too. date and time: the null result is the failure.
+
+
+String formats, spec 8.3 (2026-10-17)
+- {text:spec} and text.toStr(spec) for strings (CodeGen.StrFormat.cs checks literal specs at compile time; RuntimeStringFormat.cs, chunk
+  "strfmt", does the work and brings the "text" chunk and the Unicode table of white space). A spec that is not valid at run time leaves
+  the text as it is (like numbers give the default text). A null string is "" and is padded like any other.
+- Order of the options (CHOICE, the spec only lists them): trim (s, sl, sr), case (cU cL cS cT), quote (q), truncate (t), then width, fill
+  and alignment. Default alignment is left. Options may come in any order and may repeat (the last wins); letters are case-insensitive.
+- w<n> counts characters (code points); wc<n> counts display columns: 0 for combining marks and zero-width characters, 2 for the main
+  East Asian wide and emoji ranges (an approximation of East Asian Width, CHOICE), 1 for the rest. A width never cuts the text.
+- t<'marker'> keeps the start, t>'marker' keeps the end; the marker counts in the width and is written between single quotes (\' and \
+  stand for themselves); it needs a width; a marker wider than the width is cut to the width. Text that already fits is left alone.
+- cS (sentence) capitalizes only the first letter and lowers the rest (CHOICE: no capital after a full stop); cT (title) capitalizes the
+  first letter after every white space and lowers the rest.
+- q writes a Dflat string literal: \" \ \n \r \t \0, other control characters as \u{HEX}; braces are not escaped.
+- A fill character cannot be a letter (a digit can); in wc mode a fill of width 0 is ignored.
+
+
+Array sort, sortUnstable and copyFrom, spec 6.6 (2026-10-17)
+- arr.sort() / sort(SortDirection.ASC | DESC) is a stable merge sort (a temporary buffer); sortUnstable is a heap sort (no extra
+  memory) (RuntimeSort.cs, chunk "sort"). SortDirection { ASC, DESC } is declared when the program names it (AddPrelude).
+- Default order (CHOICE where the spec is short): numbers, char and enums (by value) as numbers; bool false before true; strings by
+  code point (a byte comparison of the UTF-8, so "Apple" < "apple"); date, time null first (the null is the minimum value); a real NaN
+  last. Descending reverses the order but keeps equal items in their original order (stable). Objects and tuples have no default order yet.
+- sort(lambda) is "Lambdas not supported yet" (no lambdas).
+- copyFrom(dstIndex, source, srcIndex, count) and copyFrom(dstIndex, source, range) (a..b, a..=b, ..b, a..): a range that does not fit
+  either array, or a negative index, raises IndexOutOfRangeException (not detected at compile time yet; the spec wants a compile error
+  when it can be seen); the same array as source and destination is a compile error when both are the same variable, otherwise
+  ModifyingProtectedSourceException at run time. dstIndex may be the length (count 0). Arrays of objects are refused (items would be cloned).
+
+
+Reference parameters, spec 13.1 (2026-10-17)
+- &T x is a read-only reference, (&)T x a writable one. In C both are pointers (const T* and T*) named p_x; the body sees the variable as
+  (*p_x), so reads, writes, +=, ++, array methods and passing it on all work unchanged. A read-only reference is const in the body.
+- The call: &T takes any value, no marker (a variable by its address, other values through a temporary, so literals and expressions
+  work); (&)T needs (&)x in the call and takes a variable, a field (obj.f, this field), a tuple field or an array item (a[i], with
+  its bounds check); the type must be exactly the parameter's type; a const variable is refused; the variable counts as assigned
+  afterwards. A (&) on a plain parameter, or a missing (&), is a compile error. A writable reference cannot have a default value.
+- Overloads: the (&) in the call is ignored for the choice of the function (the type of x counts). A reference parameter and a copy
+  parameter of the same type are the same signature.
+- Objects: a reference to an object (&Item o, (&)Item o) is the object pointer itself. (&)Item o still requires (&)o in the call. It does
+  NOT yet let the function replace the caller's object (CHOICE: ownership of the variable is not touched); it is a writable borrow
+  for changing fields and calling functions.
+- Not done: reference parameters on constructors (error), volatile &T (error), variadic references (the parser refuses), references stored
+  in variables or returned (the spec has none), compile-time proof that the reference does not outlive the variable.
+
+
+EXCEPTIONS: THE MODEL (final design, 2026-10-17; NOT BUILT YET; to be merged into the language specification, section 15)
+=========================================================================================================================
+Status: this is what the compiler will do. Today (0.0.9alpha) non-silent exceptions use a global error register (df_err) and silent ones a
+one-slot note (df_silent_desc) that only a catch of the same function can see. Everything below replaces that. The syntax of the language
+does not change.
+
+1. Principles
+- An exception is a value that a function returns next to its result, as in Rust: one slot for the result, one for the exception. There is no
+  unwinding and no global error register. After a call, the caller looks at the exception slot: it handles the exception, returns it to its own
+  caller, or (for a silent exception nobody observes) does not even look.
+- A silent exception is an exception with a flag. It is created, passed back and checked exactly like any other exception, but only where
+  somebody observes it (rule 5). Where nobody does, ALL the code for it is removed: no trapping, no exception record, no passing back.
+- atEnd blocks and destructors are not changed. They run on the normal path and on the exception path as they do now.
+
+2. Which catch observes an exception
+- A catch handles an exception when the exception is of the class the catch names or of any subclass of it. This is the same rule for silent and
+  non-silent exceptions.
+- Exception is the root of all exceptions: "catch Exception e" (and the bare "catch e", which means the same) is the sinkhole and handles every
+  exception that is not silent: it does NOT handle silent exceptions (spec 15.1, 15.4, 15.8.2).
+- SilentException is meant to be a trait that every silent exception class implements. "catch SilentException e" handles every silent exception and
+  no other. The definition of the trait is still open (it is declared by the compiler today).
+- "catch all" handles everything, as it does today. A catch for a parent class handles all the silent children of that class too.
+- Catches of a function are tried in the order written; the first that matches handles the exception.
+
+3. Kinds of function (decided by the compiler; there is no safe keyword)
+- PURE: can raise nothing at all.                            Signature: the result only.
+- SAFE: no non-silent exception can leave it, and the silent exceptions it can emit are not observed by the call (see 5 and 6).
+                                                             Signature: the result only. Callers never check it.
+- FAILING: a non-silent exception can leave it, or a silent one that the call observes can.
+                                                             Signature: the result and the exception (see 4).
+- A function can raise when it contains a throw, an operation that raises (integer / and %, array and string indexing, access to a null
+  object ...), or a call to a function that can raise.
+- A non-silent exception that is fully handled inside the function and cannot get out of it counts as not emitted by the function. Every point
+  of the function that can raise it must be covered by a catch that handles it (rule 2), and the catch bodies must not raise a non-silent
+  exception themselves (no throw of one, no call that can raise one that escapes). Example, a SAFE function:
+      fun i64 safeDivide(i64 a, i64 b) {
+        return a / b
+        catch DivisionByZeroException { return 1 }
+      }
+  The division raises DivisionByZeroException, which is not silent, but the catch covers it and the body of the catch cannot raise: nothing
+  leaves the function, so callers do not check it. Without the catch, or with a catch for another class, the function is FAILING.
+- Virtual functions and trait functions: a slot is SAFE only if all its implementations are SAFE (one FAILING override makes the slot FAILING).
+  PURE needs the same: all implementations.
+
+4. How a FAILING function returns (the Rust model)
+- Two slots: the result and the exception. The exception slot is a pointer to the exception record, null when there is none.
+- A function without a result (void) returns only the exception slot. Several results or a tuple are one result slot.
+- Call site: call, then "if the exception slot is not null": run the matching catch of this function; if there is none, return the exception to our
+  own caller (this function is FAILING), after the atEnd blocks of the scopes left have run. An exception that nobody handles reaches the top of the
+  program: Panic, as today.
+- Non-silent exceptions go up the call chain to the first matching catch, as today.
+
+5. Silent exceptions: who observes them
+- A silent exception of class X emitted by function F is observed by a call statement of F's caller when that statement is covered by a catch of the
+  caller that handles X (rule 2). "Emitted by F" means: raised by one of F's own operations (for example the + that overflows), thrown by an explicit
+  throw in F, or declared by a library function that F calls directly (rule 8). It is NOT what F's own callees emit (rule 6).
+- If no catch of the caller handles X, the call returns as if nothing had happened (spec 15.4: execution continues) and nothing is generated for X.
+- A catch in the function that contains the emitting operation itself handles the exception as an ordinary local exception (same rule, the function
+  being its own caller).
+- Example, a function that can only overflow silently is SAFE for callers that do not catch it:
+      fun i64 add(i64 a, i64 b) { a + b }
+
+6. Silent exceptions never go up on their own
+- If F calls G and G emits a silent exception that F does not observe (no catch of F handles it), the exception is ignored in F. F's caller does not see
+  G's exception, even if F's caller has a matching catch.
+- To send it up, F catches it and throws it again, explicitly:   catch OverflowException e { throw e }
+  The new throw is F's own emission, so F's caller observes it (when it has a matching catch), as rule 5 says.
+- Example:
+      fun i64 mul(i64 a, i64 b) { a * b }                   // can overflow: silent
+      fun i64 add3(i64 a, i64 b, i64 c) { mul(a, b) + c }   // no catch: the overflow of mul is ignored here
+      fun i64 use() {
+        return add3(1, 2, 3)
+        catch OverflowException { return -1 }               // sees only the overflow of the + in add3, never the one of mul
+      }
+
+7. Variants (how the silent code is stripped) [BUILT AS A RUN-TIME MASK: see EXCEPTIONS STAGE 2 at the end]
+- A function that can emit silent exceptions is compiled once for every MASK its call sites ask for. The mask of a call site is the set of silent
+  exception classes, among those the called function can emit, that are handled by the catches covering that call statement in the caller.
+  A call outside any catch has the empty mask. A catch SilentException or a catch all covers every silent class the function can emit; a catch Exception does not.
+- Empty mask: every silent path is removed from that version. If the function can raise nothing else, that version is SAFE (plain signature).
+- Non-empty mask: the silent classes in the mask are treated like any other exception in that version, which is then FAILING.
+- Masks do not flow down: the mask of the calls a function makes comes from that function's own catches (rule 6).
+- Virtual and trait calls: every implementation of a slot is compiled with the union of the masks of all the call sites of that slot.
+- The number of versions stays small: a mask can only contain silent classes that the function can emit and that some catch of the program handles.
+
+8. Library functions: black boxes with declared exceptions
+- The compiler does not look inside a library function (today they are C code of the runtime; later some will be written in Dflat). What it needs is the
+  list of exceptions each function may raise, silent and non-silent. That list is in the standard library specification (dflat-stdlib.md): every
+  function is listed with the exceptions it may throw. The compiler keeps the same list in its library tables.
+- A function that lists nothing (for example Math.sqrt) is PURE. A function that lists non-silent exceptions makes its caller FAILING (unless the caller handles
+  them all). A listed silent exception is observed through the mask of the call like any other (rule 5).
+- The C code of the runtime reports an exception in a temporary slot between its return and the wrapper that the compiler generates at the call site; the
+  wrapper moves it into the exception slot. The temporary slot is never visible to the program and is empty between statements.
+- When a library function is rewritten in Dflat, it follows the rules above and must propagate what its specification says it propagates: an exception
+  declared for the function is emitted by the function itself, or caught and thrown again explicitly (rule 6). A helper that throws for its caller is not enough.
+  File and FileStream are written in Dflat today and must be changed this way (their silent exceptions, for example FileAccessException, must be emitted by the
+  public function the user calls).
+
+9. What does not change
+- The syntax: throw, catch, catch all, catch by class, rethrow, exception classes, Panic and exit codes.
+- atEnd blocks, destructors and scopes: same order, same guarantees.
+
+10. Open points
+- The exact definition of the SilentException trait.
+- Whether library functions without a declared list in dflat-stdlib.md (only the IO section lists "raised by" today) need to be completed before the model is built.
+- (closed) Spec 15.4: a catch of Exception, and the bare catch, do NOT handle silent exceptions. The compiler follows it since 2026-10-17.
+
+11. Plan and tests (for when it is built)
+- Stage 1: the two-slot return for FAILING functions (replaces df_err), the PURE / SAFE / FAILING analysis (including fully handled exceptions).
+  Non-silent behaviour must not change: all existing tests must give the same output.
+- Stage 2: masks and variants, the silent rules, the library tables with their declared exceptions, File and FileStream moved to explicit re-throws.
+- Tests: safeDivide (called from code that does not check it); the mul / add3 / use example, with and without the catch in use; add with and without a catch;
+  a silent exception class thrown by a user function; re-throw with "throw e"; catch Exception and catch SilentException observing silent exceptions; a virtual slot
+  with a SAFE and a FAILING override; a trait call; a generic function used with and without a catch; every library call that raises silently.
+
+
+EXCEPTIONS STAGE 1: BUILT (2026-10-17)
+=======================================
+Built: rules 2, 3, 4 and 8 of the model above (pure / safe / failing functions, the result + exception return, fully handled exceptions).
+Not built: rules 5 to 7 (silent exceptions seen by callers, masks and variants, library declarations): silent exceptions still behave as
+before (raised only where a catch of the same function handles them).
+
+How it works in the generated C
+- Every function has its own locals df_err and df_err_thrown (CodeGen.Errors.cs, FunctionContext); the catch, dispatch and atEnd code is the old
+  code working on these locals. The global df_err is gone.
+- A FAILING function returns its result and its exception: a struct df_resN { value; err } (CodeGen.ExcFlow.cs, ResultPair), or just the exception
+  (df_exception*) when it has no result. Constructors return the object with the exception the same way. A PURE or SAFE function returns its result only.
+- A call to a failing function: PairCheck looks at .err, moves it into df_err and jumps to the handler of the scope (UserCallCode).
+- The C runtime and the destructors cannot return a pair: they leave the exception in df_pending (Runtime.cs, df_raise). The code generated around the
+  call (CheckRaise, RaiseJump) moves it into df_err at once. df_pending is empty between statements.
+- A function whose analysis says "nothing leaves" but that reaches its fail label anyway panics there (an internal error, never silent).
+- main: an exception that reaches the top is a panic, as before (df_panic_unhandled(exception)). Static initializers do the same at program start.
+
+The analysis (CodeGen.Leaks.cs, FindFailingFunctions)
+- For every function: its raise points (integer / and %, indexing, null object access, throw, ==/!= on objects) and its calls, each with the catches
+  that cover it (a statement is covered by the catches written after it in the same block and in the blocks around it). A fixpoint over the call graph gives
+  the set of exception ids that can leave each function: the raise points and the callee sets that no covering catch handles. A function with a non-empty
+  set is FAILING; the others are PURE or SAFE.
+- A catch handles an exception of its class and its subclasses; catch Exception and catch all handle every non-silent exception. A catch body only lets out
+  what it throws (any other error in a catch body is a panic, as before). A throw of a catch variable (throw ex) lets out the class of that catch.
+- Conservative choices (sound, they only make a function FAILING when it could be safe): a / or % counts even on reals (no types at this stage); a throw
+  of a variable that is not a catch variable lets out "any exception"; calls to generic functions and constructors of generic classes let out "any exception"
+  (their copies are made later); the copies of equals; == and != between objects when the program has equals or the operator; functions of classes and
+  traits with the same name and parameters share what they let out (they can be called through one pointer); one failing destructor makes every function
+  FAILING (as before).
+- Silent exceptions: a throw of a silent exception is not counted (it never leaves a function today).
+
+Tests: tests/safety.df and tests/safety2.df (outputs in their comments; the C signatures can be read with --emit-c: pure and safe functions have plain
+signatures, failing ones df_resN). The 31 older tests give exactly the output of the compiler before this change.
+
+
+EXCEPTIONS STAGE 2: BUILT (2026-10-17)
+=======================================
+Built: rules 2, 4, 5 and 6 of the model (which catch observes an exception, silent exceptions observed only by the caller that catches them, no
+leaking, explicit re-throw). Rule 7 (variants) is built in another way, see "The observed mask". Rule 8 (library declarations) is not built.
+
+RULE 7 (variants) IS BUILT AS A RUN-TIME MASK (the specification 15.8.7 now describes this): one compiled version and a mask passed at run time instead of one version per mask. Reason: variants cannot give the right behaviour for
+virtual and trait calls (one override would have to be compiled for the union of the masks of all the callers, and would stop at a silent throw
+for a caller that ignores it; the spec says an ignored silent exception lets the function go on). A mask passed at run time gives exactly the
+rules of 4 to 6 for every kind of call and needs no copies of the functions. What it does not do: it does not remove the code of a silent
+exception per call chain; it removes it per program (a kind that no catch of the program handles has no code at all) and the C compiler removes
+the test when it sees a constant mask.
+
+The observed mask
+- LIVE silent kinds: the silent exception classes (the standard silent ones and the silent exception classes of the program) that at least one catch of the
+  program handles (CatchHandles with silent = true: its own class, a parent, Exception, the SilentException trait, catch all). Each live kind has a bit
+  (silentBit, 64 at most; more is a compile error).
+- EMITTERS (maskFuns): the functions that contain a throw of a live silent exception that no catch of the function itself handles, or a re-throw of a catch
+  variable that may hold a silent exception (throw e). Constructors, init functions, static initializers, destructors, == operators and generic copies
+  of equals are never emitters (a silent throw there is only seen by the catches of the same function, as before). Functions of classes and traits
+  with the same name and parameters are all emitters or none (they are called through one pointer).
+- An emitter takes one more parameter, the hidden "uint64_t df_obs", and returns its exception like every FAILING function. The call site passes the
+  kinds that the catches around the call handle (ObservedMask), and nothing else: the mask of a call is built from the catches of the caller only, so a
+  silent exception never goes through a function that does not catch it (rule 5). main is called with 0.
+- A throw of a silent exception inside an emitter: if a catch of the same function handles it, it is an ordinary local raise; else it is raised only if the
+  bit of its kind is in df_obs ("if (df_obs & bit) { raise }"), otherwise the throw does nothing and the function goes on. In a function that is not an
+  emitter the throw does nothing unless a local catch handles it. A re-throw (throw e in a catch body) checks the bit of the exception at run time
+  (df_obs_bit, generated).
+- The catches of a block do not observe what their own bodies throw (SilentCaught skips the catches of the block whose body we are in).
+- The analysis of what leaves a function (CodeGen.Leaks.cs) is not changed by this: the silent exceptions are tracked apart (FunFlow.Silent).
+
+Library functions
+- The natives of the C runtime (parse, date(string), (time)n ...) keep their silent exceptions as before: a catch of the function that makes the call observes
+  them (SilentCall), which is rule 5 with the native as the emitter. They are not yet declared per function as rule 8 asks.
+- File and FileStream (written in Dflat) now throw their silent exceptions themselves in the function the user calls (FileAccessException, DirectoryNotEmptyException,
+  FileNameAlreadyExistsException, SeekBeforeBeginException); File.check only throws what is not silent and gives back the silent id. The wrappers (delete, copyTo,
+  moveTo, createDirectory of the object) catch the silent exceptions of the static functions and throw them again.
+
+FIXED (2026-10-17): catch Exception and the bare catch ex do NOT handle silent exceptions, as the specification says (15.1, 15.4, 15.8.2). CatchHandles
+(CodeGen.Leaks.cs) returns false for the target Exception when the exception is silent and df_exc_is (Runtime.cs) keeps its exclusion; a silent exception is handled by a
+catch of its own class, of a parent class below Exception, of the SilentException trait, or by catch all. tests/silent.df and tests/exceptions.df are back to the original
+rule; tests/silentmodel.df has sink (catch Exception does not observe) and a parent class below Exception (Family / Cousin).
+
+Not done: arithmetic overflow and the other silent operations of the language (casts, + - *) do not emit exceptions at all yet (they wrap or saturate), so no
+user function can be a silent emitter except by an explicit throw; silent exceptions from constructors, field initializers and destructors.
+
+Tests: tests/silentmodel.df (the rules with user exception classes: ignored, observed, not leaking, re-thrown, catch Exception / SilentException / all,
+virtual and trait calls, non-silent exceptions unchanged), tests/silentfiles.df (the library), tests/silent.df and tests/exceptions.df (two lines changed
+back to the original rule after the fix). The other 29 old tests give the output of the compiler before stage 1.
+
+
+THE TEST RUNNER (2026-10-17)
+=============================
+tests\run-tests.ps1 runs every tests\*.df with the compiler (bin\Debug\net10.0\dfcompiler.exe, empty standard input) and compares what the program printed with
+tests\expected\<name>.txt: the standard output after the line "---- run ----" of the compiler, exit code line included. The warnings of the compilers are not part of it.
+  .\run-tests.ps1              run all, one line per test, exit code 1 when something differs or a test has no expected file
+  .\run-tests.ps1 -Build       build the compiler first       -Only a,b  only these tests       -Verbose  show the first differing lines
+  .\run-tests.ps1 -Update      save the current output as the expected one. Look at the diff of tests\expected in git before trusting it:
+                               a saved output is only as right as the compiler was on the day it was saved.
+The expected files of 2026-10-17 were saved after comparing the 31 older tests with the output of the compiler built from the commit before this work (identical
+except the intended changes), and after reading the output of the newer tests against the expectations written in their comments. A test must not print
+anything that depends on the machine or on the time (paths, now): silentfiles.df prints ids, not messages with paths.
+
+Tests that must not compile (tests\errors, 2026-10-17)
+- tests\errors\<name>.df is a small program (one or two lines) that the compiler must refuse; errors\expected\<name>.txt holds the error line(s):
+  "<name>.df(<line>): error: <message>", with no folder. The runner compiles it with --emit-c, so no C compiler is involved. A program that compiles is a
+  FAIL ("NO ERROR"). 53 cases today: bitfields, tryParse, reference parameters, string formats, copyFrom and sort, throw, and the basic errors of the language.
+  Adding a case: write the .df file, run .\run-tests.ps1 -Only <name> -Update, read the message in the expected file, and keep it only if it is the right one.
+- The messages are locked as they are today. Three things found while writing them, not changed:
+  * catch NoSuchException { } is accepted with no error: a single unknown name after catch is taken as the name of the variable of catch Exception.
+    A capitalized name that is no exception could be reported as an unknown exception.
+  * File() reports "missing argument 'rawPath' for 'File'": the constructor parameter of the File class written in Dflat is called rawPath (the spec says path).
+  * increment((&)3) reports "only variables and tuple fields can be assigned for now": the message of the general assignment, not one about (&).

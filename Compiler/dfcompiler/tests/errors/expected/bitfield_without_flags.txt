@@ -1,0 +1,1 @@
+bitfield_without_flags.df(1): error: bitfield 'Bad' needs at least one flag

@@ -1,0 +1,18 @@
+i32 '42': true, 42
+i32 'abc': false, unchanged 42
+i32 '  -17 apples': true, -17
+i32 out of range: false, unchanged -17
+u8 '-5': false, 0
+u8 '200': true, 200
+r64 '12.3': true, 12.3
+r64 '1.5e3': true, 1500
+r64 '': false, 1500
+with a format: true, 42
+format that does not match: false, 42
+date: true, 2026-10-17T14:30:00.000Z
+bad date: false, unchanged 2026-10-17T14:30:00.000Z
+time: true, 13:45:00.000
+bad time: false
+abc
+111
+---- exit code 0 ----

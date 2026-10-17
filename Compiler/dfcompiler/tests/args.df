@@ -2,14 +2,14 @@
 alias Root as r
 
 fun int main(string args...) {
-  arr<string> same = r.GetArgs()
-  r.Console.Log(args.len == same.len)
-  r.Console.Log(args == same)
-  r.Console.Log(args.len)
+  arr<string> same = r.getArgs()
+  r.Console.log(args.len == same.len)
+  r.Console.log(args == same)
+  r.Console.log(args.len)
   i32 count = (i32)args.len
   for i32 index = 1..count {
-    r.Console.Log($"arg {index}: {args[index]}")
+    r.Console.log($"arg {index}: {args[index]}")
   }
-  r.Console.Log(args[0].Contains("args"))
+  r.Console.log(args[0].contains("args"))
   return count
 }

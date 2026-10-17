@@ -86,11 +86,32 @@ static const df_descriptor df_desc_NaNUsedAsKeyException = { 21, "NaNUsedAsKeyEx
 static const df_descriptor df_desc_InvalidMapKeyException = { 22, "InvalidMapKeyException", &df_desc_Exception, true };
 static const df_descriptor df_desc_EmptyVectorAccessException = { 23, "EmptyVectorAccessException", &df_desc_Exception, true };
 static const df_descriptor df_desc_InvalidDateTimeFormatException = { 24, "InvalidDateTimeFormatException", &df_desc_Exception, true };
+static const df_descriptor df_desc_FileNotFoundException = { 25, "FileNotFoundException", &df_desc_Exception, false };
+static const df_descriptor df_desc_InvalidFileAccessException = { 26, "InvalidFileAccessException", &df_desc_Exception, false };
+static const df_descriptor df_desc_FileAccessException = { 27, "FileAccessException", &df_desc_Exception, true };
+static const df_descriptor df_desc_DirectoryNotEmptyException = { 28, "DirectoryNotEmptyException", &df_desc_Exception, true };
+static const df_descriptor df_desc_FileNameAlreadyExistsException = { 29, "FileNameAlreadyExistsException", &df_desc_Exception, true };
+static const df_descriptor df_desc_InvalidPathException = { 30, "InvalidPathException", &df_desc_Exception, false };
+static const df_descriptor df_desc_FullPathNotFoundException = { 31, "FullPathNotFoundException", &df_desc_Exception, false };
+static const df_descriptor df_desc_SeekBeforeBeginException = { 32, "SeekBeforeBeginException", &df_desc_Exception, true };
+static const df_descriptor df_desc_FileAlreadyExistsException = { 33, "FileAlreadyExistsException", &df_desc_Exception, false };
+static const df_descriptor df_desc_FileAccessToADirectoryException = { 34, "FileAccessToADirectoryException", &df_desc_Exception, false };
+static const df_descriptor df_desc_ReadOnlyItemCannotBeWrittenException = { 35, "ReadOnlyItemCannotBeWrittenException", &df_desc_Exception, false };
+static const df_descriptor df_desc_ConflictingSharingException = { 36, "ConflictingSharingException", &df_desc_Exception, false };
+static const df_descriptor df_desc_InvalidStreamModesException = { 37, "InvalidStreamModesException", &df_desc_Exception, false };
+static const df_descriptor df_desc_NoMoreResourcesException = { 38, "NoMoreResourcesException", &df_desc_Exception, false };
+static const df_descriptor df_desc_AccessToAClosedStreamException = { 39, "AccessToAClosedStreamException", &df_desc_Exception, false };
+static const df_descriptor df_desc_StreamModeNotAllowedException = { 40, "StreamModeNotAllowedException", &df_desc_Exception, false };
+static const df_descriptor df_desc_SeekNotSupportedByStreamException = { 41, "SeekNotSupportedByStreamException", &df_desc_Exception, false };
+static const df_descriptor df_desc_InvalidBufferRangeException = { 42, "InvalidBufferRangeException", &df_desc_Exception, false };
+static const df_descriptor df_desc_GenericIOErrorException = { 43, "GenericIOErrorException", &df_desc_Exception, false };
+static const df_descriptor df_desc_FileRemovedWhileOpenException = { 44, "FileRemovedWhileOpenException", &df_desc_Exception, false };
+static const df_descriptor df_desc_StreamCloseFailureException = { 45, "StreamCloseFailureException", &df_desc_Exception, false };
 
-/* 0 = no error; otherwise the exception being raised */
-static df_exception* df_err = NULL;
-/* true when df_err was raised by a throw statement (a throw inside a catch goes to the enclosing level) */
-static bool df_err_thrown = false;
+/* The exception of a function is a local of that function (df_err in the generated code) and travels back to the caller as the second
+   value it returns. The runtime functions written in C cannot return it that way: they leave it here, and the code generated around
+   the call moves it into the local df_err at once. This slot is empty between statements. */
+static df_exception* df_pending = NULL;
 
 /* copies at most maxBytes - 1 bytes plus the terminator, never cutting a UTF-8 character */
 static char* df_cstr_truncated(const char* text, uint64_t length, uint64_t maxBytes) {
@@ -129,11 +150,10 @@ static void df_raise(const df_descriptor* descriptor, const char* function) {
     spaced[length++] = *letter;
   }
   spaced[length] = 0;
-  df_err = df_new_exception(descriptor, spaced, length, function);
-  df_err_thrown = false;
+  df_pending = df_new_exception(descriptor, spaced, length, function);
 }
 
-/* true when the exception is of that type or a subtype; a silent exception is not an 'Exception' catch (spec 15.4) */
+/* true when the exception is of that type or a subtype; a silent exception is not an 'Exception' catch (spec 15.1, 15.4) */
 static bool df_exc_is(const df_exception* exception, uint64_t id) {
   for (const df_descriptor* descriptor = exception->descriptor; descriptor; descriptor = descriptor->parent) {
     if (descriptor->id == id) {
@@ -151,9 +171,9 @@ static void df_silent_note(const df_descriptor* descriptor) {
 }
 
 /* unhandled exception: its message, then Panic -1000 */
-static void df_panic_unhandled(void) {
+static void df_panic_unhandled(const df_exception* error) {
   fflush(stdout);
-  printf("%s\n", df_err ? df_err->message : "");
+  printf("%s\n", error ? error->message : "");
   df_panic(DF_PANIC_UNHANDLED);
 }
 

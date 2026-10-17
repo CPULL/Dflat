@@ -1,0 +1,1 @@
+literal_out_of_range.df(1): error: 300 doesn't fit in i8

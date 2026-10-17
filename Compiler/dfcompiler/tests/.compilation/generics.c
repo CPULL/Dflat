@@ -82,11 +82,32 @@ static const df_descriptor df_desc_NaNUsedAsKeyException = { 21, "NaNUsedAsKeyEx
 static const df_descriptor df_desc_InvalidMapKeyException = { 22, "InvalidMapKeyException", &df_desc_Exception, true };
 static const df_descriptor df_desc_EmptyVectorAccessException = { 23, "EmptyVectorAccessException", &df_desc_Exception, true };
 static const df_descriptor df_desc_InvalidDateTimeFormatException = { 24, "InvalidDateTimeFormatException", &df_desc_Exception, true };
+static const df_descriptor df_desc_FileNotFoundException = { 25, "FileNotFoundException", &df_desc_Exception, false };
+static const df_descriptor df_desc_InvalidFileAccessException = { 26, "InvalidFileAccessException", &df_desc_Exception, false };
+static const df_descriptor df_desc_FileAccessException = { 27, "FileAccessException", &df_desc_Exception, true };
+static const df_descriptor df_desc_DirectoryNotEmptyException = { 28, "DirectoryNotEmptyException", &df_desc_Exception, true };
+static const df_descriptor df_desc_FileNameAlreadyExistsException = { 29, "FileNameAlreadyExistsException", &df_desc_Exception, true };
+static const df_descriptor df_desc_InvalidPathException = { 30, "InvalidPathException", &df_desc_Exception, false };
+static const df_descriptor df_desc_FullPathNotFoundException = { 31, "FullPathNotFoundException", &df_desc_Exception, false };
+static const df_descriptor df_desc_SeekBeforeBeginException = { 32, "SeekBeforeBeginException", &df_desc_Exception, true };
+static const df_descriptor df_desc_FileAlreadyExistsException = { 33, "FileAlreadyExistsException", &df_desc_Exception, false };
+static const df_descriptor df_desc_FileAccessToADirectoryException = { 34, "FileAccessToADirectoryException", &df_desc_Exception, false };
+static const df_descriptor df_desc_ReadOnlyItemCannotBeWrittenException = { 35, "ReadOnlyItemCannotBeWrittenException", &df_desc_Exception, false };
+static const df_descriptor df_desc_ConflictingSharingException = { 36, "ConflictingSharingException", &df_desc_Exception, false };
+static const df_descriptor df_desc_InvalidStreamModesException = { 37, "InvalidStreamModesException", &df_desc_Exception, false };
+static const df_descriptor df_desc_NoMoreResourcesException = { 38, "NoMoreResourcesException", &df_desc_Exception, false };
+static const df_descriptor df_desc_AccessToAClosedStreamException = { 39, "AccessToAClosedStreamException", &df_desc_Exception, false };
+static const df_descriptor df_desc_StreamModeNotAllowedException = { 40, "StreamModeNotAllowedException", &df_desc_Exception, false };
+static const df_descriptor df_desc_SeekNotSupportedByStreamException = { 41, "SeekNotSupportedByStreamException", &df_desc_Exception, false };
+static const df_descriptor df_desc_InvalidBufferRangeException = { 42, "InvalidBufferRangeException", &df_desc_Exception, false };
+static const df_descriptor df_desc_GenericIOErrorException = { 43, "GenericIOErrorException", &df_desc_Exception, false };
+static const df_descriptor df_desc_FileRemovedWhileOpenException = { 44, "FileRemovedWhileOpenException", &df_desc_Exception, false };
+static const df_descriptor df_desc_StreamCloseFailureException = { 45, "StreamCloseFailureException", &df_desc_Exception, false };
 
-/* 0 = no error; otherwise the exception being raised */
-static df_exception* df_err = NULL;
-/* true when df_err was raised by a throw statement (a throw inside a catch goes to the enclosing level) */
-static bool df_err_thrown = false;
+/* The exception of a function is a local of that function (df_err in the generated code) and travels back to the caller as the second
+   value it returns. The runtime functions written in C cannot return it that way: they leave it here, and the code generated around
+   the call moves it into the local df_err at once. This slot is empty between statements. */
+static df_exception* df_pending = NULL;
 
 /* copies at most maxBytes - 1 bytes plus the terminator, never cutting a UTF-8 character */
 static char* df_cstr_truncated(const char* text, uint64_t length, uint64_t maxBytes) {
@@ -125,11 +146,10 @@ static void df_raise(const df_descriptor* descriptor, const char* function) {
     spaced[length++] = *letter;
   }
   spaced[length] = 0;
-  df_err = df_new_exception(descriptor, spaced, length, function);
-  df_err_thrown = false;
+  df_pending = df_new_exception(descriptor, spaced, length, function);
 }
 
-/* true when the exception is of that type or a subtype; a silent exception is not an 'Exception' catch (spec 15.4) */
+/* true when the exception is of that type or a subtype; a silent exception is not an 'Exception' catch (spec 15.1, 15.4) */
 static bool df_exc_is(const df_exception* exception, uint64_t id) {
   for (const df_descriptor* descriptor = exception->descriptor; descriptor; descriptor = descriptor->parent) {
     if (descriptor->id == id) {
@@ -147,9 +167,9 @@ static void df_silent_note(const df_descriptor* descriptor) {
 }
 
 /* unhandled exception: its message, then Panic -1000 */
-static void df_panic_unhandled(void) {
+static void df_panic_unhandled(const df_exception* error) {
   fflush(stdout);
-  printf("%s\n", df_err ? df_err->message : "");
+  printf("%s\n", error ? error->message : "");
   df_panic(DF_PANIC_UNHANDLED);
 }
 
@@ -926,6 +946,21 @@ struct c_Box__r64 {
 };
 
 typedef struct {
+  df_string value;
+  df_exception* err;
+} df_res0;
+
+typedef struct {
+  int32_t value;
+  df_exception* err;
+} df_res1;
+
+typedef struct {
+  double value;
+  df_exception* err;
+} df_res2;
+
+typedef struct {
   int32_t* p;
   uint64_t len;
 } df_arr_i32;
@@ -938,34 +973,34 @@ static const char df_fn9[] = "string Box__string.Get()";
 static const char df_fn11[] = "Box__string.Set(string)";
 static const char df_fn13[] = "Box__string.Bump()";
 static const char df_fn15[] = "string Pair__i32_string.Show()";
-static const char df_fn17[] = "Box__i32 Box__Box__i32.Get()";
-static const char df_fn19[] = "Box__Box__i32.Set(Box__i32)";
-static const char df_fn32[] = "Box__Box__i32.Bump()";
-static const char df_fn34[] = "string Registry__Dog.Describe()";
-static const char df_fn37[] = "r64 Box__r64.Get()";
-static const char df_fn39[] = "Box__r64.Set(r64)";
-static const char df_fn41[] = "Box__r64.Bump()";
-static const char df_fn43[] = "Dog.__init(string)";
-static const char df_fn45[] = "Box__i32.__init(i32)";
-static const char df_fn47[] = "Box__i32.__static_created()";
-static const char df_fn49[] = "Box__string.__init(string)";
-static const char df_fn51[] = "Box__string.__static_created()";
-static const char df_fn53[] = "Pair__i32_string.__init(i32, string)";
-static const char df_fn55[] = "Box__Box__i32.__init(Box__i32)";
-static const char df_fn68[] = "Box__Box__i32.__static_created()";
-static const char df_fn70[] = "Registry__Dog.__init(Dog)";
-static const char df_fn83[] = "Box__r64.__init(r64)";
-static const char df_fn85[] = "Box__r64.__static_created()";
-static const char df_fn87[] = "main()";
-static const char df_fn146[] = "i32 smaller__i32(i32, i32)";
-static const char df_fn149[] = "r64 smaller__r64(r64, r64)";
-static const char df_fn152[] = "r64 average__i32_r64(i32, r64)";
-static const char df_fn154[] = "string describe__string(string)";
-static const char df_fn156[] = "string describe__char(char)";
-static const char df_fn158[] = "string identity__string(string)";
-static const char df_fn160[] = "string firstOf__string_i32(string, i32)";
-static const char df_fn162[] = "string nameOf__Dog(Dog)";
-static const char df_fn165[] = "i32 total__i32(i32, arr<i32>)";
+static const char df_fn19[] = "Box__i32 Box__Box__i32.Get()";
+static const char df_fn21[] = "Box__Box__i32.Set(Box__i32)";
+static const char df_fn34[] = "Box__Box__i32.Bump()";
+static const char df_fn36[] = "string Registry__Dog.Describe()";
+static const char df_fn39[] = "r64 Box__r64.Get()";
+static const char df_fn41[] = "Box__r64.Set(r64)";
+static const char df_fn43[] = "Box__r64.Bump()";
+static const char df_fn45[] = "Dog.__init(string)";
+static const char df_fn47[] = "Box__i32.__init(i32)";
+static const char df_fn49[] = "Box__i32.__static_created()";
+static const char df_fn51[] = "Box__string.__init(string)";
+static const char df_fn53[] = "Box__string.__static_created()";
+static const char df_fn55[] = "Pair__i32_string.__init(i32, string)";
+static const char df_fn57[] = "Box__Box__i32.__init(Box__i32)";
+static const char df_fn70[] = "Box__Box__i32.__static_created()";
+static const char df_fn72[] = "Registry__Dog.__init(Dog)";
+static const char df_fn85[] = "Box__r64.__init(r64)";
+static const char df_fn87[] = "Box__r64.__static_created()";
+static const char df_fn89[] = "main()";
+static const char df_fn148[] = "i32 smaller__i32(i32, i32)";
+static const char df_fn151[] = "r64 smaller__r64(r64, r64)";
+static const char df_fn154[] = "r64 average__i32_r64(i32, r64)";
+static const char df_fn156[] = "string describe__string(string)";
+static const char df_fn158[] = "string describe__char(char)";
+static const char df_fn160[] = "string identity__string(string)";
+static const char df_fn162[] = "string firstOf__string_i32(string, i32)";
+static const char df_fn164[] = "string nameOf__Dog(Dog)";
+static const char df_fn167[] = "i32 total__i32(i32, arr<i32>)";
 
 static int32_t s_Box__i32_created;
 static int32_t s_Box__string_created;
@@ -983,7 +1018,7 @@ static df_string f_Pair__i32_string_Show(c_Pair__i32_string* self);
 static c_Box__i32* f_Box__Box__i32_Get(c_Box__Box__i32* self);
 static void f_Box__Box__i32_Set(c_Box__Box__i32* self, c_Box__i32* v_next);
 static void f_Box__Box__i32_Bump(void);
-static df_string f_Registry__Dog_Describe(c_Registry__Dog* self);
+static df_res0 f_Registry__Dog_Describe(c_Registry__Dog* self);
 static double f_Box__r64_Get(c_Box__r64* self);
 static void f_Box__r64_Set(c_Box__r64* self, double v_next);
 static void f_Box__r64_Bump(void);
@@ -1005,15 +1040,15 @@ static c_Registry__Dog* f_Registry__Dog(c_Dog* v_first);
 static void f_Box__r64___init(c_Box__r64* self, double v_value);
 static c_Box__r64* f_Box__r64(double v_value);
 static void f_Box__r64___static_created(void);
-static int32_t f_smaller__i32(int32_t v_first, int32_t v_second);
-static double f_smaller__r64(double v_first, double v_second);
-static double f_average__i32_r64(int32_t v_first, double v_second);
-static df_string f_describe__string(df_string v_value);
-static df_string f_describe__char(uint32_t v_value);
-static df_string f_identity__string(df_string v_value);
-static df_string f_firstOf__string_i32(df_string v_first, int32_t v_second);
-static df_string f_nameOf__Dog(c_Dog* v_thing);
-static int32_t f_total__i32(int32_t v_first, df_arr_i32 v_rest);
+static df_res1 f_smaller__i32(int32_t v_first, int32_t v_second);
+static df_res2 f_smaller__r64(double v_first, double v_second);
+static df_res2 f_average__i32_r64(int32_t v_first, double v_second);
+static df_res0 f_describe__string(df_string v_value);
+static df_res0 f_describe__char(uint32_t v_value);
+static df_res0 f_identity__string(df_string v_value);
+static df_res0 f_firstOf__string_i32(df_string v_first, int32_t v_second);
+static df_res0 f_nameOf__Dog(c_Dog* v_thing);
+static df_res1 f_total__i32(int32_t v_first, df_arr_i32 v_rest);
 
 static const df_trait df_trait_Named = { 2048, "Named" };
 
@@ -1194,350 +1229,494 @@ static void df_dropall_Box__r64(void* p) {
 static const df_class df_cls_Box__r64 = { 262, "Box<r64>", NULL, df_vt_Box__r64, df_strp_Box__r64, NULL, 0, df_dropall_Box__r64 };
 
 static df_string f_Dog_Name(c_Dog* self) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
   return self->m_label;
-  fn1_fail: return df_str_lit("", 0);
-  fn1_panic: df_panic_unhandled();
+  return df_str_lit("", 0);
+  fn1_fail: df_panic_unhandled(df_err);
+  fn1_panic: df_panic_unhandled(df_err);
   return df_str_lit("", 0);
 }
 
 static int32_t f_Box__i32_Get(c_Box__i32* self) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
   return self->m_value;
-  fn3_fail: return 0;
-  fn3_panic: df_panic_unhandled();
+  return 0;
+  fn3_fail: df_panic_unhandled(df_err);
+  fn3_panic: df_panic_unhandled(df_err);
   return 0;
 }
 
 static void f_Box__i32_Set(c_Box__i32* self, int32_t v_next) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
   self->m_value = v_next;
-  fn5_fail: return;
-  fn5_panic: df_panic_unhandled();
+  return;
+  fn5_fail: df_panic_unhandled(df_err);
+  fn5_panic: df_panic_unhandled(df_err);
 }
 
 static void f_Box__i32_Bump(void) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
   s_Box__i32_created = ((int32_t)(s_Box__i32_created + ((int32_t)1LL)));
-  fn7_fail: return;
-  fn7_panic: df_panic_unhandled();
+  return;
+  fn7_fail: df_panic_unhandled(df_err);
+  fn7_panic: df_panic_unhandled(df_err);
 }
 
 static df_string f_Box__string_Get(c_Box__string* self) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
   return self->m_value;
-  fn9_fail: return df_str_lit("", 0);
-  fn9_panic: df_panic_unhandled();
+  return df_str_lit("", 0);
+  fn9_fail: df_panic_unhandled(df_err);
+  fn9_panic: df_panic_unhandled(df_err);
   return df_str_lit("", 0);
 }
 
 static void f_Box__string_Set(c_Box__string* self, df_string v_next) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
   self->m_value = v_next;
-  fn11_fail: return;
-  fn11_panic: df_panic_unhandled();
+  return;
+  fn11_fail: df_panic_unhandled(df_err);
+  fn11_panic: df_panic_unhandled(df_err);
 }
 
 static void f_Box__string_Bump(void) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
   s_Box__string_created = ((int32_t)(s_Box__string_created + ((int32_t)1LL)));
-  fn13_fail: return;
-  fn13_panic: df_panic_unhandled();
+  return;
+  fn13_fail: df_panic_unhandled(df_err);
+  fn13_panic: df_panic_unhandled(df_err);
 }
 
 static df_string f_Pair__i32_string_Show(c_Pair__i32_string* self) {
-  return df_str_concat(df_str_concat(df_str_concat(df_str_concat(df_str_lit("(", 1), df_str_from_i64((int64_t)(self->m_left))), df_str_lit(", ", 2)), self->m_right), df_str_lit(")", 1));
-  fn15_fail: return df_str_lit("", 0);
-  fn15_panic: df_panic_unhandled();
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
+  return ({ df_string t_17 = df_str_from_i64((int64_t)(self->m_left)); df_string t_18 = self->m_right; df_str_concat(df_str_concat(df_str_concat(df_str_concat(df_str_lit("(", 1), t_17), df_str_lit(", ", 2)), t_18), df_str_lit(")", 1)); });
+  return df_str_lit("", 0);
+  fn15_fail: df_panic_unhandled(df_err);
+  fn15_panic: df_panic_unhandled(df_err);
   return df_str_lit("", 0);
 }
 
 static c_Box__i32* f_Box__Box__i32_Get(c_Box__Box__i32* self) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
   return self->m_value;
-  fn17_fail: return NULL;
-  fn17_panic: df_panic_unhandled();
+  return NULL;
+  fn19_fail: df_panic_unhandled(df_err);
+  fn19_panic: df_panic_unhandled(df_err);
   return NULL;
 }
 
 static void f_Box__Box__i32_Set(c_Box__Box__i32* self, c_Box__i32* v_next) {
-  df_exception* df_pend20 = NULL;
-  ({ ({ c_Box__i32* t_24 = ({ c_Box__i32** t_21 = &(v_next); c_Box__i32* t_22 = *t_21; *t_21 = NULL; t_22; }); c_Box__i32** t_23 = &(self->m_value); c_Box__i32* t_25 = *t_23; *t_23 = t_24; if (t_25 != t_24) { df_drop((void*)t_25); } }); if (df_err) { df_err_thrown = false; goto f20_exc1; } });
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
+  df_exception* df_pend22 = NULL;
+  ({ ({ c_Box__i32* t_26 = ({ c_Box__i32** t_23 = &(v_next); c_Box__i32* t_24 = *t_23; *t_23 = NULL; t_24; }); c_Box__i32** t_25 = &(self->m_value); c_Box__i32* t_27 = *t_25; *t_25 = t_26; if (t_27 != t_26) { df_drop((void*)t_27); } }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f22_exc1; } });
   {
-    ({ ({ c_Box__i32** t_27 = &(v_next); void* t_28 = (void*)*t_27; *t_27 = NULL; df_drop(t_28); }); if (df_err) { df_err_thrown = false; goto f20_exc0; } });
+    ({ ({ c_Box__i32** t_29 = &(v_next); void* t_30 = (void*)*t_29; *t_29 = NULL; df_drop(t_30); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f22_exc0; } });
   }
-  goto f20_done;
-  f20_exc1: if (df_err) { df_pend20 = df_err; df_err = NULL; }
+  goto f22_done;
+  f22_exc1: if (df_err) { df_pend22 = df_err; df_err = NULL; }
   {
-    ({ ({ c_Box__i32** t_30 = &(v_next); void* t_31 = (void*)*t_30; *t_30 = NULL; df_drop(t_31); }); if (df_err) { df_err_thrown = false; goto fn19_panic; } });
+    ({ ({ c_Box__i32** t_32 = &(v_next); void* t_33 = (void*)*t_32; *t_32 = NULL; df_drop(t_33); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn21_panic; } });
   }
-  f20_exc0: if (df_err == NULL) { df_err = df_pend20; } df_pend20 = NULL;
-  goto fn19_fail;
-  f20_done: ;
-  fn19_fail: return;
-  fn19_panic: df_panic_unhandled();
+  f22_exc0: if (df_err == NULL) { df_err = df_pend22; } df_pend22 = NULL;
+  goto fn21_fail;
+  f22_done: ;
+  return;
+  fn21_fail: df_panic_unhandled(df_err);
+  fn21_panic: df_panic_unhandled(df_err);
 }
 
 static void f_Box__Box__i32_Bump(void) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
   s_Box__Box__i32_created = ((int32_t)(s_Box__Box__i32_created + ((int32_t)1LL)));
-  fn32_fail: return;
-  fn32_panic: df_panic_unhandled();
+  return;
+  fn34_fail: df_panic_unhandled(df_err);
+  fn34_panic: df_panic_unhandled(df_err);
 }
 
-static df_string f_Registry__Dog_Describe(c_Registry__Dog* self) {
-  return f_Dog_Name(((c_Dog*)({ c_Dog* t_36 = self->m_first; if (t_36 == NULL || DF_IS_DEAD(t_36)) { df_raise(&df_desc_NullPointerException, df_fn34); { df_err_thrown = false; goto fn34_fail; } } t_36; })));
-  fn34_fail: return df_str_lit("", 0);
-  fn34_panic: df_panic_unhandled();
-  return df_str_lit("", 0);
+static df_res0 f_Registry__Dog_Describe(c_Registry__Dog* self) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
+  return (df_res0){ f_Dog_Name(((c_Dog*)({ c_Dog* t_38 = self->m_first; if (t_38 == NULL || DF_IS_DEAD(t_38)) { df_raise(&df_desc_NullPointerException, df_fn36); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn36_fail; } } t_38; }))), NULL };
+  fn36_fail: return (df_res0){ df_str_lit("", 0), df_err };
+  fn36_panic: df_panic_unhandled(df_err);
+  return (df_res0){ df_str_lit("", 0), df_err };
 }
 
 static double f_Box__r64_Get(c_Box__r64* self) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
   return self->m_value;
-  fn37_fail: return 0;
-  fn37_panic: df_panic_unhandled();
+  return 0;
+  fn39_fail: df_panic_unhandled(df_err);
+  fn39_panic: df_panic_unhandled(df_err);
   return 0;
 }
 
 static void f_Box__r64_Set(c_Box__r64* self, double v_next) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
   self->m_value = v_next;
-  fn39_fail: return;
-  fn39_panic: df_panic_unhandled();
+  return;
+  fn41_fail: df_panic_unhandled(df_err);
+  fn41_panic: df_panic_unhandled(df_err);
 }
 
 static void f_Box__r64_Bump(void) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
   s_Box__r64_created = ((int32_t)(s_Box__r64_created + ((int32_t)1LL)));
-  fn41_fail: return;
-  fn41_panic: df_panic_unhandled();
+  return;
+  fn43_fail: df_panic_unhandled(df_err);
+  fn43_panic: df_panic_unhandled(df_err);
 }
 
 static void f_Dog___init(c_Dog* self, df_string v_label) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
   (self)->m_label = v_label;
-  fn43_fail: return;
-  fn43_panic: df_panic_unhandled();
+  return;
+  fn45_fail: df_panic_unhandled(df_err);
+  fn45_panic: df_panic_unhandled(df_err);
 }
 
 static c_Dog* f_Dog(df_string v_label) {
   c_Dog* self = (c_Dog*)df_calloc(1, sizeof(struct c_Dog));
   self->cls = &df_cls_Dog;
   f_Dog___init(self, v_label);
-  if (df_err) {
-    return NULL;
-  }
   return self;
 }
 
 static void f_Box__i32___init(c_Box__i32* self, int32_t v_value) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
   (self)->m_value = v_value;
-  fn45_fail: return;
-  fn45_panic: df_panic_unhandled();
+  return;
+  fn47_fail: df_panic_unhandled(df_err);
+  fn47_panic: df_panic_unhandled(df_err);
 }
 
 static c_Box__i32* f_Box__i32(int32_t v_value) {
   c_Box__i32* self = (c_Box__i32*)df_calloc(1, sizeof(struct c_Box__i32));
   self->cls = &df_cls_Box__i32;
   f_Box__i32___init(self, v_value);
-  if (df_err) {
-    return NULL;
-  }
   return self;
 }
 
 static void f_Box__i32___static_created(void) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
   s_Box__i32_created = ((int32_t)0LL);
-  fn47_fail: return;
-  fn47_panic: df_panic_unhandled();
+  return;
+  fn49_fail: df_panic_unhandled(df_err);
+  fn49_panic: df_panic_unhandled(df_err);
 }
 
 static void f_Box__string___init(c_Box__string* self, df_string v_value) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
   (self)->m_value = v_value;
-  fn49_fail: return;
-  fn49_panic: df_panic_unhandled();
+  return;
+  fn51_fail: df_panic_unhandled(df_err);
+  fn51_panic: df_panic_unhandled(df_err);
 }
 
 static c_Box__string* f_Box__string(df_string v_value) {
   c_Box__string* self = (c_Box__string*)df_calloc(1, sizeof(struct c_Box__string));
   self->cls = &df_cls_Box__string;
   f_Box__string___init(self, v_value);
-  if (df_err) {
-    return NULL;
-  }
   return self;
 }
 
 static void f_Box__string___static_created(void) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
   s_Box__string_created = ((int32_t)0LL);
-  fn51_fail: return;
-  fn51_panic: df_panic_unhandled();
+  return;
+  fn53_fail: df_panic_unhandled(df_err);
+  fn53_panic: df_panic_unhandled(df_err);
 }
 
 static void f_Pair__i32_string___init(c_Pair__i32_string* self, int32_t v_left, df_string v_right) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
   (self)->m_left = v_left;
   (self)->m_right = v_right;
-  fn53_fail: return;
-  fn53_panic: df_panic_unhandled();
+  return;
+  fn55_fail: df_panic_unhandled(df_err);
+  fn55_panic: df_panic_unhandled(df_err);
 }
 
 static c_Pair__i32_string* f_Pair__i32_string(int32_t v_left, df_string v_right) {
   c_Pair__i32_string* self = (c_Pair__i32_string*)df_calloc(1, sizeof(struct c_Pair__i32_string));
   self->cls = &df_cls_Pair__i32_string;
   f_Pair__i32_string___init(self, v_left, v_right);
-  if (df_err) {
-    return NULL;
-  }
   return self;
 }
 
 static void f_Box__Box__i32___init(c_Box__Box__i32* self, c_Box__i32* v_value) {
-  df_exception* df_pend56 = NULL;
-  ({ ({ c_Box__i32* t_60 = ({ c_Box__i32** t_57 = &(v_value); c_Box__i32* t_58 = *t_57; *t_57 = NULL; t_58; }); c_Box__i32** t_59 = &((self)->m_value); c_Box__i32* t_61 = *t_59; *t_59 = t_60; if (t_61 != t_60) { df_drop((void*)t_61); } }); if (df_err) { df_err_thrown = false; goto f56_exc1; } });
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
+  df_exception* df_pend58 = NULL;
+  ({ ({ c_Box__i32* t_62 = ({ c_Box__i32** t_59 = &(v_value); c_Box__i32* t_60 = *t_59; *t_59 = NULL; t_60; }); c_Box__i32** t_61 = &((self)->m_value); c_Box__i32* t_63 = *t_61; *t_61 = t_62; if (t_63 != t_62) { df_drop((void*)t_63); } }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f58_exc1; } });
   {
-    ({ ({ c_Box__i32** t_63 = &(v_value); void* t_64 = (void*)*t_63; *t_63 = NULL; df_drop(t_64); }); if (df_err) { df_err_thrown = false; goto f56_exc0; } });
+    ({ ({ c_Box__i32** t_65 = &(v_value); void* t_66 = (void*)*t_65; *t_65 = NULL; df_drop(t_66); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f58_exc0; } });
   }
-  goto f56_done;
-  f56_exc1: if (df_err) { df_pend56 = df_err; df_err = NULL; }
+  goto f58_done;
+  f58_exc1: if (df_err) { df_pend58 = df_err; df_err = NULL; }
   {
-    ({ ({ c_Box__i32** t_66 = &(v_value); void* t_67 = (void*)*t_66; *t_66 = NULL; df_drop(t_67); }); if (df_err) { df_err_thrown = false; goto fn55_panic; } });
+    ({ ({ c_Box__i32** t_68 = &(v_value); void* t_69 = (void*)*t_68; *t_68 = NULL; df_drop(t_69); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn57_panic; } });
   }
-  f56_exc0: if (df_err == NULL) { df_err = df_pend56; } df_pend56 = NULL;
-  goto fn55_fail;
-  f56_done: ;
-  fn55_fail: return;
-  fn55_panic: df_panic_unhandled();
+  f58_exc0: if (df_err == NULL) { df_err = df_pend58; } df_pend58 = NULL;
+  goto fn57_fail;
+  f58_done: ;
+  return;
+  fn57_fail: df_panic_unhandled(df_err);
+  fn57_panic: df_panic_unhandled(df_err);
 }
 
 static c_Box__Box__i32* f_Box__Box__i32(c_Box__i32* v_value) {
   c_Box__Box__i32* self = (c_Box__Box__i32*)df_calloc(1, sizeof(struct c_Box__Box__i32));
   self->cls = &df_cls_Box__Box__i32;
   f_Box__Box__i32___init(self, v_value);
-  if (df_err) {
-    return NULL;
-  }
   return self;
 }
 
 static void f_Box__Box__i32___static_created(void) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
   s_Box__Box__i32_created = ((int32_t)0LL);
-  fn68_fail: return;
-  fn68_panic: df_panic_unhandled();
+  return;
+  fn70_fail: df_panic_unhandled(df_err);
+  fn70_panic: df_panic_unhandled(df_err);
 }
 
 static void f_Registry__Dog___init(c_Registry__Dog* self, c_Dog* v_first) {
-  df_exception* df_pend71 = NULL;
-  ({ ({ c_Dog* t_75 = ({ c_Dog** t_72 = &(v_first); c_Dog* t_73 = *t_72; *t_72 = NULL; t_73; }); c_Dog** t_74 = &((self)->m_first); c_Dog* t_76 = *t_74; *t_74 = t_75; if (t_76 != t_75) { df_drop((void*)t_76); } }); if (df_err) { df_err_thrown = false; goto f71_exc1; } });
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
+  df_exception* df_pend73 = NULL;
+  ({ ({ c_Dog* t_77 = ({ c_Dog** t_74 = &(v_first); c_Dog* t_75 = *t_74; *t_74 = NULL; t_75; }); c_Dog** t_76 = &((self)->m_first); c_Dog* t_78 = *t_76; *t_76 = t_77; if (t_78 != t_77) { df_drop((void*)t_78); } }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f73_exc1; } });
   {
-    ({ ({ c_Dog** t_78 = &(v_first); void* t_79 = (void*)*t_78; *t_78 = NULL; df_drop(t_79); }); if (df_err) { df_err_thrown = false; goto f71_exc0; } });
+    ({ ({ c_Dog** t_80 = &(v_first); void* t_81 = (void*)*t_80; *t_80 = NULL; df_drop(t_81); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f73_exc0; } });
   }
-  goto f71_done;
-  f71_exc1: if (df_err) { df_pend71 = df_err; df_err = NULL; }
+  goto f73_done;
+  f73_exc1: if (df_err) { df_pend73 = df_err; df_err = NULL; }
   {
-    ({ ({ c_Dog** t_81 = &(v_first); void* t_82 = (void*)*t_81; *t_81 = NULL; df_drop(t_82); }); if (df_err) { df_err_thrown = false; goto fn70_panic; } });
+    ({ ({ c_Dog** t_83 = &(v_first); void* t_84 = (void*)*t_83; *t_83 = NULL; df_drop(t_84); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn72_panic; } });
   }
-  f71_exc0: if (df_err == NULL) { df_err = df_pend71; } df_pend71 = NULL;
-  goto fn70_fail;
-  f71_done: ;
-  fn70_fail: return;
-  fn70_panic: df_panic_unhandled();
+  f73_exc0: if (df_err == NULL) { df_err = df_pend73; } df_pend73 = NULL;
+  goto fn72_fail;
+  f73_done: ;
+  return;
+  fn72_fail: df_panic_unhandled(df_err);
+  fn72_panic: df_panic_unhandled(df_err);
 }
 
 static c_Registry__Dog* f_Registry__Dog(c_Dog* v_first) {
   c_Registry__Dog* self = (c_Registry__Dog*)df_calloc(1, sizeof(struct c_Registry__Dog));
   self->cls = &df_cls_Registry__Dog;
   f_Registry__Dog___init(self, v_first);
-  if (df_err) {
-    return NULL;
-  }
   return self;
 }
 
 static void f_Box__r64___init(c_Box__r64* self, double v_value) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
   (self)->m_value = v_value;
-  fn83_fail: return;
-  fn83_panic: df_panic_unhandled();
+  return;
+  fn85_fail: df_panic_unhandled(df_err);
+  fn85_panic: df_panic_unhandled(df_err);
 }
 
 static c_Box__r64* f_Box__r64(double v_value) {
   c_Box__r64* self = (c_Box__r64*)df_calloc(1, sizeof(struct c_Box__r64));
   self->cls = &df_cls_Box__r64;
   f_Box__r64___init(self, v_value);
-  if (df_err) {
-    return NULL;
-  }
   return self;
 }
 
 static void f_Box__r64___static_created(void) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
   s_Box__r64_created = ((int32_t)0LL);
-  fn85_fail: return;
-  fn85_panic: df_panic_unhandled();
+  return;
+  fn87_fail: df_panic_unhandled(df_err);
+  fn87_panic: df_panic_unhandled(df_err);
 }
 
-static int32_t f_smaller__i32(int32_t v_first, int32_t v_second) {
+static df_res1 f_smaller__i32(int32_t v_first, int32_t v_second) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
   if ((v_first < v_second)) {
-    return v_first;
+    return (df_res1){ v_first, NULL };
   }
-  return v_second;
-  fn146_fail: return 0;
-  fn146_panic: df_panic_unhandled();
-  return 0;
+  return (df_res1){ v_second, NULL };
+  fn148_fail: return (df_res1){ 0, df_err };
+  fn148_panic: df_panic_unhandled(df_err);
+  return (df_res1){ 0, df_err };
 }
 
-static double f_smaller__r64(double v_first, double v_second) {
+static df_res2 f_smaller__r64(double v_first, double v_second) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
   if ((v_first < v_second)) {
-    return v_first;
+    return (df_res2){ v_first, NULL };
   }
-  return v_second;
-  fn149_fail: return 0;
-  fn149_panic: df_panic_unhandled();
-  return 0;
+  return (df_res2){ v_second, NULL };
+  fn151_fail: return (df_res2){ 0, df_err };
+  fn151_panic: df_panic_unhandled(df_err);
+  return (df_res2){ 0, df_err };
 }
 
-static double f_average__i32_r64(int32_t v_first, double v_second) {
-  return (((((double)(v_first)) + v_second)) / (2.0));
-  fn152_fail: return 0;
-  fn152_panic: df_panic_unhandled();
-  return 0;
+static df_res2 f_average__i32_r64(int32_t v_first, double v_second) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
+  return (df_res2){ (((((double)(v_first)) + v_second)) / (2.0)), NULL };
+  fn154_fail: return (df_res2){ 0, df_err };
+  fn154_panic: df_panic_unhandled(df_err);
+  return (df_res2){ 0, df_err };
 }
 
-static df_string f_describe__string(df_string v_value) {
-  return df_str_concat(df_str_lit("text:", 5), v_value);
-  fn154_fail: return df_str_lit("", 0);
-  fn154_panic: df_panic_unhandled();
-  return df_str_lit("", 0);
+static df_res0 f_describe__string(df_string v_value) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
+  return (df_res0){ df_str_concat(df_str_lit("text:", 5), v_value), NULL };
+  fn156_fail: return (df_res0){ df_str_lit("", 0), df_err };
+  fn156_panic: df_panic_unhandled(df_err);
+  return (df_res0){ df_str_lit("", 0), df_err };
 }
 
-static df_string f_describe__char(uint32_t v_value) {
-  return df_str_concat(df_str_lit("text:", 5), df_str_from_char(v_value));
-  fn156_fail: return df_str_lit("", 0);
-  fn156_panic: df_panic_unhandled();
-  return df_str_lit("", 0);
+static df_res0 f_describe__char(uint32_t v_value) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
+  return (df_res0){ df_str_concat(df_str_lit("text:", 5), df_str_from_char(v_value)), NULL };
+  fn158_fail: return (df_res0){ df_str_lit("", 0), df_err };
+  fn158_panic: df_panic_unhandled(df_err);
+  return (df_res0){ df_str_lit("", 0), df_err };
 }
 
-static df_string f_identity__string(df_string v_value) {
-  return v_value;
-  fn158_fail: return df_str_lit("", 0);
-  fn158_panic: df_panic_unhandled();
-  return df_str_lit("", 0);
+static df_res0 f_identity__string(df_string v_value) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
+  return (df_res0){ v_value, NULL };
+  fn160_fail: return (df_res0){ df_str_lit("", 0), df_err };
+  fn160_panic: df_panic_unhandled(df_err);
+  return (df_res0){ df_str_lit("", 0), df_err };
 }
 
-static df_string f_firstOf__string_i32(df_string v_first, int32_t v_second) {
-  return v_first;
-  fn160_fail: return df_str_lit("", 0);
-  fn160_panic: df_panic_unhandled();
-  return df_str_lit("", 0);
+static df_res0 f_firstOf__string_i32(df_string v_first, int32_t v_second) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
+  return (df_res0){ v_first, NULL };
+  fn162_fail: return (df_res0){ df_str_lit("", 0), df_err };
+  fn162_panic: df_panic_unhandled(df_err);
+  return (df_res0){ df_str_lit("", 0), df_err };
 }
 
-static df_string f_nameOf__Dog(c_Dog* v_thing) {
-  return f_Dog_Name(((c_Dog*)({ c_Dog* t_164 = v_thing; if (t_164 == NULL || DF_IS_DEAD(t_164)) { df_raise(&df_desc_NullPointerException, df_fn162); { df_err_thrown = false; goto fn162_fail; } } t_164; })));
-  fn162_fail: return df_str_lit("", 0);
-  fn162_panic: df_panic_unhandled();
-  return df_str_lit("", 0);
+static df_res0 f_nameOf__Dog(c_Dog* v_thing) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
+  return (df_res0){ f_Dog_Name(((c_Dog*)({ c_Dog* t_166 = v_thing; if (t_166 == NULL || DF_IS_DEAD(t_166)) { df_raise(&df_desc_NullPointerException, df_fn164); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn164_fail; } } t_166; }))), NULL };
+  fn164_fail: return (df_res0){ df_str_lit("", 0), df_err };
+  fn164_panic: df_panic_unhandled(df_err);
+  return (df_res0){ df_str_lit("", 0), df_err };
 }
 
-static int32_t f_total__i32(int32_t v_first, df_arr_i32 v_rest) {
+static df_res1 f_total__i32(int32_t v_first, df_arr_i32 v_rest) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
   int32_t v_sum = v_first;
   {
-    df_arr_i32 df_coll168 = v_rest;
-    for (uint64_t df_pos168 = 0; df_pos168 < df_coll168.len; df_pos168++) {
-      int32_t v_n = df_coll168.p[df_pos168];
+    df_arr_i32 df_coll170 = v_rest;
+    for (uint64_t df_pos170 = 0; df_pos170 < df_coll170.len; df_pos170++) {
+      int32_t v_n = df_coll170.p[df_pos170];
       v_sum = ((int32_t)(v_sum + v_n));
     }
   }
-  return v_sum;
-  fn165_fail: return 0;
-  fn165_panic: df_panic_unhandled();
-  return 0;
+  return (df_res1){ v_sum, NULL };
+  fn167_fail: return (df_res1){ 0, df_err };
+  fn167_panic: df_panic_unhandled(df_err);
+  return (df_res1){ 0, df_err };
 }
 
 int main(int argc, char** argv) {
@@ -1548,103 +1727,95 @@ int main(int argc, char** argv) {
   s_Box__Box__i32_created = 0;
   s_Box__r64_created = 0;
   f_Box__i32___static_created();
-  if (df_err) {
-    df_panic_unhandled();
-  }
   f_Box__string___static_created();
-  if (df_err) {
-    df_panic_unhandled();
-  }
   f_Box__Box__i32___static_created();
-  if (df_err) {
-    df_panic_unhandled();
-  }
   f_Box__r64___static_created();
-  if (df_err) {
-    df_panic_unhandled();
-  }
-  df_exception* df_pend88 = NULL;
-  c_Box__i32* v_a_88 = NULL;
-  c_Box__string* v_b_88 = NULL;
-  c_Pair__i32_string* v_p_88 = NULL;
-  c_Box__Box__i32* v_nested_88 = NULL;
-  c_Registry__Dog* v_registry_88 = NULL;
-  c_Box__r64* v_inferred_88 = NULL;
-  df_console_log(df_str_from_i64((int64_t)(({ int32_t t_89 = f_smaller__i32(((int32_t)3LL), ((int32_t)5LL)); if (df_err) { df_err_thrown = false; goto f88_exc6; } t_89; }))));
-  df_console_log(df_str_from_i64((int64_t)(({ int32_t t_90 = f_smaller__i32(((int32_t)9LL), ((int32_t)4LL)); if (df_err) { df_err_thrown = false; goto f88_exc6; } t_90; }))));
-  df_console_log(df_str_from_r64(({ double t_91 = f_smaller__r64((2.5), (1.5)); if (df_err) { df_err_thrown = false; goto f88_exc6; } t_91; })));
-  df_console_log(df_str_from_r64(({ double t_92 = f_average__i32_r64(((int32_t)3LL), (4.5)); if (df_err) { df_err_thrown = false; goto f88_exc6; } t_92; })));
-  df_console_log(({ df_string t_93 = f_describe__string(df_str_lit("hi", 2)); if (df_err) { df_err_thrown = false; goto f88_exc6; } t_93; }));
-  df_console_log(({ df_string t_94 = f_describe__char(((uint32_t)99u)); if (df_err) { df_err_thrown = false; goto f88_exc6; } t_94; }));
-  df_console_log(({ df_string t_95 = f_identity__string(df_str_lit("same", 4)); if (df_err) { df_err_thrown = false; goto f88_exc6; } t_95; }));
-  df_console_log(({ df_string t_96 = f_firstOf__string_i32(df_str_lit("kept", 4), ((int32_t)7LL)); if (df_err) { df_err_thrown = false; goto f88_exc6; } t_96; }));
-  df_console_log(({ df_string t_97 = f_nameOf__Dog(f_Dog(df_str_lit("rex", 3))); if (df_err) { df_err_thrown = false; goto f88_exc6; } t_97; }));
-  df_console_log(df_str_from_i64((int64_t)(({ int32_t t_99 = f_total__i32(((int32_t)1LL), ({ df_arr_i32 t_98 = { (int32_t*)df_calloc(3, sizeof(int32_t)), 3 }; t_98.p[0] = ((int32_t)2LL); t_98.p[1] = ((int32_t)3LL); t_98.p[2] = ((int32_t)4LL); t_98; })); if (df_err) { df_err_thrown = false; goto f88_exc6; } t_99; }))));
-  v_a_88 = f_Box__i32(((int32_t)10LL));
-  f_Box__i32_Set(((c_Box__i32*)({ c_Box__i32* t_101 = v_a_88; if (t_101 == NULL || DF_IS_DEAD(t_101)) { df_raise(&df_desc_NullPointerException, df_fn87); { df_err_thrown = false; goto f88_exc6; } } t_101; })), ((int32_t)(f_Box__i32_Get(((c_Box__i32*)({ c_Box__i32* t_100 = v_a_88; if (t_100 == NULL || DF_IS_DEAD(t_100)) { df_raise(&df_desc_NullPointerException, df_fn87); { df_err_thrown = false; goto f88_exc6; } } t_100; }))) + ((int32_t)5LL))));
-  df_console_log(df_str_from_i64((int64_t)(f_Box__i32_Get(((c_Box__i32*)({ c_Box__i32* t_102 = v_a_88; if (t_102 == NULL || DF_IS_DEAD(t_102)) { df_raise(&df_desc_NullPointerException, df_fn87); { df_err_thrown = false; goto f88_exc6; } } t_102; }))))));
-  v_b_88 = f_Box__string(df_str_lit("hello", 5));
-  df_console_log(f_Box__string_Get(((c_Box__string*)({ c_Box__string* t_103 = v_b_88; if (t_103 == NULL || DF_IS_DEAD(t_103)) { df_raise(&df_desc_NullPointerException, df_fn87); { df_err_thrown = false; goto f88_exc6; } } t_103; }))));
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
+  df_exception* df_pend90 = NULL;
+  c_Box__i32* v_a_90 = NULL;
+  c_Box__string* v_b_90 = NULL;
+  c_Pair__i32_string* v_p_90 = NULL;
+  c_Box__Box__i32* v_nested_90 = NULL;
+  c_Registry__Dog* v_registry_90 = NULL;
+  c_Box__r64* v_inferred_90 = NULL;
+  df_console_log(df_str_from_i64((int64_t)(({ df_res1 t_91 = f_smaller__i32(((int32_t)3LL), ((int32_t)5LL)); if (t_91.err) { df_err = t_91.err; df_err_thrown = false; goto f90_exc6; } t_91.value; }))));
+  df_console_log(df_str_from_i64((int64_t)(({ df_res1 t_92 = f_smaller__i32(((int32_t)9LL), ((int32_t)4LL)); if (t_92.err) { df_err = t_92.err; df_err_thrown = false; goto f90_exc6; } t_92.value; }))));
+  df_console_log(df_str_from_r64(({ df_res2 t_93 = f_smaller__r64((2.5), (1.5)); if (t_93.err) { df_err = t_93.err; df_err_thrown = false; goto f90_exc6; } t_93.value; })));
+  df_console_log(df_str_from_r64(({ df_res2 t_94 = f_average__i32_r64(((int32_t)3LL), (4.5)); if (t_94.err) { df_err = t_94.err; df_err_thrown = false; goto f90_exc6; } t_94.value; })));
+  df_console_log(({ df_res0 t_95 = f_describe__string(df_str_lit("hi", 2)); if (t_95.err) { df_err = t_95.err; df_err_thrown = false; goto f90_exc6; } t_95.value; }));
+  df_console_log(({ df_res0 t_96 = f_describe__char(((uint32_t)99u)); if (t_96.err) { df_err = t_96.err; df_err_thrown = false; goto f90_exc6; } t_96.value; }));
+  df_console_log(({ df_res0 t_97 = f_identity__string(df_str_lit("same", 4)); if (t_97.err) { df_err = t_97.err; df_err_thrown = false; goto f90_exc6; } t_97.value; }));
+  df_console_log(({ df_res0 t_98 = f_firstOf__string_i32(df_str_lit("kept", 4), ((int32_t)7LL)); if (t_98.err) { df_err = t_98.err; df_err_thrown = false; goto f90_exc6; } t_98.value; }));
+  df_console_log(({ df_res0 t_99 = f_nameOf__Dog(f_Dog(df_str_lit("rex", 3))); if (t_99.err) { df_err = t_99.err; df_err_thrown = false; goto f90_exc6; } t_99.value; }));
+  df_console_log(df_str_from_i64((int64_t)(({ df_res1 t_101 = f_total__i32(((int32_t)1LL), ({ df_arr_i32 t_100 = { (int32_t*)df_calloc(3, sizeof(int32_t)), 3 }; t_100.p[0] = ((int32_t)2LL); t_100.p[1] = ((int32_t)3LL); t_100.p[2] = ((int32_t)4LL); t_100; })); if (t_101.err) { df_err = t_101.err; df_err_thrown = false; goto f90_exc6; } t_101.value; }))));
+  v_a_90 = f_Box__i32(((int32_t)10LL));
+  f_Box__i32_Set(((c_Box__i32*)({ c_Box__i32* t_103 = v_a_90; if (t_103 == NULL || DF_IS_DEAD(t_103)) { df_raise(&df_desc_NullPointerException, df_fn89); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f90_exc6; } } t_103; })), ((int32_t)(f_Box__i32_Get(((c_Box__i32*)({ c_Box__i32* t_102 = v_a_90; if (t_102 == NULL || DF_IS_DEAD(t_102)) { df_raise(&df_desc_NullPointerException, df_fn89); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f90_exc6; } } t_102; }))) + ((int32_t)5LL))));
+  df_console_log(df_str_from_i64((int64_t)(f_Box__i32_Get(((c_Box__i32*)({ c_Box__i32* t_104 = v_a_90; if (t_104 == NULL || DF_IS_DEAD(t_104)) { df_raise(&df_desc_NullPointerException, df_fn89); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f90_exc6; } } t_104; }))))));
+  v_b_90 = f_Box__string(df_str_lit("hello", 5));
+  df_console_log(f_Box__string_Get(((c_Box__string*)({ c_Box__string* t_105 = v_b_90; if (t_105 == NULL || DF_IS_DEAD(t_105)) { df_raise(&df_desc_NullPointerException, df_fn89); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f90_exc6; } } t_105; }))));
   f_Box__i32_Bump();
   f_Box__i32_Bump();
   df_console_log(df_str_from_i64((int64_t)(s_Box__i32_created)));
   df_console_log(df_str_from_i64((int64_t)(s_Box__string_created)));
-  v_p_88 = f_Pair__i32_string(((int32_t)1LL), df_str_lit("one", 3));
-  df_console_log(f_Pair__i32_string_Show(((c_Pair__i32_string*)({ c_Pair__i32_string* t_104 = v_p_88; if (t_104 == NULL || DF_IS_DEAD(t_104)) { df_raise(&df_desc_NullPointerException, df_fn87); { df_err_thrown = false; goto f88_exc6; } } t_104; }))));
-  v_nested_88 = f_Box__Box__i32(f_Box__i32(((int32_t)7LL)));
-  df_console_log(df_str_from_i64((int64_t)(f_Box__i32_Get(((c_Box__i32*)({ c_Box__i32* t_106 = f_Box__Box__i32_Get(((c_Box__Box__i32*)({ c_Box__Box__i32* t_105 = v_nested_88; if (t_105 == NULL || DF_IS_DEAD(t_105)) { df_raise(&df_desc_NullPointerException, df_fn87); { df_err_thrown = false; goto f88_exc6; } } t_105; }))); if (t_106 == NULL || DF_IS_DEAD(t_106)) { df_raise(&df_desc_NullPointerException, df_fn87); { df_err_thrown = false; goto f88_exc6; } } t_106; }))))));
-  v_registry_88 = f_Registry__Dog(f_Dog(df_str_lit("fido", 4)));
-  df_console_log(({ df_string t_108 = f_Registry__Dog_Describe(((c_Registry__Dog*)({ c_Registry__Dog* t_107 = v_registry_88; if (t_107 == NULL || DF_IS_DEAD(t_107)) { df_raise(&df_desc_NullPointerException, df_fn87); { df_err_thrown = false; goto f88_exc6; } } t_107; }))); if (df_err) { df_err_thrown = false; goto f88_exc6; } t_108; }));
-  v_inferred_88 = f_Box__r64((2.5));
-  df_console_log(df_str_from_r64(f_Box__r64_Get(((c_Box__r64*)({ c_Box__r64* t_109 = v_inferred_88; if (t_109 == NULL || DF_IS_DEAD(t_109)) { df_raise(&df_desc_NullPointerException, df_fn87); { df_err_thrown = false; goto f88_exc6; } } t_109; })))));
-  df_console_log(df_str_obj(v_a_88));
+  v_p_90 = f_Pair__i32_string(((int32_t)1LL), df_str_lit("one", 3));
+  df_console_log(f_Pair__i32_string_Show(((c_Pair__i32_string*)({ c_Pair__i32_string* t_106 = v_p_90; if (t_106 == NULL || DF_IS_DEAD(t_106)) { df_raise(&df_desc_NullPointerException, df_fn89); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f90_exc6; } } t_106; }))));
+  v_nested_90 = f_Box__Box__i32(f_Box__i32(((int32_t)7LL)));
+  df_console_log(df_str_from_i64((int64_t)(f_Box__i32_Get(((c_Box__i32*)({ c_Box__i32* t_108 = f_Box__Box__i32_Get(((c_Box__Box__i32*)({ c_Box__Box__i32* t_107 = v_nested_90; if (t_107 == NULL || DF_IS_DEAD(t_107)) { df_raise(&df_desc_NullPointerException, df_fn89); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f90_exc6; } } t_107; }))); if (t_108 == NULL || DF_IS_DEAD(t_108)) { df_raise(&df_desc_NullPointerException, df_fn89); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f90_exc6; } } t_108; }))))));
+  v_registry_90 = f_Registry__Dog(f_Dog(df_str_lit("fido", 4)));
+  df_console_log(({ df_res0 t_110 = f_Registry__Dog_Describe(((c_Registry__Dog*)({ c_Registry__Dog* t_109 = v_registry_90; if (t_109 == NULL || DF_IS_DEAD(t_109)) { df_raise(&df_desc_NullPointerException, df_fn89); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f90_exc6; } } t_109; }))); if (t_110.err) { df_err = t_110.err; df_err_thrown = false; goto f90_exc6; } t_110.value; }));
+  v_inferred_90 = f_Box__r64((2.5));
+  df_console_log(df_str_from_r64(f_Box__r64_Get(((c_Box__r64*)({ c_Box__r64* t_111 = v_inferred_90; if (t_111 == NULL || DF_IS_DEAD(t_111)) { df_raise(&df_desc_NullPointerException, df_fn89); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f90_exc6; } } t_111; })))));
+  df_console_log(df_str_obj(v_a_90));
   {
-    ({ ({ c_Box__r64** t_111 = &(v_inferred_88); void* t_112 = (void*)*t_111; *t_111 = NULL; df_drop(t_112); }); if (df_err) { df_err_thrown = false; goto f88_exc5; } });
+    ({ ({ c_Box__r64** t_113 = &(v_inferred_90); void* t_114 = (void*)*t_113; *t_113 = NULL; df_drop(t_114); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f90_exc5; } });
   }
   {
-    ({ ({ c_Registry__Dog** t_114 = &(v_registry_88); void* t_115 = (void*)*t_114; *t_114 = NULL; df_drop(t_115); }); if (df_err) { df_err_thrown = false; goto f88_exc4; } });
+    ({ ({ c_Registry__Dog** t_116 = &(v_registry_90); void* t_117 = (void*)*t_116; *t_116 = NULL; df_drop(t_117); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f90_exc4; } });
   }
   {
-    ({ ({ c_Box__Box__i32** t_117 = &(v_nested_88); void* t_118 = (void*)*t_117; *t_117 = NULL; df_drop(t_118); }); if (df_err) { df_err_thrown = false; goto f88_exc3; } });
+    ({ ({ c_Box__Box__i32** t_119 = &(v_nested_90); void* t_120 = (void*)*t_119; *t_119 = NULL; df_drop(t_120); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f90_exc3; } });
   }
   {
-    ({ ({ c_Pair__i32_string** t_120 = &(v_p_88); void* t_121 = (void*)*t_120; *t_120 = NULL; df_drop(t_121); }); if (df_err) { df_err_thrown = false; goto f88_exc2; } });
+    ({ ({ c_Pair__i32_string** t_122 = &(v_p_90); void* t_123 = (void*)*t_122; *t_122 = NULL; df_drop(t_123); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f90_exc2; } });
   }
   {
-    ({ ({ c_Box__string** t_123 = &(v_b_88); void* t_124 = (void*)*t_123; *t_123 = NULL; df_drop(t_124); }); if (df_err) { df_err_thrown = false; goto f88_exc1; } });
+    ({ ({ c_Box__string** t_125 = &(v_b_90); void* t_126 = (void*)*t_125; *t_125 = NULL; df_drop(t_126); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f90_exc1; } });
   }
   {
-    ({ ({ c_Box__i32** t_126 = &(v_a_88); void* t_127 = (void*)*t_126; *t_126 = NULL; df_drop(t_127); }); if (df_err) { df_err_thrown = false; goto f88_exc0; } });
+    ({ ({ c_Box__i32** t_128 = &(v_a_90); void* t_129 = (void*)*t_128; *t_128 = NULL; df_drop(t_129); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f90_exc0; } });
   }
-  goto f88_done;
-  f88_exc6: if (df_err) { df_pend88 = df_err; df_err = NULL; }
+  goto f90_done;
+  f90_exc6: if (df_err) { df_pend90 = df_err; df_err = NULL; }
   {
-    ({ ({ c_Box__r64** t_129 = &(v_inferred_88); void* t_130 = (void*)*t_129; *t_129 = NULL; df_drop(t_130); }); if (df_err) { df_err_thrown = false; goto fn87_panic; } });
+    ({ ({ c_Box__r64** t_131 = &(v_inferred_90); void* t_132 = (void*)*t_131; *t_131 = NULL; df_drop(t_132); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn89_panic; } });
   }
-  f88_exc5: if (df_err) { df_pend88 = df_err; df_err = NULL; }
+  f90_exc5: if (df_err) { df_pend90 = df_err; df_err = NULL; }
   {
-    ({ ({ c_Registry__Dog** t_132 = &(v_registry_88); void* t_133 = (void*)*t_132; *t_132 = NULL; df_drop(t_133); }); if (df_err) { df_err_thrown = false; goto fn87_panic; } });
+    ({ ({ c_Registry__Dog** t_134 = &(v_registry_90); void* t_135 = (void*)*t_134; *t_134 = NULL; df_drop(t_135); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn89_panic; } });
   }
-  f88_exc4: if (df_err) { df_pend88 = df_err; df_err = NULL; }
+  f90_exc4: if (df_err) { df_pend90 = df_err; df_err = NULL; }
   {
-    ({ ({ c_Box__Box__i32** t_135 = &(v_nested_88); void* t_136 = (void*)*t_135; *t_135 = NULL; df_drop(t_136); }); if (df_err) { df_err_thrown = false; goto fn87_panic; } });
+    ({ ({ c_Box__Box__i32** t_137 = &(v_nested_90); void* t_138 = (void*)*t_137; *t_137 = NULL; df_drop(t_138); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn89_panic; } });
   }
-  f88_exc3: if (df_err) { df_pend88 = df_err; df_err = NULL; }
+  f90_exc3: if (df_err) { df_pend90 = df_err; df_err = NULL; }
   {
-    ({ ({ c_Pair__i32_string** t_138 = &(v_p_88); void* t_139 = (void*)*t_138; *t_138 = NULL; df_drop(t_139); }); if (df_err) { df_err_thrown = false; goto fn87_panic; } });
+    ({ ({ c_Pair__i32_string** t_140 = &(v_p_90); void* t_141 = (void*)*t_140; *t_140 = NULL; df_drop(t_141); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn89_panic; } });
   }
-  f88_exc2: if (df_err) { df_pend88 = df_err; df_err = NULL; }
+  f90_exc2: if (df_err) { df_pend90 = df_err; df_err = NULL; }
   {
-    ({ ({ c_Box__string** t_141 = &(v_b_88); void* t_142 = (void*)*t_141; *t_141 = NULL; df_drop(t_142); }); if (df_err) { df_err_thrown = false; goto fn87_panic; } });
+    ({ ({ c_Box__string** t_143 = &(v_b_90); void* t_144 = (void*)*t_143; *t_143 = NULL; df_drop(t_144); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn89_panic; } });
   }
-  f88_exc1: if (df_err) { df_pend88 = df_err; df_err = NULL; }
+  f90_exc1: if (df_err) { df_pend90 = df_err; df_err = NULL; }
   {
-    ({ ({ c_Box__i32** t_144 = &(v_a_88); void* t_145 = (void*)*t_144; *t_144 = NULL; df_drop(t_145); }); if (df_err) { df_err_thrown = false; goto fn87_panic; } });
+    ({ ({ c_Box__i32** t_146 = &(v_a_90); void* t_147 = (void*)*t_146; *t_146 = NULL; df_drop(t_147); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn89_panic; } });
   }
-  f88_exc0: if (df_err == NULL) { df_err = df_pend88; } df_pend88 = NULL;
-  goto fn87_panic;
-  f88_done: ;
+  f90_exc0: if (df_err == NULL) { df_err = df_pend90; } df_pend90 = NULL;
+  goto fn89_panic;
+  f90_done: ;
   return 0;
-  fn87_panic: df_panic_unhandled();
+  fn89_panic: df_panic_unhandled(df_err);
   return 0;
 }

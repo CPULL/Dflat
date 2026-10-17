@@ -46,70 +46,70 @@ fun string greet(any Named n) { n.Hello() }
 
 Square sq = Square()
 Circle ci = Circle()
-r.Console.Log(sq.Label())
-r.Console.Log(sq.Hello())
-r.Console.Log(sq.Info())
-r.Console.Log(ci.Hello())
-r.Console.Log(ci.Info())
-r.Console.Log(sq.sides)
+r.Console.log(sq.Label())
+r.Console.log(sq.Hello())
+r.Console.log(sq.Info())
+r.Console.log(ci.Hello())
+r.Console.log(ci.Info())
+r.Console.log(sq.sides)
 sq.SetName("my square")
-r.Console.Log(sq.name)
-r.Console.Log(describe(sq))
-r.Console.Log(describe(ci))
-r.Console.Log(greet(sq))
-r.Console.Log(greet(ci))
+r.Console.log(sq.name)
+r.Console.log(describe(sq))
+r.Console.log(describe(ci))
+r.Console.log(greet(sq))
+r.Console.log(greet(ci))
 
 // a class that gets the function from its parent class
 Derived d = Derived()
-r.Console.Log(d.Hello())
-r.Console.Log(greet(d))
-r.Console.Log(d.name)
-r.Console.Log(d.extra)
+r.Console.log(d.Hello())
+r.Console.log(greet(d))
+r.Console.log(d.name)
+r.Console.log(d.extra)
 
 // a subclass overriding a function that answers a trait
 Loud loud = Loud()
 loud.side = 3.0
-r.Console.Log(describe(loud))
-r.Console.Log(greet(loud))
+r.Console.log(describe(loud))
+r.Console.log(greet(loud))
 
 // properties through a trait-typed value
 Shape s = ci
-r.Console.Log(s.sides)
+r.Console.log(s.sides)
 s.sides = 8
-r.Console.Log(ci.sides)
+r.Console.log(ci.sides)
 s.name = "renamed"
-r.Console.Log(ci.name)
-r.Console.Log(s.Hello())
+r.Console.log(ci.name)
+r.Console.log(s.Hello())
 
 // a mixed array of any shape
 arr<any Shape> shapes = [sq, ci, loud]
 r64 total = 0.0
 for any Shape item in shapes { total += item.Area() }
-r.Console.Log(total)
-for var item in shapes { r.Console.Print(item.Label() + ";") }
-r.Console.Log("")
+r.Console.log(total)
+for var item in shapes { r.Console.print(item.Label() + ";") }
+r.Console.log("")
 
 // a trait value assigned to the parent trait
 Named n = s
-r.Console.Log(n.Label())
+r.Console.log(n.Label())
 n = d
-r.Console.Log(n.Label())
+r.Console.log(n.Label())
 Named none = null
-r.Console.Log(none == null)
+r.Console.log(none == null)
 
 // is: with a class, and with a trait
-r.Console.Log(s is Circle)
-r.Console.Log(s is Square)
-r.Console.Log(sq is Shape)
-r.Console.Log(d is Shape)
-r.Console.Log(d is Named)
-r.Console.Log(n is Base)
+r.Console.log(s is Circle)
+r.Console.log(s is Square)
+r.Console.log(sq is Shape)
+r.Console.log(d is Shape)
+r.Console.log(d is Named)
+r.Console.log(n is Base)
 arr<Named> mixed = [sq, d, ci]
 for Named item in mixed {
   if item is Shape sh {
-    r.Console.Log("shape " + sh.Area())
+    r.Console.log("shape " + sh.Area())
   } else if item is Base b {
-    r.Console.Log("base " + b.Label())
+    r.Console.log("base " + b.Label())
   }
 }
 
@@ -119,5 +119,5 @@ none.Hello()
 catch NullPointerException {
   caught += 1
 }
-r.Console.Log(caught)
-r.Console.Log(sq)
+r.Console.log(caught)
+r.Console.log(sq)

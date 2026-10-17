@@ -1,0 +1,3 @@
+class Box { }
+arr<Box> boxes = [Box()]
+boxes.sort()

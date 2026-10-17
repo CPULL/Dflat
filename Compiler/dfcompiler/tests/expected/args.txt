@@ -1,0 +1,5 @@
+true
+true
+1
+true
+---- exit code 1 ----

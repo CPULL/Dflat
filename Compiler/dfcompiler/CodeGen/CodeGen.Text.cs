@@ -13,8 +13,11 @@ public sealed partial class CodeGen {
       return;
     }
     needs.Add(key);
-    if (key is "date" or "numfmt") {
+    if (key is "date" or "numfmt" or "strfmt") {
       needs.Add("text");
+    }
+    if (key == "strfmt") {
+      unicodeNeeds.Add("space");
     }
   }
 
@@ -37,11 +40,20 @@ public sealed partial class CodeGen {
     if (needs.Contains("text")) {
       sb.Append(RuntimeText.Source);
     }
+    if (needs.Contains("sort")) {
+      sb.Append(RuntimeSort.Source);
+    }
+    if (needs.Contains("strfmt")) {
+      sb.Append(RuntimeStringFormat.Source);
+    }
     if (needs.Contains("date")) {
       sb.Append(RuntimeDate.Source);
     }
     if (needs.Contains("numfmt")) {
       sb.Append(RuntimeNumber.Source);
+    }
+    if (needs.Contains("io")) {
+      sb.Append(RuntimeIO.Source);
     }
     return sb.ToString();
   }
@@ -75,17 +87,17 @@ public sealed partial class CodeGen {
     }
 
     // strings (spec 4.2)
-    Add("string", "Trim", Fun("string", "df_str_trim", NoParams, needs: TextNeed));
-    Add("string", "Trim", Fun("string", "df_str_trim_set", new[] { "string" }, needs: TextNeed));
-    Add("string", "TrimLeft", Fun("string", "df_str_trim_left", NoParams, needs: TextNeed));
-    Add("string", "TrimLeft", Fun("string", "df_str_trim_left_set", new[] { "string" }, needs: TextNeed));
-    Add("string", "TrimRight", Fun("string", "df_str_trim_right", NoParams, needs: TextNeed));
-    Add("string", "TrimRight", Fun("string", "df_str_trim_right_set", new[] { "string" }, needs: TextNeed));
-    Add("string", "Substr", Fun("string", "df_str_substr", new[] { "u32", "u32" }, needs: TextNeed));
-    Add("string", "Replace", Fun("string", "df_str_replace", new[] { "string", "string" }, "true", TextNeed));
-    Add("string", "Replace", Fun("string", "df_str_replace", new[] { "string", "string", "bool" }, needs: TextNeed));
+    Add("string", "trim", Fun("string", "df_str_trim", NoParams, needs: TextNeed));
+    Add("string", "trim", Fun("string", "df_str_trim_set", new[] { "string" }, needs: TextNeed));
+    Add("string", "trimLeft", Fun("string", "df_str_trim_left", NoParams, needs: TextNeed));
+    Add("string", "trimLeft", Fun("string", "df_str_trim_left_set", new[] { "string" }, needs: TextNeed));
+    Add("string", "trimRight", Fun("string", "df_str_trim_right", NoParams, needs: TextNeed));
+    Add("string", "trimRight", Fun("string", "df_str_trim_right_set", new[] { "string" }, needs: TextNeed));
+    Add("string", "substr", Fun("string", "df_str_substr", new[] { "u32", "u32" }, needs: TextNeed));
+    Add("string", "replace", Fun("string", "df_str_replace", new[] { "string", "string" }, "true", TextNeed));
+    Add("string", "replace", Fun("string", "df_str_replace", new[] { "string", "string", "bool" }, needs: TextNeed));
     foreach (var (name, cname) in new[] {
-      ("IndexOf", "df_str_indexof"), ("LastIndexOf", "df_str_lastindexof")
+      ("indexOf", "df_str_indexof"), ("lastIndexOf", "df_str_lastindexof")
     }) {
       Add("string", name, Fun("i64", cname, new[] { "string" }, "true", TextNeed));
       Add("string", name, Fun("i64", cname, new[] { "string", "bool" }, needs: TextNeed));
@@ -93,34 +105,34 @@ public sealed partial class CodeGen {
       Add("string", name, Fun("i64", cname + "_c", new[] { "char", "bool" }, needs: TextNeed));
     }
     foreach (var (name, cname) in new[] {
-      ("Contains", "df_str_contains"), ("StartsWith", "df_str_startswith"), ("EndsWith", "df_str_endswith")
+      ("contains", "df_str_contains"), ("startsWith", "df_str_startswith"), ("endsWith", "df_str_endswith")
     }) {
       Add("string", name, Fun("bool", cname, new[] { "string" }, "true", TextNeed));
       Add("string", name, Fun("bool", cname, new[] { "string", "bool" }, needs: TextNeed));
     }
-    Add("string", "Split", Fun("arr<string>", "df_str_split", new[] { "string" }, needs: TextNeed));
-    Add("string", "ToLower", Fun("string", "df_str_tolower", NoParams, needs: TextNeed));
-    Add("string", "ToUpper", Fun("string", "df_str_toupper", NoParams, needs: TextNeed));
-    Add("string", "PadLeft", Fun("string", "df_str_pad_left", new[] { "u32" }, "32u", TextNeed));
-    Add("string", "PadLeft", Fun("string", "df_str_pad_left", new[] { "u32", "char" }, needs: TextNeed));
-    Add("string", "PadRight", Fun("string", "df_str_pad_right", new[] { "u32" }, "32u", TextNeed));
-    Add("string", "PadRight", Fun("string", "df_str_pad_right", new[] { "u32", "char" }, needs: TextNeed));
-    Add("string", "ToCStr", Fun("arr<u8>", "df_str_tocstr", NoParams, "0", TextNeed));
-    Add("string", "ToCStr", Fun("arr<u8>", "df_str_tocstr", new[] { "StringEncoding" }, needs: TextNeed));
+    Add("string", "split", Fun("arr<string>", "df_str_split", new[] { "string" }, needs: TextNeed));
+    Add("string", "toLower", Fun("string", "df_str_tolower", NoParams, needs: TextNeed));
+    Add("string", "toUpper", Fun("string", "df_str_toupper", NoParams, needs: TextNeed));
+    Add("string", "padLeft", Fun("string", "df_str_pad_left", new[] { "u32" }, "32u", TextNeed));
+    Add("string", "padLeft", Fun("string", "df_str_pad_left", new[] { "u32", "char" }, needs: TextNeed));
+    Add("string", "padRight", Fun("string", "df_str_pad_right", new[] { "u32" }, "32u", TextNeed));
+    Add("string", "padRight", Fun("string", "df_str_pad_right", new[] { "u32", "char" }, needs: TextNeed));
+    Add("string", "toCStr", Fun("arr<u8>", "df_str_tocstr", NoParams, "0", TextNeed));
+    Add("string", "toCStr", Fun("arr<u8>", "df_str_tocstr", new[] { "StringEncoding" }, needs: TextNeed));
 
     // chars (spec 4.1)
     foreach (var (name, cname, table2) in new[] {
-      ("IsLetter", "df_cp_is_letter", "letter"), ("IsDigit", "df_cp_is_digit", "digit"),
-      ("IsLetterOrDigit", "df_cp_is_letterordigit", "letterordigit"), ("IsWhiteSpace", "df_cp_is_space", "space"),
-      ("IsUpper", "df_cp_is_upper", "upper"), ("IsLower", "df_cp_is_lower", "lower"),
-      ("IsHexDigit", "df_cp_is_hexdigit", "hexdigit"), ("IsPunctuation", "df_cp_is_punct", "punct"),
-      ("IsSymbol", "df_cp_is_symbol", "symbol"), ("IsControl", "df_cp_is_control", "control"),
-      ("IsAscii", "df_cp_is_ascii", "ascii")
+      ("isLetter", "df_cp_is_letter", "letter"), ("isDigit", "df_cp_is_digit", "digit"),
+      ("isLetterOrDigit", "df_cp_is_letterordigit", "letterordigit"), ("isWhiteSpace", "df_cp_is_space", "space"),
+      ("isUpper", "df_cp_is_upper", "upper"), ("isLower", "df_cp_is_lower", "lower"),
+      ("isHexDigit", "df_cp_is_hexdigit", "hexdigit"), ("isPunctuation", "df_cp_is_punct", "punct"),
+      ("isSymbol", "df_cp_is_symbol", "symbol"), ("isControl", "df_cp_is_control", "control"),
+      ("isAscii", "df_cp_is_ascii", "ascii")
     }) {
       Add("char", name, Fun("bool", cname, NoParams, needs: new[] { "u:" + table2 }));
     }
-    Add("char", "ToUpper", Fun("char", "df_cp_toupper", NoParams, needs: new[] { "u:toupper" }));
-    Add("char", "ToLower", Fun("char", "df_cp_tolower", NoParams, needs: new[] { "u:tolower" }));
+    Add("char", "toUpper", Fun("char", "df_cp_toupper", NoParams, needs: new[] { "u:toupper" }));
+    Add("char", "toLower", Fun("char", "df_cp_tolower", NoParams, needs: new[] { "u:tolower" }));
 
     // dates and times (spec 3.3.1, 3.3.2)
     Add("date", "addYears", Fun("date", "df_date_add_years", new[] { "i64" }, needs: DateNeed));
@@ -137,13 +149,13 @@ public sealed partial class CodeGen {
 
     // parameter names of the spec (4.2), for named arguments
     var names = new Dictionary<string, string[]> {
-      ["Trim"] = new[] { "c" }, ["TrimLeft"] = new[] { "c" }, ["TrimRight"] = new[] { "c" },
-      ["Substr"] = new[] { "start", "len" }, ["Replace"] = new[] { "toFind", "replacement", "caseSensitive" },
-      ["IndexOf"] = new[] { "val", "caseSensitive" }, ["LastIndexOf"] = new[] { "val", "caseSensitive" },
-      ["Contains"] = new[] { "val", "caseSensitive" }, ["StartsWith"] = new[] { "val", "caseSensitive" },
-      ["EndsWith"] = new[] { "val", "caseSensitive" }, ["Split"] = new[] { "separator" },
-      ["PadLeft"] = new[] { "totalWidth", "paddingChar" }, ["PadRight"] = new[] { "totalWidth", "paddingChar" },
-      ["ToCStr"] = new[] { "encoding" }
+      ["trim"] = new[] { "c" }, ["trimLeft"] = new[] { "c" }, ["trimRight"] = new[] { "c" },
+      ["substr"] = new[] { "start", "len" }, ["replace"] = new[] { "toFind", "replacement", "caseSensitive" },
+      ["indexOf"] = new[] { "val", "caseSensitive" }, ["lastIndexOf"] = new[] { "val", "caseSensitive" },
+      ["contains"] = new[] { "val", "caseSensitive" }, ["startsWith"] = new[] { "val", "caseSensitive" },
+      ["endsWith"] = new[] { "val", "caseSensitive" }, ["split"] = new[] { "separator" },
+      ["padLeft"] = new[] { "totalWidth", "paddingChar" }, ["padRight"] = new[] { "totalWidth", "paddingChar" },
+      ["toCStr"] = new[] { "encoding" }
     };
     foreach (var entry in table["string"].Where(entry => names.ContainsKey(entry.Key))) {
       for (int index = 0; index < entry.Value.Count; index++) {
@@ -179,13 +191,21 @@ public sealed partial class CodeGen {
     if (path == null) {
       return true;
     }
-    string first = path.Split('.')[0];
+    string[] parts = path.Split('.');
+    string first = parts[0];
+    // Flags.None.set(Flags.CanRead): an entry of a bitfield is a value
+    if (parts.Length == 2 && enums.TryGetValue(first, out var bitfield) && bitfield.Bitfield && scope.Find(first) == null) {
+      return true;
+    }
     // a local variable, or a field of the class being compiled
     return scope.Find(first) != null || (currentClass != null && FindField(currentClass, first) != null)
       || (traits.ContainsKey(first) && scope.Find("this") != null);
   }
 
   Expr? TryReceiverCall(Expr receiver, string name, List<Node> args, Scope scope, Node at) {
+    if (IsBitfield(receiver.Type)) {
+      return BitfieldMethod(receiver, name, args, scope, at);
+    }
     if (IsArr(receiver.Type)) {
       return ArrayMethod(receiver, name, args, scope, at);
     }
@@ -196,6 +216,45 @@ public sealed partial class CodeGen {
       return StdCall($"{receiver.Type}.{name}", overloads, args, scope, at, receiver.Code);
     }
     return null;
+  }
+
+  static readonly (string Name, string Declaration)[] IoEnums = {
+    ("DeleteOptions", "bitfield8 DeleteOptions { Recursive: 0, ForceDelete: 1 }"),
+    ("OverwriteOptions", "enum OverwriteOptions { None, Overwrite }"),
+    ("FileSystemObjectsType", "enum FileSystemObjectsType { Files, Dirs, Both }"),
+    ("FileWriteMode", "enum FileWriteMode { CreateOnly, ReplaceOnly, CreateReplace, AppendOnly, CreateAppend }"),
+    ("StreamReadWriteAccessMode", "enum StreamReadWriteAccessMode { None, Exclusive, Shared }"),
+    ("StreamOpenMode", "enum StreamOpenMode { OpenExisting, CreateOrOpen, CreateIfMissing, CreateOrTruncate, TruncateExisting, CreateOrAppend, AppendExisting }"),
+    ("StreamSeekOrigin", "enum StreamSeekOrigin { Begin, CurrentPosition, End }")
+  };
+
+  // set, clear, setAs, toggle, isSet, isAnySet (spec 3.1.1). The ones that change a value return the new value.
+  Expr? BitfieldMethod(Expr receiver, string name, List<Node> args, Scope scope, Node at) {
+    int expectedArgs = name switch {
+      "set" or "clear" or "toggle" or "isSet" or "isAnySet" => 1,
+      "setAs" => 2,
+      _ => -1
+    };
+    if (expectedArgs < 0) {
+      return null;
+    }
+    if (args.Count != expectedArgs) {
+      throw Error($"{name} takes {(expectedArgs == 1 ? "the flags" : "the flags and a bool")}", at);
+    }
+    var flags = ExprOf(args[0], scope, receiver.Type);
+    if (flags.Type != receiver.Type) {
+      throw Error($"{name} needs flags of {receiver.Type}, not {flags.Type}", at);
+    }
+    string cType = CType(receiver.Type);
+    string on = args.Count == 2 ? BoolOf(ExprOf(args[1], scope), at) : "";
+    return new Expr(WithTemp(receiver, value => WithTemp(flags, flagsCode => name switch {
+      "set" => $"(({cType})({value} | {flagsCode}))",
+      "clear" => $"(({cType})({value} & ~{flagsCode}))",
+      "toggle" => $"(({cType})({value} ^ {flagsCode}))",
+      "setAs" => $"(({on}) ? ({cType})({value} | {flagsCode}) : ({cType})({value} & ~{flagsCode}))",
+      "isSet" => $"(({value} & {flagsCode}) == {flagsCode})",
+      _ => $"(({value} & {flagsCode}) != 0)"
+    })), name.StartsWith("is") ? "bool" : receiver.Type);
   }
 
   // enums that belong to the library are declared when the program mentions them
@@ -209,12 +268,41 @@ public sealed partial class CodeGen {
         && Mentions(program, node => node.Text == "DayOfWeek" || (node.Kind == "Member" && node.Text == "dayOfWeek"))) {
       source.Append("enum DayOfWeek { Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday }\n");
     }
+    if (!declared.Contains("SortDirection") && Mentions(program, node => node.Text == "SortDirection")) {
+      source.Append("enum SortDirection { ASC, DESC }" + Environment.NewLine);
+    }
     if (!declared.Contains("SilentException") && Mentions(program, node => node.Text == "SilentException")) {
       source.Append("trait SilentException { }\n");
     }
+    // Root.IO.File (spec 17.6.3) is a class written in Dflat (IoPrelude); it needs the string encodings and some Root.IO enums
+    var userTypes = program.Children.Where(child => child.Kind is "Class" or "Trait" or "Enum").Select(child => child.Text).ToHashSet();
+    // Stream and FileStream (spec 6.8) use File for its exception check and add File.open
+    bool usesStreams = !userTypes.Contains("FileStream")
+      && Mentions(program, node => node.Text is "FileStream" or "Stream" or "open");
+    bool usesFile = !userTypes.Contains("File")
+      && (usesStreams || Mentions(program, node => node.Text == "File" || (node.Kind == "Member" && node.Text == "File")));
+    var fileEnums = new HashSet<string> { "DeleteOptions", "OverwriteOptions", "FileSystemObjectsType", "FileWriteMode" };
+    if (usesStreams) {
+      fileEnums.UnionWith(new[] { "StreamReadWriteAccessMode", "StreamOpenMode", "StreamSeekOrigin" });
+    }
     if (!declared.Contains("StringEncoding")
-        && Mentions(program, node => node.Text == "StringEncoding" || (node.Kind == "Member" && node.Text == "ToCStr"))) {
-      source.Append("enum StringEncoding { UTF8, UTF16, UTF32, UTF16BE, UTF32BE, ASCII, ISO88591 }\n");
+        && (usesFile || Mentions(program, node => node.Text == "StringEncoding" || node.Text == "String.StringEncoding" || (node.Kind == "Member" && node.Text == "toCStr")))) {
+      source.Append("enum StringEncoding { UTF8, UTF16, UTF32, UTF16BE, UTF32BE, ASCII, ISO88591 }" + Environment.NewLine);
+    }
+    // Root.IO enums (spec 17.6.4): the program writes fs.StreamOpenMode.OpenExisting, Root.IO.StreamOpenMode or the bare name
+    foreach (var (name, declaration) in IoEnums) {
+      if (!declared.Contains(name)
+          && ((usesFile && fileEnums.Contains(name)) || Mentions(program, node => node.Text == name || node.Text?.EndsWith("." + name) == true))) {
+        source.AppendLine(declaration);
+      }
+    }
+    if (usesFile) {
+      source.AppendLine(IoPrelude
+        .Replace("//OPEN-STATIC", usesStreams ? IoOpenStatic : "")
+        .Replace("//OPEN-OBJECT", usesStreams ? IoOpenObject : ""));
+    }
+    if (usesStreams) {
+      source.AppendLine(IoStreamPrelude);
     }
     if (source.Length == 0) {
       return;

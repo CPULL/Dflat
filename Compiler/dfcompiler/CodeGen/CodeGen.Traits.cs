@@ -284,7 +284,7 @@ public sealed partial class CodeGen {
     var codes = ArgCodes(chosen, args, scope, at);
     codes.Insert(0, "(void*)self");
     string call = $"{chosen.CName}({string.Join(", ", codes)})";
-    return new Expr(failingFuns.Contains(chosen) ? CheckRaise(call, chosen.Ret) : call, chosen.Ret, IsClass(chosen.Ret) && chosen.ReturnsOwned);
+    return new Expr(UserCallCode(chosen, call), chosen.Ret, IsClass(chosen.Ret) && chosen.ReturnsOwned);
   }
 
   // x.TraitName: the object seen as that trait

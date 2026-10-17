@@ -19,22 +19,22 @@ fun string describe(Status value) {
 
 Status current = Status.Pending
 Status fresh
-r.Console.Log($"current = {current}, value {(i32)current}")
-r.Console.Log($"fresh = {fresh}")
-r.Console.Log($"Waiting = {(i32)Status.Waiting}")
-r.Console.Log($"OnHold prints as {Status.OnHold}, equals Pending: {Status.OnHold == Status.Pending}")
-r.Console.Log($"Active < Pending: {Status.Active < Status.Pending}")
-r.Console.Log("describe(Inactive) = " + describe(Status.Inactive))
-r.Console.Log("describe(OnHold) = " + describe(Status.OnHold))
+r.Console.log($"current = {current}, value {(i32)current}")
+r.Console.log($"fresh = {fresh}")
+r.Console.log($"Waiting = {(i32)Status.Waiting}")
+r.Console.log($"OnHold prints as {Status.OnHold}, equals Pending: {Status.OnHold == Status.Pending}")
+r.Console.log($"Active < Pending: {Status.Active < Status.Pending}")
+r.Console.log("describe(Inactive) = " + describe(Status.Inactive))
+r.Console.log("describe(OnHold) = " + describe(Status.OnHold))
 
 Level level = Level.Low
 level = Level.Next(level)
-r.Console.Log($"next of Low = {level}, top = {Level.IsTop(level)}")
+r.Console.log($"next of Low = {level}, top = {Level.IsTop(level)}")
 level = Level.Next(level)
-r.Console.Log($"next of Mid = {level}, top = {Level.IsTop(level)}")
+r.Console.log($"next of Mid = {level}, top = {Level.IsTop(level)}")
 
 Status fromNumber = (Status)11
 Status unknown = (Status)3
-r.Console.Log($"(Status)11 = {fromNumber}, (Status)3 = {unknown}")
-r.Console.Log($"Big: {Big.Min} {(i64)Big.Min} {Big.Max}")
-if current then r.Console.Log("enum to bool: true")
+r.Console.log($"(Status)11 = {fromNumber}, (Status)3 = {unknown}")
+r.Console.log($"Big: {Big.Min} {(i64)Big.Min} {Big.Max}")
+if current then r.Console.log("enum to bool: true")

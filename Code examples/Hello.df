@@ -1,7 +1,7 @@
-Root.Console.Log("Hello, what is your name?")
-string name = Root.Console.ReadLine()
+Root.Console.log("Hello, what is your name?")
+string name = Root.Console.readLine()
 if name.len < 2 { // Sadly we cannot remove the newline yet
-  Root.Console.Log("Are you shy?")
+  Root.Console.log("Are you shy?")
 	name = "<shy person>"
 }
-Root.Console.Print($"Hello {name}")
+Root.Console.print($"Hello {name}")

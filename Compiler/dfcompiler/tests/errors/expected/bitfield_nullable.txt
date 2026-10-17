@@ -1,0 +1,1 @@
+bitfield_nullable.df(2): error: a bitfield cannot be nullable (not decided yet, spec 3.1.1)

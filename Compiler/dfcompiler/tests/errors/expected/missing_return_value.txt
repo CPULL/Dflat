@@ -1,0 +1,1 @@
+missing_return_value.df(1): error: this function must return a i32

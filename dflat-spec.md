@@ -254,6 +254,9 @@ bitfield32 Flags { CanRead: 0, CanWrite: 1, CanSeek: 2, IsNetwork: 3 }
 | `bool isSet(flags)` | True if all the flags are set |
 | `bool isAnySet(flags)` | True if at least one of the flags is set |
 
+These methods return the value and do not change the original bitfield variable.
+
+
 - `_value` (bitwise not, 2.5) flips only the defined bits. Casting an integer to a bitfield masks off every bit that is not defined, so a bitfield never holds undefined bits: `[Flags]_[u32]value` is the same as `_value`.
 
 ```
@@ -521,7 +524,7 @@ reset((&)scores[2..5])                // writable view passed to a function
 |---|---|---|---|---|---|---|---|
 | `.len`, `.sizeof` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `.capacity`, `reserve`, `shrinkToFit` | – | ✓ | – | – | ✓ | – | ✓ |
-| `.keys` | ✓ | ✓ | ✓ | ✓ | ✓ | – | – |
+| `.keys` | – | – | – | ✓ | ✓ | – | – |
 | `.values` | – | – | – | ✓ | ✓ | – | – |
 | `c[k]` read | ✓ | ✓ | ✓ | ✓ | ✓ | – | – |
 | `c[k] = v` | replace | replace | replace | set or add | set or add | – | – |
@@ -549,7 +552,7 @@ A member marked `–` is a compile error on that collection (for example `hasKey
 
 - `.len`: count of items. `.sizeof`: bytes to store the object itself (for all types: to be discussed).
 - `.capacity`: items that fit without growing. `reserve(n)` makes room for at least `n` more items; `shrinkToFit()` lowers the capacity to the length.
-- `.keys`: keys of a map, or the positions of `arr` / `vec` / `list`. `.values`: values of a map.
+- `.keys`: keys of a map (`map`, `hmap`). `.values`: values of a map. To walk the positions of `arr`, `vec` and `list` use a range (`0..list.len`, 6.4).
 - `c[k] = v`: on `arr`, `vec` and `list` it replaces an existing item only; an index past the end raises `IndexOutOfRangeException` (not silent). On `map` and `hmap` it replaces the value, or adds the key and the value when the key is missing.
 - Reading a missing map key gives the null or zero value of the value type and raises a silent `InvalidMapKeyException` (15.3).
 - `add(v)`: appends to `vec` and `list`. `add(k, v)`: adds the pair to a map, or replaces the value of an existing key; returns `false` when it replaced, `true` when the key is new. On sets it returns `true` if the value was added.
@@ -593,7 +596,7 @@ flat[row * width + column] = 7          // a matrix on a flat array
 - Arrays are not initialized automatically: `fill(value)` sets every element. Reading an element before it is filled or assigned gives a level 1 warning. Arrays of objects start as null.
 - No built-in multi-dimensional arrays: use an `arr` of `arr`, or a flat `arr` indexed by `row * width + column`.
 - Default iterator: index 0 up to `.len` - 1.
-- Members: `.len`, `.keys`, `c[k]`, `c[k] = v` (replace only), views, `has`, `indexOf`, `clear`, `fill`, `sort`, `sortUnstable`, `reverse`, `copyFrom`. No `add`, `insert`, `remove` or `pop`.
+- Members: `.len`, `c[k]`, `c[k] = v` (replace only), views, `has`, `indexOf`, `clear`, `fill`, `sort`, `sortUnstable`, `reverse`, `copyFrom`. No `add`, `insert`, `remove` or `pop`.
 
 ## 6.8 Vectors `vec`
 
@@ -801,7 +804,7 @@ for u8 i = 0..10 { }
 for u16 i = 0..=100 step i += 2 { }
 for u8 i = 10..=1 { }                 // start > end: counts down
 for char c in "text" { }
-for u64 k in list.keys { }
+for u64 k in 0..list.len { }
 for string message in messages { }
 for (string key, i32 value) in map { }      // map: (key, value) tuples
 for (var key, var value) in map { }
@@ -1546,7 +1549,8 @@ class MySilentException : Exception, SilentException { ... }
 - Standard silent exceptions have their own fallback (table above); custom ones just continue.
 - A class is silent when it implements the `SilentException` trait (a marker trait with a dummy method). Subclasses of a silent exception are silent too.
 - The silent flag is stored in the descriptor.
-- A silent exception needs a specific catch: its own type, a parent below `Exception`, the `SilentException` trait, or `catch all`. `catch Exception` / `catch variable` don't handle it.
+- A silent exception needs a specific catch: its own type, a parent class below `Exception`, the `SilentException` trait, or `catch all`. `catch Exception` / `catch variable` do not handle silent exceptions.
+- Silent exceptions do not bubble up on their own. If nobody observes one it is gone; to pass it up, the function that observes it catches it and throws it again explicitly (see [15.8.6](#1586-silent-exceptions-never-go-up-on-their-own)).
 
 ### 15.5 Panic and exit codes
 
@@ -1562,10 +1566,111 @@ class MySilentException : Exception, SilentException { ... }
 
 ### 15.7 Implementation
 
-- Rust/Swift style: a failing function returns normally with an **error register** holding 0 or a pointer to an error record; the caller jumps to its `catch` or propagates. Functions that can't fail skip the check.
+- Rust/Swift style: a failing function returns normally with an **error register** holding 0 or a pointer to an error record; the caller jumps to its `catch` or propagates. Functions that can't fail skip the check. The error register is a dedicated return slot next to the result, not a global variable; the details are in 15.8.
 - Error record: `{ id, descriptor*, message, subclass fields }`. Descriptor: `{ id, name, parent*, silent flag }`.
 - IDs: 0–255 reserved for `Root`, otherwise a hash of the full name. Exact catch = one compare; base-class catch walks the parents.
 - External libraries raise the base types with a short message; richer errors via an exported mapping function.
+
+
+### 15.8 Detailed compiler implementation
+
+#### 15.8.1 Principles
+- An exception is a value that a function returns next to its result, as in Rust: one slot for the result, one for the exception. There is no
+  unwinding and no global variable: the error register of 15.7 is the second return slot. After a call, the caller looks at the exception slot: it handles the exception, returns it to its own
+  caller, or (for a silent exception nobody observes) does not even look.
+- A silent exception is an exception with a flag. It is created, passed back and checked exactly like any other exception, but only where
+  somebody observes it (rule [15.8.5](#1585-silent-exceptions-who-observes-them)). Where nobody does, ALL the code for it is removed: no trapping, no exception record, no passing back.
+
+#### 15.8.2 Which catch observes an exception
+- A catch handles an exception when the exception is of the class the catch names or of any subclass of it. This is the same rule for silent and
+  non-silent exceptions, except that Exception, the root, does not handle silent ones (see below).
+- Exception is the root of all exceptions: "catch Exception e" (and the bare "catch e", which means the same) is the sinkhole and handles every
+  exception that is not silent: `catch Exception` does not handle silent exceptions.
+- SilentException is meant to be a trait that every silent exception class implements. "catch SilentException e" handles every silent exception and no other.
+- "catch all" handles everything, silent exceptions included. A catch for a parent class (below Exception) handles all the silent children of that class too.
+- Catches of a function are tried in the order written; the first that matches handles the exception.
+
+#### 15.8.3 Safety of function (decided by the compiler; there is no safe keyword)
+Some functions can be marked as `safe` by the compiler. This means they will not emit exceptions (silent exceptions are allowed).
+Safe functions when the silent exceptions are ignored by the caller, will remove all code to check if an exception is emitted.
+- PURE: can raise nothing at all. Signature: the result only.
+- SAFE: no non-silent exception can leave it, and the silent exceptions it can emit are not observed by the call (see [15.8.5](#1585-silent-exceptions-who-observes-them) and [15.8.6](#1586-silent-exceptions-never-go-up-on-their-own)). Signature: the result only. Callers never check it.
+- FAILING: a non-silent exception can leave it, or a silent one that the call observes can. Signature: the result and the exception (see [15.8.4](#1584-how-a-failing-function-returns-the-rust-model)).
+- A function can raise when it contains a throw, an operation that raises (integer / and %, array and string indexing, access to a null
+  object ...), or a call to a function that can raise.
+- A non-silent exception that is fully handled inside the function and cannot get out of it counts as not emitted by the function. Every point
+  of the function that can raise it must be covered by a catch that handles it (rule [15.8.2](#1582-which-catch-observes-an-exception)), and the catch bodies must not raise a non-silent
+  exception themselves (no throw of one, no call that can raise one that escapes). Example, a SAFE function:
+```
+		fun i64 safeDivide(i64 a, i64 b) {
+			return a / b
+			catch DivisionByZeroException { return 1 }
+		}
+```			
+  The division raises DivisionByZeroException, which is not silent, but the catch covers it and the body of the catch cannot raise: nothing
+  leaves the function, so callers do not check it. Without the catch, or with a catch for another class, the function is FAILING.
+- Virtual functions and trait functions: a slot is SAFE only if all its implementations are SAFE (one FAILING override makes the slot FAILING).
+  PURE needs the same: all implementations.
+
+#### 15.8.4 How a FAILING function returns (the Rust model)
+- Two slots: the result and the exception. The exception slot is a pointer to the exception record, null when there is none.
+- A function without a result (void) returns only the exception slot. Several results or a tuple are one result slot.
+- Call site: call, then "if the exception slot is not null": run the matching catch of this function; if there is none, return the exception to our
+  own caller (this function is FAILING), after the atEnd blocks of the scopes left have run. An exception that nobody handles reaches the top of the
+  program: Panic (see 15.5).
+- Non-silent exceptions go up the call chain to the first matching catch.
+
+#### 15.8.5 Silent exceptions: who observes them
+- A silent exception of class X emitted by function F is observed by a call statement of F's caller when that statement is covered by a catch of the
+  caller that handles X (rule [15.8.2](#1582-which-catch-observes-an-exception)). "Emitted by F" means: raised by one of F's own operations (for example the + that overflows), thrown by an explicit
+  throw in F, or declared by a library function that F calls directly (see [15.8.8](#1588-library-functions-black-boxes-with-declared-exceptions)). It is NOT what F's own callees emit (rule [15.8.6](#1586-silent-exceptions-never-go-up-on-their-own)).
+- If no catch of the caller handles X, the call returns as if nothing had happened (spec [15.4](#154-silent-exceptions): execution continues) and nothing is generated for X.
+- A catch in the function that contains the emitting operation itself handles the exception as an ordinary local exception (same rule, the function
+  being its own caller).
+- Example, a function that can only overflow silently is SAFE for callers that do not catch it: `fun i64 add(i64 a, i64 b) { a + b }`
+
+#### 15.8.6 Silent exceptions never go up on their own
+- If F calls G and G emits a silent exception that F does not observe (no catch of F handles it), the exception is ignored in F. F's caller does not see
+  G's exception, even if F's caller has a matching catch.
+- To send it up, F catches it and throws it again, explicitly: `catch OverflowException e { throw e }`
+  The new throw is F's own emission, so F's caller observes it (when it has a matching catch), as [15.8.5](#1585-silent-exceptions-who-observes-them) says.
+- Examples:
+```
+      fun i64 mul(i64 a, i64 b) { a * b }                   // can overflow: silent
+      fun i64 add3(i64 a, i64 b, i64 c) { mul(a, b) + c }   // no catch: the overflow of mul is ignored here
+      fun i64 use() {
+        return add3(1, 2, 3)
+        catch OverflowException { return -1 }               // sees only the overflow of the + in add3, never the one of mul
+      }
+```
+
+#### 15.8.7 The observed mask (how the silent code is stripped)
+- A function that can emit silent exceptions takes one hidden extra parameter, the OBSERVED MASK: a set of bits, one for each silent exception class that
+  some catch of the program handles. The caller fills it with the silent classes handled by the catches that cover the call statement in the caller.
+  A call outside any catch passes the empty mask. A catch SilentException or a catch all covers every silent class; a catch Exception does not (see 15.8.2).
+- When the function reaches a throw of a silent exception: if a catch of the function itself handles it, it is an ordinary local exception; otherwise, if the
+  bit of its class is in the mask, the exception is returned like any other (the function stops there); otherwise the throw does nothing and the function goes on.
+- Masks do not flow down: the mask of the calls a function makes comes from that function's own catches (rule [15.8.6](#1586-silent-exceptions-never-go-up-on-their-own)).
+- Virtual and trait calls: every implementation of a slot takes the mask, and every call passes its own. A caller that ignores a silent exception and a caller that
+  observes it can use the same implementation and each gets the behaviour of 15.4.
+- Stripping: the code of a silent class that no catch of the program handles is removed completely (no check, no record, no passing back). Where the mask of a
+  call is a constant the test of the bit can be removed by the compiler of the target.
+- A function that can throw a silent class that some catch of the program handles returns the exception (it has the FAILING signature) even when a given caller
+  ignores it. SAFE and PURE signatures remain for functions that no catch of the program can observe.
+
+#### 15.8.8 Library functions: black boxes with declared exceptions
+- The compiler does not look inside a library function (today they are C code of the runtime; later some will be written in Dflat). What it needs is the
+  list of exceptions each function may raise, silent and non-silent. That list is in the standard library specification (dflat-stdlib.md): every
+  function is listed with the exceptions it may throw. The compiler keeps the same list in its library tables.
+- A function that lists nothing (for example Math.sqrt) is PURE. A function that lists non-silent exceptions makes its caller FAILING (unless the caller handles
+  them all). A listed silent exception is observed through the mask of the call like any other (rule [15.8.5](#1585-silent-exceptions-who-observes-them)).
+- The C code of the runtime reports an exception in a temporary slot between its return and the wrapper that the compiler generates at the call site; the
+  wrapper moves it into the exception slot. The temporary slot is never visible to the program and is empty between statements.
+- When a library function is rewritten in Dflat, it follows the rules above and must propagate what its specification says it propagates: an exception
+  declared for the function is emitted by the function itself, or caught and thrown again explicitly (rule [15.8.6](#1586-silent-exceptions-never-go-up-on-their-own)). A helper that throws for its caller is not enough.
+  File and FileStream are written in Dflat today and must be changed this way (their silent exceptions, for example FileAccessException, must be emitted by the
+  public function the user calls).
+
 
 ---
 
@@ -1576,7 +1681,7 @@ namespace clinic.planning         // one per file, no braces
 namespace local                   // name from the folder path
 import stdrnd                     // full namespace path of the library (to be defined)
 alias Root as r
-alias console as Root.Console
+alias Root.Console as console
 alias u8 as byte8
 ```
 
@@ -1588,371 +1693,13 @@ alias u8 as byte8
 
 ---
 
+# 17 Standard Library
+DFlat comes with a basic standard library called `Root`
+It contains basic file access and streams, console, random, etc.
 
+Check the [DFlat Standard library](dflat-stdlib.md) document for the full specification.
 
-# 17. Standard library
-- Type members live on the types: `d.year`, `d.addDays(3)`, `s.Split(",")`, `c.IsDigit`, `list.sort()`.
 
-## 17.1 Program
-
-| Definition | Example | Description |
-|---|---|---|
-| `arr<string> GetArgs()` | `arr<string> args = Root.GetArgs()` | Returns the command-line arguments; index 0 is the program name (as in C and Rust). Returns an empty array when there are no arguments and no program name (e.g. micro-controllers). Same object as the `args` parameter of `main` (14.1) |
-
-## 17.2 Console
-Access to stdinput and stdoutput and stderror
-
-| Definition | Example | Description |
-|---|---|---|
-| `Log(string)` | `Root.Console.Log("Hello")` | Converts the object to string if needed, prints on stdout appending a newline |
-| `LogError(string)` | `Root.Console.LogError("Hello")` | Converts the object to string if needed, prints on stderr appending a newline |
-| `Print(string)` | `Root.Console.Print("Hello")` | Converts the object to string if needed, prints on stdout |
-| `char Read()` | `char c = Root.Console.Read()` | Reads a character from stdin and returns it, returns '\0' at end of input |
-| `string ReadLine()` | `string line = Root.Console.ReadLine()` | Reads a line from stdin and returns it, the line is not stripped of the newline character, if any. Returns "" at end of input |
-| `` | `` |  |
-
-## 17.3 Date and Time
-Mostly used to get current date and time and to measure elapsed at nanosecond scale
-
-| Definition | Example | Description |
-|---|---|---|
-| `date Now()` | `date d = Root.Time.Now()` | Gets the current time in UTC. A `date` prints as ISO 8601, UTC, to the millisecond: `2026-10-11T14:03:22.123Z` |
-| `clock Clock()` | `Root.Time.Clock()` | Returns a u64 monotonic counter with a resolution of 0.1 ns; `Clock()` never returns 0 |
-| `` | `` |  |
-
-- `date`, `time`, `clock` and `lapse` are already nullable (`type?` is a compile error on them) and a variable of these types without a value starts as null. A `clock` prints as its number, a `lapse` as its number in its own unit, and null as `null`.
-- `time` (3.3) is the time of day, millisecond resolution; parsing in section 9.
-- Calendar dates and zoned date-times are classes, `CalendarDate` and `ZonedDateTime`, in an optional DateTime library: available only when imported, so programs that don't need them stay small. Import path, timezone database and parsing: to be defined with the library. There is no local date-time type: a generic zone covers wall-clock values.
-- `date - date` and `clock - clock` give a `lapse`. Two values of the same type can be compared; a null date or clock sorts first.
-
-## 17.4 Math
-Standard mathematical functions. `Root.Math` operates on `r64` while `Root.Math32` operates on `r32` (similar to `Mathf` of C#)
-
-| Name | Definition | Description |
-|---|---|---|
-| `Sin` | `r64 Sin(r64 v)` | Computes the trigonometric sine of an angle in radians. |
-| `Cos` | `r64 Cos(r64 v)` | Computes the trigonometric cosine of an angle in radians. |
-| `Tan` | `r64 Tan(r64 v)` | Computes the trigonometric tangent of an angle in radians. |
-| `Asin` | `r64 Asin(r64 v)` | Computes the arcsine (inverse sine) in radians, returning a value between $-\pi/2$ and $\pi/2$. |
-| `Acos` | `r64 Acos(r64 v)` | Computes the arccosine (inverse cosine) in radians, returning a value between $0$ and $\pi$. |
-| `Atan` | `r64 Atan(r64 v)` | Computes the arctangent (inverse tangent) in radians, returning a value between $-\pi/2$ and $\pi/2$. |
-| `Atan2` | `r64 Atan2(r64 y, r64 x)` | Computes the 4-quadrant arctangent of $y / x$ using the signs of both arguments to determine the correct quadrant. |
-| `Sinh` | `r64 Sinh(r64 v)` | Computes the hyperbolic sine of a value. |
-| `Cosh` | `r64 Cosh(r64 v)` | Computes the hyperbolic cosine of a value. |
-| `Tanh` | `r64 Tanh(r64 v)` | Computes the hyperbolic tangent of a value. |
-| `Sqrt` | `r64 Sqrt(r64 v)` | Computes the non-negative square root of a value. |
-| `Cbrt` | `r64 Cbrt(r64 v)` | Computes the cube root of a value. |
-| `Pow` | `r64 Pow(r64 v, r64 e)` | Raises a base value to a specified exponent power. |
-| `Exp` | `r64 Exp(r64 v)` | Computes $e$ raised to the power of the given value ($e^v$). |
-| `Ln` | `r64 Ln(r64 v)` | Computes the natural logarithm (base $e$) of a value. |
-| `Log10` | `r64 Log10(r64 v)` | Computes the common logarithm (base 10) of a value. |
-| `Log(x, base)` | `r64 Log(r64 x, r64 base)` | Computes the logarithm of $x$ with respect to a custom base. |
-| `Abs` | `r64 Abs(r64 v)` | Returns the absolute (non-negative) value of a number. |
-| `Sign` | `r64 Sign(r64 v)` | Returns the sign of a number ($1$ for positive, $-1$ for negative, $0$ for zero). |
-| `Min` | `r64 Min(r64 v...)` | Returns the smallest of two or more values (at least two); NaN if any is NaN. |
-| `Max` | `r64 Max(r64 v...)` | Returns the largest of two or more values (at least two); NaN if any is NaN. |
-| `Clamp` | `r64 Clamp(r64 v, r64 min, r64 max)` | Constrains a value to lie between the specified minimum and maximum bounds; NaN stays NaN; `min` greater than `max` is undefined. |
-| `Floor` | `r64 Floor(r64 v)` | Rounds a value down to the largest integer less than or equal to the number. |
-| `Ceil` | `r64 Ceil(r64 v)` | Rounds a value up to the smallest integer greater than or equal to the number. |
-| `Round` | `r64 Round(r64 v)` | Rounds a value to the nearest integer, halves away from zero. |
-| `Trunc` | `r64 Trunc(r64 v)` | Truncates the fractional part of a number, rounding toward zero. |
-| `Hypot` | `r64 Hypot(r64 v...)` | Computes the square root of the sum of squares of its arguments (Euclidean distance function). |
-| `Fmod` | `r64 Fmod(r64 v, r64 d)` | Computes the floating-point remainder of division. |
-| `Lerp(a, b, t)` | `r64 Lerp(r64 a, r64 b, r64 t)` | Performs linear interpolation between $a$ and $b$ using parameter $t$ ($0.0$ to $1.0$). |
-| `InverseLerp(a, b, v)` | `r64 InverseLerp(r64 a, r64 b, r64 v)` | Finds the interpolation factor $t$ for value $v$ between range $a$ and $b$. |
-| `PI` | `r64 PI` | Mathematical constant Pi ($\pi \approx 3.14159$). |
-| `PI_HALF` | `r64 PI_HALF` | Mathematical constant Pi divided by two ($\pi/2 \approx 1.57079$). |
-| `E` | `r64 E` | Mathematical constant Euler's number ($e \approx 2.71828$). |
-| `SQRT2` | `r64 SQRT2` | Mathematical constant square root of two ($\sqrt{2} \approx 1.41421$). |
-| `R2D` | `r64 R2D` | Conversion factor from radians to degrees ($180 / \pi$). |
-| `D2R` | `r64 D2R` | Conversion factor from degrees to radians ($\pi / 180$). |
-
-- Math functions never raise exceptions: `Sqrt(-1)` is NaN, `Ln(0)` is `-∞`.
-- `Abs`, `Sign`, `Min`, `Max` and `Clamp` also exist for every integer type (`Abs` and `Sign` for signed ones only) and return that type; the argument types pick the version (13.2 rules). `Math32` has the real versions only.
-
-## 17.5 Random
-A simple random number generator is included in the standard library. The algorithm is fixed (xoshiro256\*\*, seeded with splitmix64), so the same seed gives the same sequence on every target. Without a call to `Seed` it starts from the current time.
-
-| Name | Definition | Description |
-|---|---|---|
-| `Seed` | `Root.Random.Seed(u64)` | Initialize the seed of the generator with the provided value |
-| `Int` | `i64 Int(i64 min, i64 max)` | Returns a random integer between the minimum number and the maximum number (both included, no bias); the two are swapped if `min` is greater than `max` |
-| `RealRange` | `r64 RealRange(r64 min, r64 max)` | Returns a random real number between the minimum number and the maximum number (max excluded) |
-| `Real` | `r64 Real()` | Returns a real value in the range [0, 1] (1 is included) |
-| `Shuffle` | `Shuffle(collection)` | Randomize the order of elements in an ordered collection. It is valid for arrays, vectors, lists, strings (needs collections: TODO) |
-
----
-
-## 17.6 Root.IO - Files, Directories and Streams
-
-Status: design in progress. The `File` manager class and the `Stream` base class with `FileStream` are specified. Memory, console and text streams, network streams and the async syntax are not (17.6.9).
-
-### 17.6.1 Scope and general decisions
-
-- `Root.IO` holds the basics of file system access (the equivalent of C# `System.IO`): files, directories, paths and streams. In the examples `alias Root.IO as fs` is used.
-- `File` is the file manager class: it works at the level of a file manager (like Norton Commander) on files and directories. `Stream` accesses the contents of a file.
-- All streams are binary. Helpers (UTF converters) transform them to text.
-- `Stream` is the base class. The stream types (`FileStream`, `MemoryStream`, `ConsoleStream`) are subclasses, because one object cannot be a file, a memory and a console stream at the same time. `TextStream` is a trait that can be applied to any stream to add the text methods (17.6.8).
-- Memory streams are available on every target. Other parts of `Root.IO` can be unavailable on specific targets.
-- `Root.Console` is a special case: a shortcut to read and write. The console (standard input, standard output) is also reachable as streams (to be defined).
-- Big errors raise exceptions, but not every failure raises one, to keep async code manageable: many cases use silent exceptions (15.4, 17.6.6).
-
-### 17.6.2 Paths
-
-- Paths are normalized: `/` is the root and the separator on every OS, and a drive letter is the first folder: `/d:/folder/subfolder/file.txt`.
-- Paths written in the form of any OS are accepted and normalized (following C#). `.` and `..` are accepted as generic paths, as everywhere.
-- A path with illegal characters raises `InvalidPathException` (not silent) when the `File` is created.
-- `File.combinePaths(path1, path2)` joins exactly two paths and returns a `string`.
-- Drive letters on other OS and network paths: later.
-
-### 17.6.3 The `File` class
-
-`File(string path)` creates a `File` object that refers to a file or a directory. It opens nothing and does not check the path: a path that does not exist is valid, and its `exists()` returns `false`.
-
-A folder listing returns a list of single `File` objects; `isDirectory` tells whether an item is a file or a directory.
-
-#### 17.6.3.1 Properties (read-only)
-
-| Property | Type | Description |
-|---|---|---|
-| `path` | `string` | Normalized path |
-| `name` | `string` | Name of the file or directory |
-| `extension` | `string` | Extension of the name, without the dot |
-| `parent` | `File` | Containing directory |
-| `isDirectory` | `bool` | True for a directory |
-| `isFile` | `bool` | True for a file |
-| `size` | `u64` | Size in bytes |
-| `created` | `date` | Creation date |
-| `modified` | `date` | Last modification date |
-| `accessed` | `date` | Last access date |
-| `isReadOnly` | `bool` | True if the item is read-only (the only attribute in the standard library) |
-
-- If the item cannot be accessed, `size`, `created`, `modified`, `accessed` and `isReadOnly` raise the silent `FileAccessException` and give `0`, a null `date` and `false`.
-- For an item that does not exist they give the default values.
-
-#### 17.6.3.2 Static methods
-
-| Definition | Description |
-|---|---|
-| `bool exists(string path)` | True if the path exists |
-| `bool delete(string path, fs.DeleteOptions options = fs.DeleteOptions.None)` | Deletes a file or a directory; true if it was deleted, false if it was not |
-| `File copy(string from, string to, fs.OverwriteOptions options = fs.OverwriteOptions.None)` | Copies a file or a directory to the new location and returns the `File` at the new location |
-| `File move(string from, string to, fs.OverwriteOptions options = fs.OverwriteOptions.None)` | Moves a file or a directory to the new location and returns the `File` at the new location |
-| `File createDirectory(string path)` | Creates the directory and returns it |
-| `arr<File> getAllFiles(string path, bool recursive = false, fs.FileSystemObjectsType itemType = fs.FileSystemObjectsType.Files, string match = "*")` | Lists the items of a directory; `path` has no default and an empty path raises `InvalidPathException` |
-| `File getTempFile()` | A `File` for a temporary file |
-| `string getTempFileName()` | The fully qualified name and path of a temporary file; it does not create the file |
-| `string getTempDir()` | The path of the temporary directory |
-| `string combinePaths(string path1, string path2)` | Joins two paths |
-| `FileStream open(string path, fs.StreamReadWriteAccessMode readMode, fs.StreamReadWriteAccessMode writeMode, fs.StreamOpenMode openMode)` | Shortcut for `FileStream(path, readMode, writeMode, openMode)` (17.6.8.3) |
-
-#### 17.6.3.3 Object methods
-
-| Definition | Description |
-|---|---|
-| `bool exists()` | True if the item exists |
-| `bool delete(fs.DeleteOptions options = fs.DeleteOptions.None)` | As the static `delete`, on this item |
-| `File copyTo(string to, fs.OverwriteOptions options = fs.OverwriteOptions.None)` | As the static `copy`, from this item |
-| `File moveTo(string to, fs.OverwriteOptions options = fs.OverwriteOptions.None)` | As the static `move`, from this item |
-| `File createDirectory()` | As the static `createDirectory`, for this path |
-| `arr<File> getAllFiles(bool recursive = false, fs.FileSystemObjectsType itemType = fs.FileSystemObjectsType.Files, string match = "*")` | As the static `getAllFiles`, on this directory |
-| `arr<byte> readAll()` | The whole content as bytes |
-| `string readAllText(String.StringEncoding encoding = String.StringEncoding.UTF8)` | The whole content as text in the given encoding |
-| `writeAll(arr<byte> buffer, fs.FileWriteMode mode = fs.FileWriteMode.CreateReplace)` | Writes the bytes to the file following the write mode |
-| `writeAllText(string text, String.StringEncoding encoding = String.StringEncoding.UTF8, fs.FileWriteMode mode = fs.FileWriteMode.CreateReplace)` | Writes the text, in the given encoding, to the file following the write mode |
-| `FileStream open(fs.StreamReadWriteAccessMode readMode, fs.StreamReadWriteAccessMode writeMode, fs.StreamOpenMode openMode)` | Shortcut for `FileStream(path, readMode, writeMode, openMode)` on this file (17.6.8.3) |
-
-`readAll`, `readAllText`, `writeAll` and `writeAllText` exist only on the `File` object, not as static methods. They are a simplification: they ignore sharing and read only. Streams (17.6.8) give the finer control.
-
-### 17.6.4 Enums
-
-All the enums are in `Root.IO`.
-
-| Enum | Values |
-|---|---|
-| `fs.DeleteOptions` | bitfield (3.1.1) with `Recursive` and `ForceDelete`; `None` and `All` are built in; flags combine with `\|` (`Recursive \| ForceDelete`) |
-| `fs.OverwriteOptions` | `None`, `Overwrite` (used by `copy`, `copyTo`, `move` and `moveTo`) |
-| `fs.FileSystemObjectsType` | `Files`, `Dirs`, `Both` |
-| `fs.FileWriteMode` | `CreateOnly`, `ReplaceOnly`, `CreateReplace`, `AppendOnly`, `CreateAppend` (used by `writeAll` and `writeAllText`) |
-| `fs.StreamReadWriteAccessMode` | `None`, `Exclusive`, `Shared` (used for both `readMode` and `writeMode` of a stream) |
-| `fs.StreamOpenMode` | `OpenExisting`, `CreateOrOpen`, `CreateIfMissing`, `CreateOrTruncate`, `TruncateExisting`, `CreateOrAppend`, `AppendExisting` |
-| `fs.StreamSeekOrigin` | `Begin`, `CurrentPosition`, `End` |
-
-`String.StringEncoding` is the existing enum: `UTF8`, `UTF16`, `UTF32`, `UTF16BE`, `UTF32BE`, `ASCII`, `ISO88591`.
-
-File write modes (`fs.FileWriteMode`):
-
-| Value | Missing file | Existing file |
-|---|---|---|
-| `CreateOnly` | creates it | `FileAlreadyExistsException` |
-| `ReplaceOnly` | `FileNotFoundException` | replaces the content |
-| `CreateReplace` | creates it | replaces the content |
-| `AppendOnly` | `FileNotFoundException` | appends |
-| `CreateAppend` | creates it | appends |
-
-Stream open modes (`fs.StreamOpenMode`):
-
-| Value | Missing file | Existing file |
-|---|---|---|
-| `OpenExisting` | `FileNotFoundException` | opens it, keeps the content |
-| `CreateOrOpen` | creates it | opens it, keeps the content |
-| `CreateIfMissing` | creates it | `FileAlreadyExistsException` |
-| `CreateOrTruncate` | creates it | opens it and empties it |
-| `TruncateExisting` | `FileNotFoundException` | opens it and empties it |
-| `CreateOrAppend` | creates it | opens it, writes go to the end |
-| `AppendExisting` | `FileNotFoundException` | opens it, writes go to the end |
-
-Stream access modes (`fs.StreamReadWriteAccessMode`): `None` means the stream does not read (or does not write). `Exclusive` means the stream takes exclusive access for that operation. `Shared` means other streams can use the file for that operation too (exact meaning to be confirmed, 17.6.9).
-
-### 17.6.5 Behavior
-
-- `delete`: a directory that is not empty is deleted only with the `Recursive` flag; without it the silent `DirectoryNotEmptyException` is raised and `delete` returns `false`. A missing item returns `false`. `ForceDelete` tries its best to delete an item that is locked for some reason (for example used by another `File` object); the result depends on the OS.
-- `copy`, `move`: a directory is always copied or moved with everything inside it. If the target directory already exists, the contents are merged (as pasting a folder over a folder on Windows). With `Overwrite` files of the same name are replaced; with `None` those files are skipped and the silent `FileNameAlreadyExistsException` is raised. When the file itself is skipped, `copy` and `move` return nothing (a null `File`). A missing source raises `FileNotFoundException` (not silent).
-- `createDirectory`: it never creates missing parent folders; a missing parent raises `InvalidPathException`. If the directory already exists, the silent `FileNameAlreadyExistsException` is raised and the existing directory is returned as a `File`, so the code goes on without failing (a `catch` can still handle the case).
-- `getAllFiles`: returns an `arr<File>` in no defined order. A path that does not exist raises `FileNotFoundException`, not an empty result. `recursive` includes the subdirectories; `itemType` selects files, directories or both.
-- `match`: only the wildcards `*` and `?` are special; everything else is static text; case is ignored. It applies to the names of files only. Regular expressions: delayed until 0.1.0.
-- `readAll`, `readAllText`: a missing file raises `FileNotFoundException` (not silent).
-- `writeAll`, `writeAllText`: the write mode decides what happens with an existing or a missing file (table in 17.6.4). A missing parent folder raises `FullPathNotFoundException` (not silent).
-- Temporary files: nothing is deleted automatically (the OS usually handles temporary files); whether `getTempFile` creates the file on disk depends on the OS. Use `atEnd` when the file has to be removed, for example `File tempFile = File.getTempFile() atEnd of tempFile { tempFile.delete() }` (14.2).
-
-### 17.6.6 Exceptions
-
-The IDs continue the table in 15.3. For the stream exceptions (33 to 45) whether they are silent is still to be confirmed case by case; for now they are not silent.
-
-| ID | Exception | Silent | Raised by |
-|---|---|---|---|
-| 25 | `FileNotFoundException` | no | `copy`, `copyTo`, `move`, `moveTo` with a missing source; `readAll`, `readAllText` on a missing file; `getAllFiles` on a missing path; `writeAll`, `writeAllText` in `ReplaceOnly` or `AppendOnly` on a missing file; the `FileStream` constructor on a missing file with `OpenExisting`, `TruncateExisting` or `AppendExisting` |
-| 26 | `InvalidFileAccessException` | no | `copy`, `copyTo`, `move`, `moveTo`, `createDirectory`, `getAllFiles`, `readAll`, `readAllText`, `writeAll`, `writeAllText`, `getTempFile` and the `FileStream` constructor when the access is not allowed by the OS |
-| 27 | `FileAccessException` | yes | `exists`, `delete` and the attributes (`size`, `created`, `modified`, `accessed`, `isReadOnly`) when the access is not allowed |
-| 28 | `DirectoryNotEmptyException` | yes | `delete` of a directory that is not empty without `Recursive` |
-| 29 | `FileNameAlreadyExistsException` | yes | `createDirectory` on an existing directory; `copy` and `move` with `None` when the target exists |
-| 30 | `InvalidPathException` | no | `File(path)` with illegal characters; `getAllFiles` with an empty path; `createDirectory` with a missing parent folder; the `FileStream` constructor with an invalid path |
-| 31 | `FullPathNotFoundException` | no | `writeAll`, `writeAllText` and the `FileStream` constructor with a missing parent folder |
-| 32 | `SeekBeforeBeginException` | yes | `seek` to a position before the start of the stream |
-| 33 | `FileAlreadyExistsException` | no | `writeAll`, `writeAllText` in `CreateOnly` on an existing file; the `FileStream` constructor with `CreateIfMissing` on an existing file |
-| 34 | `FileAccessToADirectoryException` | no | the `FileStream` constructor when the path is a directory |
-| 35 | `ReadOnlyItemCannotBeWrittenException` | no | the `FileStream` constructor opening a read-only item for write |
-| 36 | `ConflictingSharingException` | no | the `FileStream` constructor when another stream or process has the file open in an incompatible mode |
-| 37 | `InvalidStreamModesException` | no | the stream constructor with an invalid combination of modes (write off with a truncate or append open mode, both read and write off) |
-| 38 | `NoMoreResourcesException` | no | too many open files or other resource limits; disk full |
-| 39 | `AccessToAClosedStreamException` | no | `read`, `write`, `readByte`, `writeByte`, `seek` and `flush` on a closed stream |
-| 40 | `StreamModeNotAllowedException` | no | `read` when the read mode is `None`, `write` when the write mode is `None` |
-| 41 | `SeekNotSupportedByStreamException` | no | `seek` on a stream with `canSeek` false |
-| 42 | `InvalidBufferRangeException` | no | `read`, `write` with `start` or `length` out of the bounds of the buffer, or `readAtLeast` or `writeAtLeast` larger than `length` |
-| 43 | `GenericIOErrorException` | no | an I/O error while reading, writing or flushing (hardware failure, dropped network connection) |
-| 44 | `FileRemovedWhileOpenException` | no | the file was deleted or moved while the stream was open |
-| 45 | `StreamCloseFailureException` | no | an error while closing (for example the final flush fails) |
-
-Silent fallbacks: `exists` and `delete` give `false`; `size` gives `0`; the dates give a null `date`; `isReadOnly` gives `false`; `createDirectory` gives the existing directory; the skipped files of `copy` and `move` are not copied; a timeout of a stream read gives `0`; `seek` before the start gives position `0`.
-
-Not an error: a timeout of a read (silent), the end of the stream (`null`), and a second `close()`. Exceptions for memory and text streams: later.
-
-### 17.6.7 Examples
-
-```
-alias Root.IO as fs
-
-File directory = File.createDirectory("/d:/data/reports")
-string filePath = File.combinePaths("/d:/data/reports", "report.txt")
-File.delete(filePath)
-File report = File(filePath)
-report.writeAllText("Done")
-report.writeAllText("More", String.StringEncoding.UTF8, fs.FileWriteMode.AppendOnly)
-
-u64 fileCount = 0
-u64 directoryCount = 0
-for File item in File.getAllFiles("/d:/data", recursive: false, itemType: fs.FileSystemObjectsType.Both, match: "*.txt") {
-  if item.isDirectory {
-    directoryCount++
-  } else {
-    fileCount++
-  }
-}
-
-File tempFile = File.getTempFile() atEnd of tempFile { tempFile.delete() }
-
-// buffer is an arr<byte>
-FileStream input = FileStream("/d:/data/in.bin", fs.StreamReadWriteAccessMode.Shared, fs.StreamReadWriteAccessMode.None, fs.StreamOpenMode.OpenExisting)
-if input != null {
-  uns count = input.read(buffer) ?? 0
-  uns newPosition = input.seek(-16, fs.StreamSeekOrigin.End)
-  input is atEnd.     // closes the stream now (12.4); otherwise it closes at the end of the scope
-}
-```
-
-### 17.6.8 Streams
-
-Status: the base class and `FileStream` are defined. Memory, console and text streams, network streams and the async syntax are not.
-
-#### 17.6.8.1 Classes
-
-- `Stream` is the base class. It offers only the basics: close, flush, seek (if supported), read and write.
-- `FileStream : Stream` accesses the contents of a file. `MemoryStream` and `ConsoleStream` are other subclasses (later).
-- `TextStream` is a trait applicable to any stream; it adds the specific text methods (later).
-- All streams are binary; helpers convert them to text.
-- Sync and async are both supported. The async version is real async: a callback is called when the operation completes. Its syntax is defined in the rest of the language specification (not for now).
-- Sources considered: files, memory, console (standard input and output). Network (sockets, websockets) later: websockets are message based, so they may need a different shape.
-
-#### 17.6.8.2 Opening and closing
-
-- There is no `open` in the base class: the constructor of each stream type opens the stream, as in `FileStream stream = FileStream(path, readMode, writeMode, openMode)`.
-- `File.open(readMode, writeMode, openMode)` is a shortcut for `FileStream(path, readMode, writeMode, openMode)`.
-- If the constructor fails it returns `null` (objects are nullable by default) and raises the exception that describes the problem (17.6.6).
-- A stream follows the Rust memory model: it is closed when its owner is lost. `stream is atEnd.` (12.4) or `close()` closes it earlier; the stream is then marked as closed, so a stream is never closed twice and a second `close()` does nothing.
-- A closed stream cannot be reopened. Using it raises `AccessToAClosedStreamException`.
-- Example: `FileStream stream = FileStream(path, readMode, writeMode, openMode)`; the stream is closed at the end of the scope, or earlier with `stream is atEnd.` or `stream.close()`.
-
-#### 17.6.8.3 Constructor and modes
-
-`FileStream(string path, fs.StreamReadWriteAccessMode readMode, fs.StreamReadWriteAccessMode writeMode, fs.StreamOpenMode openMode)`
-
-- `readMode`, `writeMode`: `None`, `Exclusive` or `Shared` (17.6.4). They are separate parameters of the same enum type.
-- `openMode`: what to do when the file is missing or already exists (table in 17.6.4).
-- The three modes are shared by all the stream types and defined once with the base class. Every other constructor parameter belongs to the stream type: `path` exists only in `FileStream`.
-- The modes are exposed as read-only constants of the object, with the name of the parameter in upper case: `READ_MODE`, `WRITE_MODE`, `OPEN_MODE`. They cannot be changed once the stream is open.
-- Invalid combinations (write off with `CreateOrTruncate`, `TruncateExisting`, `CreateOrAppend` or `AppendExisting`; read and write both off) raise `InvalidStreamModesException`.
-
-#### 17.6.8.4 Base class members
-
-| Definition | Description |
-|---|---|
-| `bool canRead` | True if the stream can be read |
-| `bool canWrite` | True if the stream can be written |
-| `bool canSeek` | True if the stream supports seeking |
-| `bool hasLength` | True if the stream can tell its length |
-| `uns position` | Current position, always available; on a stream that cannot seek it grows as new data arrives |
-| `uns length` | Length of the stream; `0` if the stream cannot provide it (see `hasLength`) |
-| `uns? read(arr<byte> buffer, uns start = 0, uns length = <rest of the buffer>, uns readAtLeast = 0)` | Reads into the buffer; returns the number of bytes read, `0` if nothing is available, `null` at the end of the stream |
-| `uns write(arr<byte> buffer, uns start = 0, uns length = <rest of the buffer>, uns writeAtLeast = 0)` | Writes from the buffer; returns the number of bytes written |
-| `byte? readByte()` | Reads one byte; `null` at the end of the stream |
-| `bool writeByte(byte value)` | Writes one byte; true if the byte was written |
-| `uns seek(int position, fs.StreamSeekOrigin origin)` | Moves the position (only if `canSeek`) and returns the new absolute position |
-| `flush(bool forcePhysical = false)` | Writes any buffered data to the destination (the OS, for a file); with `forcePhysical` the OS is also asked to write it to the physical device |
-| `close()` | Closes the stream |
-
-`uns` and `int` are the target-dependent unsigned and signed sizes (64 bits on x64, 32 on x32, 16 on 8-bit machines). For now they are used everywhere; before 0.1.0 they will be split by use (17.6.9). Async versions of `read` and `write` exist (for example `readAsync`); names and callback syntax come with the language async syntax.
-
-#### 17.6.8.5 Behavior of read, write, seek and flush
-
-- `read`, `write`: the buffer can be a whole array (it is used from the beginning for its full length) or a view of it, such as `(&)buffer[10..20]`. `start` and `length` select a part and are relative to the buffer passed: if a view is passed, the view is the buffer. Example: `read((&)buffer[10..20], start: 2, length: 4)` fills the elements 12 to 15 of `buffer`.
-- `readAtLeast`: the minimum number of bytes to read before returning. The default `0` means do not wait: `read` returns what is available now, possibly nothing.
-- `writeAtLeast`: the minimum number of bytes to write before returning. The default `0` means write what you can, with no limitation; the returned value tells how much was written.
-- A timeout of a read raises a silent exception and `read` returns `0`.
-- `seek` to a position before the start raises the silent `SeekBeforeBeginException` and the position becomes `0`, which is returned. `seek` to a position past the end is allowed, as in C# and Rust: reads return the end of the stream and a write extends the file.
-- `flush()` pushes the library buffers to the OS, as in C# and Rust. `flush(forcePhysical: true)` also asks the OS to write the data to the physical device (C# `Flush(true)`, Rust `sync_all`).
-
-### 17.6.9 Open items
-
-- Memory streams, console as streams (standard input and output), text streams (`TextStream` trait), network streams: later
-- Async: names and callback syntax for `read` and `write` (language async syntax): not for now
-- Streams: exact meaning of `Exclusive` and `Shared` (for example, with an exclusive write can others still read?); other invalid mode combinations (for example creating a file with the write mode `None`)
-- Streams: silent or not for each stream exception (for now all not silent); exceptions of the memory and text streams
-- Before 0.1.0: split `int` and `uns` by use (calculation, memory offsets, file offsets); parser and compiler support for `uns` in normal code (not in `dfoot`)
-- Before 0.1.0: regular expressions in `match`
-- Normalization details: drive letters on other OS, network paths
-- The full list of exceptions of the File manager and their final names
-
----
 
 # 18 RESERVED
 

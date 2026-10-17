@@ -1,0 +1,1 @@
+strformat_truncate_without_width.df(1): error: invalid string format "t<'..'": t needs a width (w or wc)

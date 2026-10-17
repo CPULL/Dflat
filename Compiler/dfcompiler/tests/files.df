@@ -1,0 +1,85 @@
+namespace files
+alias Root as r
+alias Root.IO as fs
+
+string base = File.combinePaths(File.getTempDir(), "dflat-files-test")
+File.delete(base, fs.DeleteOptions.Recursive)
+File root = File.createDirectory(base)
+r.Console.log($"created {root.name}, isDirectory {root.isDirectory}, exists {root.exists()}")
+
+File report = File(File.combinePaths(base, "report.txt"))
+r.Console.log($"report: name {report.name}, extension {report.extension}, exists {report.exists()}, parent {report.parent.name}")
+report.writeAllText("Done")
+report.writeAllText(" more", String.StringEncoding.UTF8, fs.FileWriteMode.AppendOnly)
+r.Console.log($"text = {report.readAllText()}, size {report.size}, isFile {report.isFile}, readonly {report.isReadOnly}")
+r.Console.log($"modified is not null: {report.modified != null}, created {report.created != null}")
+
+// encodings
+report.writeAllText("héllo", String.StringEncoding.UTF16)
+r.Console.log($"utf16 size {report.size}, read back {report.readAllText(String.StringEncoding.UTF16)}")
+arr<u8> bytes = report.readAll()
+r.Console.log($"bytes {bytes.len}: {bytes[0]} {bytes[1]}")
+report.writeAll([72, 105])
+r.Console.log($"writeAll: {report.readAllText()}")
+
+// copy, move, folders
+File sub = File.createDirectory(File.combinePaths(base, "sub"))
+File copied = report.copyTo(File.combinePaths(base, "sub/copy.txt"))
+r.Console.log($"copied {copied.name}, parent {copied.parent.name}, text {copied.readAllText()}")
+File moved = copied.moveTo(File.combinePaths(base, "sub/moved.txt"))
+r.Console.log($"moved {moved.name}, copy exists {File.exists(File.combinePaths(base, "sub/copy.txt"))}")
+File.copy(File.combinePaths(base, "sub"), File.combinePaths(base, "sub2"))
+r.Console.log($"sub2 holds {File.exists(File.combinePaths(base, "sub2/moved.txt"))}")
+
+arr<File> all = File.getAllFiles(base, recursive: true, itemType: fs.FileSystemObjectsType.Both)
+r.Console.log($"all items: {all.len}")
+arr<File> texts = File.getAllFiles(base, true, fs.FileSystemObjectsType.Files, "*.TXT")
+r.Console.log($"txt files: {texts.len}")
+arr<File> dirs = root.getAllFiles(itemType: fs.FileSystemObjectsType.Dirs)
+r.Console.log($"directories: {dirs.len}")
+
+// delete
+r.Console.log($"delete sub without Recursive: {File.delete(File.combinePaths(base, "sub"))}")
+r.Console.log($"delete sub recursive: {File.delete(File.combinePaths(base, "sub"), fs.DeleteOptions.Recursive)}")
+r.Console.log($"delete missing: {File.delete(File.combinePaths(base, "nothing"))}")
+
+// errors
+fun string readMissing() {
+  File missing = File(File.combinePaths(File.getTempDir(), "dflat-no-such-file.txt"))
+  string text = missing.readAllText()
+  return "no error"
+  catch FileNotFoundException ex {
+    return "FileNotFoundException id " + ex.Id
+  }
+}
+r.Console.log(readMissing())
+
+fun string badPath() {
+  File bad = File("/d:/bad|name")
+  return "no error"
+  catch InvalidPathException ex {
+    return "InvalidPathException id " + ex.Id
+  }
+}
+r.Console.log(badPath())
+
+fun string createOnly(File target) {
+  target.writeAllText("again", String.StringEncoding.UTF8, fs.FileWriteMode.CreateOnly)
+  return "no error"
+  catch FileAlreadyExistsException ex {
+    return "FileAlreadyExistsException id " + ex.Id
+  }
+}
+r.Console.log(createOnly(report))
+
+fun string noParent(string where) {
+  File.createDirectory(File.combinePaths(where, "a/b/c"))
+  return "no error"
+  catch InvalidPathException ex {
+    return "InvalidPathException id " + ex.Id
+  }
+}
+r.Console.log(noParent(base))
+
+File.delete(base, fs.DeleteOptions.Recursive)
+r.Console.log($"cleaned: {!File.exists(base)}")

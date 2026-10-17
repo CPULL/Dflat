@@ -1,0 +1,1 @@
+assign_to_const.df(2): error: 'a' is const

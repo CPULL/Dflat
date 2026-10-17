@@ -20,6 +20,21 @@ public sealed partial class CodeGen {
   static bool IsTuple(string type) => type.StartsWith('(') && type.EndsWith(')');
   static bool IsMulti(string type) => type.StartsWith('*');
   bool IsEnum(string type) => enums.ContainsKey(type);
+  bool IsBitfield(string type) => enums.TryGetValue(type, out var info) && info.Bitfield;
+
+  // fs.DeleteOptions with alias Root.IO as fs, Root.IO.DeleteOptions, String.StringEncoding: the library enum's own name
+  string StripLibraryQualifier(string name) {
+    int dot = name.IndexOf('.');
+    if (dot < 0) {
+      return name;
+    }
+    string first = name[..dot];
+    string full = (nameAliases.TryGetValue(first, out var target) ? target : first) + name[dot..];
+    if (full.StartsWith("Root.IO.") && full.IndexOf('.', "Root.IO.".Length) < 0) {
+      return full["Root.IO.".Length..];
+    }
+    return full == "String.StringEncoding" ? "StringEncoding" : name;
+  }
 
   static bool IsTimeType(string t) => t is "date" or "time" or "clock" or "lapse";
 
@@ -273,6 +288,9 @@ public sealed partial class CodeGen {
         if (IsNullable(inner)) {
           throw Error($"'{inner}' is already nullable", n);
         }
+        if (IsBitfield(inner)) {
+          throw Error("a bitfield cannot be nullable (not decided yet, spec 3.1.1)", n);
+        }
         return inner + "?";
       }
       case "TupleType": {
@@ -288,7 +306,7 @@ public sealed partial class CodeGen {
       case "ResolvedType":
         return n.Text!;   // a type parameter replaced by its type argument (generics)
       case "Type": {
-        string t = n.Text!;
+        string t = StripLibraryQualifier(n.Text!);
         if (t == "T" && n.Children.Count == 0 && currentGenericT != null) {
           return currentGenericT;   // inside a copy of equals(T other)
         }

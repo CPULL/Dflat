@@ -1,0 +1,1 @@
+strformat_width_without_number.df(1): error: invalid string format "w": w needs a number (wc for display columns)

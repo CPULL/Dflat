@@ -1,0 +1,2 @@
+arr<i32> a = [1, 2]
+a.copyFrom(0, a, 1, 1)

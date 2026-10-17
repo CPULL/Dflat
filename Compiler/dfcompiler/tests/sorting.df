@@ -1,0 +1,82 @@
+namespace sorting
+alias Root as r
+
+// sort, sortUnstable, copyFrom on arrays (spec 6.6)
+arr<i32> numbers = [5, 3, 9, 1, 7, 3]
+numbers.sort()
+r.Console.log(numbers)                                     // [1, 3, 3, 5, 7, 9]
+numbers.sort(SortDirection.DESC)
+r.Console.log(numbers)                                     // [9, 7, 5, 3, 3, 1]
+numbers.sort(SortDirection.ASC)
+r.Console.log(numbers)                                     // [1, 3, 3, 5, 7, 9]
+
+arr<string> names = ["pear", "Apple", "fig", "apple", "banana", ""]
+names.sort()
+r.Console.log(names)                                       // ["", Apple, apple, banana, fig, pear] by code point
+names.sortUnstable(SortDirection.DESC)
+r.Console.log(names)                                       // pear, fig, banana, apple, Apple, ""
+
+arr<r64> reals = [2.5, -1.0, 0.0 / 0.0, 10.0, -7.25]
+reals.sort()
+r.Console.log(reals)                                       // [-7.25, -1, 2.5, 10, NaN]
+arr<char> letters = ['d', 'a', 'c', 'b']
+letters.sort()
+r.Console.log(letters)                                     // [a, b, c, d]
+arr<u8> bytes = [200, 3, 100, 255, 0]
+bytes.sortUnstable()
+r.Console.log(bytes)                                       // [0, 3, 100, 200, 255]
+arr<bool> flags = [true, false, true, false]
+flags.sort()
+r.Console.log(flags)                                       // [false, false, true, true]
+arr<date> dates = [date("2026-03-01"), date("2025-12-31"), date("2026-01-15")]
+dates.sort()
+r.Console.log(dates[0])                                    // 2025-12-31T00:00:00.000Z
+
+// many items, both sorts agree with each other
+arr<i64> big = arr<i64>[2000]
+r.Random.seed(11ul)
+for i32 k = 0..2000 { big[k] = r.Random.int(-500, 500) }
+arr<i64> other = arr<i64>[2000]
+other.copyFrom(0, big, 0, 2000)
+big.sort()
+other.sortUnstable()
+bool same = true
+bool ascending = true
+for i32 k = 0..2000 {
+  if big[k] != other[k] { same = false }
+  if k > 0 && big[k - 1] > big[k] { ascending = false }
+}
+r.Console.log($"stable == unstable: {same}, ascending: {ascending}")   // true, true
+
+// copyFrom
+arr<i32> target = [0, 0, 0, 0, 0, 0]
+arr<i32> source = [1, 2, 3, 4, 5]
+target.copyFrom(1, source, 0, 3)
+r.Console.log(target)                                      // [0, 1, 2, 3, 0, 0]
+target.copyFrom(3, source, 2..5)
+r.Console.log(target)                                      // [0, 1, 2, 3, 4, 5]
+target.copyFrom(0, source, 1..=2)
+r.Console.log(target)                                      // [2, 3, 2, 3, 4, 5]
+target.copyFrom(4, source, ..2)
+r.Console.log(target)                                      // [2, 3, 2, 3, 1, 2]
+target.copyFrom(2, source, 3..)
+r.Console.log(target)                                      // [2, 3, 4, 5, 1, 2]
+target.copyFrom(6, source, 0, 0)                           // nothing to copy at the end: allowed
+r.Console.log(target.len)                                  // 6
+
+fun string tryCopy(arr<i32> to, arr<i32> from, i32 dst, i32 src, i32 count) {
+  to.copyFrom(dst, from, src, count)
+  return "copied"
+  catch IndexOutOfRangeException ex { return "IndexOutOfRangeException " + ex.Id }
+  catch ModifyingProtectedSourceException ex { return "ModifyingProtectedSourceException " + ex.Id }
+}
+r.Console.log(tryCopy(target, source, 4, 0, 3))            // IndexOutOfRangeException 19 (does not fit in the destination)
+r.Console.log(tryCopy(target, source, 0, 3, 3))            // IndexOutOfRangeException 19 (does not fit in the source)
+r.Console.log(tryCopy(target, source, 0, -1, 1))           // IndexOutOfRangeException 19
+r.Console.log(tryCopy(target, target, 0, 1, 2))            // ModifyingProtectedSourceException 20
+r.Console.log(tryCopy(target, source, 6, 0, 0))            // copied
+
+// errors it should give (one at a time):
+// target.copyFrom(0, target, 1, 2)              copyFrom cannot use the same array as source and destination
+// names.sort((a, b) { a.len < b.len })          Lambdas ... not supported yet
+// arr<r32> small = [1.0]  small.copyFrom(0, numbers, 0, 1)   copyFrom needs an arr<r32> as the source

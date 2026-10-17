@@ -1,0 +1,33 @@
+4
+1024
+1.5
+3
+-1
+3
+2
+9.5
+5
+7
+10
+2.5
+0.25
+NaN
+2
+7
+-1
+-7
+3
+100
+3.141592653589793
+true
+true
+true
+9
+true
+true
+true
+none is null
+true
+true
+true
+---- exit code 0 ----

@@ -37,91 +37,91 @@ public class Person(string name, i32 age) {
 }
 
 Counter c = Counter(10, "a")
-r.Console.Log(c.start)
-r.Console.Log(c.Next())
-r.Console.Log(c.Next())
-r.Console.Log(c.Name())
-r.Console.Log(c.Twice())
-r.Console.Log(c.Doubled())
+r.Console.log(c.start)
+r.Console.log(c.Next())
+r.Console.log(c.Next())
+r.Console.log(c.Name())
+r.Console.log(c.Twice())
+r.Console.log(c.Doubled())
 c.Reset(100)
-r.Console.Log(c.start)
+r.Console.log(c.start)
 c.start = 7
-r.Console.Log(c.start)
+r.Console.log(c.start)
 c.start += 3
 c.start++
-r.Console.Log(c.start)
-r.Console.Log(Counter.created)
-r.Console.Log(Counter.MAX)
+r.Console.log(c.start)
+r.Console.log(Counter.created)
+r.Console.log(Counter.MAX)
 Counter.created = 50
-r.Console.Log(Counter.created)
+r.Console.log(Counter.created)
 Counter made = Counter.Make("z")
-r.Console.Log(made.Name())
-r.Console.Log(made.Reveal())
-r.Console.Log(c == made)
+r.Console.log(made.Name())
+r.Console.log(made.Reveal())
+r.Console.log(c == made)
 Counter same = c
-r.Console.Log(c == same)
-r.Console.Log(c != made)
+r.Console.log(c == same)
+r.Console.log(c != made)
 
 // objects are null until set
 Counter none = null
-r.Console.Log(none == null)
-r.Console.Log(c == null)
+r.Console.log(none == null)
+r.Console.log(c == null)
 Counter view = c
-r.Console.Log(view == null)
+r.Console.log(view == null)
 
 // zero values of the fields
 Person p = Person("Ann", 30)
-r.Console.Log(p.name + " " + p.age)
-r.Console.Log(p.partner == null)
-r.Console.Log(p.score)
-r.Console.Log(p.born == null)
-r.Console.Log(p.marks == null)
+r.Console.log(p.name + " " + p.age)
+r.Console.log(p.partner == null)
+r.Console.log(p.score)
+r.Console.log(p.born == null)
+r.Console.log(p.marks == null)
 p.partner = Person("Bob", 31)
-r.Console.Log(p.partner.name)
-r.Console.Log(p.partner.partner == null)
+r.Console.log(p.partner.name)
+r.Console.log(p.partner.partner == null)
 p.born = date("2020-01-02")
-r.Console.Log(p.born)
+r.Console.log(p.born)
 p.marks = [1, 2, 3]
-r.Console.Log(p.marks[2])
+r.Console.log(p.marks[2])
 
 // null-safe access
 Person nobody = null
-r.Console.Log(nobody?.name == null)
-r.Console.Log(p?.name)
-r.Console.Log(p.partner?.partner?.name == null)
-r.Console.Log(p.partner?.age)
+r.Console.log(nobody?.name == null)
+r.Console.log(p?.name)
+r.Console.log(p.partner?.partner?.name == null)
+r.Console.log(p.partner?.age)
 Person nothing = null
-r.Console.Log(nothing?.age == null)
+r.Console.log(nothing?.age == null)
 
 // null access raises NullPointerException
 i32 caught = 0
-r.Console.Log(nobody.name)
+r.Console.log(nobody.name)
 catch NullPointerException ex {
-  r.Console.Log("caught: " + ex.Message)
+  r.Console.log("caught: " + ex.Message)
   caught += 1
 }
 nobody.age = 4
 catch NullPointerException {
   caught += 1
 }
-r.Console.Log(p.partner.partner.age)
+r.Console.log(p.partner.partner.age)
 catch NullPointerException {
   caught += 1
 }
-r.Console.Log(caught)
+r.Console.log(caught)
 
 // printing: first three fields, one level
 Empty e = Empty()
-r.Console.Log(e)
-r.Console.Log(made)
-r.Console.Log(p)
-r.Console.Log(nobody)
-r.Console.Log($"p is {p.partner}")
+r.Console.log(e)
+r.Console.log(made)
+r.Console.log(p)
+r.Console.log(nobody)
+r.Console.log($"p is {p.partner}")
 
 // arrays, tuples and parameters of objects
 arr<Person> people = [Person("A", 1), Person("B", 2)]
-r.Console.Log(people[1].name)
+r.Console.log(people[1].name)
 fun string describe(Person who) { who.name + ":" + who.age }
-r.Console.Log(describe(people[0]))
+r.Console.log(describe(people[0]))
 fun (Person who, i32 count) pair(Person x) { return (x, 2) }
-r.Console.Log(pair(p).count)
+r.Console.log(pair(p).count)

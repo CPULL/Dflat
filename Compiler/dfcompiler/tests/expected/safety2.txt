@@ -1,0 +1,20 @@
+area 0
+area 20
+division by zero
+area 0
+size 0
+size 15
+failed: Division By Zero Exception
+ratio 5
+no ratio
+middle: no error
+top: ok
+top caught disk
+guard released
+guarded 25
+guard released
+guarded failed
+55
+total 170
+zero in the list
+---- exit code 0 ----

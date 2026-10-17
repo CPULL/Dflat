@@ -1,0 +1,28 @@
+|Hello     |
+|     Hello|
+|  Hello   |
+|*****Hello|
+|..Hello..|
+|Hello|
+HELLO WORLD. HOW ARE YOU
+hello world. how are you
+Hello world. how are you
+Hello World. How Are You
+|spaced out|
+|spaced out  |
+|  	 spaced out|
+"He said \"hi\"\n\\ end"
+"Hello"
+|Hello w…|
+|…o world|
+|Hello...|
+|Hello world         |
+|...|
+|日本語  |
+|日本語     |
+|日… |
+|__Hello World__|
+   abc
+|    |
+Hello
+---- exit code 0 ----

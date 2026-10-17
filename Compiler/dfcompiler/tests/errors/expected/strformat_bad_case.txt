@@ -1,0 +1,1 @@
+strformat_bad_case.df(1): error: invalid string format "cX": c needs U, L, S or T

@@ -1,0 +1,22 @@
+6
+0
+true
+t5
+42
+10
+4
+Green
+9
+Blue
+3
+20
+-1
+2
+4
+caught Division By Zero Exception
+-2
+caught Division By Zero Exception
+-2
+Division By Zero Exception
+Panic -1000
+---- exit code -1000 ----

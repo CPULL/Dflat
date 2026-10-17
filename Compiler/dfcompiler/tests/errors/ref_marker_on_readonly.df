@@ -1,0 +1,3 @@
+fun i32 total(&arr<i32> items) { 0 }
+arr<i32> n = [1]
+total((&)n)

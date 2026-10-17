@@ -9,7 +9,7 @@ fun u64 fib(u64 n) {
 fun i32 square(i32 x) { x * x }
 
 fun greet(string name = "world") {
-  r.Console.Log($"Hello {name}!")
+  r.Console.log($"Hello {name}!")
 }
 
 greet()
@@ -17,14 +17,14 @@ greet("Dflat")
 
 // loops and recursion
 for u64 i = 0..10 {
-  r.Console.Log($"fib({i}) = {fib(i)}")
+  r.Console.log($"fib({i}) = {fib(i)}")
 }
 
 i32 total = 0
 for i32 i = 1..=100 step i += 1 {
   total += i
 }
-r.Console.Log("sum 1..100 = " + total)
+r.Console.log("sum 1..100 = " + total)
 
 i32 count = 0
 while count < 3 {
@@ -33,34 +33,34 @@ while count < 3 {
 {
   count--
 } while count > 1
-r.Console.Log($"count = {count}")
+r.Console.log($"count = {count}")
 
 // casts and transmutes
 i16 big16 = 257
-r.Console.Log($"(i8)257 = {(i8)big16}, [i8]257 = {[i8]big16}")
+r.Console.log($"(i8)257 = {(i8)big16}, [i8]257 = {[i8]big16}")
 r64 huge = 1e300
-r.Console.Log($"(i32)1e300 = {(i32)huge}")
+r.Console.log($"(i32)1e300 = {(i32)huge}")
 
 // numbers and strings
 r64 x = 2
-r.Console.Log($"sqrt(2) = {r.Math.Sqrt(x)}")
-r.Console.Log($"pi = {r.Math.PI}, lerp = {r.Math.Lerp(0, 10, 0.25)}")
-r.Console.Log(1 + 2 + "a")
-r.Console.Log('a' + 'b')
-r.Console.Log($"square(12) = {square(12)}")
+r.Console.log($"sqrt(2) = {r.Math.sqrt(x)}")
+r.Console.log($"pi = {r.Math.PI}, lerp = {r.Math.lerp(0, 10, 0.25)}")
+r.Console.log(1 + 2 + "a")
+r.Console.log('a' + 'b')
+r.Console.log($"square(12) = {square(12)}")
 char smile = '\u{1F600}'
-r.Console.Log("smile " + smile)
+r.Console.log("smile " + smile)
 string word = "héllo"
-r.Console.Log($"{word} has {word.len} chars and {word.sizeof} bytes")
-r.Console.Log($"literal braces: \{ok\}")
+r.Console.log($"{word} has {word.len} chars and {word.sizeof} bytes")
+r.Console.log($"literal braces: \{ok\}")
 
 bool flag = true
 if flag && total > 5000 {
-  r.Console.Log("big total")
+  r.Console.log("big total")
 } else if total > 100 {
-  r.Console.Log("medium total")
+  r.Console.log("medium total")
 } else {
-  r.Console.Log("small total")
+  r.Console.log("small total")
 }
 
 // labels and break
@@ -70,10 +70,10 @@ for i32 a = 0..5 {
   }
 }
 #Found#
-r.Console.Log("found a * b == 6")
+r.Console.log("found a * b == 6")
 
 // errors
 i32 zero = 0
-r.Console.Log("dividing by zero...")
+r.Console.log("dividing by zero...")
 i32 boom = 10 / zero
-r.Console.Log($"not reached {boom}")
+r.Console.log($"not reached {boom}")

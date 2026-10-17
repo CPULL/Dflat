@@ -1,0 +1,33 @@
+  mul went on
+result 10
+  mul went on
+result 604
+  mul went on
+mul 6
+observed in observeMul: big product
+  mul went on
+600
+  mul went on
+checked 6
+observed up the chain: big product
+0
+  mul went on
+sink 400
+SilentException sees: big product
+all sees it
+  mul went on
+wrongKind 400
+Family sees: a cousin
+byParent 0
+byException 5
+  before
+local catch: local
+reading 9
+reading 3
+noise: noisy
+ignoring 9
+level 8
+probe warning: below zero
+hard 4
+Trouble: zero
+---- exit code 0 ----

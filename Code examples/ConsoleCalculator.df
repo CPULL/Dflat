@@ -1,0 +1,17 @@
+// DFlat Simple Calculator Example
+alias Root.Console.log as log // We use just log to call Root.Console.log
+alias Root.Console.readLine as read
+
+log("Test Calculator DFlat\nEnter first value:") // Printing some messages on the console
+r64 firstValue = r64.parse(read()) // We read a line from the console (standard input) and we try to parse to a real number, if the parsing will not work the default value of 0 is assigned
+log("Enter second value:")
+r64 secondValue = r64.parse(read()) // We read again from the console
+log("Enter operator (+, -, /, *):") // We ask for an operator
+r64 result = read()[0] ? { // We read the console, and get the first character. We never fail because the line has at least a newline inside
+    '+': firstValue + secondValue, // if the character is + the result is the sum
+    '-': firstValue - secondValue, // Same for -, /, and *
+    '/': firstValue / secondValue,
+    '*': firstValue * secondValue,
+    default: 0 // Any other character will give 0 as result
+}
+log($"Result: {result}") // We print the result on the console

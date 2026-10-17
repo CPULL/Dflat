@@ -1,0 +1,1 @@
+ref_wrong_type.df(3): error: the parameter is a i32, but 'text' is a string

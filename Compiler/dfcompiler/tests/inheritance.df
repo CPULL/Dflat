@@ -33,48 +33,48 @@ public class Square : Shape {
 fun string show(Shape s) { s.Describe() + " area " + s.Area() }
 
 Circle c = Circle()
-r.Console.Log(c.Kind())
-r.Console.Log(c.Area())
-r.Console.Log(c.Describe())
+r.Console.log(c.Kind())
+r.Console.log(c.Area())
+r.Console.log(c.Describe())
 
 Shape s = c
-r.Console.Log(s.Kind())
-r.Console.Log(s.Area())
-r.Console.Log(show(c))
-r.Console.Log(show(Square()))
-r.Console.Log(show(Shape()))
-r.Console.Log(show(Ring(0.5)))
+r.Console.log(s.Kind())
+r.Console.log(s.Area())
+r.Console.log(show(c))
+r.Console.log(show(Square()))
+r.Console.log(show(Shape()))
+r.Console.log(show(Ring(0.5)))
 
 Ring ring = Ring(0.5)
 ring.radius = 1.0
-r.Console.Log(ring.Kind())
-r.Console.Log(ring.Depth())
-r.Console.Log(ring.Radius())
-r.Console.Log(ring.Area())
+r.Console.log(ring.Kind())
+r.Console.log(ring.Depth())
+r.Console.log(ring.Radius())
+r.Console.log(ring.Area())
 
 // array of mixed shapes
 arr<Shape> shapes = [Circle(), Square(), Shape(), Ring(1.0)]
 r64 total = 0.0
 for Shape item in shapes { total += item.Area() }
-r.Console.Log(total)
-for var item in shapes { r.Console.Print(item.Kind() + ";") }
-r.Console.Log("")
+r.Console.log(total)
+for var item in shapes { r.Console.print(item.Kind() + ";") }
+r.Console.log("")
 
 // is
-r.Console.Log(shapes[0] is Circle)
-r.Console.Log(shapes[1] is Circle)
-r.Console.Log(shapes[3] is Circle)
-r.Console.Log(shapes[3] is Ring)
-r.Console.Log(shapes[2] is Ring)
+r.Console.log(shapes[0] is Circle)
+r.Console.log(shapes[1] is Circle)
+r.Console.log(shapes[3] is Circle)
+r.Console.log(shapes[3] is Ring)
+r.Console.log(shapes[2] is Ring)
 Shape nothing = null
-r.Console.Log(nothing is Shape)
+r.Console.log(nothing is Shape)
 for Shape item in shapes {
   if item is Ring big {
-    r.Console.Log("ring with depth " + big.Depth())
+    r.Console.log("ring with depth " + big.Depth())
   } else if item is Circle round {
-    r.Console.Log("circle " + round.Radius())
+    r.Console.log("circle " + round.Radius())
   } else {
-    r.Console.Log("other " + item.Kind())
+    r.Console.log("other " + item.Kind())
   }
 }
 
@@ -82,20 +82,20 @@ for Shape item in shapes {
 Shape.count = 0
 c.Touch()
 ring.Touch()
-r.Console.Log(Shape.Total())
-r.Console.Log(Circle.Total())
-r.Console.Log(Ring.count)
+r.Console.log(Shape.Total())
+r.Console.log(Circle.Total())
+r.Console.log(Ring.count)
 Circle.count = 10
-r.Console.Log(Shape.count)
+r.Console.log(Shape.count)
 
 // a parent field set through the child, and the printing of a child
 Square sq = Square()
 sq.side = 3.0
-r.Console.Log(sq.Area())
-r.Console.Log(sq)
-r.Console.Log(ring)
+r.Console.log(sq.Area())
+r.Console.log(sq)
+r.Console.log(ring)
 
 // comparing parent and child references
 Shape same = ring
-r.Console.Log(same == ring)
-r.Console.Log(same == c)
+r.Console.log(same == ring)
+r.Console.log(same == c)

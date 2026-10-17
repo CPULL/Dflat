@@ -1,0 +1,1 @@
+class Box { override fun i32 size() { 1 } }

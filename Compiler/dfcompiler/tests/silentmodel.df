@@ -1,0 +1,146 @@
+namespace silentmodel
+alias Root as r
+
+// silent exceptions: they leave a function only for the caller that has a catch for them (EXCEPTIONS: THE MODEL, rules 4 to 6)
+
+public class Warning(string text) : Exception, SilentException { }
+public class Notice(string text) : Exception, SilentException { }
+public class Trouble : Exception { }
+
+fun i64 mul(i64 a, i64 b) {
+  i64 product = a * b
+  if product > 100 then throw Warning("big product")       // silent
+  r.Console.log("  mul went on")                            // runs when nobody observes the warning
+  return product
+}
+fun i64 add3(i64 a, i64 b, i64 c) {                         // no catch: the warning of mul is ignored here
+  return mul(a, b) + c
+}
+fun string observe(i64 a, i64 b, i64 c) {
+  return "result " + add3(a, b, c)
+  catch Warning w { return "observed in observe: " + w.Message }
+}
+fun string observeMul(i64 a, i64 b) {
+  return "mul " + mul(a, b)
+  catch Warning w { return "observed in observeMul: " + w.Message }
+}
+r.Console.log(observe(2, 3, 4))                             // mul went on / result 10
+r.Console.log(observe(20, 30, 4))                           // mul went on / result 604: add3 ignored the warning, observe never sees it
+r.Console.log(observeMul(2, 3))                             // mul went on / mul 6
+r.Console.log(observeMul(20, 30))                           // observed in observeMul: big product (mul stops at the throw)
+r.Console.log(mul(20, 30))                                  // mul went on / 600: no catch, ignored
+
+// to send it up, catch and throw again
+fun i64 checked(i64 a, i64 b) {
+  return mul(a, b)
+  catch Warning w { throw w }
+}
+fun string seeChecked(i64 a, i64 b) {
+  return "checked " + checked(a, b)
+  catch Warning w { return "observed up the chain: " + w.Message }
+}
+r.Console.log(seeChecked(2, 3))                             // mul went on / checked 6
+r.Console.log(seeChecked(20, 30))                           // observed up the chain: big product
+r.Console.log(checked(20, 30))                              // nobody observes the rethrow: execution goes on after the call: 0
+
+// catch SilentException and catch all observe silent exceptions; catch Exception does not (spec 15.1, 15.4, 15.8.2)
+fun string sink(i64 a) {
+  return "sink " + mul(a, a)
+  catch Exception e { return "Exception sees: " + e.Message }
+}
+fun string bySilent(i64 a) {
+  return "bySilent " + mul(a, a)
+  catch SilentException e { return "SilentException sees: " + e.Message }
+}
+fun string byAll(i64 a) {
+  return "byAll " + mul(a, a)
+  catch all { return "all sees it" }
+}
+fun string wrongKind(i64 a) {
+  return "wrongKind " + mul(a, a)
+  catch Notice n { return "Notice: " + n.Message }
+}
+r.Console.log(sink(20))                                     // mul went on / sink 400: catch Exception does not observe a silent exception
+r.Console.log(bySilent(20))                                 // SilentException sees: big product
+r.Console.log(byAll(20))                                    // all sees it
+r.Console.log(wrongKind(20))                                // mul went on / wrongKind 400: a catch for another kind does not observe it
+
+// a catch for a parent class below Exception observes the silent children of that class
+public class Family : Exception { }
+public class Cousin(string text) : Family, SilentException { }
+fun i64 cousin(i64 a) {
+  if a > 0 then throw Cousin("a cousin")
+  return a
+}
+fun string byParent(i64 a) {
+  return "byParent " + cousin(a)
+  catch Family f { return "Family sees: " + f.Message }
+}
+fun string byException(i64 a) {
+  return "byException " + cousin(a)
+  catch Exception e { return "Exception sees: " + e.Message }
+}
+r.Console.log(byParent(5))                                  // Family sees: a cousin
+r.Console.log(byParent(0))                                  // byParent 0
+r.Console.log(byException(5))                               // byException 5: catch Exception does not observe it
+
+// a silent exception thrown and caught in the same function
+fun string sameFunction() {
+  r.Console.log("  before")
+  throw Notice("local")
+  r.Console.log("  after the throw")
+  return "finished"
+  catch Notice n { return "local catch: " + n.Message }
+}
+r.Console.log(sameFunction())                               // local catch: local
+
+// virtual and trait calls
+public class Sensor {
+  public fun i64 read(i64 v) { v }
+}
+public class Noisy : Sensor {
+  override fun i64 read(i64 v) {
+    if v > 5 then throw Notice("noisy")
+    return v
+  }
+}
+fun string reading(Sensor s, i64 v) {
+  return "reading " + s.read(v)
+  catch Notice n { return "noise: " + n.Message }
+}
+fun string ignoring(Sensor s, i64 v) {
+  return "ignoring " + s.read(v)
+}
+r.Console.log(reading(Sensor(), 9))                         // reading 9
+r.Console.log(reading(Noisy(), 3))                          // reading 3
+r.Console.log(reading(Noisy(), 9))                          // noise: noisy
+r.Console.log(ignoring(Noisy(), 9))                         // ignoring 9: nobody observes it, the function went on and returned 9
+
+trait Probe {
+  fun i64 level(i64 v)
+}
+public class Deep : Probe {
+  override fun i64 level(i64 v) {
+    if v < 0 then throw Warning("below zero")
+    return v * 2
+  }
+}
+fun string probing(Probe p, i64 v) {
+  return "level " + p.level(v)
+  catch Warning w { return "probe warning: " + w.Message }
+}
+r.Console.log(probing(Deep(), 4))                           // level 8
+r.Console.log(probing(Deep(), -4))                          // probe warning: below zero
+
+// non-silent exceptions still go up on their own
+fun i64 hard(i64 a) {
+  if a == 0 then throw Trouble("zero")
+  return a
+}
+fun i64 middleman(i64 a) { hard(a) + 1 }
+fun string hardCatcher(i64 a) {
+  return "hard " + middleman(a)
+  catch Trouble t { return "Trouble: " + t.Message }
+}
+r.Console.log(hardCatcher(3))                               // hard 4
+r.Console.log(hardCatcher(0))                               // Trouble: zero

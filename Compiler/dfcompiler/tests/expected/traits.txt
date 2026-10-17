@@ -1,0 +1,38 @@
+square
+Hi square (unnamed)
+Hi square (unnamed) area 4 sides 3
+Hello from the circle
+Hello from the circle area 3 sides 3
+3
+my square
+Hi square (my square) area 4 sides 3
+Hello from the circle area 3 sides 3
+Hi square (my square)
+Hello from the circle
+Hi base label (unnamed)
+Hi base label (unnamed)
+unnamed
+5
+Hi LOUD (unnamed) area 9 sides 3
+Hi LOUD (unnamed)
+3
+8
+renamed
+Hello from the circle
+16
+square;circle;LOUD;
+circle
+base label
+true
+true
+false
+true
+false
+true
+true
+shape 4
+base base label
+shape 3
+1
+Square { name: my square, sides: 3, side: 2 }
+---- exit code 0 ----

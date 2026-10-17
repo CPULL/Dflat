@@ -1,0 +1,2 @@
+bitfield32 F { A: 0, B: 1 }
+F x = F.A + F.B

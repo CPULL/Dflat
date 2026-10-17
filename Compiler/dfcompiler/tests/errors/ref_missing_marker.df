@@ -1,0 +1,3 @@
+fun increment((&)i32 value) { value += 1 }
+i32 counter = 1
+increment(counter)

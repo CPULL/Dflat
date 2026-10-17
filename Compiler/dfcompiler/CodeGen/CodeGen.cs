@@ -48,6 +48,8 @@ sealed class FunSig {
   public string? GenericT { get; set; } // a copy of equals(T other) made for this T
   public FunSig Root { get; set; }
   public int GroupSize { get; set; }   // on a root: how many functions override it
+  public int InstanceDepth { get; set; }      // a copy of a generic function: how deep the chain of copies is
+  public string InstanceChain { get; set; } = "";
 }
 
 sealed class ParamSig {
@@ -108,7 +110,7 @@ public sealed partial class CodeGen {
   static readonly HashSet<string> UnsignedTypes = new() { "u8", "u16", "u32", "u64" };
   static readonly HashSet<string> RealTypes = new() { "r32", "r64" };
   static readonly HashSet<string> TypeNodeKinds = new() {
-    "Type", "Nullable", "TupleType", "FunType", "Pointer", "WritablePointer", "Volatile", "Specific", "Any"
+    "Type", "ResolvedType", "Nullable", "TupleType", "FunType", "Pointer", "WritablePointer", "Volatile", "Specific", "Any"
   };
 
   static readonly Dictionary<string, string> MathConsts = new() {
@@ -163,6 +165,7 @@ public sealed partial class CodeGen {
         DeclareEnum(statement);
       }
     }
+    RegisterGenerics(program);
     DeclareClasses(program);
     foreach (var statement in program.Children) {
       if (statement.Kind == "Alias") {
@@ -175,9 +178,14 @@ public sealed partial class CodeGen {
       }
     }
     RegisterClasses();
+    CheckClassInstances();
     foreach (var statement in program.Children) {
       if (statement.Kind == "Fun") {
-        RegisterFun(statement, null);
+        if (IsGenericFunNode(statement)) {
+          RegisterGenericFun(statement);
+        } else {
+          RegisterFun(statement, null);
+        }
       }
     }
 
@@ -186,14 +194,15 @@ public sealed partial class CodeGen {
 
     var protos = new StringBuilder();
     var bodies = new StringBuilder();
-    foreach (var fun in funs.Values.SelectMany(overloads => overloads).Where(fun => !fun.IsAbstract)) {
+    // (a snapshot: compiling a body can make copies of generic functions, which are added to funs)
+    foreach (var fun in funs.Values.SelectMany(overloads => overloads).Where(fun => !fun.IsAbstract).ToList()) {
       protos.Append(Signature(fun)).Append(";\n");
       bodies.Append(fun.IsCtor ? EmitConstructor(fun) : EmitFun(fun)).Append('\n');
     }
 
     // a main function is the entry point (spec 14.1); otherwise the top-level statements are
     var topLevel = program.Children.Where(statement =>
-      statement.Kind is not ("Fun" or "Alias" or "Enum" or "Class" or "Trait" or "Namespace" or "NamespaceLocal")).ToList();
+      statement.Kind is not ("Fun" or "Alias" or "Enum" or "Class" or "Trait" or "GenericSet" or "Namespace" or "NamespaceLocal")).ToList();
     if (funs.TryGetValue("main", out var mains)) {
       if (topLevel.Count > 0) {
         throw Error("a program starts either from top-level code or from a main function, not both", topLevel[0]);
@@ -205,7 +214,7 @@ public sealed partial class CodeGen {
     fn = NewFunctionContext("main()", "i32", true);
     assign = new AssignState();
     currentRet = null;
-    var statements = program.Children.Where(statement => statement.Kind is not ("Fun" or "Alias" or "Enum" or "Class" or "Trait")).ToList();
+    var statements = program.Children.Where(statement => statement.Kind is not ("Fun" or "Alias" or "Enum" or "Class" or "Trait" or "GenericSet")).ToList();
     var root = PrepareFrame(statements, new Scope(null), FrameKind.Function);
     root.OuterHandler = fn.PanicLabel;
     var mainBody = new StringBuilder();
@@ -1262,7 +1271,7 @@ public sealed partial class CodeGen {
         var hole = ExprOf(part.Children[0], scope);
         var formatted = part.Children.Count > 1 ? FormattedHole(hole, part.Children[1], part) : null;
         if (part.Children.Count > 1 && formatted == null && !specWarned) {
-          Warn("format specs are ignored for now", part);
+          Warn("format specs apply to numbers, dates and times only; ignored for other values", part);
           specWarned = true;
         }
         piece = formatted?.Code ?? StrOf(hole, part);
@@ -1483,6 +1492,9 @@ public sealed partial class CodeGen {
 
   // a.b.c → "a.b.c" with the first segment resolved through aliases
   string? Path(Node n) {
+    if (n.Kind == "GenericRef") {
+      return GenericRefClass(n);   // Stack<i32>.create(): the copy of the generic class
+    }
     if (n.Kind == "Name") {
       if (nameAliases.TryGetValue(n.Text!, out var name)) {
         return name;
@@ -1503,7 +1515,17 @@ public sealed partial class CodeGen {
     var callee = n.Children[0];
     var args = n.Children[1].Children;
     if (callee.Kind == "GenericRef") {
-      throw NotSupported("Generics", callee);
+      if (callee.Children[0] is not { Kind: "Name" } genericName) {
+        throw NotSupported("Generics", callee);
+      }
+      if (genericFuns.TryGetValue(genericName.Text!, out var explicitFun)) {
+        return UserCall(InstantiateForCall(explicitFun, callee.Children.Skip(1).ToList(), args, scope, n), args, scope, n);
+      }
+      if (GenericRefClass(callee) is string instanceName) {
+        // Stack<i32>(args): the constructor of the copy
+        return Call(Synthetic("Call", n).Add(Synthetic("Name", n, instanceName)).Add(n.Children[1]), scope);
+      }
+      throw Error($"'{genericName.Text}' is not a generic function or class", callee);
     }
     if (callee.Kind == "SafeMember") {
       return SafeAccess(callee, n, scope);
@@ -1546,6 +1568,9 @@ public sealed partial class CodeGen {
       }
       if (callee.Kind == "Member" && StaticCall(path, args, scope, n) is Expr staticCall) {
         return staticCall;
+      }
+      if (callee.Kind == "Name" && genericFuns.TryGetValue(path, out var inferredFun)) {
+        return UserCall(InstantiateForCall(inferredFun, new List<Node>(), args, scope, n), args, scope, n);
       }
       bool enumMethod = callee.Kind == "Member" && IsEnum(path.Split('.')[0]);
       if ((callee.Kind == "Name" || enumMethod) && funs.TryGetValue(path, out var overloads)) {

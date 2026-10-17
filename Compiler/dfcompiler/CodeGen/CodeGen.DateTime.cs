@@ -40,14 +40,18 @@ public sealed partial class CodeGen {
 
   // x.toStr(format) on a date or a time
   Expr FormatCall(Expr value, List<Node> args, Scope scope, Node at) {
-    if (value.Type is not ("date" or "time")) {
-      throw Error($"toStr(format) is not supported on {value.Type} yet", at);
-    }
     var format = args[0];
     if (format.Kind == "Named") {
       throw Error("toStr takes the format as its only argument", at);
     }
     string formatCode = Convert(ExprOf(format, scope, "string"), "string", format);
+    string? literal = format.Kind == "String" ? FromCodePoints(Unescape(format.Text![1..^1], format)) : null;
+    if (NumberFormat(value, literal, formatCode, at) is Expr number) {
+      return number;
+    }
+    if (value.Type is not ("date" or "time")) {
+      throw Error($"toStr(format) is not supported on {value.Type} yet", at);
+    }
     if (format.Kind == "String") {
       CheckFormat(value.Type, Unescape(format.Text![1..^1], format), at);
     }
@@ -82,6 +86,9 @@ public sealed partial class CodeGen {
 
   // {value:spec} in an interpolated string
   Expr? FormattedHole(Expr value, Node spec, Node at) {
+    if (IsNumberType(BaseOf(value.Type))) {
+      return NumberFormat(value, spec.Text, CString(CodePoints(spec.Text!)), at);
+    }
     if (value.Type is not ("date" or "time")) {
       return null;
     }

@@ -3,12 +3,14 @@
 #ifndef _WIN32
 #define _POSIX_C_SOURCE 200809L
 #endif
+#include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <time.h>
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -54,7 +56,10 @@ typedef struct df_descriptor {
   bool silent;
 } df_descriptor;
 
+struct df_class;
+
 typedef struct {
+  const struct df_class* cls;   /* NULL for the exceptions raised by the runtime; the class of an exception object */
   uint64_t id;
   const df_descriptor* descriptor;
   char* message;     /* C-style, max 2 KB */
@@ -71,6 +76,12 @@ static const df_descriptor df_desc_OutOfMemoryException = { 15, "OutOfMemoryExce
 static const df_descriptor df_desc_ChangingRefCountTypeException = { 16, "ChangingRefCountTypeException", &df_desc_Exception, false };
 static const df_descriptor df_desc_OutOfRangeCastException = { 17, "OutOfRangeCastException", &df_desc_Exception, true };
 static const df_descriptor df_desc_InvalidCharacterCodePointException = { 18, "InvalidCharacterCodePointException", &df_desc_Exception, true };
+static const df_descriptor df_desc_IndexOutOfRangeException = { 19, "IndexOutOfRangeException", &df_desc_Exception, false };
+static const df_descriptor df_desc_ModifyingProtectedSourceException = { 20, "ModifyingProtectedSourceException", &df_desc_Exception, false };
+static const df_descriptor df_desc_NaNUsedAsKeyException = { 21, "NaNUsedAsKeyException", &df_desc_Exception, true };
+static const df_descriptor df_desc_InvalidMapKeyException = { 22, "InvalidMapKeyException", &df_desc_Exception, true };
+static const df_descriptor df_desc_EmptyVectorAccessException = { 23, "EmptyVectorAccessException", &df_desc_Exception, true };
+static const df_descriptor df_desc_InvalidDateTimeFormatException = { 24, "InvalidDateTimeFormatException", &df_desc_Exception, true };
 
 /* 0 = no error; otherwise the exception being raised */
 static df_exception* df_err = NULL;
@@ -94,6 +105,7 @@ static char* df_cstr_truncated(const char* text, uint64_t length, uint64_t maxBy
 
 static df_exception* df_new_exception(const df_descriptor* descriptor, const char* message, uint64_t messageLength, const char* function) {
   df_exception* exception = (df_exception*)df_alloc(sizeof(df_exception));
+  exception->cls = NULL;
   exception->id = descriptor->id;
   exception->descriptor = descriptor;
   exception->message = df_cstr_truncated(message, messageLength, 2048);
@@ -117,14 +129,21 @@ static void df_raise(const df_descriptor* descriptor, const char* function) {
   df_err_thrown = false;
 }
 
-/* true when the exception is of that type or a subtype */
+/* true when the exception is of that type or a subtype; a silent exception is not an 'Exception' catch (spec 15.4) */
 static bool df_exc_is(const df_exception* exception, uint64_t id) {
   for (const df_descriptor* descriptor = exception->descriptor; descriptor; descriptor = descriptor->parent) {
     if (descriptor->id == id) {
-      return true;
+      return !(id == 10 && exception->descriptor->silent);
     }
   }
   return false;
+}
+
+/* a library function that would raise a silent exception leaves a note; the caller raises it only when a catch exists */
+static const df_descriptor* df_silent_desc = NULL;
+
+static void df_silent_note(const df_descriptor* descriptor) {
+  df_silent_desc = descriptor;
 }
 
 /* unhandled exception: its message, then Panic -1000 */
@@ -164,6 +183,113 @@ static df_string df_str_from_cstr(const char* text) {
 
 static bool df_str_eq(df_string a, df_string b) {
   return a.len == b.len && memcmp(a.p, b.p, a.len) == 0;
+}
+
+/* ---- objects (classes): every object starts with its class descriptor ---- */
+
+typedef struct df_trait {
+  uint64_t id;
+  const char* name;
+} df_trait;
+
+/* how one class implements one trait: the function for each method and the offset of each property */
+typedef struct {
+  const df_trait* trait;
+  const void* const* methods;
+  const uint32_t* offsets;
+} df_impl;
+
+typedef struct df_class {
+  uint64_t id;
+  const char* name;
+  const struct df_class* parent;
+  const void* const* vtable;
+  df_string (*str)(const void*);
+  const df_impl* impls;
+  uint32_t nimpls;
+  void (*drop)(void*);   /* ends the object: its atEnd, then the objects it owns */
+} df_class;
+
+typedef struct { const df_class* cls; } df_object;
+
+/* x is Class: the class of the object, or one of its parents */
+static bool df_is(const void* obj, const df_class* cls) {
+  if (obj == NULL) {
+    return false;
+  }
+  for (const df_class* c = ((const df_object*)obj)->cls; c; c = c->parent) {
+    if (c == cls) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static const df_impl* df_impl_of(const void* obj, const df_trait* trait) {
+  const df_class* c = ((const df_object*)obj)->cls;
+  for (uint32_t i = 0; i < c->nimpls; i++) {
+    if (c->impls[i].trait == trait) {
+      return &c->impls[i];
+    }
+  }
+  return NULL;
+}
+
+/* x is TraitName */
+static bool df_has_trait(const void* obj, const df_trait* trait) {
+  return obj != NULL && df_impl_of(obj, trait) != NULL;
+}
+
+/* a destroyed object keeps its memory but points to this class */
+static df_string df_dead_str(const void* obj) {
+  (void)obj;
+  return df_str_lit("(destroyed)", 11);
+}
+
+static const df_class df_dead_class = { 0, "(destroyed)", NULL, NULL, df_dead_str, NULL, 0, NULL };
+
+#define DF_IS_DEAD(p) (((const df_object*)(p))->cls == &df_dead_class)
+
+/* releases the ownership held by a variable: the object ends; ending a destroyed object is a double free */
+static void df_drop(void* obj) {
+  if (obj == NULL) {
+    return;
+  }
+  const df_class* c = ((const df_object*)obj)->cls;
+  if (c == &df_dead_class) {
+    fflush(stdout);
+    printf("Double free\n");
+    df_panic(DF_PANIC_UNHANDLED);
+  }
+  if (c != NULL && c->drop != NULL) {
+    c->drop(obj);
+  }
+}
+
+static df_string df_str_obj(const void* obj) {
+  return obj ? ((const df_object*)obj)->cls->str(obj) : df_str_lit("null", 4);
+}
+
+/* ---- arrays (arr<T>): pointer and length; a null array has no pointer ---- */
+
+typedef struct { df_string* p; uint64_t len; } df_arr_string;
+typedef struct { uint8_t* p; uint64_t len; } df_arr_u8;
+
+static void* df_calloc(uint64_t count, uint64_t size) {
+  void* p = calloc(count ? count : 1, size ? size : 1);
+  if (!p) {
+    df_out_of_memory();
+  }
+  return p;
+}
+
+/* true when the index is inside; otherwise raises IndexOutOfRangeException and the caller checks df_err */
+static bool df_idx_ok(uint64_t len, uint64_t index, const char* function) {
+  if (index < len) {
+    return true;
+  }
+  df_raise(&df_desc_IndexOutOfRangeException, function);
+  return false;
 }
 
 /* character count (UTF-8 code points) */
@@ -233,16 +359,31 @@ static df_string df_str_from_real(double v, int maxDigits, bool isFloat) {
   if (isinf(v)) {
     return v > 0 ? df_str_lit("\xE2\x88\x9E", 3) : df_str_lit("-\xE2\x88\x9E", 4);
   }
-  for (int digits = 1; digits <= maxDigits; digits++) {
-    snprintf(buf, sizeof buf, "%.*g", digits, v);
+  if (v == 0) {
+    return signbit(v) ? df_str_lit("-0", 2) : df_str_lit("0", 1);
+  }
+  int digits;
+  for (digits = 1; digits <= maxDigits; digits++) {
+    snprintf(buf, sizeof buf, "%.*e", digits - 1, v);
     double back = strtod(buf, NULL);
     if (isFloat ? (float)back == (float)v : back == v) {
       break;
     }
   }
-  for (char* c = buf; *c; c++) {
-    if (*c == 'e') {
-      *c = 'E';
+  if (digits > maxDigits) {
+    digits = maxDigits;
+  }
+  snprintf(buf, sizeof buf, "%.*e", digits - 1, v);
+  int exponent = atoi(strchr(buf, 'e') + 1);
+  if (exponent >= -5 && exponent < 15) {
+    /* plain notation, as C# prints it */
+    int decimals = digits - 1 - exponent;
+    snprintf(buf, sizeof buf, "%.*f", decimals < 0 ? 0 : decimals, v);
+  } else {
+    for (char* c = buf; *c; c++) {
+      if (*c == 'e') {
+        *c = 'E';
+      }
     }
   }
   return df_str_from_buf(buf);
@@ -406,6 +547,46 @@ static void df_init(void) {
 #endif
 }
 
+/* ---- program arguments (spec 17.1): index 0 is the program name ---- */
+
+#ifdef _WIN32
+#include <shellapi.h>
+#pragma comment(lib, "shell32.lib")
+#endif
+
+static df_arr_string df_args;
+
+static void df_set_args(int argc, char** argv) {
+#ifdef _WIN32
+  /* the C arguments use the ANSI code page: read the wide command line and convert it to UTF-8 */
+  int count = 0;
+  wchar_t** wide = CommandLineToArgvW(GetCommandLineW(), &count);
+  if (wide) {
+    df_args.p = (df_string*)df_calloc((uint64_t)count, sizeof(df_string));
+    df_args.len = (uint64_t)count;
+    for (int index = 0; index < count; index++) {
+      int bytes = WideCharToMultiByte(CP_UTF8, 0, wide[index], -1, NULL, 0, NULL, NULL);
+      char* text = (char*)df_alloc((uint64_t)bytes);
+      WideCharToMultiByte(CP_UTF8, 0, wide[index], -1, text, bytes, NULL, NULL);
+      df_args.p[index].p = text;
+      df_args.p[index].len = (uint64_t)(bytes > 0 ? bytes - 1 : 0);
+    }
+    LocalFree(wide);
+    return;
+  }
+#endif
+  df_args.p = (df_string*)df_calloc((uint64_t)argc, sizeof(df_string));
+  df_args.len = (uint64_t)argc;
+  for (int index = 0; index < argc; index++) {
+    df_args.p[index].p = argv[index];
+    df_args.p[index].len = strlen(argv[index]);
+  }
+}
+
+static df_arr_string df_get_args(void) {
+  return df_args;
+}
+
 /* ---- checked integer division ---- */
 
 /* on division by zero: raise DivisionByZeroException and return 0; the caller checks df_err */
@@ -479,23 +660,240 @@ static uint64_t df_sat_u64_r(double v) {
   return (uint64_t)v;
 }
 
+/* ---- date, clock, lapse (spec 3.2, 3.3) ---- */
+
+/* null date = minimum i64; null clock = 0; null lapse = 0 */
+static int64_t df_time_now(void) {
+#ifdef _WIN32
+  FILETIME ft;
+  GetSystemTimePreciseAsFileTime(&ft);
+  uint64_t t = ((uint64_t)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
+  return (int64_t)((t - 116444736000000000ULL) / 10000ULL);
+#else
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);
+  return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+#endif
+}
+
+/* monotonic counter in 0.1 ns units, never 0 */
+static uint64_t df_time_clock(void) {
+  uint64_t value;
+#ifdef _WIN32
+  static LARGE_INTEGER frequency;
+  LARGE_INTEGER counter;
+  if (frequency.QuadPart == 0) {
+    QueryPerformanceFrequency(&frequency);
+  }
+  QueryPerformanceCounter(&counter);
+  uint64_t f = (uint64_t)frequency.QuadPart;
+  uint64_t n = (uint64_t)counter.QuadPart;
+  value = (n / f) * 10000000000ULL + (n % f) * 10000000000ULL / f;
+#else
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  value = (uint64_t)ts.tv_sec * 10000000000ULL + (uint64_t)ts.tv_nsec * 10ULL;
+#endif
+  return value ? value : 1;
+}
+
+/* ISO 8601, UTC: 2026-10-11T14:03:22.123Z */
+static df_string df_str_from_date(int64_t ms) {
+  if (ms == INT64_MIN) {
+    return df_str_lit("null", 4);
+  }
+  int64_t days = ms / 86400000;
+  int64_t rem = ms % 86400000;
+  if (rem < 0) {
+    rem += 86400000;
+    days--;
+  }
+  int64_t z = days + 719468;
+  int64_t era = (z >= 0 ? z : z - 146096) / 146097;
+  int64_t doe = z - era * 146097;
+  int64_t yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+  int64_t y = yoe + era * 400;
+  int64_t doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+  int64_t mp = (5 * doy + 2) / 153;
+  int64_t d = doy - (153 * mp + 2) / 5 + 1;
+  int64_t m = mp < 10 ? mp + 3 : mp - 9;
+  if (m <= 2) {
+    y++;
+  }
+  char buf[64];
+  snprintf(buf, sizeof buf, "%04lld-%02lld-%02lldT%02lld:%02lld:%02lld.%03lldZ",
+    (long long)y, (long long)m, (long long)d, (long long)(rem / 3600000),
+    (long long)(rem / 60000 % 60), (long long)(rem / 1000 % 60), (long long)(rem % 1000));
+  return df_str_from_buf(buf);
+}
+
+static df_string df_str_from_clock(uint64_t c) {
+  return c == 0 ? df_str_lit("null", 4) : df_str_from_u64(c);
+}
+
+/* lapse = value * 8 + code: 2 date lapse (ms), 3 clock lapse (0.1 ns), 4 year lapse, 7 clock overflow */
+static int64_t df_date_diff(int64_t a, int64_t b) {
+  if (a == INT64_MIN || b == INT64_MIN) {
+    return 0;
+  }
+  const int64_t limit = (int64_t)1 << 60;
+  int64_t d;
+  if (!__builtin_sub_overflow(a, b, &d)) {
+    if (d > -limit && d < limit) {
+      return d * 8 + 2;
+    }
+    return (d / 31556952000LL) * 8 + 4;
+  }
+  return ((a / 31556952000LL) - (b / 31556952000LL)) * 8 + 4;   /* years, beyond +-36 million */
+}
+
+static int64_t df_clock_diff(uint64_t a, uint64_t b) {
+  if (a == 0 || b == 0) {
+    return 0;
+  }
+  bool negative = a < b;
+  uint64_t d = negative ? b - a : a - b;
+  if (d >= ((uint64_t)1 << 60)) {
+    return 7;
+  }
+  int64_t v = negative ? -(int64_t)d : (int64_t)d;
+  return v * 8 + 3;
+}
+
+static bool df_lapse_bool(int64_t l) {
+  return (l >> 3) != 0 || l == 7;
+}
+
+static df_string df_str_from_lapse(int64_t l) {
+  if (l == 0) {
+    return df_str_lit("null", 4);
+  }
+  if (l == 7) {
+    return df_str_lit("overflow", 8);
+  }
+  return df_str_from_i64(l >> 3);
+}
+
+/* ---- random: xoshiro256**, seeded through splitmix64 ---- */
+
+static uint64_t df_rng[4];
+static bool df_rng_ready = false;
+
+static uint64_t df_splitmix(uint64_t* state) {
+  uint64_t z = (*state += 0x9E3779B97F4A7C15ULL);
+  z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+  z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+  return z ^ (z >> 31);
+}
+
+static void df_rand_seed(uint64_t seed) {
+  for (int i = 0; i < 4; i++) {
+    df_rng[i] = df_splitmix(&seed);
+  }
+  df_rng_ready = true;
+}
+
+static uint64_t df_rotl(uint64_t x, int k) {
+  return (x << k) | (x >> (64 - k));
+}
+
+static uint64_t df_rand_next(void) {
+  if (!df_rng_ready) {
+    df_rand_seed((uint64_t)df_time_now() ^ df_time_clock());
+  }
+  uint64_t result = df_rotl(df_rng[1] * 5, 7) * 9;
+  uint64_t t = df_rng[1] << 17;
+  df_rng[2] ^= df_rng[0];
+  df_rng[3] ^= df_rng[1];
+  df_rng[1] ^= df_rng[2];
+  df_rng[0] ^= df_rng[3];
+  df_rng[2] ^= t;
+  df_rng[3] = df_rotl(df_rng[3], 45);
+  return result;
+}
+
+/* both ends included; swapped when min > max; no modulo bias */
+static int64_t df_rand_int(int64_t a, int64_t b) {
+  if (a > b) {
+    int64_t t = a;
+    a = b;
+    b = t;
+  }
+  uint64_t range = (uint64_t)b - (uint64_t)a + 1;
+  if (range == 0) {
+    return (int64_t)df_rand_next();
+  }
+  uint64_t threshold = (0 - range) % range;
+  uint64_t r;
+  do {
+    r = df_rand_next();
+  } while (r < threshold);
+  return (int64_t)((uint64_t)a + r % range);
+}
+
+/* [0, 1], both included */
+static double df_rand_real(void) {
+  return (double)(df_rand_next() >> 11) / 9007199254740991.0;
+}
+
+/* [min, max) */
+static double df_rand_real_range(double a, double b) {
+  double u = (double)(df_rand_next() >> 11) * (1.0 / 9007199254740992.0);
+  return a + (b - a) * u;
+}
+
+/* ---- math helpers: NaN propagates in Min, Max, Clamp ---- */
+
+#define DF_MATH_REAL(T, N, LOG) \
+  static T df_min_##N(T a, T b) { if (isnan(a) || isnan(b)) return (T)NAN; return a < b ? a : b; } \
+  static T df_max_##N(T a, T b) { if (isnan(a) || isnan(b)) return (T)NAN; return a > b ? a : b; } \
+  static T df_sign_##N(T v) { return v > 0 ? (T)1 : (v < 0 ? (T)-1 : (v != v ? v : (T)0)); } \
+  static T df_clamp_##N(T v, T lo, T hi) { if (isnan(v)) return v; return v < lo ? lo : (v > hi ? hi : v); } \
+  static T df_lerp_##N(T a, T b, T t) { return a + (b - a) * t; } \
+  static T df_invlerp_##N(T a, T b, T v) { return (v - a) / (b - a); } \
+  static T df_logbase_##N(T x, T b) { return LOG(x) / LOG(b); }
+
+DF_MATH_REAL(double, r64, log)
+DF_MATH_REAL(float, r32, logf)
+
+#define DF_MATH_INT(T, N) \
+  static T df_min_##N(T a, T b) { return a < b ? a : b; } \
+  static T df_max_##N(T a, T b) { return a > b ? a : b; } \
+  static T df_clamp_##N(T v, T lo, T hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
+#define DF_MATH_SIGNED(T, N) \
+  static T df_abs_##N(T v) { return v < 0 ? (T)(0 - (uint64_t)v) : v; } \
+  static T df_sign_##N(T v) { return v > 0 ? (T)1 : (v < 0 ? (T)-1 : (T)0); }
+
+DF_MATH_INT(int8_t, i8)
+DF_MATH_INT(int16_t, i16)
+DF_MATH_INT(int32_t, i32)
+DF_MATH_INT(int64_t, i64)
+DF_MATH_INT(uint8_t, u8)
+DF_MATH_INT(uint16_t, u16)
+DF_MATH_INT(uint32_t, u32)
+DF_MATH_INT(uint64_t, u64)
+DF_MATH_SIGNED(int8_t, i8)
+DF_MATH_SIGNED(int16_t, i16)
+DF_MATH_SIGNED(int32_t, i32)
+DF_MATH_SIGNED(int64_t, i64)
+
 /* ---- end of runtime ---- */
 /* ---- program ---- */
+
 
 static const char df_fn1[] = "main()";
 
 
+
+
+
+
 int main(int argc, char** argv) {
-  (void)argc;
-  (void)argv;
   df_init();
-  df_console_log(df_str_lit("Hello, what is your name\077", 25));
-  df_string v_name = df_console_get_input();
-  if ((df_str_chars(v_name) < ((uint64_t)2ULL))) {
-    df_console_log(df_str_lit("Are you shy\077", 12));
-    v_name = df_str_lit("<shy person>", 12);
-  }
-  df_console_print(df_str_concat(df_str_lit("Hello ", 6), v_name));
+  df_set_args(argc, argv);
+  /* Namespace hello */
+  df_console_log(df_str_lit("Hello world!", 12));
   return 0;
   fn1_panic: df_panic_unhandled();
   return 0;

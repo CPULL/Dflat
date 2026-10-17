@@ -285,6 +285,8 @@ public sealed partial class CodeGen {
         }
         return MakeTuple(elems);
       }
+      case "ResolvedType":
+        return n.Text!;   // a type parameter replaced by its type argument (generics)
       case "Type": {
         string t = n.Text!;
         if (t == "T" && n.Children.Count == 0 && currentGenericT != null) {
@@ -303,8 +305,17 @@ public sealed partial class CodeGen {
           }
           return "arr<" + element + ">";
         }
+        if (genericClasses.TryGetValue(t, out var genericClass)) {
+          if (n.Children.Count == 0) {
+            throw Error($"'{t}' is generic: write its type arguments, {t}<...>", n);
+          }
+          return ClassInstanceName(genericClass, TypeArgsOf(n.Children), n);
+        }
+        if (IsSetName(t)) {
+          throw Error($"'{t}' is a set: it names alternatives at compile time and is not a type of values; use it as a constraint or as the type of a parameter (11.3.6)", n);
+        }
         if (n.Children.Count > 0) {
-          throw NotSupported("Generics", n);
+          throw Error($"'{t}' is not generic", n);
         }
         if (typeAliases.TryGetValue(t, out var aliased)) {
           return aliased;

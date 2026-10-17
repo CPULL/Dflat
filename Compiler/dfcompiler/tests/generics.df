@@ -1,0 +1,100 @@
+// Generics, phase 7a: generic functions and classes, sets, constraints, inference
+alias Root as r
+
+Generic Texts { string, char }
+Generic Whole { Integers, bool }
+
+trait Named {
+  fun string Name()
+}
+
+public class Dog(string label) : Named {
+  override fun string Name() { label }
+}
+
+fun Item smaller<Item : Numeric>(Item first, Item second) {
+  if first < second {
+    return first
+  }
+  return second
+}
+
+fun r64 average(Numeric first, Numeric second) {
+  ((r64)first + (r64)second) / 2.0
+}
+
+fun string describe<Item : Texts>(Item value) {
+  $"text:{value}"
+}
+
+fun Item identity<Item>(Item value) { value }
+
+fun Item firstOf<Item, Other>(Item first, Other second) where Other : Numeric { first }
+
+fun string nameOf<Item : Named>(Item thing) { thing.Name() }
+
+fun i32 total<Item : Integers>(Item first, Item rest...) {
+  i32 sum = (i32)first
+  for n in rest {
+    sum += (i32)n
+  }
+  return sum
+}
+
+public class Box<Item>(->Item value) {
+  public Item value
+  public static i32 created = 0
+
+  public fun Item Get() { value }
+  public fun Set(->Item next) { value = ->next }
+  public static fun Bump() { created += 1 }
+}
+
+public class Pair<First, Second>(First left, Second right) {
+  public First left
+  public Second right
+  public fun string Show() { $"({left}, {right})" }
+}
+
+public class Registry<Item : Named>(->Item first) {
+  public Item first
+  public fun string Describe() { first.Name() }
+}
+
+r.Console.Log(smaller(3, 5))
+r.Console.Log(smaller<u8>(9, 4))
+r.Console.Log(smaller(2.5, 1.5))
+r.Console.Log(average(3, 4.5))
+r.Console.Log(describe("hi"))
+r.Console.Log(describe('c'))
+r.Console.Log(identity("same"))
+r.Console.Log(firstOf("kept", 7))
+r.Console.Log(nameOf(Dog("rex")))
+r.Console.Log(total(1, 2, 3, 4))
+
+Box<i32> a = Box<i32>(10)
+a.Set(a.Get() + 5)
+r.Console.Log(a.Get())
+Box<string> b = Box<string>("hello")
+r.Console.Log(b.Get())
+Box<i32>.Bump()
+Box<i32>.Bump()
+r.Console.Log(Box<i32>.created)
+r.Console.Log(Box<string>.created)
+
+Pair<i32, string> p = Pair<i32, string>(1, "one")
+r.Console.Log(p.Show())
+
+Box<Box<i32>> nested = Box<Box<i32>>(Box<i32>(7))
+r.Console.Log(nested.Get().Get())
+
+Registry<Dog> registry = Registry<Dog>(Dog("fido"))
+r.Console.Log(registry.Describe())
+var inferred = Box<r64>(2.5)
+r.Console.Log(inferred.Get())
+r.Console.Log(a)
+
+// Errors (each one alone): smaller("a", "b")  -> string does not satisfy Numeric
+//   Registry<i32>(5) -> i32 does not satisfy Named
+//   identity()       -> cannot infer the type argument for 'Item'
+//   Box x            -> 'Box' is generic: write its type arguments

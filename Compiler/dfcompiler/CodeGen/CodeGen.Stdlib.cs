@@ -86,6 +86,7 @@ public sealed partial class CodeGen {
       }
     }
     AddDateStdlib(Add);
+    AddNumberStdlib(Add);
     return table;
   }
 
@@ -153,6 +154,10 @@ public sealed partial class CodeGen {
     }
     for (int index = 0; index < args.Count; index++) {
       string paramType = chosen.Variadic ? chosen.Params[0] : chosen.Params[index];
+      if (chosen.CName.StartsWith("df_parse_") && (chosen.CName.EndsWith("_f") || chosen.CName.EndsWith("_fmt"))
+          && index == args.Count - 1 && args[index].Kind == "String") {
+        CheckParseFormat(FromCodePoints(Unescape(args[index].Text![1..^1], args[index])), args[index]);
+      }
       codes.Add(paramType == "any"
         ? StrOf(ExprOf(args[index], scope), args[index])
         : Convert(ExprOf(args[index], scope, paramType), paramType, args[index]));
@@ -232,14 +237,17 @@ public sealed partial class CodeGen {
   // A call that may leave a note of a silent exception: raised only when a catch for it can be reached
   // from here (same function); otherwise the call just returns its fallback value (spec 15.4).
   string SilentCall(string call, string type, string exceptionName, Node at) {
-    int id = ExceptionId(exceptionName) ?? throw Error($"unknown exception {exceptionName}", at);
+    // several names, separated by commas: the call may leave a note of any of them; only the ones a catch can reach are raised
+    var names = exceptionName.Split(',').ToList();
+    var caught = names.Where(name => SilentCaught(ExceptionId(name) ?? throw Error($"unknown exception {name}", at))).ToList();
     string temp = NewTemp();
-    if (!SilentCaught(id)) {
+    if (caught.Count == 0) {
       return $"({{ {CType(type)} {temp} = {call}; df_silent_desc = NULL; {temp}; }})";
     }
     string note = NewTemp();
+    string test = caught.Count == names.Count ? note : $"({string.Join(" || ", caught.Select(name => $"{note} == &df_desc_{name}"))})";
     return $"({{ {CType(type)} {temp} = {call}; const df_descriptor* {note} = df_silent_desc; df_silent_desc = NULL; "
-      + $"if ({note}) {{ df_raise({note}, {fn!.NameConst}); {RaiseJump} }} {temp}; }})";
+      + $"if ({test}) {{ df_raise({note}, {fn!.NameConst}); {RaiseJump} }} {temp}; }})";
   }
 
   // is there a catch above this statement that handles this exception id (its own type, or catch all)?

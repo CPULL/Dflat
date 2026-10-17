@@ -313,6 +313,10 @@ public sealed class Parser {
     if (IsKw("enum")) {
       return WithMods(ParseEnum(), mods);
     }
+    // Generic Name { type, type, Set }: a named set of types (spec 11.3.6)
+    if (Peek.Kind == TokenKind.Ident && Peek.Text == "Generic" && PeekAt(1).Kind == TokenKind.Ident && PeekAt(2).Is("{")) {
+      return WithMods(ParseGenericSet(), mods);
+    }
     if (ownerName != null && Peek.Kind == TokenKind.Ident && Peek.Text == ownerName && PeekAt(1).Is("(")) {
       return WithMods(ParseConstructor(), mods);
     }
@@ -986,12 +990,7 @@ public sealed class Parser {
     int save = pos;
     SkipNewlines();
     if (Peek.Kind == TokenKind.Ident && Peek.Text == "where") {
-      var where = ParseWhere();
-      bool inlineConstraints = generics != null && generics.Children.Any(param => param.Kind == "TypeParam" && param.Children.Count > 0);
-      if (inlineConstraints) {
-        throw ErrorAt("constraints go inline or in a 'where' clause, not both", where.Line == 0 ? t : Peek);
-      }
-      node.Add(where);
+      node.Add(ParseWhere());   // inline constraints and 'where' can be mixed (spec 11.3.1)
       save = pos;
       SkipNewlines();
     }
@@ -1030,7 +1029,27 @@ public sealed class Parser {
     return node;
   }
 
-  // where Item : Numeric && Orderable, list<Item> : Printable
+  // Generic Strings { char, string }   (members may be on several lines)
+  Node ParseGenericSet() {
+    Next();
+    var name = Next();
+    var node = new Node("GenericSet", name, name.Text);
+    ExpectOp("{");
+    SkipNewlines();
+    while (!IsOp("}")) {
+      node.Add(ParseType(false));
+      SkipNewlines();
+      if (!AcceptOp(",")) {
+        break;
+      }
+      SkipNewlines();
+    }
+    SkipNewlines();
+    ExpectOp("}");
+    return node;
+  }
+
+  // where Source.Item : Numeric, Key : Named && Priced
   Node ParseWhere() {
     var word = Next();
     var node = new Node("Where", word);
@@ -1576,6 +1595,13 @@ public sealed class Parser {
       // arr<i32>[100]: a collection created with a size
       bool sized = target.Kind == "Name" && target.Text is "arr" or "vec" or "hmap" or "hset" && IsOp(">") && PeekAt(1).Is("[");
       if (sized) {
+        Next();
+        return generic;
+      }
+      // Stack<i32>.create(): a static member of a generic class (only plain types between the angle brackets)
+      bool staticMember = IsOp(">") && PeekAt(1).Is(".") && target.Kind == "Name"
+        && generic.Children.Skip(1).All(arg => arg.Kind is "Type" or "Nullable" or "TupleType");
+      if (staticMember) {
         Next();
         return generic;
       }

@@ -4,15 +4,39 @@ using dfparser;
 namespace dfcompiler;
 
 public static class Program {
-  public const string Version = "0.0.8alpha";
+  public const string Version = "0.0.9alpha";
+
+  // the targets of --target and the clang triple of each (a target equal to this machine passes none: clang's own default)
+  static readonly Dictionary<string, string> Targets = new() {
+    ["win-x64"] = "x86_64-pc-windows-msvc",
+    ["win-x32"] = "i686-pc-windows-msvc",
+    ["linux-x64"] = "x86_64-unknown-linux-gnu",
+    ["linux-arm64"] = "aarch64-unknown-linux-gnu",
+    ["osx-x64"] = "x86_64-apple-darwin",
+    ["osx-arm64"] = "arm64-apple-darwin"
+  };
+
+  const string Usage = "usage: dfcompiler <file.df> [--output <file>] [--target <target>] [--emit-c] [--run] [--cc <path-to-clang>] "
+    + "[-- program arguments] | --version\n"
+    + "  target: win-x64 win-x32 linux-x64 linux-arm64 osx-x64 osx-arm64, or CL:<options passed as they are to clang>";
 
   public static int Main(string[] args) {
     string? path = null;
     string? output = null;
+    string? target = null;
     string? cc = Environment.GetEnvironmentVariable("DFLAT_CC");
     bool emitOnly = false;
     bool run = false;
     var programArgs = new List<string>();
+
+    // every option starts with two dashes; those that take a value read the next argument
+    string? Value(ref int index, string option) {
+      if (index + 1 >= args.Length) {
+        Console.Error.WriteLine($"{option} needs a value\n{Usage}");
+        return null;
+      }
+      return args[++index];
+    }
 
     for (int i = 0; i < args.Length; i++) {
       if (args[i] == "--") {
@@ -21,7 +45,6 @@ public static class Program {
         break;
       }
       switch (args[i]) {
-        case "-version":
         case "--version":
           Console.WriteLine($"dfcompiler {Version}");
           return 0;
@@ -31,20 +54,33 @@ public static class Program {
         case "--run":
           run = true;
           break;
-        case "-o":
-          output = i + 1 < args.Length ? args[++i] : null;
+        case "--output":
+          if ((output = Value(ref i, "--output")) == null) {
+            return 2;
+          }
+          break;
+        case "--target":
+          if ((target = Value(ref i, "--target")) == null) {
+            return 2;
+          }
           break;
         case "--cc":
-          cc = i + 1 < args.Length ? args[++i] : null;
+          if ((cc = Value(ref i, "--cc")) == null) {
+            return 2;
+          }
           break;
         default:
+          if (args[i].StartsWith('-')) {
+            Console.Error.WriteLine($"unknown option {args[i]}\n{Usage}");
+            return 2;
+          }
           path = args[i];
           break;
       }
     }
 
     if (path == null) {
-      Console.Error.WriteLine("usage: dfcompiler <file.df> [-o out] [--emit-c] [--run] [--cc path-to-clang] [-- program arguments] | -version");
+      Console.Error.WriteLine(Usage);
       return 2;
     }
     if (!File.Exists(path)) {
@@ -52,19 +88,33 @@ public static class Program {
       return 2;
     }
 
-    string cPath = Path.ChangeExtension(path, ".c");
-    output ??= OperatingSystem.IsWindows() ? Path.ChangeExtension(path, ".exe") : Path.ChangeExtension(path, null);
+    // the target: this machine unless --target says otherwise; CL:<text> is passed to clang as it is
+    string host = HostTarget();
+    bool custom = target != null && target.StartsWith("CL:");
+    if (target != null && !custom && !Targets.ContainsKey(target)) {
+      Console.Error.WriteLine($"unknown target '{target}': use {string.Join(", ", Targets.Keys)}, or CL:<options for clang>");
+      return 2;
+    }
+    string effective = custom ? "custom" : target ?? host;
+    bool forHost = !custom && effective == host;
+    bool forWindows = !custom && effective.StartsWith("win-");
+
+    // the generated C goes to .compilation and the executable to build.<target>, both next to the source file
+    string sourceDir = Path.GetDirectoryName(Path.GetFullPath(path))!;
+    string name = Path.GetFileNameWithoutExtension(path);
+    string cPath = Path.Combine(sourceDir, ".compilation", name + ".c");
+    output ??= Path.Combine(sourceDir, "build." + effective, forWindows ? name + ".exe" : name);
 
     try {
       var lexer = new Lexer(File.ReadAllText(path));
       var tokens = lexer.Tokenize();
       var parser = new Parser(tokens);
       var tree = parser.ParseProgram();
-      var gen = new CodeGen();
-      string c = gen.Generate(tree);
-      foreach (var warning in lexer.Warnings.Concat(parser.Warnings).Concat(gen.Warnings)) {
+      var (c, genWarnings) = CodeGen.Compile(tree);
+      foreach (var warning in lexer.Warnings.Concat(parser.Warnings).Concat(genWarnings)) {
         Console.Error.WriteLine(path + warning);
       }
+      Directory.CreateDirectory(Path.GetDirectoryName(cPath)!);
       File.WriteAllText(cPath, c);
     } catch (DfException ex) {
       Console.Error.WriteLine($"{path}({ex.Line},{ex.Col}): error: {ex.Message}");
@@ -85,14 +135,23 @@ public static class Program {
       return 1;
     }
 
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
     var ccArgs = new List<string> {
       "-std=c11", "-O2", "-fwrapv", "-Wno-unused-function",
       "-Wno-parentheses-equality", "-Wno-tautological-compare", "-o", output, cPath
     };
-    if (OperatingSystem.IsWindows()) {
-      ccArgs.Insert(0, "-D_CRT_SECURE_NO_WARNINGS");
+    if (custom) {
+      // the text after CL: as it is, split at the spaces; nothing else is added for the target
+      ccArgs.AddRange(target!["CL:".Length..].Split(' ', StringSplitOptions.RemoveEmptyEntries));
     } else {
-      ccArgs.Add("-lm");
+      if (!forHost) {
+        ccArgs.Insert(0, "--target=" + Targets[effective]);
+      }
+      if (forWindows) {
+        ccArgs.Insert(0, "-D_CRT_SECURE_NO_WARNINGS");
+      } else {
+        ccArgs.Add("-lm");
+      }
     }
     int code = RunProcess(clang, ccArgs);
     if (code != 0) {
@@ -102,11 +161,28 @@ public static class Program {
     Console.WriteLine($"Executable: {output}");
 
     if (run) {
+      if (!forHost) {
+        Console.Error.WriteLine($"not run: the program is built for {effective} and this machine is {host}");
+        return 0;
+      }
       Console.WriteLine("---- run ----");
       int exit = RunProcess(Path.GetFullPath(output), programArgs);
       Console.WriteLine($"---- exit code {exit} ----");
     }
     return 0;
+  }
+
+  // win-x64, win-x32, linux-x64, linux-arm64, osx-x64, osx-arm64...: the system and the processor of this machine
+  static string HostTarget() {
+    string system = OperatingSystem.IsWindows() ? "win" : OperatingSystem.IsMacOS() ? "osx" : "linux";
+    string arch = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture switch {
+      System.Runtime.InteropServices.Architecture.X64 => "x64",
+      System.Runtime.InteropServices.Architecture.Arm64 => "arm64",
+      System.Runtime.InteropServices.Architecture.X86 => "x32",
+      System.Runtime.InteropServices.Architecture.Arm => "arm",
+      var other => other.ToString().ToLowerInvariant()
+    };
+    return $"{system}-{arch}";
   }
 
   static int RunProcess(string file, List<string> args) {

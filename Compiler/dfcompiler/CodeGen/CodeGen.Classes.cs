@@ -111,11 +111,9 @@ public sealed partial class CodeGen {
     DeclareTraits(program);
     foreach (var node in program.Children.Where(child => child.Kind == "Class")) {
       string name = node.Text!;
-      if (classes.ContainsKey(name) || traits.ContainsKey(name) || enums.ContainsKey(name) || IsKnownType(name) || name == "Exception") {
+      if (classes.ContainsKey(name) || traits.ContainsKey(name) || enums.ContainsKey(name) || IsKnownType(name) || name == "Exception"
+          || IsSetName(name) || genericClasses.ContainsKey(name)) {
         throw Error($"the name '{name}' is already used by a type", node);
-      }
-      if (node.Children.Any(child => child.Kind is "GenericParams" or "Where")) {
-        throw NotSupported("Generic classes", node);
       }
       var info = new ClassInfo(name, node, classes.Count);
       classes[name] = info;
@@ -241,7 +239,7 @@ public sealed partial class CodeGen {
         if (IsClass(type) && p.Kind != "GiftParam") {
           throw Error($"the object '{p.Text}' goes into a field of {cls.Name}, which owns it: write ->{type} {p.Text}", p);
         }
-        cls.PrimaryParams.Add(new ParamSig(p.Text!, type, def?.Children[0]) { IsGift = p.Kind == "GiftParam" });
+        cls.PrimaryParams.Add(new ParamSig(p.Text!, type, def?.Children[0]) { IsGift = p.Kind == "GiftParam" && IsClass(type) });
         CheckFieldName(cls, p.Text!, p);
         cls.Fields.Add(new FieldInfo(p.Text!, type, cls, p) { FromParam = true });
       }
@@ -866,7 +864,7 @@ public sealed partial class CodeGen {
     if (!IsClass(subject.Type) && subject.Type != "Exception") {
       throw Error($"'is' needs an object, not {subject.Type}", n);
     }
-    string targetName = n.Children[1].Kind == "Type" ? n.Children[1].Text! : "";
+    string targetName = n.Children[1].Kind is "Type" or "ResolvedType" ? n.Children[1].Text! : "";
     if (!classes.TryGetValue(targetName, out var target) && !traits.TryGetValue(targetName, out target)) {
       throw Error($"'is' needs a class or trait name, not '{targetName}'", n);
     }
@@ -903,13 +901,13 @@ public sealed partial class CodeGen {
       var sb = classCode;
       sb.Append($"static df_string df_str_{cls.Name}(const {cls.StructName}* o) {{\n");
       sb.Append("  if (o == NULL) {\n    return df_str_lit(\"null\", 4);\n  }\n");
-      sb.Append($"  df_string r = {CString(CodePoints(cls.Name + (all.Count == 0 ? " {}" : " { ")))};\n");
+      sb.Append($"  df_string r = {CString(CodePoints(DisplayName(cls.Name) + (all.Count == 0 ? " {}" : " { ")))};\n");
       for (int index = 0; index < all.Count && index < 3; index++) {
         var field = all[index];
         string label = (index > 0 ? ", " : "") + field.Name + ": ";
         string value;
         if (IsClass(field.Type)) {
-          value = $"(o->{field.CName} == NULL ? df_str_lit(\"null\", 4) : {CString(CodePoints(field.Type + "{}"))})";
+          value = $"(o->{field.CName} == NULL ? df_str_lit(\"null\", 4) : {CString(CodePoints(DisplayName(field.Type) + "{}"))})";
         } else {
           value = StrOf(new Expr($"o->{field.CName}", field.Type), cls.Node);
         }
@@ -932,7 +930,7 @@ public sealed partial class CodeGen {
       string parent = cls.Parent == null ? "NULL" : "&" + cls.Parent.Descriptor;
       string impls = EmitImpls(cls);
       EmitDropGlue(cls);
-      sb.Append($"static const df_class {cls.Descriptor} = {{ {256 + cls.Index}, \"{cls.Name}\", {parent}, {slots}, df_strp_{cls.Name}, {impls}, df_dropall_{cls.Name} }};\n\n");
+      sb.Append($"static const df_class {cls.Descriptor} = {{ {256 + cls.Index}, \"{DisplayName(cls.Name)}\", {parent}, {slots}, df_strp_{cls.Name}, {impls}, df_dropall_{cls.Name} }};\n\n");
     }
   }
 

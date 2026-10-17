@@ -1,4 +1,4 @@
-Compiler 0.0.8alpha (spec 0.0.8)
+Compiler 0.0.9alpha (spec 0.0.9)
 
 Done -----------------------
 
@@ -39,15 +39,15 @@ Partial -----------------------
 Arrays arr<T>: literals, arr<T>[size], index read/write with IndexOutOfRangeException, .len, for-in, has, indexOf, fill, clear, reverse. Missing: sort, sortUnstable, copyFrom, views and ranges, .keys, sized declarations (arr<T>[n] x), warning for elements read before fill
 Silent exceptions: library calls (date(string), time(...), (time)n) raise them only when a catch in the same function can handle them; catches in callers do not see them yet; custom ones need classes
 Strings: every string is a pointer and a byte length, never freed; no small / block strings (4.3), no writing by index (open item)
-Parsing: date.parse and time.parse only (no i32.parse, r64.parse, tryParse: tryParse needs (&) parameters)
-Formatting: dates and times only; format specs of numbers and strings (8.1 - 8.3) are ignored with a warning
+Parsing: date.parse, time.parse and <integer or real type>.parse(text, default, format) (all of section 9 for numbers); no tryParse (it needs (&) parameters), no dec
+Formatting: dates and times (8.4) and integers and reals (8.1, 8.2: toStr(format) and {x:format}, nullables too); string specs (8.3) are ignored with a warning
 Namespaces: the namespace line is accepted, names are not qualified
 Time zones: dates are UTC; z prints +0 and parses an offset
 
 Not yet -----------------------
 
-Generics
-vec, list, map, hmap, set, hset, dfoot
+Generics: type switch, value parameters, generic traits, placeholders (7b); definition-time checking of bodies
+vec, list, map, hmap, set, hset, dfoot (7c)
 Ownership, move, copy, refcount
 Reference and move parameters
 Lambdas and captures
@@ -57,7 +57,7 @@ Class atEnd
 128/256-bit ints, r16/r128
 dec
 int/uns/real, native size (main may return int: it is an i32)
-Number and string format specs (8.1 - 8.3)
+String format specs (8.3), tryParse, parse of dec
 Imports, multiple files
 Files and Streams (17.6 is a TODO in the spec)
 DateTime library (CalendarDate, ZonedDateTime)
@@ -142,7 +142,18 @@ Phase 6  Custom exception classes                                  DONE
   exception does nothing when no catch of the function can handle it (a plain catch ex does not); standard silent ones are caught by the trait too
   limits: a parent exception class with fields cannot be extended yet (same limit as the other parents); a silent exception is only
   seen by the catches of its own function
-Phase 7  Generics    TODO (not decided)
+Phase 7  Generics (spec 11.3)                                     IN PROGRESS
+ 7a  generic functions and classes                                 DONE (tests/generics.df; older tests unchanged)
+  fun Item min<Item : Numeric>(...), class Stack<Item>, explicit arguments min<u8>(3, 5) and Stack<i32>(), inference from the arguments
+  (also through arr<T>, tuples, Stack<T> and variadic T...); one copy per list of type arguments, made by copying the tree with the
+  parameters replaced and compiled like any other function or class; static members are per copy (Stack<i32>.create())
+  constraints: a trait, a class (and its subclasses) or a set, joined with &&; inline and in 'where' (both can be mixed; a repeated
+  one is an L1 warning, a different one on an inline parameter is an error); where on a placeholder or a type expression: not yet
+  sets: Generic Name { types } (public / internal accepted), the predefined Signed, Unsigned, Integers, Reals, Numeric, Strings
+  (only the types this compiler has); a set as a constraint (one type per call) or as the type of a parameter (each one independent)
+  T? in generic code is an error (11.3.8); limits of 11.3.12: chain depth 16, copies per generic 16 (properties of CodeGen, no option yet)
+ 7b  type switch (value is ? { }), conversion to a set member, value parameters, generic traits, placeholders, 'where' on class headers   TODO
+ 7c  vec, list, map, hmap, set, hset as generic classes                                                                              TODO
 
 Decisions: operator is "fun bool ==(V o)"; only primary constructors for now; default toStr is
 "Px { a: Py{}, b: 3, c: BTree{}, ... }" (first 3 fields, one level, "..." when there are more);

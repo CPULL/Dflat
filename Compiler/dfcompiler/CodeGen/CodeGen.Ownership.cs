@@ -137,9 +137,16 @@ public sealed partial class CodeGen {
   bool CallMoves(Node call, Dictionary<FunSig, int>? state = null) {
     state ??= new Dictionary<FunSig, int>();
     var callee = call.Children[0];
+    if (callee.Kind == "GenericRef" && callee.Children[0] is { Kind: "Name" } genericName) {
+      return genericClasses.ContainsKey(genericName.Text!)
+        || (genericFuns.TryGetValue(genericName.Text!, out var explicitFun) && TemplateReturnsMoves(explicitFun));
+    }
     string? simple = callee.Kind is "Name" or "Member" ? callee.Text : null;
     if (simple == null) {
       return false;
+    }
+    if (callee.Kind == "Name" && genericFuns.TryGetValue(simple, out var inferredFun)) {
+      return TemplateReturnsMoves(inferredFun);
     }
     if (callee.Kind == "Name" && classes.ContainsKey(simple)) {
       return true;
@@ -189,6 +196,9 @@ public sealed partial class CodeGen {
       if (typeNode.Text == "var" && init?.Children[0] is { Kind: "Call" } call
           && call.Children[0] is { Kind: "Name" } name && classes.ContainsKey(name.Text!)) {
         return name.Text;
+      }
+      if (typeNode.Text == "var" && init?.Children[0] is { Kind: "Call" } genericCall && genericCall.Children[0].Kind == "GenericRef") {
+        return GenericRefClass(genericCall.Children[0]);   // var s = Stack<i32>()
       }
       return null;
     }

@@ -1,4 +1,4 @@
-Compiler implementation notes (dfcompiler 0.0.8alpha, spec 0.0.8)
+Compiler implementation notes (dfcompiler 0.0.9alpha, spec 0.0.9)
 =====================================================================
 
 What this file is: the decisions the compiler makes where the spec leaves room, the way each part is built,
@@ -9,15 +9,26 @@ Where a decision came from the spec the section is named; where I (Claude) chose
 1. Overall shape
 -----------------
 - dfparser (Lexer, Parser, Node) is shared with dfcompiler: same source files, compiled into both.
-- dfcompiler reads one .df file, type checks it, writes a C file next to it and calls clang (not found: PATH, DFLAT_CC, --cc).
-- Options: -o out, --emit-c (only the C file), --run (run the program), --cc path, -version, "--" then the arguments of the program.
+- dfcompiler reads one .df file, type checks it, writes a C file and calls clang (not found: PATH, DFLAT_CC, --cc).
+  Folders (next to the source file): the C goes to .compilation/<name>.c, the executable to build.<target>/<name>[.exe]
+  (build.win-x64, build.linux-x64 ...; build.custom for CL:). Both folders are created when missing and the files are overwritten.
+- Options (all with two dashes, no short forms; an unknown option is an error): --output <file> (the executable, wherever the user
+  wants), --target <target>, --emit-c (only the C file), --run (run the program), --cc <path>, --version, and "--" then the
+  arguments of the program. (-o and -version of the earlier versions are gone.)
+- Targets: win-x64, win-x32, linux-x64, linux-arm64, osx-x64, osx-arm64 (clang triples in Program.Targets), or CL:<text>: the text is
+  split at the spaces and given to clang as it is (nothing else is added for the target: no -lm, no -D_CRT_SECURE_NO_WARNINGS).
+  Without --target, or with the target of this machine, clang gets no target flag (as before). Any other known target adds
+  --target=<triple>, -lm (not for Windows targets) and -D_CRT_SECURE_NO_WARNINGS (Windows targets). Whether clang can build for the
+  target (headers, libraries, linker) is not checked: clang's own errors are shown. --run only runs a program built for this
+  machine; for another target it says so and stops after building. The generated C is the same for every target (the differences
+  are #ifdef _WIN32 blocks that the C compiler resolves), and the Linux and macOS parts of the runtime were never compiled yet.
 - Output is one C file: the runtime (always), optional runtime parts (strings, dates, Unicode tables, only when used),
   the types, the tables of classes, the function prototypes, the bodies, main.
-- Compiler version = spec version + "alpha" (0.0.8alpha).
+- Compiler version = spec version + "alpha" (0.0.9alpha).
 - Nothing is freed to the system yet (strings, arrays, objects): see section 10.
 - Source files: CodeGen/CodeGen.cs (core, statements, expressions), .Types, .Features (overloads, named arguments, definite
   assignment), .Errors (catch, throw, atEnd frames), .Switch (enums, switch), .Nulls (nullables, ?., enforce), .Tuples,
-  .Stdlib, .Text (string/char/date tables), .DateTime, .Arrays, .Classes, .Traits, .Equality, .Exceptions, .Ownership;
+  .Stdlib, .Text (string/char/date tables), .DateTime, .Arrays, .Classes, .Traits, .Equality, .Exceptions, .Ownership, .Generics;
   Runtime.cs (always), RuntimeText.cs, RuntimeDate.cs, UnicodeTables.cs (optional parts).
 
 
@@ -28,7 +39,7 @@ Where a decision came from the spec the section is named; where I (Claude) chose
 - Unsuffixed integer literals are i32 (the spec says native size: not done; there is no native int/uns/real yet).
   `int` is accepted only as the return type of main, and means i32.
 - Not available: i128/i256/u128/u256, r16/r128, dec, int/uns/real, pointers, addr, vec/list/map/hmap/set/hset/dfoot, lambdas,
-  generics, imports, multiple files.
+  imports, multiple files.
 - Casts: out of range saturates; a float to integer cast truncates. (spec 3.5)
 - `var`: for variables and for-loop items only; the type is the type of the value. Not allowed for fields.
 - Strings: UTF-8, a pointer and a byte length, never freed. Small / block strings of 4.3 are not implemented.
@@ -68,8 +79,8 @@ Where a decision came from the spec the section is named; where I (Claude) chose
   doubled w and i pad to 2 with a space; j = 1 (Monday) to 7; quoted text in '...' or "..." and \ escape; a<20 a>20 a^20 align.
   A date-only letter used on a time is a compile error (when the format is a literal). Parsing with a format is strict and uses the
   same letters; two-digit years: 00-29 = 2000s, 30-99 = 1900s.
-- Number and string format specs (8.1 - 8.3) are NOT implemented; `{x:spec}` on anything but date/time gives a warning and is ignored.
-  i32.parse, r64.parse, tryParse are not implemented (tryParse needs (&) parameters).
+- Number formats (8.1, 8.2) and number parse are implemented for integers and reals (section 14). String formats (8.3) are NOT:
+  `{x:spec}` on anything but numbers and date/time gives a warning and is ignored. tryParse is not implemented (it needs (&) parameters).
 - Silent exceptions of library calls are raised only when a catch that can handle them exists in the same function (see 7).
 
 
@@ -215,8 +226,154 @@ Owner or borrow is decided where a variable is declared:
 
 12. Summary of the main limits
 -------------------------------
-- No generics, collections other than arr, lambdas, pointers, references, imports, namespaces (the line is a comment).
+- Generics: functions and classes only (section 13); no generic traits, placeholders, value parameters, type switch.
+- No collections other than arr, lambdas, pointers, references, imports, namespaces (the line is a comment).
 - Classes: primary constructors only; no parent constructor arguments; no secondary constructors.
 - Ownership: single owner and weak references only; no reference counting, clone or copy; borrows are not lifetime checked.
-- Library: no number/string formatting, no number parse, no files.
+- Library: no string formatting, no tryParse, no files.
 - Memory is never freed.
+
+
+13. Generics (spec 11.3) - phase 7a
+------------------------------------
+STATE (2026-10-17): built and tested. dfcompiler/tests/generics.df compiles and runs with the expected output; the 30 older tests
+give exactly the same output as the compiler before 7a (checked by building the previous commit and comparing). The error cases
+(constraint not met, bare generic class, no inference, set used as a type, two types for one parameter, too many type arguments,
+copy limit reached) give clear messages. Two fixes were needed after the first build: a header parameter written ->Item is a gift
+only when the type is an object (for a number it is a plain copy, so Box<i32> works); the test uses "Item rest..." (the variadic
+mark goes after the name) and "return" for a body with several statements.
+(Rule from the user: never build without explicit approval.)
+
+Where the code is
+- dfparser/Parser.cs: inline constraints and 'where' can be mixed (the old "not both" error is gone); "Generic Name { ... }" is
+  parsed to a GenericSet node (ParseGenericSet); "Stack<i32>.member" is accepted in TryParseGenericArgs (a '>' followed by '.').
+- dfcompiler/CodeGen/CodeGen.Generics.cs: everything generic (templates, sets, constraints, inference, copies, limits, Compile()).
+- Small changes in: CodeGen.cs (Generate calls RegisterGenerics before DeclareClasses, CheckClassInstances after RegisterClasses,
+  generic functions go to RegisterGenericFun; Path() and Call() understand GenericRef; the emission loop works on a snapshot;
+  FunSig has InstanceDepth / InstanceChain; "ResolvedType" is a type node kind), CodeGen.Types.cs (ResolveType: ResolvedType,
+  generic class use, a set used as a value type is an error), CodeGen.Classes.cs (no more "Generic classes" error, names that clash
+  with sets, display names in printing and in the class descriptor, IsParts accepts ResolvedType), CodeGen.Errors.cs (failing
+  analysis knows generic names), CodeGen.Ownership.cs (CallMoves and ObjectTypeOf know generic calls), Program.cs (uses
+  CodeGen.Compile; Version is 0.0.9alpha).
+- dfcompiler/tests/generics.df: the test program (the errors it should give are listed in comments at the end).
+
+How it works
+- A generic function or class is a template (a tree). A use with concrete type arguments copies the tree, replaces every use of a
+  type parameter by a "ResolvedType" node (its text is the type string) and registers the copy as an ordinary function or class with
+  a mangled name: min<u8> -> min__u8, Stack<i32> -> class Stack__i32. A class copy prints as Stack<i32> (displayNames). Nothing
+  generic reaches the C code.
+- Functions: copies are made while the program is compiled, when a call is compiled (InstantiateForCall -> InstantiateFun). A copy
+  is registered in funs, marked as able to fail (so callers always check the error register: wide on purpose, like section 5),
+  classified for ownership (Classify), and put in the pending list that Assemble compiles (the same list the equals copies use).
+  Any call to a generic name also makes the caller able to fail (FindFailingFunctions).
+- Classes: a copy must exist before the classes are declared, but the compiler only finds out which copies it needs while compiling.
+  So: when a type Stack<i32> is resolved and its copy does not exist, ClassInstanceName adds it to the seeds and throws
+  NeedInstanceException; CodeGen.Compile() catches it and compiles the whole program again from a fresh clone of the tree (the seeds
+  survive between attempts; RegisterGenerics turns each seed into a class node before DeclareClasses). A program with N generic class
+  copies is compiled up to N + 1 times. The tree is cloned for every attempt because AddPrelude changes it.
+  NeedInstanceException is not a CompileException on purpose, so the "catch (CompileException)" blocks do not swallow it.
+- Type arguments are inferred from the arguments only (not from the return type or from the target). The declared type of each
+  parameter is matched with the type of the argument: T, arr<T>, tuples, Stack<T>, T... (variadic), named arguments. If one
+  parameter gets two types, the wider one is taken when the other converts to it, otherwise it is an error. Written type arguments
+  may be fewer than the parameters; the rest is inferred. A parameter that cannot be inferred is an error that says to write it.
+- A set used as the type of a parameter (Numeric first, Numeric second): that parameter gets a type parameter of its own (named
+  _first), constrained by the set. So average(Numeric a, Numeric b) is one copy per combination actually called.
+- Constraints: a trait, a class or a set, joined with && (all must hold). Checked when a function copy is made, and for class copies
+  after all classes are registered (CheckClassInstances), because classes are not known earlier. A class member of a set accepts
+  its subclasses; a trait member accepts every implementer. Inline and 'where' constraints can be mixed: the same constraint twice is
+  an L1 warning; a different one in 'where' on a parameter that already has inline ones is an error (join it with &&).
+- Sets: "Generic Name { types }" at the top level, uppercase name, members are types, classes, traits or other sets. A set used where
+  a value type is expected is an error (it only names alternatives). Predefined: Signed, Unsigned, Integers, Reals, Numeric, Strings,
+  but only with the types this compiler has (no i128/i256/u128/u256/r16/r128/dec/int/uns/real yet).
+- Limits of 11.3.12: MaxCopies = 16 copies per generic, MaxChainDepth = 16 for copies made by copies (functions: the chain is
+  printed) and for the nesting of type arguments (classes). They are properties of CodeGen; there is no command line option yet
+  (the names of the options are an open item in the spec). The limit for library collections (64) does not exist yet (no collections).
+  The message follows the spec: "Generic X defined in line N was used with more than 16 instances in function F".
+- Static members: one copy per instance, because each instance is a class of its own (Stack<i32>.Bump() and Stack<string>.Bump()
+  do not share anything).
+- T? in generic code is an error when the type parameter is replaced (spec 11.3.8); nullable types are listed in sets instead.
+
+CHOICES where I (Claude) decided and the spec does not say, and limits of this version
+- The body of a generic is NOT checked at the definition (the spec says it is: the Rust model). It is checked in every copy, so an
+  error appears with the first type that reaches it, and a generic that is never used is never checked at all.
+- Supported: generic functions at the top level and generic classes at the top level. NOT supported (error "feature not supported"):
+  generic methods, generic traits, a generic parent (class A<T> : B<T>), placeholders, value parameters, 'where' on a class header,
+  'where' on a placeholder or a type expression, the type switch (value is ? { }), conversion of a value to a set member (11.3.9),
+  Box<Dog> -> Box<Animal> conversion. These are phase 7b.
+- Type arguments of a class are always written (Box<i32>(5)); a constructor call does not infer them.
+- A generic function cannot have the name of another function (no overloading between generic and plain ones).
+- The "unconstrained T is move-only" rule of 11.3.11 is not checked at the definition. ->Item on an object moves it, on a number it
+  copies (a constructor header that takes ->Item works for both).
+- Whether a call of a generic function gives a new object (moves) is guessed from the returns of the template (TemplateReturnsMoves);
+  the copy is then classified for real. If both disagree, the usual ownership errors can appear.
+- The L1 warning "-> on a basic value" is repeated for each copy that has a number there (open item in the spec, 99).
+- A generic function copy is always "failing" (see above); this only costs extra checks, not correctness.
+- Nothing from section 99 of the spec is implemented (the user said it is for later): sets inside a class, a variable declared with a
+  set as type argument, conversion of borrowed generic values and collections, 'where' on class and trait headers, nullable
+  edge cases in sets, '->' warning inside generic code, names of the compiler options for the limits, the exported intermediate form.
+- Default type arguments, specialization and T? are not in the language (11.3.13), so they give errors.
+
+Ideas for later (7b and 7c)
+- 7b: type switch with coverage check, set conversion order of 11.3.9, value parameters (Grid<u64 W, u64 H, Cell>), generic traits
+  and placeholders (with (Item is u32)), 'where' on headers, checking bodies at the definition if it turns out to be worth it.
+- 7c: vec, list, map, hmap, set, hset written as generic classes (arr stays a primitive). 4c (collections that own their elements)
+  and the hash-collection warning of phase 5 depend on them.
+
+
+14. Number formatting and parsing (spec 8.1, 8.2, 9) - integers and reals
+--------------------------------------------------------------------------
+STATE (2026-10-17): built and tested with dfcompiler/tests/numformat.df (every line of the test has its expected text in a comment) and
+the 30 older tests (same output as before). Silent exceptions of parse were checked with catches in the same function.
+NOT done: tryParse (needs (&) parameters), dec, string formats (8.3), formats in {x:spec} for anything but numbers, dates and times.
+
+Where the code is
+- dfcompiler/RuntimeNumber.cs: the C runtime, added to the program only when it uses a number format or parse (chunk "numfmt", which
+  also brings the "text" chunk: UTF-8 helpers and the string builder).
+- dfcompiler/CodeGen/CodeGen.NumFormat.cs: toStr(format) and {x:format} for numbers (NumberFormat), the compile-time check of literal
+  formats (NumberFormatProblem for a spec, CheckParseFormat for a parse format), and the registration of T.parse (AddNumberStdlib).
+- Small edits: CodeGen.DateTime.cs (FormatCall and FormattedHole send numbers to NumberFormat), CodeGen.Stdlib.cs (SilentCall takes
+  several exception names; parse formats written as literals are checked), CodeGen.Text.cs (the new chunk), CodeGen.cs (warning text).
+
+How it works
+- Formatting: df_nf_parse reads the spec into a df_nf struct (the same grammar is repeated in C# in NumberFormatProblem, only to
+  report errors at compile time; if you change the grammar, change both). A number becomes decimal digits (digs, no leading or
+  trailing zeros, value = 0.digs * 10^dp): integers from the magnitude, reals from the shortest round-trip digits (no D size) or from
+  all the exact digits of the double (D size given, so rounding is right: 2.5 is a true tie, 0.1 is not). Then df_nf_round applies the
+  mode (u half up = away from zero, b banker's, c toward +infinity, f toward -infinity, t truncate), then layout.
+- A spec that does not parse at run time gives the default text of the value (a literal spec is a compile error instead).
+- Parsing: df_parse_<type>(text, default), _f(text, default, format), _fmt(text, format); one set per integer type and r32, r64.
+  No format: skips everything up to the first digit (or ".digit"), a '-' right before it is the sign, reads digits, an optional
+  ".digits", for reals an exponent; NaN, INF and the infinity sign are read by reals only. With a format: prefix, placeholders
+  (alternatives tried in order, the first that matches the whole text wins), suffix; nothing is skipped except fill characters
+  when a width, fill or alignment is given. Any invalid format gives the default.
+- Out of range saturates and leaves a silent OutOfRangeCastException; a minus on an unsigned type gives 0 and a silent
+  OverflowException. A parse call raises only the one a catch of the same function can handle (SilentCall tests the note).
+
+CHOICES where the spec is short or unclear
+- Option letters are case-insensitive except h / H after b. Separators and fill characters can be any character that is not an
+  ASCII letter (a digit is allowed as fill: f0). Anything else in a spec is an error (spaces too).
+- D: optional symbol (any non-letter non-digit; l = locale = '.'), size digits (0 alone = no decimals, 0n = exactly n, n = up to n),
+  then an optional rounding mode letter u b c f t. So after the size, f / b / t are read as modes: to follow D with a fill or a
+  base, put another option in between (w10f0D2 is fine, D2f0 is floor then an error). Integers accept D too (5 with D02 is 5.00).
+- Sign: S or S- negatives only (default); S+ always (zero too); St- / St+ the sign at the left edge of the width; S() negatives in
+  parentheses. With the default the sign sits next to the digits, so the fill comes before it (000-42).
+- Width counts characters; the default alignment of numbers is to the right; a^ puts the extra fill on the right. a. aligns the
+  decimal symbol by adding the missing decimal places on the right (it only has an effect with D size, not fixed).
+- Grouping g<sep><size>[<size><sep>...]: sizes are one digit (1 to 9); the separator after each group is the one written with it;
+  the last group size repeats; a trailing r groups from the left (1234567 with g_3r is 123_456_7); gL is ',' and 3. Grouping applies
+  to the integer digits (and to the digits of the other bases).
+- Other bases: bh / bH / bb / bo / b64 show the raw bits (negative numbers by their width, reals by their IEEE bits); there is no
+  sign; zero prints 0 (A in b64); b64 uses A-Z a-z 0-9 + / without padding.
+- Scientific e[lit]0n: the text in lit is printed before the exponent; '+' inside lit marks where the exponent sign goes and makes it
+  always shown, '-' marks the place with the sign only on negatives; no marker = at the end of lit, negatives only; \\ escapes. A
+  negative exponent always gets '-'. 0n pads the exponent digits with zeros (after the sign), #n with spaces (after the sign too).
+  Plain e = e[e+]D6a<. Without D, 6 decimals (up to). Zero prints 0. The mantissa has one digit before the decimal symbol.
+- Rounding to zero never leaves a minus sign (-0.004 with D2 is 0).
+- NaN, the infinity sign and null (a nullable without a value) take width, fill and alignment; the infinity sign takes the sign.
+- A real with a format is printed in plain digits, never as 1E+20 (the format-less toStr() is unchanged).
+- parse: the format of the spec example "{S}{S()}" reads both -10 and (10) as -10. Group separators are accepted between digits
+  without checking the group sizes. A scientific format needs its text and exponent digits exactly. Hex and the other bases read the
+  raw bits (ffffffd6 as an i32 is -42). A format with no placeholder, two groups of static text, or an invalid spec is an error at
+  compile time when it is a literal, otherwise the default is returned.
+- parse signature: parse(text, default = 0, format = none), also parse(text, format) as a named form (text:, default:, format:).
+  A second argument that is a string is the format.

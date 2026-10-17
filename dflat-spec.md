@@ -448,6 +448,7 @@ A collection holds several items in one object. Dflat has seven: `arr`, `vec`, `
 - By access: `arr`, `vec`, `list` are indexed by position (0 to `.len` - 1); `map` and `hmap` hold key/value pairs; `set` and `hset` hold each value once.
 - Hash against B-tree: `hmap` and `hset` are hash tables (fast lookup, no order); `map` and `set` are B-trees (kept sorted, O(log n)); `list` is a counted B-tree used by position. The items of a `list` need no key rules.
 - Type, size and capacity: the size of an `arr` and the capacity of a `vec` are given only at initialization and are not part of the type.
+- `arr<T>` is a primitive: a block of memory for the items, with no code of its own and no limit on the types. `vec`, `list`, `map`, `hmap`, `set` and `hset` are ordinary generic classes (11.3) with their own copy limit (11.3.12).
 - Index checks happen at compile time when possible, otherwise at runtime: an index outside the collection raises `IndexOutOfRangeException` (not silent), or is a compile error when it can be detected at compile time.
 - The members are listed in 6.6; each collection has its own section for the details.
 
@@ -967,15 +968,21 @@ fun Item min<Item : Numeric>(Item first, Item second) {
   first.Compare(second) ? { first, second }
 }
 
-fun Item pick<Item, Key>(Item value, Key key)
-  where Item : Numeric && Orderable, Key : Hashable && Named { }
+trait Priced {
+  fun r64 Price()
+}
 
-fun printAll<Item>(list<Item> items) where list<Item> : Printable { }
+fun Item pick<Item : Numeric, Key : Named && Priced>(Item value, Key key) { }
+
+fun r64 sum<Source : Sequence>(Source items) where Source.Item : Numeric { }
 ```
 
-- Constraints inline `<Item : Trait>` or in a `where` clause, never both in one declaration (compile error).
-- Several traits joined with `&&`. No negative constraints.
-- `where` may constrain any type expression; parameters separated by commas.
+- A constraint is a trait, a class or a set (11.3.6). A class names the class and all its subclasses; a trait names every type that implements it.
+- Constraints on the type parameters are written inline, `<Item : Numeric>`, however many parameters there are. `where` is for the constraints that are not on a plain parameter: the placeholder of a trait (`Source.Item`, 11.3.4) or another type expression. Both forms can be used in the same declaration. Entries of a `where` clause are separated by commas.
+- Repeating in `where` a constraint already written inline on the same parameter (`<Item : Numeric> ... where Item : Numeric`) is a level 1 warning. A different constraint on that parameter in `where` is a compile error: join it inline with `&&`.
+- Several constraints are joined with `&&`: the type must satisfy all of them. No negative constraints.
+- There are no `Hashable`, `Orderable` or `Printable` constraints: every type already has `.hash`, `.order` and `toStr()` (6.1, 6.2), and `.hash` is sized to the architecture (`uns`).
+- The body is checked at the definition, using only what the constraints guarantee, against every type that can reach it (11.3.6, 11.3.11).
 
 ### 11.3.2 Classes and traits
 
@@ -992,13 +999,15 @@ trait Container<Item> {
 }
 
 class Names : Container<string> { ... }
-class Cache<Key : Hashable, Value> { hmap<Key, Value> entries }
+class Cache<Key, Value> { hmap<Key, Value> entries }
+class Registry<Item : Named> { list<Item> items }
 
 Stack<i32> numbers = Stack<i32>()
 ```
 
 - Several parameters are comma-separated; types and value parameters can be mixed.
 - A generic trait can be implemented several times by one class with different types.
+- `Stack<i32>` and `Stack<string>` are two different classes made from the same code: they have nothing in common as types, and a function that takes one does not accept the other.
 
 ### 11.3.3 Value parameters
 
@@ -1026,12 +1035,129 @@ fun printAll<Source : Sequence>(Source items) { ... }
 
 - `placeholder` declares a type inside a trait that each implementing class fixes once, with `with (Name is type, ...)` in the header.
 - Users of the trait don't name the placeholder.
+- A constraint on the placeholder uses `where` (11.3.1): `where Source.Item : Numeric`.
 
 ### 11.3.5 Inference
 
 - The compiler infers type arguments; if it can't → compile error. Explicit arguments are always allowed: `min<u8>(3, 5)`.
 - A name followed by `<…>(` is read as a generic call (lookahead). When the code could also read as comparisons → level 3 warning; parentheses force comparisons.
 - Unsuffixed literals follow 1.3: `min(3, 5)` → native signed integer.
+
+### 11.3.6 Generic sets
+
+```
+Generic Strings { char, string }
+public Generic Shapes { Circle, Square }
+Generic Anything { Numeric, Strings }
+Generic NullableSmallNums { i16, i16?, i8, i8?, u8, u8?, u16, u16? }
+
+fun Item smaller<Item : Numeric>(Item first, Item second) { ... }
+fun r64 average(Numeric first, Numeric second) { ... }
+```
+
+- `Generic Name { types }` is a named set of types, computed at compile time. The members are built-in types, classes, traits or other sets. The name starts with an uppercase letter.
+- A set is declared at namespace level. Its visibility follows the other declarations: private by default, `public` or `internal` to expose it. Sets declared inside a class: open item (99).
+- A class member means the class and all its subclasses (the code is checked with what the class guarantees). A trait member means every type implementing it.
+- A set is used as a constraint (`<Item : Numeric>`): every use of `Item` in one call is the same type. It can also be written directly as the type of a parameter (`Numeric first, Numeric second`): each argument is independent. Only the combinations that are actually called are generated.
+- A set exists only at compile time: it names alternatives, it is not a type of values. `Box<Num>(x)` is a constructor call whose argument selects the member (11.3.9); `var b = Box<Num>(5.5)` is a `Box<r64>`.
+- Operators and members are checked only where they are used, against every type that can reach the use. With `Generic Mixed { uns, char, string }`, the expression `first < second` in `fun Compare(Mixed first, Mixed second)` needs `<` between all combinations of the members.
+- The body of a generic class or function that receives a set is compiled once per member (or per combination); a branch that does not apply to the member is not compiled (11.3.7).
+
+Predefined sets:
+
+| Set | Members |
+|---|---|
+| `Signed` | `i8` `i16` `i32` `i64` `i128` `i256` `int` |
+| `Unsigned` | `u8` `u16` `u32` `u64` `u128` `u256` `uns` |
+| `Integers` | `Signed`, `Unsigned` |
+| `Reals` | `r16` `r32` `r64` `r128` `real` |
+| `Numeric` | `Integers`, `Reals`, `dec` |
+| `Strings` | `char`, `string` |
+
+- `int`, `uns` and `real` are aliases known at compile time (3.1): they match the type they stand for on the target, and never count as a duplicate case or as an extra copy.
+- `char` is not part of `Numeric`; `dec` is.
+
+### 11.3.7 Type switch
+
+```
+Generic Convertible { Numeric, char, string }
+
+fun r64 toReal(Convertible item) {
+  r64 result = item is ? {
+    Numeric: (r64)item,
+    char: (r64)(u32)item,
+    string: r64.parse(item)
+  }
+  result
+}
+```
+
+- `value is ? { type: expression, ... }` is the switch expression of 10.6 applied to the type of `value`. A case is a type, a class, a trait or a set; `default` is allowed.
+- Only the matching case is compiled in each copy.
+- Coverage is checked at the definition: a type that can reach the switch and has no matching case and no `default` is a compile error.
+- The first matching case wins, so the order matters. A case that can never match because the earlier ones already cover all its types is a level 2 warning (dead code).
+- `T is type` (11.1.3) stays the form for one check; `value is ? { }` is the form for many.
+
+### 11.3.8 Null in generic code
+
+- A set that contains a type that can be null forces the generic code to handle null: numbers with `?` (`i16?`), `date`, `time` and objects (classes).
+- `string` does not count: a null `string` always falls back to the empty string (7.1).
+- `T?` is not allowed in generic code. Nullable alternatives are listed in the set (`NullableSmallNums` in 11.3.6).
+
+### 11.3.9 Converting a value to a member of a set
+
+```
+Generic ABC { u64, u32, u16 }     // a u8 value becomes u64 (leftmost)
+Generic CBA { u16, u32 }          // a u8 value becomes u16
+Generic DEF { u64, u8 }           // a u8 value stays u8 (exact type first)
+Generic Num { i64, r64 }          // a u8 value becomes i64 (unsigned to a wider signed)
+Generic Narrow { i16, u32 }       // an i32 value: compile error, no member keeps the value
+```
+
+The value on the right is evaluated first. If it converts implicitly (section 6) to a member of the set, it converts; otherwise it is a compile error. The member is chosen in this order:
+
+1. The exact type of the value (same macrotype and same size).
+2. A member of the same macrotype that holds the value, leftmost first.
+3. A member of a compatible macrotype reached by an implicit conversion of section 6 (unsigned to a wider signed), leftmost first.
+4. Nothing fits: compile error. The message lists the members tried and why each one failed.
+
+- For classes: the exact class, then the nearest parent class that is a member, then left to right.
+- The leftmost rule is the one of sets; the overload resolution of 13.2 (smallest widening) is not used.
+
+### 11.3.10 Classes inside generics
+
+- A `Box<Animal>` holds `Dog` and `Cat` objects as `Animal`: only the `Animal` members are visible, an `override` still runs the `Dog` version, and `v is Dog d` (11.1) gets the `Dog` back.
+- A `Box<Dog>` is converted to `Box<Animal>` automatically, with the Rust model: the conversion moves the box and the original can no longer be used, so no one sees one box as two types. Conversion of borrowed values and of collections: open item (99).
+
+### 11.3.11 Ownership in generic code
+
+- A parameter of type `Item` without `->` is borrowed for every `Item`. `->Item value` moves an object and copies a value type (a number): using a number again after `->` is never an error, using an object again is.
+- The move check is done at the definition, with the Rust rule: an unconstrained `Item` is move-only, so using the value twice after `->` is a compile error even if every call uses numbers. A constraint to value types (`<Item : Numeric>`) allows it.
+
+### 11.3.12 Limits of the generated copies
+
+- Three limits stop runaway code generation. Each one is set by its own compiler parameter, from 1 to 256:
+
+| Limit | Meaning | Default |
+|---|---|---|
+| Chain depth | nested instantiations, a generic that instantiates another one that instantiates another | 16 |
+| Copies per generic | different type combinations of one generic in the user code | 16 |
+| Copies per library collection | the same, for each collection defined by this specification (`vec`, `list`, `map`, `hmap`, `set`, `hset`) | 64 |
+
+- The copies are counted per generic: 64 different `list` types and 64 different `map` types are allowed. A custom collection, even one built on the library ones, uses the user limit. `arr<T>` is a primitive (no code of its own) and has no limit.
+- The same type arguments are one copy: `smaller<i32>` called many times is generated once. Identical machine code produced by different types is merged by the backend (the linker); the limits count the type combinations before any merging.
+- Exceeding a limit is a compile error with a clear message, for example: `Generic XYZ defined in file abc.df was used with more than 16 instances in function FunName in file def.df`. For the chain depth the message lists the chain.
+
+### 11.3.13 Not in the language
+
+- Default type arguments (`<Item = i32>`).
+- Specialization: two implementations of one generic for overlapping types are a compile error; a different behavior for one type is written with the type switch (11.3.7) or as a separate type.
+- `T?` (11.3.8).
+
+### 11.3.14 Libraries
+
+- A compiled library that uses generics only internally exports nothing for them: the copies it needs are already generated.
+- A public generic offered for any type needs its code in the user's compiler. The plan is to export a minimal intermediate form ("bytecode"), not the source, that the compiler finishes for each new type. This is for after 0.1.0 (open item in 99).
 
 
 ## 11.4 Class `atEnd` (Destructor code)
@@ -1863,12 +1989,14 @@ Level 1 = most important, level 3 = least.
 | 1 | `Root.Class` written in a class header | 11.1 |
 | 1 | Equality without hash on a key of a hash collection | 11.1.3 |
 | 1 | `->` on a variable or field of a basic type | 12.4 |
+| 1 | Same constraint repeated inline and in `where` | 11.3.1 |
 | 2 | Cast out of range saturates | 3.5 |
 | 2 | Upward type check | 11.1 |
 | 2 | Type name not PascalCase | 1.1 |
 | 2 | `catch { }` without type or variable | 15.1 |
 | 2 | Char compared with an integer | 2.5 |
 | 2 | `equals` and operator `==` both defined | 11.1.3 |
+| 2 | Unreachable case in a type switch | 11.3.7 |
 | 3 | Unmatched `#region` / `#endregion` | 19.1 |
 | 3 | `const` name not UPPER_SNAKE_CASE | 1.1 |
 | 3 | Folder ignored (invalid name) | 16 |
@@ -1892,6 +2020,14 @@ Level 1 = most important, level 3 = least.
 - Class destructor that throws (15.x)
 - Lexing of reals ending in a dot (`0.`): a real needs digits on both sides of the dot
 - Binding in generic checks (`T is i32`: type of `other` inside the branch)
+- Generics: `Generic` sets declared inside a class (for now namespace level only)
+- Generics: a variable declared with a set as type argument (`Box<Num> b`) and the type it takes
+- Generics: conversion of borrowed generic values and of collections (`vec<Dog>` to `vec<Animal>`)
+- Generics: `where` on class and trait headers
+- Generics: whether `clock`, `lapse`, `addr` and pointers (nullable by default, 7.1) count as real nullables in a set, like `date`, `time` and objects (11.3.8)
+- Generics: whether the level 1 warning of `->` on a basic type (12.4) fires inside generic code
+- Generics: names of the compiler parameters for the chain depth, the copies per generic and the copies per library collection (11.3.12)
+- Generics: minimal intermediate form exported by compiled libraries for public generics (11.3.14), after 0.1.0
 - Stdlib: strings, files, time, collections extras (queue/stack)
 - Bitfields: whether `set`, `clear`, `setAs` and `toggle` modify the value in place or return a new value; nullability of bitfields (3.1.1, 7.1)
 - `.sizeof` for all types (whether it counts the items of a collection)
@@ -2146,3 +2282,16 @@ Level 1 = most important, level 3 = least.
 - 11.4, 14.2 Examples updated to the new `File` API (`size`, `File.exists`)
 - 17.5 Empty table row removed
 - 99 Open items: `close()` as a method of `File` removed (streams have `close()`); bitfield in-place or new-value decision and nullability added; the open items of files and streams are in 17.6.9
+- 11.3 Generics rewritten around sets: 11.3.1 inline constraints for the type parameters and `where` for sub-constraints (placeholders, type expressions), both forms can be mixed; the same constraint repeated is a level 1 warning, a different one on the same parameter is a compile error; `Hashable`, `Orderable` and `Printable` removed (every type has `.hash`, `.order`, `toStr()`; `.hash` is sized to the architecture, `uns`); examples updated
+- 11.3.6 `Generic` sets (new): named compile-time sets of types (types, classes, traits, other sets), uppercase names, namespace level, `public` / `internal` to expose; used as a constraint (same type per call) or as a parameter type (independent arguments); never a type of values; predefined `Signed`, `Unsigned`, `Integers`, `Reals`, `Numeric`, `Strings`; `int`, `uns`, `real` are compile-time aliases and never a duplicate; operators are checked where used against every type that can reach them
+- 11.3.7 Type switch (new): `value is ? { type: expression, ... }`, only the matching case is compiled per copy, coverage checked at the definition, first match wins, unreachable case is a level 2 warning
+- 11.3.8 Null in generic code (new): sets with `?` numbers, `date`, `time` or objects force null handling; `string` does not count; `T?` is not allowed
+- 11.3.9 Converting a value to a set member (new): exact type, then same macrotype leftmost, then compatible macrotype leftmost, otherwise a compile error listing what was tried; classes: exact class, nearest parent, left to right
+- 11.3.10 Classes inside generics (new): `Box<Animal>` holds subclass objects seen as `Animal`; `Box<Derived>` converts to `Box<Base>` automatically by moving the box (Rust model)
+- 11.3.11 Ownership in generic code (new): `->Item` moves an object and copies a value type; moves are checked at the definition, an unconstrained `Item` is move-only
+- 11.3.12 Limits (new): chain depth 16, copies per generic 16, copies per library collection 64, each 1 to 256 with its own compiler parameter; counted per generic and per collection; `arr` has no limit; identical machine code is merged by the backend; clear error message when exceeded
+- 11.3.13 Not in the language (new): default type arguments, specialization, `T?`
+- 11.3.14 Libraries (new): internal generics export nothing; public generics will export a minimal intermediate form, after 0.1.0
+- 6.1 `arr<T>` is a primitive; the other collections are ordinary generic classes
+- 19.3 Warnings: L1 same constraint repeated inline and in `where`; L2 unreachable case in a type switch
+- 99 Open items: `Generic` sets inside a class; variable declared with a set as type argument; conversion of borrowed generic values and of collections; `where` on class and trait headers; `clock`, `lapse`, `addr` and pointers as nullables in a set; `->` warning inside generic code; names of the compiler parameters for the limits; intermediate form of exported generics

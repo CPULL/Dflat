@@ -165,7 +165,10 @@ public sealed partial class CodeGen {
       foreach (var (fun, called) in callees) {
         bool callsFailing = called.Any(name => name.StartsWith("?.")
           ? allFuns.Any(other => other.Class != null && other.Name.EndsWith("." + name[2..]) && failingFuns.Contains(other))
-          : funs.TryGetValue(name, out var overloads) && overloads.Any(failingFuns.Contains));
+          : genericFuns.ContainsKey(name)
+            || (genericClasses.ContainsKey(name) && allFuns.Any(other => other.IsCtor && classInstanceArgs.TryGetValue(other.Class!.Name, out var made)
+              && made.Template.Name == name && failingFuns.Contains(other)))
+            || (funs.TryGetValue(name, out var overloads) && overloads.Any(failingFuns.Contains)));
         if (!failingFuns.Contains(fun) && callsFailing) {
           failingFuns.Add(fun);
           changed = true;
@@ -230,6 +233,8 @@ public sealed partial class CodeGen {
         foreach (string prefix in prefixes) {
           called.Add(prefix + "." + callee.Text);
         }
+      } else if (callee.Kind == "GenericRef" && callee.Children[0] is { Kind: "Name" } genericCallee) {
+        called.Add(genericCallee.Text!);   // a generic function or the constructor of a generic class
       } else if (Path(callee) is string path) {
         called.Add(path);
       }

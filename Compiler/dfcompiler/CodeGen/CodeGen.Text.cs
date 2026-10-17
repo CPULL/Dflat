@@ -13,7 +13,7 @@ public sealed partial class CodeGen {
       return;
     }
     needs.Add(key);
-    if (key == "date") {
+    if (key is "date" or "numfmt") {
       needs.Add("text");
     }
   }
@@ -39,6 +39,9 @@ public sealed partial class CodeGen {
     }
     if (needs.Contains("date")) {
       sb.Append(RuntimeDate.Source);
+    }
+    if (needs.Contains("numfmt")) {
+      sb.Append(RuntimeNumber.Source);
     }
     return sb.ToString();
   }

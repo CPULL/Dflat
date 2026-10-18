@@ -1,0 +1,2 @@
+rex
+---- exit code 0 ----

@@ -1,0 +1,1 @@
+genwhere_plain_class.df(7): error: 'where' is for generic classes: 'Plain' has no type parameters

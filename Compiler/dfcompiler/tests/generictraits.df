@@ -1,0 +1,40 @@
+// Generic traits (11.3.2): one trait made per list of type arguments
+alias Root as r
+
+trait Container<Item> {
+  fun Item Get(u64 index)
+  fun u64 Size()
+}
+
+public class Names : Container<string> {
+  override fun string Get(u64 index) { "name" }
+  override fun u64 Size() { 1 }
+}
+
+public class Numbers : Container<i32> {
+  override fun i32 Get(u64 index) { (i32)index * 10 }
+  override fun u64 Size() { 3 }
+}
+
+public class Wrapper<Item>(Item held) : Container<Item> {
+  public Item held
+  override fun Item Get(u64 index) { held }
+  override fun u64 Size() { 1 }
+}
+
+fun string first(Container<string> source) { source.Get(0) }
+
+fun u64 sizeOf<Source : Container<i32>>(Source source) { source.Size() }
+
+Names n = Names()
+Numbers m = Numbers()
+Container<string> viaTrait = n
+r.Console.log(viaTrait.Get(0))
+r.Console.log(first(n))
+r.Console.log(m.Get(2))
+r.Console.log(sizeOf(m))
+Wrapper<i32> w = Wrapper<i32>(7)
+r.Console.log(sizeOf(w))
+r.Console.log(w.Get(0))
+Container<i32> asNumbers = w
+r.Console.log(asNumbers.Get(0))

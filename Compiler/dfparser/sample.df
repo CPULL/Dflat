@@ -53,7 +53,7 @@ fun hello(string name = "john doe", i32 age) {
   r.Console.log($"Hello {name}, age {age:f0w3}")
 }
 
-fun take(->Item gift, Item borrowed, &i32 counter, Item copied!, &Item readOnly!) {
+fun take(->Item gift, Item borrowed, &i32 counter, Item copied, &Item readOnly) {
   counter++
 }
 
@@ -177,7 +177,7 @@ i32 y = 2
 x, y = y, x
 
 // ------------------------------------------------ types, casts, operators
-dyn Shape s = Circle(2.0)
+any Shape s = Circle(2.0)
 if s is Circle cc {
   r.Console.log($"r = {cc.radius:D,02}")
 }

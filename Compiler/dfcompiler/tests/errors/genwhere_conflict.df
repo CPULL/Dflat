@@ -1,0 +1,12 @@
+alias Root as r
+
+trait Named {
+  fun string Name()
+}
+
+trait Priced {
+  fun r64 Price()
+}
+
+public class Holder<Item : Named>() where Item : Priced {
+}

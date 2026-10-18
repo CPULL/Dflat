@@ -14,6 +14,7 @@ sealed class TypeParam {
   public string Name { get; }
   public Node At { get; }
   public List<Node> Constraints { get; } = new();   // type nodes: a trait, a class or a set; all must hold
+  public string? ValueType { get; set; }            // a value parameter (11.3.3): its type; null for a type parameter
 }
 
 // a generic function: the template is kept as a tree and a copy is made for each list of type arguments
@@ -30,6 +31,7 @@ sealed class GenericFun {
   public int Copies { get; set; }
 }
 
+// a generic class or a generic trait (Node.Kind says which): the copies of both are made the same way
 sealed class GenericClass {
   public GenericClass(string name, Node node, List<TypeParam> ps) {
     Name = name;
@@ -40,6 +42,7 @@ sealed class GenericClass {
   public string Name { get; }
   public Node Node { get; }
   public List<TypeParam> Params { get; }
+  public bool IsTrait => Node.Kind == "Trait";
 }
 
 // the instances of generic classes the program needs; they survive from one attempt to the next (see Compile)
@@ -118,7 +121,7 @@ public sealed partial class CodeGen {
     return name + "__" + string.Join("_", args.Select(SanitizeName));
   }
 
-  string DisplayName(string type) => displayNames.TryGetValue(type, out var shown) ? shown : type;
+  string DisplayName(string type) => displayNames.TryGetValue(type, out var shown) ? shown : type.StartsWith('#') ? type[1..] : type;
 
   bool IsSetName(string name) => PredefinedSets.ContainsKey(name) || genericSets.ContainsKey(name);
 
@@ -146,13 +149,13 @@ public sealed partial class CodeGen {
         throw Error($"the set '{name}' is already declared", statement);
       }
     }
-    foreach (var node in program.Children.Where(child => child.Kind == "Class" && child.Children.Any(c => c.Kind == "GenericParams")).ToList()) {
+    foreach (var plain in program.Children.Where(child => child.Kind == "Class" && child.Children.Any(c => c.Kind == "Where") && !child.Children.Any(c => c.Kind == "GenericParams"))) {
+      throw Error($"'where' is for generic classes: '{plain.Text}' has no type parameters", plain);
+    }
+    foreach (var node in program.Children.Where(child => child.Kind is "Class" or "Trait" && child.Children.Any(c => c.Kind == "GenericParams")).ToList()) {
       string name = node.Text!;
       if (genericClasses.ContainsKey(name) || IsSetName(name)) {
         throw Error($"the name '{name}' is already used", node);
-      }
-      if (node.Children.Any(child => child.Kind == "Where")) {
-        throw NotSupported("'where' on the header of a class", node);
       }
       genericClasses[name] = new GenericClass(name, node, ReadTypeParams(node, name));
       program.Children.Remove(node);
@@ -164,25 +167,36 @@ public sealed partial class CodeGen {
       var map = generic.Params.Zip(args).ToDictionary(pair => pair.First.Name, pair => pair.Second);
       var copy = CloneNode(generic.Node, SubstituteTypes(map));
       copy.Text = mangled;
-      copy.Children.RemoveAll(child => child.Kind == "GenericParams");
+      copy.Children.RemoveAll(child => child.Kind is "GenericParams" or "Where");
       program.Children.Add(copy);
       classInstanceArgs[mangled] = (generic, args);
       displayNames[mangled] = $"{generic.Name}<{string.Join(", ", args.Select(DisplayName))}>";
     }
   }
 
+  static readonly HashSet<string> ValueParamTypes = new() { "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "bool" };
+
   // <Item : Numeric, Key> and the entries of 'where' that are on a plain parameter
   List<TypeParam> ReadTypeParams(Node node, string name) {
     var ps = new List<TypeParam>();
     var generics = node.Children.First(child => child.Kind == "GenericParams");
     foreach (var param in generics.Children) {
-      if (param.Kind == "ValueParam") {
-        throw NotSupported("Value parameters (11.3.3)", param);
-      }
       if (ps.Any(existing => existing.Name == param.Text)) {
         throw Error($"duplicate type parameter '{param.Text}'", param);
       }
       var typeParam = new TypeParam(param.Text!, param);
+      if (param.Kind == "ValueParam") {
+        // <u64 Width>: a compile-time constant of an integer type or bool (the other types of 11.3.3 are not built)
+        string valueType = param.Children[0] is { Kind: "Type", Children.Count: 0 } declared ? Normalize(declared.Text!) : "";
+        if (!ValueParamTypes.Contains(valueType)) {
+          throw valueType is "char" or "r16" or "r32" or "r64" or "r128" or "dec"
+            ? NotSupported($"Value parameters of type {valueType} (11.3.3)", param)
+            : Error($"a value parameter is an integer or a bool, not '{param.Children[0].Text}'", param);
+        }
+        typeParam.ValueType = valueType;
+        ps.Add(typeParam);
+        continue;
+      }
       typeParam.Constraints.AddRange(param.Children);
       ps.Add(typeParam);
     }
@@ -210,6 +224,11 @@ public sealed partial class CodeGen {
 
   static bool HasInline(Node generics, string name) {
     return generics.Children.Any(param => param.Text == name && param.Children.Count > 0);
+  }
+
+  // Container<i32> as written in a message
+  string ConstraintShown(Node constraint) {
+    return constraint.Children.Count == 0 ? constraint.Text! : $"{constraint.Text}<{string.Join(", ", constraint.Children.Select(arg => DisplayName(ResolveType(arg))))}>";
   }
 
   static string ConstraintText(Node constraint) => constraint.Text ?? constraint.Kind;
@@ -248,11 +267,95 @@ public sealed partial class CodeGen {
       if (node.Kind == "Nullable" && node.Children[0] is { Kind: "Type", Children.Count: 0 } inner && map.ContainsKey(inner.Text!)) {
         throw Error($"'{inner.Text}?' is not allowed in generic code: list the nullable types in a set instead (11.3.8)", node);
       }
+      var at = new Token(TokenKind.Ident, "", node.Line, 0);
       if (node.Kind == "Type" && node.Children.Count == 0 && node.Text != null && map.TryGetValue(node.Text, out var concrete)) {
-        return new Node("ResolvedType", new Token(TokenKind.Ident, "", node.Line, 0), concrete);
+        // a value parameter written as a type argument: Grid<Width, Cell>
+        return concrete.StartsWith('#') ? new Node("ValueArg", at).Add(ValueNode(concrete, node)) : new Node("ResolvedType", at, concrete);
+      }
+      // a value parameter used as a value: arr<Cell>[Width * Height]
+      if (node.Kind == "Name" && node.Text != null && map.TryGetValue(node.Text, out var constant) && constant.StartsWith('#')) {
+        return ValueNode(constant, node);
       }
       return null;
     };
+  }
+
+  // the literal of a value argument "#12", "#-3" or "#true"
+  static Node ValueNode(string value, Node at) {
+    var token = new Token(TokenKind.Ident, "", at.Line, 0);
+    string text = value[1..];
+    if (text is "true" or "false") {
+      return new Node("Bool", token, text);
+    }
+    return text.StartsWith('-') ? new Node("Neg", token).Add(new Node("Int", token, text[1..])) : new Node("Int", token, text);
+  }
+
+  // ---------------------------------------------------------------- value parameters (11.3.3)
+
+  // the value of a value argument written in a type: a number, true/false, or + * << of those, as "#value"
+  string ValueArgOf(Node node, TypeParam param) {
+    var token = new Token(TokenKind.Ident, "", node.Line, 0);
+    var written = node.Kind switch {
+      "Count" => new Node("Int", token, node.Text),
+      "ValueArg" => node.Children[0],
+      "Type" when node is { Children.Count: 0, Text: "true" or "false" } => new Node("Bool", token, node.Text),
+      _ => throw Error($"'{param.Name}' is a value parameter: write a constant, as in 4 or Width * 2", node)
+    };
+    Int128 value = EvalConstant(written);
+    if (param.ValueType == "bool") {
+      return "#" + (value != 0 ? "true" : "false");
+    }
+    var (min, max) = IntegerRange(param.ValueType!);
+    if (value < min || value > max) {
+      throw Error($"{value} does not fit in {param.ValueType}, the type of the value parameter '{param.Name}'", node);
+    }
+    return "#" + value;
+  }
+
+  static (Int128 Min, Int128 Max) IntegerRange(string type) => type switch {
+    "i8" => (sbyte.MinValue, sbyte.MaxValue),
+    "i16" => (short.MinValue, short.MaxValue),
+    "i32" => (int.MinValue, int.MaxValue),
+    "i64" => (long.MinValue, long.MaxValue),
+    "u8" => (0, byte.MaxValue),
+    "u16" => (0, ushort.MaxValue),
+    "u32" => (0, uint.MaxValue),
+    _ => (0, ulong.MaxValue)
+  };
+
+  // + * << on unsigned values saturate at the largest u64 (11.3.3); a literal -n is allowed for the signed types
+  Int128 EvalConstant(Node node) {
+    switch (node.Kind) {
+      case "Int": {
+        string digits = node.Text!.Replace("_", "");
+        bool hex = digits.StartsWith("0x", StringComparison.OrdinalIgnoreCase);
+        if (!ulong.TryParse(hex ? digits[2..] : digits, hex ? System.Globalization.NumberStyles.HexNumber : System.Globalization.NumberStyles.None,
+              null, out var number)) {
+          throw Error($"'{node.Text}' is not a valid value for a value parameter", node);
+        }
+        return number;
+      }
+      case "Bool":
+        return node.Text == "true" ? 1 : 0;
+      case "Paren":
+        return EvalConstant(node.Children[0]);
+      case "Neg" when node.Children[0].Kind == "Int":
+        return -EvalConstant(node.Children[0]);
+      case "Binary" when node.Text is "+" or "*" or "<<": {
+        Int128 left = EvalConstant(node.Children[0]);
+        Int128 right = EvalConstant(node.Children[1]);
+        Int128 a = left < 0 ? 0 : left;
+        Int128 b = right < 0 ? 0 : right;
+        Int128 result = node.Text switch {
+          "+" => a + b,
+          "*" => a * b,
+          _ => b >= 64 ? (a == 0 ? 0 : ulong.MaxValue) : a << (int)b
+        };
+        return result > ulong.MaxValue ? ulong.MaxValue : result;
+      }
+      default:
+        throw Error("a value argument is a constant: numbers, true, false and + * << of them", node);
+    }
   }
 
   // ---------------------------------------------------------------- sets and constraints
@@ -287,10 +390,10 @@ public sealed partial class CodeGen {
   }
 
   bool Satisfies(string type, Node constraint) {
-    if (constraint is not { Kind: "Type", Children.Count: 0 }) {
+    if (constraint is not { Kind: "Type" }) {
       throw NotSupported("a constraint that is not a plain name", constraint);
     }
-    if (IsSetName(constraint.Text!)) {
+    if (constraint.Children.Count == 0 && IsSetName(constraint.Text!)) {
       return InSet(type, constraint.Text!);
     }
     string required = ResolveType(constraint);
@@ -302,10 +405,14 @@ public sealed partial class CodeGen {
 
   void CheckConstraints(List<TypeParam> ps, List<string> args, Node at, string what) {
     for (int index = 0; index < ps.Count; index++) {
-      foreach (var constraint in ps[index].Constraints) {
+      foreach (var written in ps[index].Constraints) {
+        // a constraint with type arguments (Container<Item>) is read with the arguments of this copy
+        var constraint = written.Children.Count > 0
+          ? CloneNode(written, SubstituteTypes(ps.Zip(args).ToDictionary(pair => pair.First.Name, pair => pair.Second)))
+          : written;
         if (!Satisfies(args[index], constraint)) {
           string parameter = ps[index].Name.StartsWith('_') ? "the parameter " + ps[index].Name[1..] : "the type parameter " + ps[index].Name;
-          throw Error($"{DisplayName(args[index])} does not satisfy {constraint.Text}, required by {parameter} of {what}", at);
+          throw Error($"{DisplayName(args[index])} does not satisfy {ConstraintShown(constraint)}, required by {parameter} of {what}", at);
         }
       }
     }
@@ -342,13 +449,17 @@ public sealed partial class CodeGen {
   static int NestingOf(string type) => Regex.Matches(type, "__").Count + 1;
 
   // the type arguments written in a Type node
-  List<string> TypeArgsOf(IEnumerable<Node> nodes) {
+  List<string> TypeArgsOf(IEnumerable<Node> nodes, List<TypeParam> ps) {
     var args = new List<string>();
     foreach (var node in nodes) {
-      if (node.Kind is "Count" or "ValueArg") {
-        throw NotSupported("Value parameters (11.3.3)", node);
+      var param = args.Count < ps.Count ? ps[args.Count] : null;
+      if (param?.ValueType != null) {
+        args.Add(ValueArgOf(node, param));
+      } else if (node.Kind is "Count" or "ValueArg") {
+        throw Error(param != null ? $"'{param.Name}' is a type parameter: write a type" : "a type is expected here, not a value", node);
+      } else {
+        args.Add(ResolveType(node));
       }
-      args.Add(ResolveType(node));
     }
     return args;
   }
@@ -358,7 +469,7 @@ public sealed partial class CodeGen {
     if (reference.Children[0] is not { Kind: "Name" } target || !genericClasses.TryGetValue(target.Text!, out var generic)) {
       return null;
     }
-    return ClassInstanceName(generic, TypeArgsOf(reference.Children.Skip(1)), reference);
+    return ClassInstanceName(generic, TypeArgsOf(reference.Children.Skip(1), generic.Params), reference);
   }
 
   // after the classes are registered: the type arguments of each copy must satisfy the constraints
@@ -366,6 +477,54 @@ public sealed partial class CodeGen {
     foreach (var (_, (generic, args)) in classInstanceArgs) {
       CheckConstraints(generic.Params, args, generic.Node, generic.Name);
     }
+  }
+
+  // ---------------------------------------------------------------- type switch (11.3.7)
+
+  // value is ? { Numeric: a, string: b, default: c }: the first case that matches the type of the value is the only one compiled
+  Expr TypeSwitch(Node n, Scope scope, string? expected) {
+    var subject = ExprOf(n.Children[0], scope);
+    string type = subject.Type;
+    Node? chosen = null;
+    bool sawDefault = false;
+    var seen = new HashSet<string>();
+    foreach (var arm in n.Children.Skip(1)) {
+      bool matches = false;
+      foreach (var label in arm.Children[0].Children) {
+        if (label.Kind == "Default") {
+          if (sawDefault) {
+            throw Error("a type switch can have only one 'default'", label);
+          }
+          matches = true;
+          if (chosen == null) {
+            chosen = arm;
+          }
+          sawDefault = true;
+          continue;
+        }
+        if (sawDefault || !seen.Add(TypeNodeText(label))) {
+          Warn("a case of the type switch can never match: an earlier case already takes its types", label, 2);
+        }
+        if (chosen == null && CaseMatches(type, label)) {
+          chosen = arm;
+        }
+      }
+    }
+    if (chosen == null) {
+      throw Error($"no case of the type switch matches {DisplayName(type)}: add a case for it or a 'default'", n);
+    }
+    return ExprOf(chosen.Children[1], scope, expected);
+  }
+
+  static string TypeNodeText(Node type) => type.Kind + ":" + type.Text + "(" + string.Join(",", type.Children.Select(TypeNodeText)) + ")";
+
+  // a case is a type, a class (and its subclasses), a trait or a set
+  bool CaseMatches(string type, Node label) {
+    if (label is { Kind: "Type", Children.Count: 0 } && IsSetName(label.Text!)) {
+      return InSet(type, label.Text!);
+    }
+    string resolved = ResolveType(label);
+    return type == resolved || (IsClass(resolved) && IsClass(type) && IsSubtype(type, resolved));
   }
 
   // ---------------------------------------------------------------- generic functions
@@ -406,7 +565,7 @@ public sealed partial class CodeGen {
     if (written.Count > generic.Params.Count) {
       throw Error($"{generic.Name} takes {generic.Params.Count} type argument(s), not {written.Count}", at);
     }
-    var writtenTypes = TypeArgsOf(written);
+    var writtenTypes = TypeArgsOf(written, generic.Params);
     for (int index = 0; index < writtenTypes.Count; index++) {
       bound[generic.Params[index].Name] = writtenTypes[index];
     }

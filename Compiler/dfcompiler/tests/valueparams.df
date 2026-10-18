@@ -1,0 +1,50 @@
+// Value parameters of generics (11.3.3): constants that are part of the type
+alias Root as r
+
+public class Grid<u64 Width, u64 Height, Cell>() {
+  public arr<Cell> cells = arr<Cell>[Width * Height]
+
+  public fun u64 Count() { Width * Height }
+  public fun Set(u64 x, u64 y, Cell value) { cells[y * Width + x] = value }
+  public fun Cell Get(u64 x, u64 y) { cells[y * Width + x] }
+}
+
+public class Flag<bool On>() {
+  public fun string Show() {
+    if On {
+      return "on"
+    }
+    return "off"
+  }
+}
+
+public class Wrapper<u64 N>() {
+  public fun u64 Twice() { Grid<N, 2, i32>().Count() }
+}
+
+public class Offset<i32 By>() {
+  public fun i32 Apply(i32 x) { x + By }
+}
+
+fun u64 sizeOf<u64 N>(i32 ignored) { N << 2 }
+
+fun u64 gridCount<u64 N>(Grid<N, 3, i32> grid) { grid.Count() + N }
+
+Grid<4, 3, i32> g = Grid<4, 3, i32>()
+g.Set(1, 2, 42)
+r.Console.log(g.Get(1, 2))
+r.Console.log(g.Count())
+Grid<2 + 2, 3, i32> same = Grid<4, 3, i32>()
+r.Console.log(same.Count())
+Grid<2, 2, string> names = Grid<2, 2, string>()
+names.Set(0, 1, "x")
+r.Console.log(names.Get(0, 1))
+r.Console.log(Flag<true>().Show())
+r.Console.log(Flag<false>().Show())
+r.Console.log(Wrapper<5>().Twice())
+r.Console.log(sizeOf<3>(0))
+r.Console.log(gridCount(g))
+r.Console.log(Offset<-5>().Apply(7))
+r.Console.log(g)
+
+// Errors are in tests/errors: valueparam_*.df

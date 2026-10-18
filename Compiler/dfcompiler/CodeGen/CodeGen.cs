@@ -80,6 +80,7 @@ sealed class VarInfo {
   public bool IsConst { get; }
   public bool Own { get; set; }       // the variable owns its object: it is destroyed when the scope ends
   public bool IsWeak { get; set; }    // a weak reference: used only through enforce
+  public long? KnownLength { get; set; }   // an array that starts from a literal or arr<T>[n] and is never assigned again: its length is known
 }
 
 sealed class Scope {
@@ -697,6 +698,9 @@ public sealed partial class CodeGen {
       sb.Append($"{pad}{(isConst ? "const " : "")}{CType(type)} {variable.CName} = {code};\n");
     }
     variable.IsWeak = weak;
+    if (init != null && !weak && IsArr(type) && ConstantArrayLength(init.Children[0]) is long length && !AssignedAgain(s.Text!)) {
+      variable.KnownLength = length;
+    }
     scope.Vars[s.Text!] = variable;
     if (init == null) {
       assign.Unassigned.Add(variable);
@@ -1084,6 +1088,8 @@ public sealed partial class CodeGen {
         return SafeAccess(n, n, scope);
       case "SwitchExpr":
         return SwitchExpr(n, scope, expected);
+      case "TypeSwitch":
+        return TypeSwitch(n, scope, expected);
       case "BoolSwitchExpr":
         return BoolSwitchExpr(n, scope, expected);
       case "IsNull":

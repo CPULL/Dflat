@@ -15,6 +15,9 @@ Where a decision came from the spec the section is named; where I (Claude) chose
 - Options (all with two dashes, no short forms; an unknown option is an error): --output <file> (the executable, wherever the user
   wants), --target <target>, --emit-c (only the C file), --run (run the program), --cc <path>, --version, and "--" then the
   arguments of the program. (-o and -version of the earlier versions are gone.)
+  Since 2026-10-18 the names are not case sensitive (--VERSION, --Emit-C work), as in "Compiler Options.md", which is the list of the options of the compiler
+  (the ones not built yet are described there). --run must be the very last option; the program arguments come after "--" (--run -- first second), and a
+  "--" without --run, or anything but "--" after --run, is an error. Program.cs holds the usage text; the options and the .dsprj file are built as we go.
 - Targets: win-x64, win-x32, linux-x64, linux-arm64, osx-x64, osx-arm64 (clang triples in Program.Targets), or CL:<text>: the text is
   split at the spaces and given to clang as it is (nothing else is added for the target: no -lm, no -D_CRT_SECURE_NO_WARNINGS).
   Without --target, or with the target of this machine, clang gets no target flag (as before). Any other known target adds
@@ -297,9 +300,25 @@ CHOICES where I (Claude) decided and the spec does not say, and limits of this v
 - The body of a generic is NOT checked at the definition (the spec says it is: the Rust model). It is checked in every copy, so an
   error appears with the first type that reaches it, and a generic that is never used is never checked at all.
 - Supported: generic functions at the top level and generic classes at the top level. NOT supported (error "feature not supported"):
-  generic methods, generic traits, a generic parent (class A<T> : B<T>), placeholders, value parameters, 'where' on a class header,
-  'where' on a placeholder or a type expression, the type switch (value is ? { }), conversion of a value to a set member (11.3.9),
+  generic methods, a class implementing a generic trait twice, a generic parent (class A<T> : B<T>), placeholders,
+  'where' on a placeholder or a type expression, conversion of a value to a set member (11.3.9),
   Box<Dog> -> Box<Animal> conversion. These are phase 7b.
+- Value parameters (11.3.3, built 2026-10-18): <u64 Width, bool On> on classes and functions. The type is an integer or bool (char, reals and dec give
+  "feature not supported"). A value argument is kept as the string "#12" / "#-3" / "#true" next to the type names, so it is part of the mangled
+  name (Grid___4_3_i32 style) and of the copy limits. A written argument is a number, true/false or + * << of numbers (saturating, unsigned, EvalConstant);
+  it must fit the type. In a copy the parameter name becomes the literal: as a value (Name node -> Int/Bool/Neg) and as a type argument (Type node ->
+  ValueArg), so arr<Cell>[Width * Height] and Grid<N, 2, i32> inside another generic work. A function infers a value parameter only through a
+  generic class argument (Grid<N, 3, i32> g); otherwise it is written: sizeOf<3>(0). A local variable with the name of a value parameter is replaced too.
+- 'where' on a class header (built 2026-10-18): the parser reads it after the bases; ReadTypeParams already handled the entries. 'where' on a class
+  without type parameters is an error.
+- Type switch (value is ? { Numeric: a, char, string: b, default: c }), built 2026-10-18: node TypeSwitch (subject + Arm like a switch expression, labels
+  are types). TypeSwitch() in CodeGen.Generics.cs takes the static type of the subject and compiles ONLY the first matching arm (a set, a class with
+  its subclasses, a trait, or a type); no match and no default is an error, checked in each copy (not at the definition). The L2 warning is only for a
+  repeated label or a case after default (a case already covered through a set is not detected).
+- Generic traits (C1, built 2026-10-18): a trait with <Item> is a GenericClass (IsTrait) and is copied like a generic class: RegisterGenerics puts a
+  Trait node named Container__string in the program, ClassInstanceName makes the name (restart through the seeds). RegisterClasses turns Container<string>
+  in a class header into the copy; a trait copy as a constraint (Source : Container<i32>) is resolved with the arguments of the copy
+  (CheckConstraints/Satisfies). Two copies of one generic trait on a class: "feature not supported yet". Parent generic traits: not in the language.
 - Type arguments of a class are always written (Box<i32>(5)); a constructor call does not infer them.
 - A generic function cannot have the name of another function (no overloading between generic and plain ones).
 - The "unconstrained T is move-only" rule of 11.3.11 is not checked at the definition. ->Item on an object moves it, on a number it
@@ -414,7 +433,7 @@ STATE (2026-10-17): built and tested with dfcompiler/tests/files.df (a scratch f
   trailing separators; "." and ".." are kept as they are; on Windows \ is a separator and < > " | ? * : (outside the drive) and
   control characters raise InvalidPathException when the File is created. On Linux and macOS only NUL is illegal and \ is a name
   character. Relative paths stay relative. The OS form is built for each call (UTF-16 on Windows, UTF-8 elsewhere).
-- File(path) normalizes in a field initializer (full = File.fixPath(rawPath)); File.path gives the normalized text.
+- File(path) normalizes in a field initializer (full = File.fixPath(path)); File.path gives the normalized text.
 - parent: a File, or null for a root ("/" or a drive) and for "." / ".."; a bare relative name has the parent ".". extension: after the
   last dot of the name, "" when there is none or the name only starts with the dot.
 - delete: a missing item is false without an exception; a folder that is not empty needs Recursive (else the silent
@@ -725,11 +744,9 @@ anything that depends on the machine or on the time (paths, now): silentfiles.df
 Tests that must not compile (tests\errors, 2026-10-17)
 - tests\errors\<name>.df is a small program (one or two lines) that the compiler must refuse; errors\expected\<name>.txt holds the error line(s):
   "<name>.df(<line>): error: <message>", with no folder. The runner compiles it with --emit-c, so no C compiler is involved. A program that compiles is a
-  FAIL ("NO ERROR"). 55 cases today: bitfields, tryParse, reference parameters, string formats, copyFrom and sort, throw, and the basic errors of the language.
+  FAIL ("NO ERROR"). 60 cases today: bitfields, tryParse, reference parameters, string formats, copyFrom and sort, throw, and the basic errors of the language.
   Adding a case: write the .df file, run .\run-tests.ps1 -Only <name> -Update, read the message in the expected file, and keep it only if it is the right one.
-- The messages are locked as they are today. Two things found while writing them, not changed:
-  * File() reports "missing argument 'rawPath' for 'File'": the constructor parameter of the File class written in Dflat is called rawPath (the spec says path).
-  * increment((&)3) reports "only variables and tuple fields can be assigned for now": the message of the general assignment, not one about (&).
+- The messages are locked as they are today.
 
 A catch always names an exception type (2026-10-18)
 - Spec 15.1: after catch comes an exception type (or all), then an optional variable. The shorthand catch ex { } (= catch Exception ex) no longer exists;
@@ -737,3 +754,17 @@ A catch always names an exception type (2026-10-18)
   exception type as "unknown exception type 'X': a catch names an exception type, then an optional variable (catch Exception X gets any exception)".
   Tests: tests/errors/catch_unknown_exception.df and catch_variable_without_type.df. The 8 uses of catch ex in the tests and the two sample.df examples now
   write catch Exception ex.
+
+Small items of 2026-10-18
+- copyFrom is checked at compile time when the sizes and indexes are constants (CheckCopyFromRanges in CodeGen.Arrays.cs): VarInfo.KnownLength is set for an array declared
+  from a literal list or arr<T>[constant] and never assigned again or handed out as (&)name in the function (or the program, for top-level code) that declares it
+  (AssignedAgain walks the whole function, so a same-named variable elsewhere only makes the check more careful). Messages: "copyFrom: N items do not fit from index I of L items",
+  "copyFrom: N items from index I do not fit in the source of L items", "copyFrom: the indexes and the count cannot be negative". An array of unknown length, a
+  non-constant index or count, and the same array as source and destination (already an error) are unchanged. Tests: errors/copyfrom_range_destination, _count_source,
+  _destination_sized, _negative_index, _inclusive_range.
+- ?. on the read-only properties of File (f?.size, f?.name, f?.parent?.name) already worked, because SafeAccess rebuilds the member and MemberValue finds the get_ function. No
+  compiler change; tests/safeprops.df locks it.
+- The File class parameter is called path (was rawPath), so File() says "missing argument 'path' for 'File'" and File(path: "x") is a valid named argument. A (&) on something
+  that is not a variable, a field or an array item says "(&) needs a variable, a field or an array item" (WritableAddress).
+- Code examples: Hello.df, ConsoleCalculator.df and Code examples.df compile. sample.df does not: line 56 writes the copy marker in the parameter list (Item copied!), which spec 13.1 puts in
+  the call (the parser refuses it on purpose). The sample is out of date, not the compiler.

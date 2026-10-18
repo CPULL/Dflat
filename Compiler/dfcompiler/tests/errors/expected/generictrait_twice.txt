@@ -1,0 +1,1 @@
+generictrait_twice.df(7): error: feature not supported yet (a class that implements the generic trait Container more than once)

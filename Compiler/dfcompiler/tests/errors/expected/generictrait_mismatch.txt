@@ -1,0 +1,1 @@
+generictrait_mismatch.df(14): error: cannot convert Names to Container__i32 implicitly; use a cast

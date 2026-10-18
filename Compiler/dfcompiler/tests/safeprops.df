@@ -1,0 +1,22 @@
+namespace safeprops
+alias Root as r
+alias Root.IO as fs
+
+// ?. on the read-only properties of File, with an object and with null
+string base = File.combinePaths(File.getTempDir(), "dflat-safeprops-test")
+File folder = File.createDirectory(base)
+File none = null
+r.Console.log(folder?.name)                          // dflat-safeprops-test
+r.Console.log(none?.name == null)                    // true
+r.Console.log(folder?.isDirectory)                   // true
+bool? missing = none?.isDirectory
+r.Console.log(missing == null)                       // true
+u64? size = folder?.size
+r.Console.log(size != null)                          // true
+u64? noSize = none?.size
+r.Console.log(noSize == null)                        // true
+r.Console.log(folder?.parent != null)                // true
+r.Console.log(none?.parent?.name == null)            // true
+r.Console.log(folder?.exists())                      // true
+File.delete(base, fs.DeleteOptions.Recursive)
+r.Console.log(folder?.exists())                      // false

@@ -146,7 +146,16 @@ public sealed partial class CodeGen {
           Warn("Root.Class is the implicit base of every class and is never written", baseType, 1);
           continue;
         }
-        if (baseType.Children.Count > 0) {
+        if (genericClasses.TryGetValue(baseName, out var genericBase) && genericBase.IsTrait) {
+          // Container<string>: the copy of the generic trait
+          if (baseType.Children.Count == 0) {
+            throw Error($"'{baseName}' is generic: write its type arguments, {baseName}<...>", baseType);
+          }
+          baseName = ClassInstanceName(genericBase, TypeArgsOf(baseType.Children, genericBase.Params), baseType);
+          if (cls.Traits.Any(existing => classInstanceArgs.TryGetValue(existing.Name, out var other) && other.Template == genericBase)) {
+            throw Error($"feature not supported yet (a class that implements the generic trait {genericBase.Name} more than once)", baseType);
+          }
+        } else if (baseType.Children.Count > 0) {
           throw NotSupported("Generic parent types", baseType);
         }
         if (baseName is "Exception" or "Root.Exception") {
@@ -753,6 +762,9 @@ public sealed partial class CodeGen {
 
   // the C address of what (&)x names; the type must be the one of the parameter
   string WritableAddress(Node target, Scope scope, string type, Node at) {
+    if (target.Kind is not ("Name" or "Member" or "Index")) {
+      throw Error("(&) needs a variable, a field or an array item", at);
+    }
     if (target.Kind == "Index") {
       var obj = ExprOf(target.Children[0], scope);
       if (!IsArr(obj.Type) || target.Children[0].Kind == "GenericRef") {

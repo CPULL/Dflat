@@ -1,0 +1,1 @@
+typeswitch_no_case.df(4): error: no case of the type switch matches string: add a case for it or a 'default'

@@ -1,0 +1,11 @@
+alias Root as r
+
+fun string kind<Item>(Item value) {
+  value is ? {
+    i32: "integer",
+    default: "a",
+    default: "b"
+  }
+}
+
+r.Console.log(kind(1))

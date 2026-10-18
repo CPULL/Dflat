@@ -327,7 +327,7 @@ public sealed partial class CodeGen {
           if (n.Children.Count == 0) {
             throw Error($"'{t}' is generic: write its type arguments, {t}<...>", n);
           }
-          return ClassInstanceName(genericClass, TypeArgsOf(n.Children), n);
+          return ClassInstanceName(genericClass, TypeArgsOf(n.Children, genericClass.Params), n);
         }
         if (IsSetName(t)) {
           throw Error($"'{t}' is a set: it names alternatives at compile time and is not a type of values; use it as a constraint or as the type of a parameter (11.3.6)", n);

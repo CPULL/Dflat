@@ -30,7 +30,8 @@ Stream and FileStream (stdlib 6.8): read, write, readByte, writeByte, seek, flus
 String formats (8.3): w / wc width in characters / columns, f fill, a< a^ a>, t<'marker' / t>'marker' (needs a width), cU cL cS cT, q, s sl sr; a width never cuts; wc uses an approximate table of wide East Asian and emoji ranges
 Reference parameters (13.1): &T x (read-only, no marker in the call) and (&)T x (writable, the call writes (&)x) for variables, fields, tuple fields and array items; also through another reference parameter; with overloads, named arguments and defaults (read-only only). tryParse still has its own library form
 A catch always names an exception type (catch Exception { } is the sinkhole of the non silent exceptions); the old shorthand catch ex { } is an error
-Test runner: tests\run-tests.ps1 compares the output of every test program with tests\expected\<name>.txt, and the compiler errors of the programs in tests\errors (55 cases that must not compile) with tests\errors\expected (see CompilerImplementation.txt, THE TEST RUNNER)
+Options of the compiler: the built ones (--output, --target, --emit-c, --run, --cc, --version) follow Compiler Options.md: names not case sensitive, --run last, program arguments after --. The rest of the options and the .dsprj project file are defined in Compiler Options.md and not built yet
+Test runner: tests\run-tests.ps1 compares the output of every test program with tests\expected\<name>.txt, and the compiler errors of the programs in tests\errors (60 cases that must not compile) with tests\errors\expected (see CompilerImplementation.txt, THE TEST RUNNER)
 Naming: the standard library functions are camelCase (Root.Console.log, Root.getArgs, Root.Time.now, Root.Random.int, Math.sqrt, string.trim, char.isDigit ...); namespaces and types stay PascalCase, constants UPPERCASE. aSin, aCos, aTan, aTan2 are accepted next to asin, acos, atan, atan2; Math.PI2 added
 Scope atEnd
 Entry point: top-level code, or main(), main(arr<string> args), main(string args...) with an int exit code
@@ -47,7 +48,7 @@ text[pos] reads a character
 
 Partial -----------------------
 
-Arrays arr<T>: literals, arr<T>[size], index read/write with IndexOutOfRangeException, .len, for-in, has, indexOf, fill, clear, reverse, sort / sortUnstable (default order, SortDirection.ASC / DESC; numbers, bool, char, string, date, time, clock, lapse, enums), copyFrom (count or range form). Missing: sort with a lambda (no lambdas yet), sort and copyFrom of objects (a comparer, cloning), views and ranges as values, sized declarations (arr<T>[n] x), warning for elements read before fill
+Arrays arr<T>: literals, arr<T>[size], index read/write with IndexOutOfRangeException, .len, for-in, has, indexOf, fill, clear, reverse, sort / sortUnstable (default order, SortDirection.ASC / DESC; numbers, bool, char, string, date, time, clock, lapse, enums), copyFrom (count or range form; an obvious misfit of constant indexes on arrays of known length is a compile error). Missing: sort with a lambda (no lambdas yet), sort and copyFrom of objects (a comparer, cloning), views and ranges as values, sized declarations (arr<T>[n] x), warning for elements read before fill
 Silent exceptions: library calls (date(string), time(...), (time)n) raise them only when a catch in the same function can handle them; catches in callers do not see them yet; custom ones need classes
 Strings: every string is a pointer and a byte length, never freed; no small / block strings (4.3), no writing by index (open item)
 Parsing: date.parse, time.parse and <integer or real type>.parse(text, default, format) (all of section 9 for numbers); tryParse for integers, reals, date and time with (&)variable (a library form, not general (&) parameters); no dec
@@ -58,7 +59,7 @@ Time zones: dates are UTC; z prints +0 and parses an offset
 Not yet -----------------------
 Exceptions stage 2 leftovers: library functions with a declared list of exceptions (the natives keep the same-function rule), silent exceptions from constructors, field initializers and destructors, silent operations of the language (overflow) that do not emit yet. See CompilerImplementation.txt
 
-Generics: type switch, value parameters, generic traits, placeholders (7b); definition-time checking of bodies
+Generics: placeholders (7b); definition-time checking of bodies
 vec, list, map, hmap, set, hset, dfoot (7c)
 Ownership, move, copy, refcount
 Move parameters on non-objects, volatile references, reference parameters on constructors, (&) borrows that replace an object
@@ -164,7 +165,10 @@ Phase 7  Generics (spec 11.3)                                     IN PROGRESS
   sets: Generic Name { types } (public / internal accepted), the predefined Signed, Unsigned, Integers, Reals, Numeric, Strings
   (only the types this compiler has); a set as a constraint (one type per call) or as the type of a parameter (each one independent)
   T? in generic code is an error (11.3.8); limits of 11.3.12: chain depth 16, copies per generic 16 (properties of CodeGen, no option yet)
- 7b  type switch (value is ? { }), conversion to a set member, value parameters, generic traits, placeholders, 'where' on class headers   TODO
+ 7b  value parameters DONE (2026-10-18: integers and bool; tests valueparams, errors/valueparam_*); the rest of 7b:
+     DONE 2026-10-18: 'where' on class headers (tests genwhere, errors/genwhere_*), type switch value is ? { } (tests typeswitch, errors/typeswitch_*)
+     DONE 2026-10-18 (C1): generic traits Container<string> (tests generictraits, errors/generictrait_*); a class implementing one generic trait twice and a
+     generic parent trait give "feature not supported". TODO: conversion to a set member, placeholders (C2)
  7c  vec, list, map, hmap, set, hset as generic classes                                                                              TODO
 
 Decisions: operator is "fun bool ==(V o)"; only primary constructors for now; default toStr is

@@ -1,0 +1,11 @@
+dflat-safeprops-test
+true
+true
+true
+true
+true
+true
+true
+true
+false
+---- exit code 0 ----

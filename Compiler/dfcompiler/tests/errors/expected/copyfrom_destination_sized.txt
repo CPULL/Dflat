@@ -1,0 +1,1 @@
+copyfrom_destination_sized.df(3): error: copyFrom: 2 items do not fit from index 1 of 2 items

@@ -82,7 +82,7 @@ public sealed partial class CodeGen {
   void DeclareTraits(Node program) {
     foreach (var node in program.Children.Where(child => child.Kind == "Trait")) {
       string name = node.Text!;
-      if (classes.ContainsKey(name) || traits.ContainsKey(name) || enums.ContainsKey(name) || IsKnownType(name)) {
+      if (classes.ContainsKey(name) || traits.ContainsKey(name) || enums.ContainsKey(name) || IsKnownType(name) || genericClasses.ContainsKey(name)) {
         throw Error($"the name '{name}' is already used by a type", node);
       }
       if (node.Children.Any(child => child.Kind is "GenericParams" or "Where")) {

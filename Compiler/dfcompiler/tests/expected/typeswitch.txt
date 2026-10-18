@@ -1,0 +1,10 @@
+3
+2.5
+65
+4
+integer
+integer
+real
+named
+other
+---- exit code 0 ----

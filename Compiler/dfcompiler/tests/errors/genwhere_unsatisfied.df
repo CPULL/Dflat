@@ -1,0 +1,10 @@
+alias Root as r
+
+trait Named {
+  fun string Name()
+}
+
+public class Holder<Item, Count>() where Item : Named, Count : Integers {
+}
+
+Holder<i32, i32> h = Holder<i32, i32>()

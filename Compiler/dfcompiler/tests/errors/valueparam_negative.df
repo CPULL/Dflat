@@ -1,0 +1,10 @@
+alias Root as r
+
+public class Grid<u64 Width, Cell>() {
+  public fun u64 Count() { Width }
+}
+
+public class Box<Item>() {
+}
+
+Grid<-1, i32> g = Grid<-1, i32>()

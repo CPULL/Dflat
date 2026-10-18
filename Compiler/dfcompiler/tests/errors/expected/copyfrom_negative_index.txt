@@ -1,0 +1,1 @@
+copyfrom_negative_index.df(3): error: copyFrom: the indexes and the count cannot be negative

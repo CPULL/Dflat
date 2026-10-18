@@ -1,0 +1,14 @@
+alias Root as r
+
+trait Container<Item> {
+  fun Item Get(u64 index)
+}
+
+public class Names : Container<string> {
+  override fun string Get(u64 index) { "name" }
+}
+
+fun i32 first(Container<i32> source) { source.Get(0) }
+
+Names n = Names()
+r.Console.log(first(n))

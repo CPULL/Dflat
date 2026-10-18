@@ -1910,7 +1910,7 @@ typedef struct c_File c_File;
 
 struct c_File {
   const df_class* cls;
-  df_string m_rawPath;
+  df_string m_path;
   df_string m_full;
 };
 
@@ -2101,8 +2101,8 @@ static df_res6 f_File_readAll(c_File* self);
 static df_res0 f_File_readAllText(c_File* self, int32_t v_encoding);
 static df_exception* f_File_writeAll(c_File* self, df_arr_u8 v_buffer, int32_t v_mode);
 static df_exception* f_File_writeAllText(c_File* self, df_string v_text, int32_t v_encoding, int32_t v_mode);
-static df_exception* f_File___init(c_File* self, df_string v_rawPath);
-static df_res2 f_File(df_string v_rawPath);
+static df_exception* f_File___init(c_File* self, df_string v_path);
+static df_res2 f_File(df_string v_path);
 static df_res0 f_readMissing(void);
 static df_res0 f_badPath(void);
 static df_res0 f_createOnly(c_File* v_target);
@@ -2116,8 +2116,8 @@ static df_string df_str_File(const c_File* o) {
     return df_str_lit("null", 4);
   }
   df_string r = df_str_lit("File { ", 7);
-  r = df_str_concat(r, df_str_lit("rawPath: ", 9));
-  r = df_str_concat(r, o->m_rawPath);
+  r = df_str_concat(r, df_str_lit("path: ", 6));
+  r = df_str_concat(r, o->m_path);
   r = df_str_concat(r, df_str_lit(", full: ", 8));
   r = df_str_concat(r, o->m_full);
   r = df_str_concat(r, df_str_lit(" }", 2));
@@ -2694,22 +2694,22 @@ static df_exception* f_File_writeAllText(c_File* self, df_string v_text, int32_t
   return df_err;
 }
 
-static df_exception* f_File___init(c_File* self, df_string v_rawPath) {
+static df_exception* f_File___init(c_File* self, df_string v_path) {
   df_exception* df_err = NULL;
   bool df_err_thrown = false;
   (void)df_err;
   (void)df_err_thrown;
-  (self)->m_rawPath = v_rawPath;
-  (self)->m_full = ({ df_res0 t_170 = f_File_fixPath(v_rawPath); if (t_170.err) { df_err = t_170.err; df_err_thrown = false; goto fn168_fail; } t_170.value; });
+  (self)->m_path = v_path;
+  (self)->m_full = ({ df_res0 t_170 = f_File_fixPath(v_path); if (t_170.err) { df_err = t_170.err; df_err_thrown = false; goto fn168_fail; } t_170.value; });
   fn168_fail: return df_err;
   fn168_panic: df_panic_unhandled(df_err);
   return df_err;
 }
 
-static df_res2 f_File(df_string v_rawPath) {
+static df_res2 f_File(df_string v_path) {
   c_File* self = (c_File*)df_calloc(1, sizeof(struct c_File));
   self->cls = &df_cls_File;
-  df_exception* error = f_File___init(self, v_rawPath);
+  df_exception* error = f_File___init(self, v_path);
   if (error) {
     return (df_res2){ NULL, error };
   }

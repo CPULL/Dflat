@@ -8,8 +8,8 @@ namespace dfcompiler;
 // The read-only properties are the get_ functions: "f.size" calls get_size() (MemberValue).
 public sealed partial class CodeGen {
   const string IoPrelude = """
-public class File(string rawPath) {
-  string full = File.fixPath(rawPath)
+public class File(string path) {
+  string full = File.fixPath(path)
 
   public static fun string fixPath(string path) {
     string result = Root.IO.Native.Normalize(path)

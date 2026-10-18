@@ -267,6 +267,74 @@ public sealed partial class CodeGen {
     };
   }
 
+  // the length of an array made from a literal list or arr<T>[constant]; null when it is not known
+  static long? ConstantArrayLength(Node init) {
+    if (init.Kind == "List") {
+      return init.Children.Count;
+    }
+    if (init.Kind == "Index" && init.Children.Count == 2 && init.Children[0].Kind == "GenericRef" && IntLiteralValue(init.Children[1]) is System.Numerics.BigInteger size
+        && size >= 0 && size < int.MaxValue) {
+      return (long)size;
+    }
+    return null;
+  }
+
+  // is the variable assigned again, or handed out as (&)name, anywhere in the function (or the program) that declares it?
+  bool AssignedAgain(string name) {
+    bool Walk(Node node) {
+      if (node.Kind == "Assign" && node.Children.Count > 0 && node.Children[0] is { Kind: "Name" } target && target.Text == name) {
+        return true;
+      }
+      if (node.Kind == "WritableAddressOf" && node.Children.Count > 0 && node.Children[0] is { Kind: "Name" } address && address.Text == name) {
+        return true;
+      }
+      if (node.Kind == "MultiAssign" && node.Children.Count > 0 && node.Children[0].Children.Any(target => target.Kind == "Name" && target.Text == name)) {
+        return true;
+      }
+      return node.Children.Any(Walk);
+    }
+    var root = currentFun?.Node ?? ProgramNode;
+    return root == null || Walk(root);
+  }
+
+  long? KnownLengthOf(Node? node, Scope scope) {
+    return node is { Kind: "Name" } && scope.Find(node.Text!) is { KnownLength: long length } ? length : null;
+  }
+
+  static long? ConstantIndex(Node node) {
+    return IntLiteralValue(node) is System.Numerics.BigInteger value && value >= long.MinValue && value <= long.MaxValue ? (long)value : null;
+  }
+
+  // copyFrom with constant indexes on arrays of known length: a copy that cannot fit is a compile error (spec 6.6)
+  void CheckCopyFromRanges(List<Node> args, Scope scope, Node at) {
+    Node? receiver = at.Kind == "Call" && at.Children[0].Kind == "Member" ? at.Children[0].Children[0] : null;
+    long? destinationLength = KnownLengthOf(receiver, scope);
+    long? sourceLength = KnownLengthOf(args[1], scope);
+    long? dstIndex = ConstantIndex(args[0]);
+    long? srcIndex;
+    long? count;
+    if (args.Count == 4) {
+      srcIndex = ConstantIndex(args[2]);
+      count = ConstantIndex(args[3]);
+    } else if (args[2].Kind == "Range") {
+      var range = args[2];
+      srcIndex = range.Children[0].Kind == "Open" ? 0 : ConstantIndex(range.Children[0]);
+      long? end = range.Children[1].Kind == "Open" ? sourceLength : ConstantIndex(range.Children[1]);
+      count = srcIndex != null && end != null ? end - srcIndex + (range.Text == "..=" ? 1 : 0) : null;
+    } else {
+      return;
+    }
+    if ((dstIndex ?? 0) < 0 || (srcIndex ?? 0) < 0 || (count ?? 0) < 0) {
+      throw Error("copyFrom: the indexes and the count cannot be negative", at);
+    }
+    if (dstIndex != null && count != null && destinationLength != null && dstIndex + count > destinationLength) {
+      throw Error($"copyFrom: {count} items do not fit from index {dstIndex} of {destinationLength} items", at);
+    }
+    if (srcIndex != null && count != null && sourceLength != null && srcIndex + count > sourceLength) {
+      throw Error($"copyFrom: {count} items from index {srcIndex} do not fit in the source of {sourceLength} items", at);
+    }
+  }
+
   // destination.copyFrom(dstIndex, source, srcIndex, count) and destination.copyFrom(dstIndex, source, range) (spec 6.6)
   Expr CopyFrom(Expr destination, List<Node> args, Scope scope, Node at) {
     if (args.Any(arg => arg.Kind == "Named") || args.Count is not (3 or 4)) {
@@ -290,6 +358,7 @@ public sealed partial class CodeGen {
       }
       return SignedTypes.Contains(value.Type) ? $"df_idx_arg((int64_t)({value.Code}))" : $"((uint64_t)({value.Code}))";
     }
+    CheckCopyFromRanges(args, scope, at);
     NeedChunk("sort");
     string dstIndex = Index(args[0]);
     string source0 = NewTemp();

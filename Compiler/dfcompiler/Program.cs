@@ -16,9 +16,10 @@ public static class Program {
     ["osx-arm64"] = "arm64-apple-darwin"
   };
 
-  const string Usage = "usage: dfcompiler <file.df> [--output <file>] [--target <target>] [--emit-c] [--run] [--cc <path-to-clang>] "
-    + "[-- program arguments] | --version\n"
-    + "  target: win-x64 win-x32 linux-x64 linux-arm64 osx-x64 osx-arm64, or CL:<options passed as they are to clang>";
+  const string Usage = "usage: dfcompiler <file.df> [--output <file>] [--target <target>] [--emit-c] [--cc <path-to-clang>] "
+    + "[--run [-- program arguments]] | --version\n"
+    + "  target: win-x64 win-x32 linux-x64 linux-arm64 osx-x64 osx-arm64, or CL:<options passed as they are to clang>\n"
+    + "  option names are not case sensitive; --run must be the last option, the program arguments follow --";
 
   public static int Main(string[] args) {
     string? path = null;
@@ -40,11 +41,17 @@ public static class Program {
 
     for (int i = 0; i < args.Length; i++) {
       if (args[i] == "--") {
-        // everything after -- goes to the program (with --run)
+        // everything after -- goes to the program, and only --run (the last option) can have arguments
+        if (!run) {
+          Console.Error.WriteLine($"the program arguments after -- need --run as the last option before them\n{Usage}");
+          return 2;
+        }
         programArgs.AddRange(args.Skip(i + 1));
         break;
       }
-      switch (args[i]) {
+      // option names are not case sensitive (what follows CL: and the file names are not options)
+      string option = args[i].StartsWith("--") ? args[i].ToLowerInvariant() : args[i];
+      switch (option) {
         case "--version":
           Console.WriteLine($"dfcompiler {Version}");
           return 0;
@@ -53,6 +60,10 @@ public static class Program {
           break;
         case "--run":
           run = true;
+          if (i + 1 < args.Length && args[i + 1] != "--") {
+            Console.Error.WriteLine($"--run must be the last option: write the program arguments after --, as in --run -- first second\n{Usage}");
+            return 2;
+          }
           break;
         case "--output":
           if ((output = Value(ref i, "--output")) == null) {

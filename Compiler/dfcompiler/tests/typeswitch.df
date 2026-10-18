@@ -1,0 +1,40 @@
+// The type switch of generics (11.3.7): value is ? { type: expression, ... }
+alias Root as r
+
+Generic Convertible { Numeric, char, string }
+
+trait Named {
+  fun string Name()
+}
+
+public class Dog(string label) : Named {
+  override fun string Name() { label }
+}
+
+fun r64 toReal(Convertible item) {
+  r64 result = item is ? {
+    Numeric: (r64)item,
+    char: (r64)(u32)item,
+    string: (r64)item.len
+  }
+  return result
+}
+
+fun string kind<Item>(Item value) {
+  value is ? {
+    i32, i64: "integer",
+    Reals: "real",
+    Named: "named",
+    default: "other"
+  }
+}
+
+r.Console.log(toReal(3))
+r.Console.log(toReal(2.5))
+r.Console.log(toReal('A'))
+r.Console.log(toReal("four"))
+r.Console.log(kind(1))
+r.Console.log(kind<i64>(1))
+r.Console.log(kind(1.5))
+r.Console.log(kind(Dog("rex")))
+r.Console.log(kind("text"))

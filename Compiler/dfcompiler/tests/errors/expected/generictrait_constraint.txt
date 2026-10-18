@@ -1,0 +1,1 @@
+generictrait_constraint.df(13): error: Names does not satisfy Container<i32>, required by the type parameter Source of sizeOf

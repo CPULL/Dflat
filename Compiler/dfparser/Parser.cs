@@ -1174,6 +1174,14 @@ public sealed class Parser {
     if (IsOp(":")) {
       node.Add(ParseBases(Next()));
     }
+    // class Box<Item>(...) where Item : Named { }
+    int afterHeader = pos;
+    SkipNewlines();
+    if (Peek.Kind == TokenKind.Ident && Peek.Text == "where") {
+      node.Add(ParseWhere());
+    } else {
+      pos = afterHeader;
+    }
     node.Add(ParseBlock(name.Text));
     return node;
   }
@@ -1407,12 +1415,63 @@ public sealed class Parser {
       }
       return new Node("Finalize", t).Add(subject);
     }
+    // value is ? { Numeric: (r64)value, string: r64.parse(value), default: 0.0 }   (the type switch of generics, spec 11.3.7)
+    if (IsOp("?") && PeekAt(1).Is("{")) {
+      return ParseTypeSwitch(subject);
+    }
     var type = ParseType(false);
     var node = new Node("Is", t).Add(subject).Add(type);
     if (Peek.Kind == TokenKind.Ident && Peek.Line == t.Line) {
       node.Text = Next().Text;
     }
     return node;
+  }
+
+  // after 'is': ? { type, type: expression, default: expression }; several types can share one expression
+  Node ParseTypeSwitch(Node subject) {
+    Next();
+    var open = Next();
+    var sw = new Node("TypeSwitch", open).Add(subject);
+    bool saved = noBrace;
+    noBrace = false;
+    var pending = new List<Node>();
+    SkipNewlines();
+    while (!IsOp("}")) {
+      if (AtEnd) {
+        throw ErrorAt("unclosed '{'", open);
+      }
+      pending.Add(IsKw("default") ? new Node("Default", Next()) : ParseType(false));
+      SkipNewlines();
+      if (IsOp(":")) {
+        var colon = Next();
+        SkipNewlines();
+        var labels = new Node("Values", colon);
+        foreach (var label in pending) {
+          labels.Add(label);
+        }
+        pending.Clear();
+        sw.Add(new Node("Arm", colon).Add(labels).Add(ParseExpr()));
+        SkipNewlines();
+      } else if (!IsOp(",")) {
+        throw Error("expected ':' after the type of a case");
+      }
+      if (!AcceptOp(",")) {
+        SkipNewlines();
+        if (!IsOp("}")) {
+          throw Error("expected ',' or '}'");
+        }
+      }
+      SkipNewlines();
+    }
+    Next();
+    noBrace = saved;
+    if (pending.Count > 0) {
+      throw ErrorAt("the last type of the type switch has no expression", open);
+    }
+    if (sw.Children.Count < 2) {
+      throw ErrorAt("a type switch needs at least one case", open);
+    }
+    return sw;
   }
 
   string? MatchBinaryOp(string[] ops) {

@@ -1,0 +1,1 @@
+generictrait_no_args.df(7): error: 'Container' is generic: write its type arguments, Container<...>

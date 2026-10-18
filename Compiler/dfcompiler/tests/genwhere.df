@@ -1,0 +1,22 @@
+// 'where' on the header of a generic class (11.3.1): constraints on a plain parameter, mixed with inline ones
+alias Root as r
+
+trait Named {
+  fun string Name()
+}
+
+public class Dog(string label) : Named {
+  override fun string Name() { label }
+}
+
+public class Holder<Item, Count>(->Item first) where Item : Named, Count : Integers {
+  public Item first
+  public fun string Describe() { first.Name() }
+}
+
+public class Both<Item : Named>(->Item first) where Item : Named {
+  public Item first
+}
+
+Holder<Dog, i32> h = Holder<Dog, i32>(Dog("rex"))
+r.Console.log(h.Describe())

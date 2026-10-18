@@ -1,0 +1,1 @@
+valueparam_not_constant.df(11): error: 'Width' is a value parameter: write a constant, as in 4 or Width * 2

@@ -366,53 +366,53 @@ Signed 64-bit; raw value = `value × 8 + code`.
 - Small strings: 64 bytes, 1-byte length, up to 62 bytes.
 - Large strings: 32-byte header (char count, byte length, sizeof, block count), content, 8-byte tail (0 or pointer to 4 KB blocks); a compact string is a valid C string.
 - `text[pos]` reads the character at position `pos` (characters, not bytes); writing by index is not yet decided.
-- Large strings behave like a StringBuilder: every operation (`+=`, `replace`, …) works in place on the 4 KB blocks, without copying the existing text.
+- Large strings behave like a StringBuilder: every operation (`+=`, `Replace`, …) works in place on the 4 KB blocks, without copying the existing text.
 - Every type has `toStr()` to convert it to a `string`.
 
 ## 4.1 Char functions
-Tests follow Unicode categories. `toUpper` / `toLower` are culture-invariant for now (locale: open item).
+Tests follow Unicode categories. `ToUpper` / `ToLower` are culture-invariant for now (locale: open item).
 
 | Definition | Description |
 |---|---|
-| `bool <char>.isLetter()` | Unicode letter |
-| `bool <char>.isDigit()` | Unicode decimal digit |
-| `bool <char>.isLetterOrDigit()` | Letter or digit |
-| `bool <char>.isWhiteSpace()` | Unicode white space |
-| `bool <char>.isUpper()` | Uppercase letter |
-| `bool <char>.isLower()` | Lowercase letter |
-| `bool <char>.isHexDigit()` | `0`–`9`, `a`–`f`, `A`–`F` |
-| `bool <char>.isPunctuation()` | Unicode punctuation |
-| `bool <char>.isSymbol()` | Unicode symbol |
-| `bool <char>.isControl()` | Control character |
-| `bool <char>.isAscii()` | Code point below 128 |
-| `char <char>.toUpper()` | Uppercase form, culture-invariant |
-| `char <char>.toLower()` | Lowercase form, culture-invariant |
+| `bool <char>.IsLetter()` | Unicode letter |
+| `bool <char>.IsDigit()` | Unicode decimal digit |
+| `bool <char>.IsLetterOrDigit()` | Letter or digit |
+| `bool <char>.IsWhiteSpace()` | Unicode white space |
+| `bool <char>.IsUpper()` | Uppercase letter |
+| `bool <char>.IsLower()` | Lowercase letter |
+| `bool <char>.IsHexDigit()` | `0`–`9`, `a`–`f`, `A`–`F` |
+| `bool <char>.IsPunctuation()` | Unicode punctuation |
+| `bool <char>.IsSymbol()` | Unicode symbol |
+| `bool <char>.IsControl()` | Control character |
+| `bool <char>.IsAscii()` | Code point below 128 |
+| `char <char>.ToUpper()` | Uppercase form, culture-invariant |
+| `char <char>.ToLower()` | Lowercase form, culture-invariant |
 
 ## 4.2 String functions
 
 | Function | Definition |
 |---|---|
-| `string <string>.trim()` | Removes all non-printable characters and all types of spaces from both ends of the string |
-| `string <string>.trim(string c)` | Removes all specified characters from both ends of the string |
-| `string <string>.trimLeft()` | Removes all non-printable characters and all types of spaces from the left of the string |
-| `string <string>.trimLeft(string c)` | Removes all specified characters from the left of the string |
-| `string <string>.trimRight()` | Removes all non-printable characters and all types of spaces from the right of the string |
-| `string <string>.trimRight(string c)` | Removes all specified characters from the right of the string |
-| `string <string>.substr(u32 start, u32 len)` | Produces a string containing the characters starting from `start` (zero-based) up to `len` length. Does not fail if `len` extends past the end |
-| `string <string>.replace(string toFind, string replacement, bool caseSensitive = true)` | Returns a string where all occurrences of the specified string are replaced with the replacement string |
-| `i64 <string>.indexOf(string val, bool caseSensitive = true)` | Returns the first zero-based index of the specified string, or `-1` if not found |
-| `i64 <string>.indexOf(char val, bool caseSensitive = true)` | Returns the first zero-based index of the specified character, or `-1` if not found |
-| `i64 <string>.lastIndexOf(string val, bool caseSensitive = true)` | Returns the last zero-based index of the specified string, or `-1` if not found |
-| `i64 <string>.lastIndexOf(char val, bool caseSensitive = true)` | Returns the last zero-based index of the specified character, or `-1` if not found |
-| `bool <string>.contains(string val, bool caseSensitive = true)` | Returns `true` if the specified string exists within the string |
-| `bool <string>.startsWith(string val, bool caseSensitive = true)` | Returns `true` if the string begins with the specified string |
-| `bool <string>.endsWith(string val, bool caseSensitive = true)` | Returns `true` if the string ends with the specified string |
-| `arr<string> <string>.split(string separator)` | Splits the string into an array of substrings bounded by the specified separator string |
-| `string <string>.toLower()` | Returns a copy of the string with all characters converted to lowercase |
-| `string <string>.toUpper()` | Returns a copy of the string with all characters converted to uppercase |
-| `string <string>.padLeft(u32 totalWidth, char paddingChar = ' ')` | Pads the left side of the string with `paddingChar` until it reaches `totalWidth` length |
-| `string <string>.padRight(u32 totalWidth, char paddingChar = ' ')` | Pads the right side of the string with `paddingChar` until it reaches `totalWidth` length |
-| `arr<byte> <string>.toCStr(StringEncoding encoding = StringEncoding.UTF8)` | Produces a byte array with the representation of the string as regular C string |
+| `string <string>.Trim()` | Removes all non-printable characters and all types of spaces from both ends of the string |
+| `string <string>.Trim(string c)` | Removes all specified characters from both ends of the string |
+| `string <string>.TrimLeft()` | Removes all non-printable characters and all types of spaces from the left of the string |
+| `string <string>.TrimLeft(string c)` | Removes all specified characters from the left of the string |
+| `string <string>.TrimRight()` | Removes all non-printable characters and all types of spaces from the right of the string |
+| `string <string>.TrimRight(string c)` | Removes all specified characters from the right of the string |
+| `string <string>.Substr(u32 start, u32 len)` | Produces a string containing the characters starting from `start` (zero-based) up to `len` length. Does not fail if `len` extends past the end |
+| `string <string>.Replace(string toFind, string replacement, bool caseSensitive = true)` | Returns a string where all occurrences of the specified string are replaced with the replacement string |
+| `i64 <string>.IndexOf(string val, bool caseSensitive = true)` | Returns the first zero-based index of the specified string, or `-1` if not found |
+| `i64 <string>.IndexOf(char val, bool caseSensitive = true)` | Returns the first zero-based index of the specified character, or `-1` if not found |
+| `i64 <string>.LastIndexOf(string val, bool caseSensitive = true)` | Returns the last zero-based index of the specified string, or `-1` if not found |
+| `i64 <string>.LastIndexOf(char val, bool caseSensitive = true)` | Returns the last zero-based index of the specified character, or `-1` if not found |
+| `bool <string>.Contains(string val, bool caseSensitive = true)` | Returns `true` if the specified string exists within the string |
+| `bool <string>.StartsWith(string val, bool caseSensitive = true)` | Returns `true` if the string begins with the specified string |
+| `bool <string>.EndsWith(string val, bool caseSensitive = true)` | Returns `true` if the string ends with the specified string |
+| `arr<string> <string>.Split(string separator)` | Splits the string into an array of substrings bounded by the specified separator string |
+| `string <string>.ToLower()` | Returns a copy of the string with all characters converted to lowercase |
+| `string <string>.ToUpper()` | Returns a copy of the string with all characters converted to uppercase |
+| `string <string>.PadLeft(u32 totalWidth, char paddingChar = ' ')` | Pads the left side of the string with `paddingChar` until it reaches `totalWidth` length |
+| `string <string>.PadRight(u32 totalWidth, char paddingChar = ' ')` | Pads the right side of the string with `paddingChar` until it reaches `totalWidth` length |
+| `arr<byte> <string>.ToCStr(StringEncoding encoding = StringEncoding.UTF8)` | Produces a byte array with the representation of the string as regular C string |
 
 `StringEncoding` is a default enum used to emit strings in specific encodings (used for interpos):
 `public enum String.StringEncoding { UTF8, UTF16, UTF32, UTF16BE, UTF32BE, ASCII, ISO88591 }`
@@ -569,7 +569,6 @@ A member marked `–` is a compile error on that collection (for example `hasKey
 - `fill(value)`: sets every item up to the current `.len`. `fillAtCapacity(value)` (`vec`): fills the whole capacity and sets `.len` to the capacity.
 - `resize(newLen, value)`: sets `.len`; new items get `value`, extra items are cut. `truncate(len)`: cuts the `vec` to `len` items (no effect if shorter), the capacity is unchanged.
 - Sorting: `sort(SortDirection.ASC)` sorts in place with the default comparer (the `.order` of the items); `sort()` is ascending. `sort(lambda)` uses a temporary custom sorter. `SortDirection` has the entries `ASC` and `DESC`. The lambda returns a bool (true is -1, "first goes before second"; false is 1) or a number (negative, zero, positive). `sort` is stable; `sortUnstable` is not (it needs no extra memory). `reverse()` flips the current order in place.
-- Default order of the items for `sort` and `sortUnstable`: numbers, `char` and enums by value; `bool` with `false` before `true`; strings by code point (`"Apple"` comes before `"apple"`); a null `date` or `time` first; a real `NaN` last. `sort(SortDirection.DESC)` reverses the order but keeps equal items in their original order.
 - `copyFrom(dstIndex, srcCollection, srcIndex, count)` and `copyFrom(dstIndex, srcCollection, range)`: copy items from another collection into this one; object items are cloned. A range outside either collection raises `IndexOutOfRangeException`, or is a compile error when it can be detected at compile time. Using the same collection as source and destination is a compile error when detectable, otherwise a non-silent `ModifyingProtectedSourceException` is raised.
 - On `vec` and `list`, `dstIndex` goes from `0` to `.len`: the items past the end are appended, so `copyFrom` is the only way to write past the end and it never leaves gaps; a larger `dstIndex` raises `IndexOutOfRangeException`.
 
@@ -734,14 +733,6 @@ Examples with `1234.56`:
 | `cU` `cL` `cS` `cT` | upper, lower, sentence (`Hello world`), title (`Hello World`) |
 | `q` | quoted and escaped |
 | `s` `sl` `sr` | trim both / left / right |
-
-- Options can be written in any order; letters are case-insensitive. A width never cuts the text.
-- Order of application: trim (`s`, `sl`, `sr`), case (`cU`, `cL`, `cS`, `cT`), quote (`q`), truncate (`t<`, `t>`; the marker counts in the width), then width, fill and alignment. The default alignment is left.
-- `cS` capitalizes the first letter of the text and lowers the rest; `cT` capitalizes the first letter of every word (after white space) and lowers the rest.
-- `w<n>` counts characters (code points); `wc<n>` counts display columns: wide East Asian and emoji characters count 2, combining marks and zero-width characters 0, all the others 1.
-- `t<'marker'>` keeps the start and `t>'marker'` keeps the end; a width is required. Text that already fits is left as it is; a marker wider than the width is cut to the width.
-- `q` writes a Dflat string literal: `\"`, `\\`, `\n`, `\r`, `\t`, `\0`, other control characters as `\u{HEX}`.
-- A format written as a literal is checked at compile time. A format built at run time that is not valid leaves the text as it is. A null string is formatted as `""`.
 
 ## 8.4 Dates and times
 
@@ -1185,7 +1176,7 @@ public class Foo(i32 a) {
     logs2 is atEnd.
   }
 } atEnd {
-  Root.Console.log("Goodbye!")
+  Root.Console.Log("Goodbye!")
   file is atEnd.
 }
 ```
@@ -1378,7 +1369,7 @@ list.Filter((x; _limit) { x < limit })     // weak
 
 ```
 fun LogAll(string level, string messages...) {
-  for string message in messages { r.Console.log($"{level}: {message}") }
+  for string message in messages { r.Console.Log($"{level}: {message}") }
 }
 LogAll("info", "started", "ready")
 ```
@@ -1401,7 +1392,7 @@ fun int main(string args...) { return 0 }
 - `main` is a top-level function, outside any class.
 - Return type: `int` (exit code) or void (exit code 0).
 - Parameters: none, `arr<string> args`, or `string args...` (an `arr<string>`).
-- The command-line arguments are also available from `Root.getArgs()` (17.1); with a parameter, `args` and `Root.getArgs()` are the same object.
+- The command-line arguments are also available from `Root.GetArgs()` (17.1); with a parameter, `args` and `Root.GetArgs()` are the same object.
 - More than one `main` is a compile error; a `main` in a library is a compile error.
 
 ## 14.2 `atEnd`
@@ -1466,8 +1457,7 @@ i32 ratio = 10 / divisor
 catch DivisionByZeroException ex { }
 catch NetworkException { }                    // no variable
 catch SilentException ex { }                  // by trait
-catch Exception { }                           // catches all the exceptions that are not silent, without getting the actual exception (sinkhole)
-catch Exception ex { }                        // the same, with the exception in ex
+catch Exception { }                           // Catches all exception that are not silent without getting the actual exception (sinkhole) 
 catch all ex { }                              // everything, silent exceptions included
 catch all { }
 throw Exception("message")
@@ -1478,7 +1468,7 @@ throw Panic(3)
 - No `try`; a `catch` handles everything raised above it in its block; unhandled → caller; top level → program ends.
 - Catches are checked in order: the first one that handles the exception type runs, the following ones are ignored. A catch that doesn't handle the type is skipped, and a later one can.
 - `catch Type` handles that type and its subtypes; a catch can also name a trait.
-- A `catch` always starts with an exception type (or `all`), then an optional variable. There is no shorthand with the variable alone: a name that is not an exception type is a compile error. `catch Exception` is the sinkhole of the exceptions that are not silent.
+- `catch variable` is the same as `catch Exception variable`; it does not handle silent exceptions.
 - `catch { }` (no type, no variable) is the same as `catch all { }`, with a level 2 warning.
 - `catch all [variable]` handles everything, silent exceptions included. After `catch`, `all` is always the catch-all keyword (fixed parser rule), so `catch all all { }` is valid.
 - After a catch that doesn't leave the scope, execution continues with the code after it.
@@ -1559,8 +1549,8 @@ class MySilentException : Exception, SilentException { ... }
 - Standard silent exceptions have their own fallback (table above); custom ones just continue.
 - A class is silent when it implements the `SilentException` trait (a marker trait with a dummy method). Subclasses of a silent exception are silent too.
 - The silent flag is stored in the descriptor.
-- A silent exception needs a specific catch: its own type, a parent class below `Exception`, the `SilentException` trait, or `catch all`. `catch Exception` does not handle silent exceptions.
-- Silent exceptions do not bubble up on their own. If nobody observes one it is gone; to pass it up, the function that observes it catches it and throws it again explicitly (see [15.8.6](#1586-silent-exceptions-never-go-up-on-their-own)).
+- A silent exception needs a specific catch: its own type or the generic `SilentException` trait, or `catch all`. `catch Exception` / `catch variable` don't handle it directly.
+- Silent exceptions will not bubble up. In case they are ignored they are gone. If they need to propagate they need to be catched and re-trown
 
 ### 15.5 Panic and exit codes
 
@@ -1576,32 +1566,32 @@ class MySilentException : Exception, SilentException { ... }
 
 ### 15.7 Implementation
 
-- Rust/Swift style: a failing function returns normally with an **error register** holding 0 or a pointer to an error record; the caller jumps to its `catch` or propagates. Functions that can't fail skip the check. The error register is a dedicated return slot next to the result, not a global variable; the details are in 15.8.
+- Rust/Swift style: a failing function returns normally with an **error register** holding 0 or a pointer to an error record; the caller jumps to its `catch` or propagates. Functions that can't fail skip the check.
 - Error record: `{ id, descriptor*, message, subclass fields }`. Descriptor: `{ id, name, parent*, silent flag }`.
 - IDs: 0–255 reserved for `Root`, otherwise a hash of the full name. Exact catch = one compare; base-class catch walks the parents.
 - External libraries raise the base types with a short message; richer errors via an exported mapping function.
 
 
-### 15.8 Detailed compiler implementation
+### 15.8 Detailed comiler implementations
 
-#### 15.8.1 Principles
+### 15.8.1 Principles
 - An exception is a value that a function returns next to its result, as in Rust: one slot for the result, one for the exception. There is no
-  unwinding and no global variable: the error register of 15.7 is the second return slot. After a call, the caller looks at the exception slot: it handles the exception, returns it to its own
+  unwinding and no global error register. After a call, the caller looks at the exception slot: it handles the exception, returns it to its own
   caller, or (for a silent exception nobody observes) does not even look.
 - A silent exception is an exception with a flag. It is created, passed back and checked exactly like any other exception, but only where
   somebody observes it (rule [15.8.5](#1585-silent-exceptions-who-observes-them)). Where nobody does, ALL the code for it is removed: no trapping, no exception record, no passing back.
 
-#### 15.8.2 Which catch observes an exception
+### 15.8.2 Which catch observes an exception
 - A catch handles an exception when the exception is of the class the catch names or of any subclass of it. This is the same rule for silent and
-  non-silent exceptions, except that Exception, the root, does not handle silent ones (see below).
-- Exception is the root of all exceptions: "catch Exception e" is the sinkhole and handles every
-  exception that is not silent: `catch Exception` does not handle silent exceptions.
+  non-silent exceptions.
+- Exception is the root of all exceptions: "catch Exception e" (and the bare "catch e", which means the same) is the sinkhole and handles every
+  exception, silent are ignored by `catch Exception`.
 - SilentException is meant to be a trait that every silent exception class implements. "catch SilentException e" handles every silent exception and no other.
-- "catch all" handles everything, silent exceptions included. A catch for a parent class (below Exception) handles all the silent children of that class too.
+- "catch all" handles everything, as it does today. A catch for a parent class handles all the silent children of that class too.
 - Catches of a function are tried in the order written; the first that matches handles the exception.
 
-#### 15.8.3 Safety of function (decided by the compiler; there is no safe keyword)
-Some functions can be marked as `safe` by the compiler. This means they will not emit exceptions (silent exceptions are allowed).
+### 15.8.3 Safety of function (decided by the compiler; there is no safe keyword)
+Some functions can be marked as `safe` by the compiler. This means they will not emit exception (silent exceptions are allowed.)
 Safe functions when the silent exceptions are ignored by the caller, will remove all code to check if an exception is emitted.
 - PURE: can raise nothing at all. Signature: the result only.
 - SAFE: no non-silent exception can leave it, and the silent exceptions it can emit are not observed by the call (see [15.8.5](#1585-silent-exceptions-who-observes-them) and [15.8.6](#1586-silent-exceptions-never-go-up-on-their-own)). Signature: the result only. Callers never check it.
@@ -1622,28 +1612,28 @@ Safe functions when the silent exceptions are ignored by the caller, will remove
 - Virtual functions and trait functions: a slot is SAFE only if all its implementations are SAFE (one FAILING override makes the slot FAILING).
   PURE needs the same: all implementations.
 
-#### 15.8.4 How a FAILING function returns (the Rust model)
+### 15.8.4 How a FAILING function returns (the Rust model)
 - Two slots: the result and the exception. The exception slot is a pointer to the exception record, null when there is none.
 - A function without a result (void) returns only the exception slot. Several results or a tuple are one result slot.
 - Call site: call, then "if the exception slot is not null": run the matching catch of this function; if there is none, return the exception to our
   own caller (this function is FAILING), after the atEnd blocks of the scopes left have run. An exception that nobody handles reaches the top of the
-  program: Panic (see 15.5).
-- Non-silent exceptions go up the call chain to the first matching catch.
+  program: Panic, as today.
+- Non-silent exceptions go up the call chain to the first matching catch, as today.
 
-#### 15.8.5 Silent exceptions: who observes them
+### 15.8.5 Silent exceptions: who observes them
 - A silent exception of class X emitted by function F is observed by a call statement of F's caller when that statement is covered by a catch of the
   caller that handles X (rule [15.8.2](#1582-which-catch-observes-an-exception)). "Emitted by F" means: raised by one of F's own operations (for example the + that overflows), thrown by an explicit
-  throw in F, or declared by a library function that F calls directly (see [15.8.8](#1588-library-functions-black-boxes-with-declared-exceptions)). It is NOT what F's own callees emit (rule [15.8.6](#1586-silent-exceptions-never-go-up-on-their-own)).
+  throw in F, or declared by a library function that F calls directly (rule 8). It is NOT what F's own callees emit (rule [15.8.6](#1586-silent-exceptions-never-go-up-on-their-own)).
 - If no catch of the caller handles X, the call returns as if nothing had happened (spec [15.4](#154-silent-exceptions): execution continues) and nothing is generated for X.
 - A catch in the function that contains the emitting operation itself handles the exception as an ordinary local exception (same rule, the function
   being its own caller).
 - Example, a function that can only overflow silently is SAFE for callers that do not catch it: `fun i64 add(i64 a, i64 b) { a + b }`
 
-#### 15.8.6 Silent exceptions never go up on their own
+### 15.8.6 Silent exceptions never go up on their own
 - If F calls G and G emits a silent exception that F does not observe (no catch of F handles it), the exception is ignored in F. F's caller does not see
   G's exception, even if F's caller has a matching catch.
 - To send it up, F catches it and throws it again, explicitly: `catch OverflowException e { throw e }`
-  The new throw is F's own emission, so F's caller observes it (when it has a matching catch), as [15.8.5](#1585-silent-exceptions-who-observes-them) says.
+  The new throw is F's own emission, so F's caller observes it (when it has a matching catch), as rule 5 says.
 - Examples:
 ```
       fun i64 mul(i64 a, i64 b) { a * b }                   // can overflow: silent
@@ -1654,21 +1644,17 @@ Safe functions when the silent exceptions are ignored by the caller, will remove
       }
 ```
 
-#### 15.8.7 The observed mask (how the silent code is stripped)
-- A function that can emit silent exceptions takes one hidden extra parameter, the OBSERVED MASK: a set of bits, one for each silent exception class that
-  some catch of the program handles. The caller fills it with the silent classes handled by the catches that cover the call statement in the caller.
-  A call outside any catch passes the empty mask. A catch SilentException or a catch all covers every silent class; a catch Exception does not (see 15.8.2).
-- When the function reaches a throw of a silent exception: if a catch of the function itself handles it, it is an ordinary local exception; otherwise, if the
-  bit of its class is in the mask, the exception is returned like any other (the function stops there); otherwise the throw does nothing and the function goes on.
+### 15.8.7 Variants (how the silent code is stripped)
+- A function that can emit silent exceptions is compiled once for every MASK its call sites ask for. The mask of a call site is the set of silent
+  exception classes, among those the called function can emit, that are handled by the catches covering that call statement in the caller.
+  A call outside any catch has the empty mask. A catch all covers every silent class the function can emit.
+- Empty mask: every silent path is removed from that version. If the function can raise nothing else, that version is SAFE (plain signature).
+- Non-empty mask: the silent classes in the mask are treated like any other exception in that version, which is then FAILING.
 - Masks do not flow down: the mask of the calls a function makes comes from that function's own catches (rule [15.8.6](#1586-silent-exceptions-never-go-up-on-their-own)).
-- Virtual and trait calls: every implementation of a slot takes the mask, and every call passes its own. A caller that ignores a silent exception and a caller that
-  observes it can use the same implementation and each gets the behaviour of 15.4.
-- Stripping: the code of a silent class that no catch of the program handles is removed completely (no check, no record, no passing back). Where the mask of a
-  call is a constant the test of the bit can be removed by the compiler of the target.
-- A function that can throw a silent class that some catch of the program handles returns the exception (it has the FAILING signature) even when a given caller
-  ignores it. SAFE and PURE signatures remain for functions that no catch of the program can observe.
+- Virtual and trait calls: every implementation of a slot is compiled with the union of the masks of all the call sites of that slot.
+- The number of versions stays small: a mask can only contain silent classes that the function can emit and that some catch of the program handles.
 
-#### 15.8.8 Library functions: black boxes with declared exceptions
+### 15.8.8 Library functions: black boxes with declared exceptions
 - The compiler does not look inside a library function (today they are C code of the runtime; later some will be written in Dflat). What it needs is the
   list of exceptions each function may raise, silent and non-silent. That list is in the standard library specification (dflat-stdlib.md): every
   function is listed with the exceptions it may throw. The compiler keeps the same list in its library tables.

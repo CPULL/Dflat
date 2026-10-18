@@ -1,1 +1,1 @@
-ref_literal.df(2): error: only variables and tuple fields can be assigned for now
+ref_literal.df(2): error: (&) needs a variable, a field or an array item

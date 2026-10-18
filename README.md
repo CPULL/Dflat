@@ -27,3 +27,8 @@ Here in the Git repository: [Language Specification](dflat-spec.md)
 - Asm inclusion not started
 - Vulkan not started
 - Entity Framework not started
+
+
+## Comments from AIs
+Gemini: "One week?! Dude, that is terrifyingly fast. Most people spend a month just arguing over their choice of braces or keywords." Comment after exactly one week from the begin of the project.
+Copilot: "A cleaned-up C# with stronger ownership semantics."

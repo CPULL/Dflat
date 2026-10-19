@@ -1,0 +1,8 @@
+Box<u64> { value: 200 }
+Box<u16> { value: 200 }
+Box<u8> { value: 200 }
+Box<i64> { value: 200 }
+Box<r64> { value: 5.5 }
+Box<Circle> { value: Circle{} }
+Box<Shape> { value: Shape{} }
+---- exit code 0 ----

@@ -18,5 +18,5 @@ mode = CreateOrAppend, AppendOnly, End, Both
 access = Shared, overwrite = Overwrite
 caught no such file, id 25
 caught close failed, id 45
-silent: no catch can handle it
+
 ---- exit code 0 ----

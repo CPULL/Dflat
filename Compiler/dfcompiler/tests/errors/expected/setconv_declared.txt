@@ -1,0 +1,1 @@
+setconv_declared.df(10): error: 'Narrow' is a set: it names alternatives at compile time and is not a type of values; use it as a constraint or as the type of a parameter (11.3.6)

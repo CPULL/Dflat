@@ -198,7 +198,8 @@ public sealed partial class CodeGen {
         return name.Text;
       }
       if (typeNode.Text == "var" && init?.Children[0] is { Kind: "Call" } genericCall && genericCall.Children[0].Kind == "GenericRef") {
-        return GenericRefClass(genericCall.Children[0]);   // var s = Stack<i32>()
+        // var s = Stack<i32>(); with a set as type argument (Box<Num>(x)) the copy is known only when the call is compiled: any class will do here
+        return HasSetArg(genericCall.Children[0]) ? ((Node)genericCall.Children[0].Children[0]).Text : GenericRefClass(genericCall.Children[0]);
       }
       return null;
     }

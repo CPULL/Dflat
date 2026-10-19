@@ -1,0 +1,30 @@
+// var declarations of objects built from variables of the same scope (the scope drops its objects at the end)
+alias Root as r
+
+Generic Num { i64, r64 }
+
+public class Foo(i32 v) {
+  public i32 v
+}
+
+public class Box<Item>(->Item value) {
+  public Item value
+}
+
+atEnd {
+  r.Console.log("main ends")
+}
+
+i32 n = 3
+u8 small = 200
+r64 half = 0.5
+var f = Foo(n)
+var g = Foo(f.v + 1)
+var wide = Box<Num>(small)
+var real = Box<Num>(half)
+var same = Box<i32>(n)
+r.Console.log(f)
+r.Console.log(g)
+r.Console.log(wide)
+r.Console.log(real)
+r.Console.log(same)

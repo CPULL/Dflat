@@ -1,0 +1,59 @@
+# Briefing: design of the collections for the Dflat language
+
+You are helping me design how the collections `vec`, `list`, `map`/`bmap`, `hmap`, `set`/`bset` and `hset` will be built in Dflat. You cannot see my files, so everything you need is below. I want a design discussion that ends in decisions I can take back to my compiler project. Please ask me about anything unclear instead of guessing. Do not write the whole implementation. Help me choose the approach, find holes, and propose an order of work.
+
+## 1. The project
+Dflat is a statically typed language I am designing, with a Rust-like ownership model and C#/Rust-like syntax. The compiler is written in C# (.NET 10), generates C, and compiles it with clang. It is at version 0.0.9alpha. It has a specification (dflat-spec.md), a standard library specification (dflat-stdlib.md), and about 145 passing tests. The only collection built today is `arr<T>`.
+
+## 2. Language facts you need
+- Types: i8..i64, u8..u64, r32, r64, bool, char, string, date, time, classes, traits, enums, tuples. Sizes written with `u64` for lengths and indexes everywhere.
+- Classes: `public class Name(i32 a, string b) : Parent, Trait { fields and methods }`. Fields are written in the body, primary constructor parameters become fields. Methods: `fun i32 Name(i32 x) { ... }`. No `new`: `Circle c = Circle(2.0)`. Traits with default dispatch. Functions are camelCase for the standard library, PascalCase in my examples.
+- Ownership (spec 12): single owner, freed at the end of the owner's scope. `->a` moves ownership (`list.add(->a)`), parameters borrow, returning moves to the caller, `b = a` is the same object without changing ownership, `a!` makes a copy, `.clone()` duplicates. Weak references `b _= a`, used with `enforce`. Collections own their elements: adding moves in, removing moves out, reading borrows.
+- Objects are nullable by default; `T?` is not allowed on objects. A destroyed object keeps its memory but points to a "dead" class, so a double free is detected.
+- Exceptions (spec 15): every function that can raise returns `(result, error)`; the compiler marks provably safe functions and they return only the result. Non-silent exceptions go up to the caller. A SILENT exception (a class with the `SilentException` trait) is returned like any other, but only the immediate caller sees it, and only if a catch around the call handles it; otherwise the caller discards it and goes on with the value the function returned (the zero value). Operations of the language that raise silent exceptions (overflow, a cast that does not fit) are seen only by a catch in the same function. The caller owns and releases every returned exception record.
+- Standard exceptions involved in collections: `IndexOutOfRangeException` (not silent), and silent ones: `NaNUsedAsKeyException` (the value is not stored or retrieved), `InvalidMapKeyException` (reading a missing key gives the null or zero value), `EmptyVectorAccessException` (`pop()` on an empty vec gives the zero value, null for objects).
+- Strings are never freed yet (known limitation).
+
+## 3. Generics (spec 11.3) as they are built today
+The model is monomorphization like Rust: a generic function or class is a template and each distinct list of type arguments makes a separate copy, compiled as an ordinary class or function.
+- Generic functions and classes: `class Stack<Item> { list<Item> items ... }`, `fun Item smaller<Item : Numeric>(Item a, Item b)`.
+- Constraints with `&&`, and `where` clauses on functions and class headers. Named compile-time type sets: `Generic Strings { char, string }`, predefined `Signed`, `Unsigned`, `Integers`, `Reals`, `Numeric`.
+- Value parameters: `class Grid<u64 Width, u64 Height, Cell>`, usable in array sizes (`arr<Cell>[Width * Height]`).
+- Type switch: `item is ? { Numeric: (r64)item, string: ..., default: ... }`. Only the matching case is compiled in each copy.
+- Generic traits (`trait Container<Item>`), and placeholders: `trait Sequence { placeholder Item; fun Item? Next() }`, with `class Countdown : Sequence with (Item is u32)` and `fun sum<Source : Sequence>(Source items) where Source.Item : Numeric`.
+- Conversion to a set member: `Box<Num>(5.5)` picks the member of the set `Num` from the argument.
+- Not in the language: default type arguments, specialization, `T?` in generic code. A set is never the type of a value.
+- Limits of generated copies (spec 11.3.12): chain depth 16, copies per user generic 16, copies per library collection 64 (counted per collection: 64 `list` types and 64 `map` types are allowed), `arr<T>` has no limit because it is a primitive.
+
+## 4. What the specification says about collections (spec 6)
+There are seven: `arr`, `vec`, `list`, `map` (alias `bmap`), `hmap`, `set` (alias `bset`), `hset`.
+- `arr<T>`: fixed size set at initialization, contiguous, a primitive with no code of its own (already built, with fill, sort, sortUnstable, reverse, copyFrom, has, indexOf, clear, views planned).
+- `vec<T>`: contiguous and growable (Rust `Vec` rules), capacity form `vec<T>[n]`.
+- `list<T>`: a counted B-tree used by position, O(log n) insert and remove, no capacity.
+- `map<K,V>`: sorted by key (B-tree). `hmap<K,V>`: hash map, has capacity `hmap<K,V>[n]`.
+- `set<T>`: sorted (B-tree). `hset<T>`: hash set, has capacity.
+- The spec says `vec`, `list`, `map`, `hmap`, `set` and `hset` are ORDINARY generic classes (11.3), only `arr` is a primitive.
+- Collections are objects: nullable by default, they own their elements, `==` compares identity only (`c!` or `.clone()` copies).
+- Keys: hashed collections need `==` and a hash; sorted collections need an ordering. `.hash` and `.order` exist on all types. Order: numbers, char, bool, date, time by value; strings by bytes; tuples item by item. Reals can be keys except NaN. A class may override hash and equals; the default class hash is the class name plus address.
+- Literals: `[1,2,3]` can be assigned to arr, vec, list, set, hset; `{k: v}` to map and hmap; literals are `arr` unless declared otherwise; empty literals need a declared type.
+- Iteration: `for i32 item in numbers`, `for (string key, i32 value) in ages`, `ages.keys`, `ages.values`. Modifying a collection while iterating it, or while a view exists, is a compile error.
+- Views: `c[a..b]` is a read-only view without a copy, `(&)c[a..b]` writable, `c[a..b]!` a copy. Views exist only on arr, vec and list, and the collection cannot grow while a view exists.
+- Members: `.len`, `.capacity`, `reserve`, `shrinkToFit`, `.keys`, `.values`, `c[k]` read, `c[k] = v` (replace only for arr/vec/list; set or add for maps), `add(v)`, `add(k, v)` (bool), `add(collection)`, `insert(index, v)`, `pop()`, `has`, `hasKey`, `indexOf`, `keyOf`, `remove`, `removeAll`, `removeAt`, `tryGet(k, (&)out[, default])`, `clear`, `fill`, `fillAtCapacity`, `resize`, `truncate`, `sort`/`sortUnstable` (stable merge sort, in-place heap sort; a custom comparer is a lambda), `reverse`, `copyFrom`, and for sets `union`, `intersection`, `difference`, `symmetricDifference`, `|=`, `&=`, `-=`, `^=`, `isSubsetOf`, `isSupersetOf`, `isDisjointFrom`.
+
+## 5. What the compiler can and cannot do today
+Built: classes, inheritance, traits, enums, tuples, exceptions and silent exceptions, ownership with owners and borrows and `->`, properties of library classes as `get_name()` methods, reference parameters, `arr<T>` with its members, all the generics above, `File` and `FileStream` written in Dflat as preludes.
+Not built (the compiler answers "feature not supported"): pointers (`*T`), lambdas and function types, secondary constructors, `atEnd` in a class body (a destructor), imports and libraries, sets declared inside a class, indexer or operator overloading for user classes (I do not know yet how a class would define `c[k]`, `.len`, `for ... in`, or literal assignment; this is open), `T?` in generic code, conversion of `Box<Dog>` to `Box<Animal>`.
+
+## 6. Questions I want to discuss
+1. **Where are the collections written?** The spec says ordinary generic classes. Options: (a) in Dflat source shipped with the compiler (needs raw memory, which today means `arr<T>`; pointers are not built), (b) generated by the compiler as C templates, (c) a mix: C runtime for storage and sorting, thin Dflat classes on top. Consequences for exceptions, ownership, and debugging.
+2. **What must the language gain first?** Candidates: a way for a class to define `c[k]`, `.len`, `for x in c` (maybe through a trait with a placeholder, like `Sequence` above), literal assignment to a collection, and a destructor that drops its elements. Which are really needed for `vec` alone, and which can wait?
+3. **Order of work.** My guess: vec, then hmap/hset (hashing exists on all types), then list, then map/set (B-tree). Do you agree? What is the smallest first slice that proves the model (for example `vec<i32>` with add, `[]`, `len`, `for`, `pop`)?
+4. **Ownership of elements.** Moving in with `->`, moving out, borrowing on read. How should the compiler drop the elements of a generic collection at the end of its scope (per-T drop glue), and how should `remove`, `pop`, `clear` and element replacement behave? What does `vec<i32>` cost compared to `vec<Dog>` in the generated code?
+5. **Exceptions and cost.** `IndexOutOfRangeException` is not silent, so `c[i]` makes the caller a function that returns `(result, error)`. `pop()` on an empty vec and reading a missing map key raise silent exceptions: with my model they are returned by the library function and ignored by a caller without a catch. Is that the right mechanism for built-in operations, or should the check be inlined? What is the cost of making `c[i]` a failing operation everywhere?
+6. **Borrow rules.** "Modifying a collection while iterating or while a view exists is a compile error." My compiler tracks owners and borrows only partially. What is the minimum borrow checking that makes views and iteration safe, and what should be left for later?
+7. **Hashing and ordering.** `.hash` and `.order` exist on every type. What hash function and table design (open addressing, robin hood, chaining) and what B-tree node size would you recommend for a small C-backed runtime? NaN keys must never be stored.
+8. **Code size.** Every distinct element type makes a copy of the whole class (limit 64 per collection). Is that acceptable, or should common operations be shared in non-generic C helpers working on byte sizes?
+9. **Literals and inference.** How should `vec values = [1, 2, 3]` (vec of native integer) and `map ages = { one: 1 }` be typed and lowered?
+
+## 7. How I work
+I take small, explicitly approved steps. I would like your output as: a list of decisions, the open questions that remain, and a proposed order of small steps, each testable on its own. Please keep the answers concrete and short, and tell me when something in my spec looks inconsistent.

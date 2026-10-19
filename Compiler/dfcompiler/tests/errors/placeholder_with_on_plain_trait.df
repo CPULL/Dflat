@@ -1,0 +1,14 @@
+alias Root as r
+
+trait Sequence {
+  placeholder Item
+  fun Item? Next()
+}
+
+trait Plain {
+  fun i32 Get()
+}
+
+public class Broken : Plain with (Item is i32) {
+  override fun i32 Get() { 1 }
+}

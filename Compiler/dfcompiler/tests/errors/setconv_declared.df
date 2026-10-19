@@ -1,0 +1,10 @@
+alias Root as r
+
+Generic Narrow { i16, u32 }
+
+public class Box<Item>(->Item value) {
+  public Item value
+  public static i32 count = 0
+}
+
+Box<Narrow> b = Box<i16>((i16)1)

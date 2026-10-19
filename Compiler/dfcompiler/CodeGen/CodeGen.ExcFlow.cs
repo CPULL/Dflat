@@ -41,13 +41,14 @@ public sealed partial class CodeGen {
     return f.Ret == "void" ? "df_err" : $"({ResultPair(CType(f.Ret))}){{ {ZeroValue(f.Ret)}, df_err }}";
   }
 
-  // a call of a Dflat function: look at the exception it returned and go to the handler of this scope when there is one
+  // a call of a Dflat function: look at the exception it returned and go to the handler of this scope when there is one. A silent
+  // exception that no catch around the call handles is ignored here (spec 15.4): the call goes on with the value the function returned
   string PairCheck(string call, string type) {
     string temp = NewTemp();
     if (type == "void") {
-      return $"({{ df_exception* {temp} = {call}; if ({temp}) {{ df_err = {temp}; df_err_thrown = false; goto {Handler}; }} }})";
+      return $"({{ df_exception* {temp} = {call}; if ({temp}) {{ if ({SilentIgnored(temp)}) {{ df_exc_release({temp}); {temp} = NULL; }} else {{ df_err = {temp}; df_err_thrown = false; goto {Handler}; }} }} }})";
     }
-    return $"({{ {ResultPair(CType(type))} {temp} = {call}; if ({temp}.err) {{ df_err = {temp}.err; df_err_thrown = false; goto {Handler}; }} {temp}.value; }})";
+    return $"({{ {ResultPair(CType(type))} {temp} = {call}; if ({temp}.err) {{ if ({SilentIgnored(temp + ".err")}) {{ df_exc_release({temp}.err); {temp}.err = NULL; }} else {{ df_err = {temp}.err; df_err_thrown = false; goto {Handler}; }} }} {temp}.value; }})";
   }
 
   // the code of a call to the user function f: checked the way its signature says

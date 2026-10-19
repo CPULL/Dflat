@@ -1,0 +1,28 @@
+// What an atEnd block may do: handle its own exceptions with a catch inside the block; a silent exception that nothing inside the block
+// handles does nothing (the block has no error part)
+alias Root as r
+
+public class Notice(string text) : Exception, SilentException { }
+
+fun i32 divide(i32 a, i32 b) { a / b }
+
+fun cleanup() {
+  r.Console.log("start")
+  atEnd {
+    i32 value = divide(1, 0)
+    r.Console.log("not printed: the catch below ends the block")
+    catch DivisionByZeroException { r.Console.log("handled inside the atEnd block") }
+  }
+  atEnd {
+    throw Notice("silent in atEnd")
+    r.Console.log("not printed: the throw is caught below")
+    catch Notice n { r.Console.log("caught inside atEnd: " + n.Message) }
+  }
+  atEnd {
+    throw Notice("ignored")
+    r.Console.log("printed: a silent throw nobody handles does nothing")
+  }
+  r.Console.log("end of body")
+}
+cleanup()
+r.Console.log("after cleanup")

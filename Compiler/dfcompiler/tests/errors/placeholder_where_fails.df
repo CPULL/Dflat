@@ -1,0 +1,16 @@
+alias Root as r
+
+trait Sequence {
+  placeholder Item
+  fun Item? Next()
+}
+
+public class Names : Sequence with (Item is string) {
+  override fun string Next() { "x" }
+}
+
+fun r64 sum<Source : Sequence>(Source items) where Source.Item : Numeric {
+  return 0.0
+}
+
+r.Console.log(sum(Names()))

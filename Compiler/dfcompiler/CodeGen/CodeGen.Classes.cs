@@ -138,25 +138,49 @@ public sealed partial class CodeGen {
       }
       bool sawTrait = false;
       foreach (var baseType in bases.Children) {
-        if (baseType.Kind == "With") {
-          throw NotSupported("Placeholders (with (Item is type))", baseType);
-        }
         string baseName = baseType.Text ?? "";
         if (baseName is "Root.Class" or "Class") {
           Warn("Root.Class is the implicit base of every class and is never written", baseType, 1);
           continue;
         }
         if (genericClasses.TryGetValue(baseName, out var genericBase) && genericBase.IsTrait) {
-          // Container<string>: the copy of the generic trait
-          if (baseType.Children.Count == 0) {
-            throw Error($"'{baseName}' is generic: write its type arguments, {baseName}<...>", baseType);
+          // Container<string> or Sequence with (Item is u32): the copy of the generic trait
+          var withNode = baseType.Children.FirstOrDefault(child => child.Kind == "With");
+          var typeArgNodes = baseType.Children.Where(child => child.Kind != "With").ToList();
+          List<string> traitArgs;
+          if (genericBase.HasPlaceholders) {
+            if (typeArgNodes.Count > 0) {
+              throw Error($"'{baseName}' has placeholders, not type parameters: write {baseName} with (...)", baseType);
+            }
+            if (withNode == null) {
+              throw Error($"'{baseName}' has placeholders: fix them, as in {baseName} with ({genericBase.Params[0].Name} is type)", baseType);
+            }
+            foreach (var bind in withNode.Children.Where(bind => !genericBase.Params.Any(p => p.Name == bind.Text))) {
+              throw Error($"'{bind.Text}' is not a placeholder of {baseName}", bind);
+            }
+            traitArgs = new List<string>();
+            foreach (var placeholder in genericBase.Params) {
+              var bind = withNode.Children.FirstOrDefault(b => b.Text == placeholder.Name)
+                ?? throw Error($"the placeholder '{placeholder.Name}' of {baseName} is not fixed: add ({placeholder.Name} is type) to 'with'", baseType);
+              traitArgs.Add(ResolveType(bind.Children[0]));
+            }
+          } else {
+            if (withNode != null) {
+              throw Error($"'{baseName}' has no placeholders: 'with' does not apply", withNode);
+            }
+            if (typeArgNodes.Count == 0) {
+              throw Error($"'{baseName}' is generic: write its type arguments, {baseName}<...>", baseType);
+            }
+            traitArgs = TypeArgsOf(typeArgNodes, genericBase.Params);
           }
-          baseName = ClassInstanceName(genericBase, TypeArgsOf(baseType.Children, genericBase.Params), baseType);
+          baseName = ClassInstanceName(genericBase, traitArgs, baseType);
           if (cls.Traits.Any(existing => classInstanceArgs.TryGetValue(existing.Name, out var other) && other.Template == genericBase)) {
             throw Error($"feature not supported yet (a class that implements the generic trait {genericBase.Name} more than once)", baseType);
           }
         } else if (baseType.Children.Count > 0) {
-          throw NotSupported("Generic parent types", baseType);
+          throw baseType.Children.Any(child => child.Kind == "With")
+            ? Error($"'{baseName}' has no placeholders: 'with' does not apply", baseType)
+            : NotSupported("Generic parent types", baseType);
         }
         if (baseName is "Exception" or "Root.Exception") {
           if (cls.Parent != null || sawTrait || cls.IsException) {
@@ -733,9 +757,6 @@ public sealed partial class CodeGen {
       }
       codes.Add(ArgCode(param, arg, scope));
     }
-    if (f.TakesMask) {
-      codes.Add(ObservedMask());
-    }
     return codes;
   }
 
@@ -844,9 +865,6 @@ public sealed partial class CodeGen {
         string temp = NewTemp();
         var paramTypes = new List<string> { "void*" };
         paramTypes.AddRange(chosen.Params.Select(param => ParamCType(param)));
-        if (chosen.TakesMask) {
-          paramTypes.Add("uint64_t");
-        }
         codes.Insert(0, temp);
         call = $"({{ void* {temp} = (void*)({self}); (({RetCType(chosen)}(*)({string.Join(", ", paramTypes)}))"
           + $"(df_impl_of({temp}, &df_trait_{chosen.Class.Name})->methods[{chosen.TSlot}]))({string.Join(", ", codes)}); }})";
@@ -860,9 +878,6 @@ public sealed partial class CodeGen {
         string temp = NewTemp();
         var paramTypes = new List<string> { CType(chosen.Class!.Name) };
         paramTypes.AddRange(chosen.Params.Select(param => ParamCType(param)));
-        if (chosen.TakesMask) {
-          paramTypes.Add("uint64_t");
-        }
         codes.Insert(0, $"(({declarer}){temp})");
         call = $"({{ {CType(cls.Name)} {temp} = {self}; (({RetCType(chosen)}(*)({string.Join(", ", paramTypes)}))({temp}->cls->vtable[{chosen.Slot}]))({string.Join(", ", codes)}); }})";
       }
@@ -1038,7 +1053,7 @@ public sealed partial class CodeGen {
     if (PairReturn(cls.Init)) {
       sb.Append($"  df_exception* error = {initCall};\n");
       sb.Append(PairReturn(ctor)
-        ? $"  if (error) {{\n    return ({ResultPair(CType(cls.Name))}){{ NULL, error }};\n  }}\n"
+        ? $"  if (error) {{\n    df_drop((void*)self);   /* the half-built object ends: the objects its fields already hold are dropped */\n    return ({ResultPair(CType(cls.Name))}){{ NULL, error }};\n  }}\n"
         : "  if (error) {\n    df_panic_unhandled(error);\n  }\n");
     } else {
       sb.Append($"  {initCall};\n");
@@ -1051,6 +1066,7 @@ public sealed partial class CodeGen {
   string InitPrologue(ClassInfo cls) {
     var sb = new StringBuilder();
     if (cls.IsException && cls.Parent == null) {
+      sb.Append("  df_exc_live++;\n");
       sb.Append("  self->message = df_cstr_truncated(v_message.p, v_message.len, 2048);\n");
       sb.Append("  self->function = df_cstr_truncated(\"\", 0, 1024);\n");
     }

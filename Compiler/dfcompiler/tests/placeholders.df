@@ -1,0 +1,52 @@
+// Placeholders (11.3.4): a trait leaves a type open and each implementing class fixes it with 'with (Item is type)'
+alias Root as r
+
+trait Sequence {
+  placeholder Item
+  fun Item? Next()
+}
+
+public class Countdown(u32 start) : Sequence with (Item is u32) {
+  u32 left = start
+  override fun u32? Next() {
+    if left == 0 {
+      return null
+    }
+    left -= 1
+    return left + 1
+  }
+}
+
+public class Evens : Sequence with (Item is i64) {
+  i64 current = 0
+  override fun i64? Next() {
+    current += 2
+    if current > 6 {
+      return null
+    }
+    return current
+  }
+}
+
+fun r64 sum<Source : Sequence>(Source items) where Source.Item : Numeric {
+  r64 total = 0.0
+  var current = items.Next()
+  while current != null {
+    total += (r64)(current ?? 0)
+    current = items.Next()
+  }
+  return total
+}
+
+fun i32 count<Source : Sequence>(Source items) {
+  i32 n = 0
+  while items.Next() != null {
+    n += 1
+  }
+  return n
+}
+
+r.Console.log(sum(Countdown(4)))
+r.Console.log(count(Countdown(3)))
+r.Console.log(count(Evens()))
+r.Console.log(sum(Evens()))

@@ -8,6 +8,7 @@ namespace dfcompiler;
 // not leave it. Silent exceptions are not part of this analysis yet: they are raised only where a catch of the same function handles them.
 public sealed partial class CodeGen {
   const int AnyException = 10;   // the id of Exception: "some non-silent exception, we do not know which"
+  const int SilentLeak = -3;     // in the set of what leaves a function: it returns a silent exception (it never goes on to a caller's caller)
 
   // the catches that cover a point of the code: one list of catch targets for every enclosing block that has catches
   // after the statement (null = catch all, -2 = the SilentException trait, otherwise an exception id)
@@ -228,8 +229,9 @@ public sealed partial class CodeGen {
         continue;
       }
       if (statement.Kind == "AtEnd") {
+        // an atEnd block has no error part: what it raises is a panic, not something that leaves the function
         foreach (var child in statement.Children) {
-          FlowNode(child, ctx);
+          FlowNode(child, new FlowContext(new FunFlow(), Cover.None, true, ctx.CatchVars));
         }
         continue;
       }
@@ -279,6 +281,14 @@ public sealed partial class CodeGen {
             Add(id);
           }
         }
+        // a silent throw that no catch of the function handles leaves it, like any throw (the caller decides what to do with it)
+        if (fun.CanEmitSilent) {
+          foreach (var (id, cover) in flow.Silent) {
+            if (id == -1 || !Covered(id, cover, true)) {
+              Add(SilentLeak);
+            }
+          }
+        }
         foreach (var (names, cover) in flow.Calls) {
           foreach (string name in names) {
             // a generic function, or the constructor of a generic class: copies are made later, so anything can come out
@@ -289,7 +299,7 @@ public sealed partial class CodeGen {
               continue;
             }
             foreach (var callee in Resolve(name)) {
-              foreach (int exception in leaks[callee].ToList()) {
+              foreach (int exception in leaks[callee].Where(leaked => leaked != SilentLeak).ToList()) {
                 if (!Covered(exception, cover)) {
                   Add(exception);
                 }
@@ -299,12 +309,12 @@ public sealed partial class CodeGen {
         }
         // a constructor runs its init function; an init function runs the init function of its parent
         if (fun.IsCtor && fun.Class!.Init != null) {
-          foreach (int exception in leaks[fun.Class.Init].ToList()) {
+          foreach (int exception in leaks[fun.Class.Init].Where(leaked => leaked != SilentLeak).ToList()) {
             Add(exception);
           }
         }
         if (fun.IsInit && fun.Class!.Parent?.Init != null) {
-          foreach (int exception in leaks[fun.Class.Parent.Init].ToList()) {
+          foreach (int exception in leaks[fun.Class.Parent.Init].Where(leaked => leaked != SilentLeak).ToList()) {
             Add(exception);
           }
         }
@@ -324,18 +334,10 @@ public sealed partial class CodeGen {
           }
         }
       }
-      // a destructor that can let an exception out makes every end of scope able to: every function can
-      if (allFuns.Any(f => f.IsDtor && leaks[f].Count > 0)) {
-        foreach (var fun in allFuns) {
-          if (leaks[fun].Add(AnyException)) {
-            changed = true;
-          }
-        }
-      }
     }
     failingFuns.Clear();
     foreach (var fun in allFuns) {
-      if (leaks[fun].Count > 0) {
+      if (leaks[fun].Count > 0 && !fun.IsDtor) {   // a destructor is an atEnd of a class: what it raises is a panic
         failingFuns.Add(fun);
       }
     }
@@ -360,14 +362,11 @@ public sealed partial class CodeGen {
   }
 
   readonly Dictionary<int, int> silentBit = new();      // live silent exception id → its bit in the observed mask
-  readonly HashSet<FunSig> maskFuns = new();            // functions that take the observed mask and return their exception
 
-  // The silent exceptions that some catch of the program handles are LIVE: each gets a bit. A function that can throw a live silent
-  // exception takes the mask of the kinds its caller observes (a hidden last parameter) and returns the exception when the thrown kind is
-  // in the mask; otherwise the throw does nothing and the function goes on. A kind no catch handles is removed from the code altogether.
+  // The silent exceptions that some catch of the program handles are LIVE: each gets a bit. A call site builds the mask of the kinds the
+  // catches around it handle (ObservedMask) and ignores any other silent exception that the callee returned (SilentIgnored).
   void ComputeSilentEmitters(List<FunSig> allFuns, Dictionary<FunSig, FunFlow> flows) {
     silentBit.Clear();
-    maskFuns.Clear();
     var targets = new List<int?>();
     void Collect(Node node) {
       if (node.Kind == "Catch") {
@@ -388,32 +387,6 @@ public sealed partial class CodeGen {
         }
         silentBit[id] = silentBit.Count;
       }
-    }
-    if (silentBit.Count == 0) {
-      return;
-    }
-    bool CanBeEmitter(FunSig fun) =>
-      !fun.IsCtor && !fun.IsInit && !fun.IsStaticInit && !fun.IsDtor && !fun.IsAbstract && fun.GenericT == null && !fun.Name.EndsWith(".==");
-    foreach (var fun in allFuns.Where(CanBeEmitter)) {
-      foreach (var (id, cover) in flows[fun].Silent) {
-        bool live = id == -1 || silentBit.ContainsKey(id);
-        if (live && (id == -1 || !Covered(id, cover, true))) {
-          maskFuns.Add(fun);
-        }
-      }
-    }
-    // functions that can be called through the same pointer take the mask together
-    foreach (var group in allFuns.Where(f => f.Class != null && !f.IsStatic && !f.IsCtor && !f.IsInit && !f.IsDtor)
-        .GroupBy(f => (f.Name[(f.Name.LastIndexOf('.') + 1)..], string.Join(",", f.Params.Select(p => p.Type))))) {
-      if (group.Any(maskFuns.Contains)) {
-        foreach (var member in group.Where(f => f.GenericT == null && !f.Name.EndsWith(".=="))) {
-          maskFuns.Add(member);
-        }
-      }
-    }
-    foreach (var fun in maskFuns) {
-      fun.TakesMask = true;
-      failingFuns.Add(fun);
     }
   }
 }

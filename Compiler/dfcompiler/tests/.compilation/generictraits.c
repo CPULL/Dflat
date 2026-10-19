@@ -124,6 +124,15 @@ static char* df_cstr_truncated(const char* text, uint64_t length, uint64_t maxBy
   return copy;
 }
 
+/* the exception records alive: the count is printed at exit when the environment variable DF_EXC_COUNT is set (to look for leaks) */
+static int64_t df_exc_live = 0;
+
+static void df_exc_report(void) {
+  if (getenv("DF_EXC_COUNT")) {
+    printf("exceptions alive at exit: %lld\n", (long long)df_exc_live);
+  }
+}
+
 static df_exception* df_new_exception(const df_descriptor* descriptor, const char* message, uint64_t messageLength, const char* function) {
   df_exception* exception = (df_exception*)df_alloc(sizeof(df_exception));
   exception->cls = NULL;
@@ -132,6 +141,7 @@ static df_exception* df_new_exception(const df_descriptor* descriptor, const cha
   exception->message = df_cstr_truncated(message, messageLength, 2048);
   exception->function = df_cstr_truncated(function, strlen(function), 1024);
   exception->line = 0;
+  df_exc_live++;
   return exception;
 }
 
@@ -198,6 +208,15 @@ static df_string df_str_from_buf(const char* buf) {
 
 static df_string df_str_from_cstr(const char* text) {
   df_string s = { text, strlen(text) };
+  return s;
+}
+
+/* a copy of the text: the Message of an exception stays valid after the exception is released */
+static df_string df_str_dup_cstr(const char* text) {
+  uint64_t n = strlen(text);
+  char* p = (char*)df_alloc(n);
+  memcpy(p, text, n);
+  df_string s = { p, n };
   return s;
 }
 
@@ -284,6 +303,20 @@ static void df_drop(void* obj) {
   if (c != NULL && c->drop != NULL) {
     c->drop(obj);
   }
+}
+
+/* the owner of an exception record is done with it (a catch ended, a silent exception was ignored): its buffers and the record are freed */
+static void df_exc_release(df_exception* exception) {
+  if (exception == NULL) {
+    return;
+  }
+  if (exception->cls != NULL) {
+    df_drop(exception);   /* an exception object of the program: its destructor runs */
+  }
+  free(exception->message);
+  free(exception->function);
+  free(exception);
+  df_exc_live--;
 }
 
 static df_string df_str_obj(const void* obj) {
@@ -565,6 +598,7 @@ static void df_init(void) {
   SetConsoleOutputCP(CP_UTF8);
   SetConsoleCP(CP_UTF8);
 #endif
+  atexit(df_exc_report);
 }
 
 /* ---- program arguments (spec 17.1): index 0 is the program name ---- */
@@ -664,6 +698,31 @@ DF_SAT_INT(uint8_t, u8, 0, UINT8_MAX)
 DF_SAT_INT(uint16_t, u16, 0, UINT16_MAX)
 DF_SAT_INT(uint32_t, u32, 0, UINT32_MAX)
 
+/* the same casts leaving a note of the silent OutOfRangeCastException when the value does not fit (used where a catch handles it) */
+#define DF_SAT_CHK(T, NAME, LO, HI) \
+  static T df_satc_##NAME##_i(int64_t v) { \
+    T r = df_sat_##NAME##_i(v); \
+    if ((int64_t)r != v) df_silent_note(&df_desc_OutOfRangeCastException); \
+    return r; \
+  } \
+  static T df_satc_##NAME##_u(uint64_t v) { \
+    T r = df_sat_##NAME##_u(v); \
+    if ((uint64_t)r != v) df_silent_note(&df_desc_OutOfRangeCastException); \
+    return r; \
+  } \
+  static T df_satc_##NAME##_r(double v) { \
+    T r = df_sat_##NAME##_r(v); \
+    if (isnan(v) || v <= (double)(LO) - 1.0 || v >= (double)(HI) + 1.0) df_silent_note(&df_desc_OutOfRangeCastException); \
+    return r; \
+  }
+
+DF_SAT_CHK(int8_t, i8, INT8_MIN, INT8_MAX)
+DF_SAT_CHK(int16_t, i16, INT16_MIN, INT16_MAX)
+DF_SAT_CHK(int32_t, i32, INT32_MIN, INT32_MAX)
+DF_SAT_CHK(uint8_t, u8, 0, UINT8_MAX)
+DF_SAT_CHK(uint16_t, u16, 0, UINT16_MAX)
+DF_SAT_CHK(uint32_t, u32, 0, UINT32_MAX)
+
 static int64_t df_sat_i64_i(int64_t v) { return v; }
 static int64_t df_sat_i64_u(uint64_t v) { return v > (uint64_t)INT64_MAX ? INT64_MAX : (int64_t)v; }
 static int64_t df_sat_i64_r(double v) {
@@ -678,6 +737,20 @@ static uint64_t df_sat_u64_r(double v) {
   if (isnan(v) || v <= 0) return 0;
   if (v >= 18446744073709551615.0) return UINT64_MAX;
   return (uint64_t)v;
+}
+
+/* the checked casts of the 64-bit types */
+static int64_t df_satc_i64_i(int64_t v) { return v; }
+static int64_t df_satc_i64_u(uint64_t v) { if (v > (uint64_t)INT64_MAX) df_silent_note(&df_desc_OutOfRangeCastException); return df_sat_i64_u(v); }
+static int64_t df_satc_i64_r(double v) {
+  if (isnan(v) || v <= -9223372036854775809.0 || v >= 9223372036854775808.0) df_silent_note(&df_desc_OutOfRangeCastException);
+  return df_sat_i64_r(v);
+}
+static uint64_t df_satc_u64_i(int64_t v) { if (v < 0) df_silent_note(&df_desc_OutOfRangeCastException); return df_sat_u64_i(v); }
+static uint64_t df_satc_u64_u(uint64_t v) { return v; }
+static uint64_t df_satc_u64_r(double v) {
+  if (isnan(v) || v <= -1.0 || v >= 18446744073709551616.0) df_silent_note(&df_desc_OutOfRangeCastException);
+  return df_sat_u64_r(v);
 }
 
 /* ---- date, clock, lapse (spec 3.2, 3.3) ---- */
@@ -1208,22 +1281,22 @@ int main(int argc, char** argv) {
   v_m_24 = f_Numbers();
   void* v_viaTrait = ((void*)(v_n_24));
   df_console_log(({ void* t_26 = (void*)(({ void* t_25 = v_viaTrait; if (t_25 == NULL || DF_IS_DEAD(t_25)) { df_raise(&df_desc_NullPointerException, df_fn23); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f24_exc3; } } t_25; })); ((df_string(*)(void*, uint64_t))(df_impl_of(t_26, &df_trait_Container__string)->methods[0]))(t_26, ((uint64_t)0ULL)); }));
-  df_console_log(({ df_res0 t_27 = f_first(((void*)(v_n_24))); if (t_27.err) { df_err = t_27.err; df_err_thrown = false; goto f24_exc3; } t_27.value; }));
+  df_console_log(({ df_res0 t_27 = f_first(((void*)(v_n_24))); if (t_27.err) { if (t_27.err->descriptor->silent) { df_exc_release(t_27.err); t_27.err = NULL; } else { df_err = t_27.err; df_err_thrown = false; goto f24_exc3; } } t_27.value; }));
   df_console_log(df_str_from_i64((int64_t)(f_Numbers_Get(((c_Numbers*)({ c_Numbers* t_28 = v_m_24; if (t_28 == NULL || DF_IS_DEAD(t_28)) { df_raise(&df_desc_NullPointerException, df_fn23); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f24_exc3; } } t_28; })), ((uint64_t)2ULL)))));
-  df_console_log(df_str_from_u64((uint64_t)(({ df_res1 t_29 = f_sizeOf__Numbers(v_m_24); if (t_29.err) { df_err = t_29.err; df_err_thrown = false; goto f24_exc3; } t_29.value; }))));
+  df_console_log(df_str_from_u64((uint64_t)(({ df_res1 t_29 = f_sizeOf__Numbers(v_m_24); if (t_29.err) { if (t_29.err->descriptor->silent) { df_exc_release(t_29.err); t_29.err = NULL; } else { df_err = t_29.err; df_err_thrown = false; goto f24_exc3; } } t_29.value; }))));
   v_w_24 = f_Wrapper__i32(((int32_t)7LL));
-  df_console_log(df_str_from_u64((uint64_t)(({ df_res1 t_30 = f_sizeOf__Wrapper__i32(v_w_24); if (t_30.err) { df_err = t_30.err; df_err_thrown = false; goto f24_exc3; } t_30.value; }))));
+  df_console_log(df_str_from_u64((uint64_t)(({ df_res1 t_30 = f_sizeOf__Wrapper__i32(v_w_24); if (t_30.err) { if (t_30.err->descriptor->silent) { df_exc_release(t_30.err); t_30.err = NULL; } else { df_err = t_30.err; df_err_thrown = false; goto f24_exc3; } } t_30.value; }))));
   df_console_log(df_str_from_i64((int64_t)(f_Wrapper__i32_Get(((c_Wrapper__i32*)({ c_Wrapper__i32* t_31 = v_w_24; if (t_31 == NULL || DF_IS_DEAD(t_31)) { df_raise(&df_desc_NullPointerException, df_fn23); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f24_exc3; } } t_31; })), ((uint64_t)0ULL)))));
   void* v_asNumbers = ((void*)(v_w_24));
   df_console_log(df_str_from_i64((int64_t)(({ void* t_33 = (void*)(({ void* t_32 = v_asNumbers; if (t_32 == NULL || DF_IS_DEAD(t_32)) { df_raise(&df_desc_NullPointerException, df_fn23); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f24_exc3; } } t_32; })); ((int32_t(*)(void*, uint64_t))(df_impl_of(t_33, &df_trait_Container__i32)->methods[0]))(t_33, ((uint64_t)0ULL)); }))));
   {
-    ({ ({ c_Wrapper__i32** t_35 = &(v_w_24); void* t_36 = (void*)*t_35; *t_35 = NULL; df_drop(t_36); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f24_exc2; } });
+    ({ ({ c_Wrapper__i32** t_35 = &(v_w_24); void* t_36 = (void*)*t_35; *t_35 = NULL; df_drop(t_36); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn23_panic; } });
   }
   {
-    ({ ({ c_Numbers** t_38 = &(v_m_24); void* t_39 = (void*)*t_38; *t_38 = NULL; df_drop(t_39); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f24_exc1; } });
+    ({ ({ c_Numbers** t_38 = &(v_m_24); void* t_39 = (void*)*t_38; *t_38 = NULL; df_drop(t_39); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn23_panic; } });
   }
   {
-    ({ ({ c_Names** t_41 = &(v_n_24); void* t_42 = (void*)*t_41; *t_41 = NULL; df_drop(t_42); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f24_exc0; } });
+    ({ ({ c_Names** t_41 = &(v_n_24); void* t_42 = (void*)*t_41; *t_41 = NULL; df_drop(t_42); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn23_panic; } });
   }
   goto f24_done;
   f24_exc3: if (df_err) { df_pend24 = df_err; df_err = NULL; }

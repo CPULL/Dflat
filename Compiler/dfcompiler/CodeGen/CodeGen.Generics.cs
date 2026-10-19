@@ -15,6 +15,7 @@ sealed class TypeParam {
   public Node At { get; }
   public List<Node> Constraints { get; } = new();   // type nodes: a trait, a class or a set; all must hold
   public string? ValueType { get; set; }            // a value parameter (11.3.3): its type; null for a type parameter
+  public List<(string Placeholder, Node Constraint)> PlaceholderConstraints { get; } = new();   // where Source.Item : Numeric (11.3.4)
 }
 
 // a generic function: the template is kept as a tree and a copy is made for each list of type arguments
@@ -43,6 +44,7 @@ sealed class GenericClass {
   public Node Node { get; }
   public List<TypeParam> Params { get; }
   public bool IsTrait => Node.Kind == "Trait";
+  public bool HasPlaceholders { get; init; }   // a trait with 'placeholder Item': the Params are the placeholders, fixed by 'with (Item is u32)' in a class
 }
 
 // the instances of generic classes the program needs; they survive from one attempt to the next (see Compile)
@@ -152,10 +154,27 @@ public sealed partial class CodeGen {
     foreach (var plain in program.Children.Where(child => child.Kind == "Class" && child.Children.Any(c => c.Kind == "Where") && !child.Children.Any(c => c.Kind == "GenericParams"))) {
       throw Error($"'where' is for generic classes: '{plain.Text}' has no type parameters", plain);
     }
-    foreach (var node in program.Children.Where(child => child.Kind is "Class" or "Trait" && child.Children.Any(c => c.Kind == "GenericParams")).ToList()) {
+    foreach (var node in program.Children.Where(child => child.Kind is "Class" or "Trait" && (child.Children.Any(c => c.Kind == "GenericParams") || PlaceholdersOf(child).Count > 0)).ToList()) {
       string name = node.Text!;
       if (genericClasses.ContainsKey(name) || IsSetName(name)) {
         throw Error($"the name '{name}' is already used", node);
+      }
+      var placeholders = PlaceholdersOf(node);
+      if (placeholders.Count > 0) {
+        // a trait with placeholders: copied for each class that fixes them (the placeholders play the part of type parameters)
+        if (node.Children.Any(c => c.Kind is "GenericParams" or "Where")) {
+          throw Error("feature not supported yet (a trait with both type parameters and placeholders)", node);
+        }
+        var placeholderParams = new List<TypeParam>();
+        foreach (var placeholder in placeholders) {
+          if (placeholderParams.Any(existing => existing.Name == placeholder.Text)) {
+            throw Error($"duplicate placeholder '{placeholder.Text}'", placeholder);
+          }
+          placeholderParams.Add(new TypeParam(placeholder.Text!, placeholder));
+        }
+        genericClasses[name] = new GenericClass(name, node, placeholderParams) { HasPlaceholders = true };
+        program.Children.Remove(node);
+        continue;
       }
       genericClasses[name] = new GenericClass(name, node, ReadTypeParams(node, name));
       program.Children.Remove(node);
@@ -165,13 +184,22 @@ public sealed partial class CodeGen {
       var generic = genericClasses[template.Name];
       string mangled = MangledName(generic.Name, args);
       var map = generic.Params.Zip(args).ToDictionary(pair => pair.First.Name, pair => pair.Second);
-      var copy = CloneNode(generic.Node, SubstituteTypes(map));
+      var copy = CloneNode(generic.Node, SubstituteTypes(map, generic.HasPlaceholders));
       copy.Text = mangled;
       copy.Children.RemoveAll(child => child.Kind is "GenericParams" or "Where");
+      if (generic.HasPlaceholders) {
+        copy.Children.First(child => child.Kind == "Block").Children.RemoveAll(member => member.Kind == "Placeholder");
+      }
       program.Children.Add(copy);
       classInstanceArgs[mangled] = (generic, args);
       displayNames[mangled] = $"{generic.Name}<{string.Join(", ", args.Select(DisplayName))}>";
     }
+  }
+
+  // the 'placeholder Item' members of a trait
+  static List<Node> PlaceholdersOf(Node node) {
+    var block = node.Kind == "Trait" ? node.Children.FirstOrDefault(child => child.Kind == "Block") : null;
+    return block == null ? new List<Node>() : block.Children.Where(member => member.Kind == "Placeholder").ToList();
   }
 
   static readonly HashSet<string> ValueParamTypes = new() { "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "bool" };
@@ -204,6 +232,15 @@ public sealed partial class CodeGen {
     if (where != null) {
       foreach (var entry in where.Children) {
         var target = entry.Children[0];
+        // where Source.Item : Numeric: a constraint on the placeholder of the trait that Source must implement
+        if (target is { Kind: "Type", Children.Count: 0 } && target.Text!.Contains('.')) {
+          string[] parts = target.Text.Split('.', 2);
+          var ownerParam = ps.FirstOrDefault(p => p.Name == parts[0]) ?? throw Error($"'{parts[0]}' is not a type parameter of {name}", target);
+          foreach (var constraint in entry.Children.Skip(1)) {
+            ownerParam.PlaceholderConstraints.Add((parts[1], constraint));
+          }
+          continue;
+        }
         var owner = target is { Kind: "Type", Children.Count: 0 } ? ps.FirstOrDefault(p => p.Name == target.Text) : null;
         if (owner == null) {
           throw NotSupported("'where' on a placeholder or a type expression (11.3.4)", entry);
@@ -262,12 +299,17 @@ public sealed partial class CodeGen {
   }
 
   // the tree of a copy: every use of a type parameter becomes the concrete type
-  Func<Node, Node?> SubstituteTypes(Dictionary<string, string> map) {
+  Func<Node, Node?> SubstituteTypes(Dictionary<string, string> map, bool allowNullable = false) {
     return node => {
-      if (node.Kind == "Nullable" && node.Children[0] is { Kind: "Type", Children.Count: 0 } inner && map.ContainsKey(inner.Text!)) {
+      if (!allowNullable && node.Kind == "Nullable" && node.Children[0] is { Kind: "Type", Children.Count: 0 } inner && map.ContainsKey(inner.Text!)) {
         throw Error($"'{inner.Text}?' is not allowed in generic code: list the nullable types in a set instead (11.3.8)", node);
       }
       var at = new Token(TokenKind.Ident, "", node.Line, 0);
+      // Item? in a trait with placeholders: a type that is nullable already (string, a class) stays as it is
+      if (allowNullable && node.Kind == "Nullable" && node.Children[0] is { Kind: "Type", Children.Count: 0 } placeholder
+          && map.TryGetValue(placeholder.Text!, out var fixedType) && !fixedType.StartsWith('#') && NullByDefault(fixedType)) {
+        return new Node("ResolvedType", at, fixedType);
+      }
       if (node.Kind == "Type" && node.Children.Count == 0 && node.Text != null && map.TryGetValue(node.Text, out var concrete)) {
         // a value parameter written as a type argument: Grid<Width, Cell>
         return concrete.StartsWith('#') ? new Node("ValueArg", at).Add(ValueNode(concrete, node)) : new Node("ResolvedType", at, concrete);
@@ -396,6 +438,11 @@ public sealed partial class CodeGen {
     if (constraint.Children.Count == 0 && IsSetName(constraint.Text!)) {
       return InSet(type, constraint.Text!);
     }
+    // a trait with placeholders: any class that implements one of its copies
+    if (constraint.Children.Count == 0 && genericClasses.TryGetValue(constraint.Text!, out var placeholderTrait) && placeholderTrait is { IsTrait: true, HasPlaceholders: true }) {
+      return classes.TryGetValue(type, out var implementer)
+        && AllTraits(implementer).Any(trait => classInstanceArgs.TryGetValue(trait.Name, out var copy) && copy.Template == placeholderTrait);
+    }
     string required = ResolveType(constraint);
     if (!IsClass(required)) {
       throw Error($"'{constraint.Text}' is not a trait, a class or a set: it cannot be a constraint", constraint);
@@ -415,7 +462,35 @@ public sealed partial class CodeGen {
           throw Error($"{DisplayName(args[index])} does not satisfy {ConstraintShown(constraint)}, required by {parameter} of {what}", at);
         }
       }
+      foreach (var (placeholder, written) in ps[index].PlaceholderConstraints) {
+        string? fixedType = PlaceholderValue(args[index], placeholder);
+        if (fixedType == null) {
+          throw Error($"{DisplayName(args[index])} has no placeholder '{placeholder}', named in 'where {ps[index].Name}.{placeholder}' of {what}", at);
+        }
+        var constraint = written.Children.Count > 0
+          ? CloneNode(written, SubstituteTypes(ps.Zip(args).ToDictionary(pair => pair.First.Name, pair => pair.Second)))
+          : written;
+        if (!Satisfies(fixedType, constraint)) {
+          throw Error($"{ps[index].Name}.{placeholder} of {DisplayName(args[index])} is {DisplayName(fixedType)}, which does not satisfy {ConstraintShown(constraint)}, required by {what}", at);
+        }
+      }
     }
+  }
+
+  // the type a class fixed for a placeholder with 'with (Item is u32)', or null when none of its traits has that placeholder
+  string? PlaceholderValue(string type, string placeholder) {
+    if (!classes.TryGetValue(type, out var cls)) {
+      return null;
+    }
+    foreach (var trait in AllTraits(cls)) {
+      if (classInstanceArgs.TryGetValue(trait.Name, out var copy) && copy.Template.HasPlaceholders) {
+        int position = copy.Template.Params.FindIndex(p => p.Name == placeholder);
+        if (position >= 0) {
+          return copy.Args[position];
+        }
+      }
+    }
+    return null;
   }
 
   // ---------------------------------------------------------------- generic classes
@@ -464,12 +539,126 @@ public sealed partial class CodeGen {
     return args;
   }
 
-  // Stack<i32> written in an expression (a constructor call or a static member): the copy of the class
-  string? GenericRefClass(Node reference) {
+  // Stack<i32> written in an expression (a constructor call or a static member): the copy of the class.
+  // Box<Num>(x): a set as type argument is replaced by the member the argument of the constructor selects (11.3.9)
+  string? GenericRefClass(Node reference, List<Node>? constructorArgs = null, Scope? scope = null) {
     if (reference.Children[0] is not { Kind: "Name" } target || !genericClasses.TryGetValue(target.Text!, out var generic)) {
       return null;
     }
-    return ClassInstanceName(generic, TypeArgsOf(reference.Children.Skip(1), generic.Params), reference);
+    var written = reference.Children.Skip(1).ToList();
+    if (HasSetArg(reference)) {
+      if (constructorArgs == null || scope == null) {
+        throw Error($"a set as a type argument needs a constructor call that gives the value, as in {generic.Name}<Set>(value) (11.3.9)", reference);
+      }
+      written = ChooseSetArgs(generic, written, constructorArgs, scope);
+    }
+    return ClassInstanceName(generic, TypeArgsOf(written, generic.Params), reference);
+  }
+
+  bool HasSetArg(Node reference) {
+    return reference.Children.Skip(1).Any(arg => arg is { Kind: "Type", Children.Count: 0 } && IsSetName(arg.Text!));
+  }
+
+  // the type arguments with each set replaced by the member its constructor argument selects
+  List<Node> ChooseSetArgs(GenericClass generic, List<Node> written, List<Node> constructorArgs, Scope scope) {
+    var chosen = new List<Node>();
+    for (int index = 0; index < written.Count; index++) {
+      var node = written[index];
+      var param = index < generic.Params.Count ? generic.Params[index] : null;
+      if (param == null || param.ValueType != null || node is not { Kind: "Type", Children.Count: 0 } || !IsSetName(node.Text!)) {
+        chosen.Add(node);
+        continue;
+      }
+      var constructor = generic.Node.Children.FirstOrDefault(child => child.Kind == "PrimaryCtor");
+      var bound = new Dictionary<string, string>();
+      var names = new HashSet<string> { param.Name };
+      if (constructor != null) {
+        foreach (var (pattern, argument) in PatternPairs(constructor, constructorArgs)) {
+          if (!MentionsParam(pattern, names)) {
+            continue;
+          }
+          string actual = ExprOf(argument, scope).Type;
+          if (actual is "null" or "void" || IsMulti(actual)) {
+            continue;
+          }
+          MatchType(pattern, actual, bound, names, argument);
+        }
+      }
+      if (!bound.TryGetValue(param.Name, out var valueType)) {
+        throw Error($"cannot choose a member of {node.Text}: no argument of the constructor of {generic.Name} gives the value for '{param.Name}'", node);
+      }
+      chosen.Add(new Node("ResolvedType", new Token(TokenKind.Ident, "", node.Line, 0), ChooseSetMember(valueType, node.Text!, node)));
+    }
+    return chosen;
+  }
+
+  // the members of a set, nested sets opened, in the order written
+  List<string> SetMembers(string setName, HashSet<string>? visited = null) {
+    visited ??= new HashSet<string>();
+    var members = new List<string>();
+    if (!visited.Add(setName)) {
+      return members;
+    }
+    void Add(string type) {
+      if (!members.Contains(type)) {
+        members.Add(type);
+      }
+    }
+    if (PredefinedSets.TryGetValue(setName, out var names)) {
+      foreach (string member in names) {
+        if (PredefinedSets.ContainsKey(member)) {
+          members.AddRange(SetMembers(member, visited).Where(type => !members.Contains(type)));
+        } else {
+          Add(member);
+        }
+      }
+      return members;
+    }
+    foreach (var member in genericSets[setName].Children) {
+      if (member is { Kind: "Type", Children.Count: 0 } && IsSetName(member.Text!)) {
+        members.AddRange(SetMembers(member.Text!, visited).Where(type => !members.Contains(type)));
+      } else {
+        Add(ResolveType(member));
+      }
+    }
+    return members;
+  }
+
+  static string MacroType(string type) {
+    string baseType = type.EndsWith('?') ? type[..^1] : type;
+    string kind = SignedTypes.Contains(baseType) ? "signed" : UnsignedTypes.Contains(baseType) ? "unsigned" : RealTypes.Contains(baseType) ? "real" : baseType;
+    return type.EndsWith('?') ? kind + "?" : kind;
+  }
+
+  // 11.3.9: the member of the set a value of this type becomes
+  string ChooseSetMember(string type, string setName, Node at) {
+    var members = SetMembers(setName);
+    if (members.Contains(type)) {
+      return type;
+    }
+    if (IsClass(type)) {
+      // the nearest parent class that is a member, then the members left to right
+      for (var parent = classes.TryGetValue(type, out var info) ? info.Parent : null; parent != null; parent = parent.Parent) {
+        if (members.Contains(parent.Name)) {
+          return parent.Name;
+        }
+      }
+      var viaTrait = members.FirstOrDefault(member => IsClass(member) && IsSubtype(type, member));
+      if (viaTrait != null) {
+        return viaTrait;
+      }
+    } else {
+      // a member of the same macrotype that holds the value, then one of a compatible macrotype (section 6)
+      var sameKind = members.FirstOrDefault(member => MacroType(member) == MacroType(type) && Assignable(member, type));
+      if (sameKind != null) {
+        return sameKind;
+      }
+      var compatible = members.FirstOrDefault(member => Assignable(member, type));
+      if (compatible != null) {
+        return compatible;
+      }
+    }
+    throw Error($"{DisplayName(type)} does not convert implicitly to any member of {setName}; tried: {string.Join(", ", members.Select(DisplayName))}", at);
   }
 
   // after the classes are registered: the type arguments of each copy must satisfy the constraints
@@ -593,7 +782,12 @@ public sealed partial class CodeGen {
 
   // the declared type of each parameter next to the argument given to it (positional, named and variadic)
   static List<(Node Pattern, Node Argument)> PatternPairs(GenericFun generic, List<Node> args) {
-    var parameters = generic.Node.Children.First(child => child.Kind == "Params").Children;
+    return PatternPairs(generic.Node.Children.First(child => child.Kind == "Params"), args);
+  }
+
+  // the same for any list of parameters (the primary constructor of a generic class)
+  static List<(Node Pattern, Node Argument)> PatternPairs(Node parameterList, List<Node> args) {
+    var parameters = parameterList.Children;
     var pairs = new List<(Node, Node)>();
     var filled = new Node?[parameters.Count];
     int variadicIndex = parameters.Count > 0 && parameters[^1].Kind == "VariadicParam" ? parameters.Count - 1 : -1;

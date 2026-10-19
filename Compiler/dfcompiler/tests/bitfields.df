@@ -54,7 +54,7 @@ fun string second() {
 }
 fun string third() {
   throw SeekBeforeBeginException("silent")
-  return "silent: no catch can handle it"
+  return "silent: never reached, the throw returns the empty string"
 }
 r.Console.log(first())
 r.Console.log(second())

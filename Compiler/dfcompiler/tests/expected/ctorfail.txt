@@ -1,0 +1,6 @@
+built with ratio 2
+construction failed
+derived construction failed
+0
+1000
+---- exit code 0 ----

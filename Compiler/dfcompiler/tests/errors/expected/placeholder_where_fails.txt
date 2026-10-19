@@ -1,0 +1,1 @@
+placeholder_where_fails.df(16): error: Source.Item of Names is string, which does not satisfy Numeric, required by sum

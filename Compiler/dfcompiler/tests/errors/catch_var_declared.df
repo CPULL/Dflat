@@ -1,0 +1,9 @@
+alias Root as r
+
+fun i32 divide(i32 a, i32 b) { a / b }
+
+divide(1, 0)
+catch DivisionByZeroException ex {
+  Exception copy = ex
+  r.Console.log(copy.Message)
+}

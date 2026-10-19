@@ -1,0 +1,1 @@
+setconv_no_member.df(10): error: i32 does not convert implicitly to any member of Narrow; tried: i16, u32

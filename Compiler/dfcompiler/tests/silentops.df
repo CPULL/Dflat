@@ -1,0 +1,98 @@
+// Silent operations of the language (spec 15.4): overflow and a cast that does not fit are raised only where a catch of the same function handles them;
+// without one the fallback applies in place (the result wraps, the cast saturates) and nothing is raised
+alias Root as r
+
+fun string addCaught(i8 a, i8 b) {
+  i8 sum = a + b
+  return $"sum {sum}"
+  catch OverflowException { return "overflow caught" }
+}
+fun i8 addPlain(i8 a, i8 b) { a + b }                       // no catch: wraps
+fun string mulCaught(i32 a, i32 b) {
+  i32 product = a * b
+  return $"product {product}"
+  catch OverflowException e { return "caught: " + e.Message }
+}
+fun string subCaught(u8 a, u8 b) {
+  u8 difference = a - b
+  return $"difference {difference}"
+  catch OverflowException { return "u8 underflow caught" }
+}
+fun string negateCaught(i8 a) {
+  i8 negative = -a
+  return $"negative {negative}"
+  catch OverflowException { return "negation overflow caught" }
+}
+fun string stepCaught(i8 a) {
+  i8 b = a
+  b++
+  return $"step {b}"
+  catch OverflowException { return "increment overflow caught" }
+}
+fun string compoundCaught(i16 a) {
+  i16 b = a
+  b += 30000
+  b += 30000
+  return $"compound {b}"
+  catch OverflowException { return "compound overflow caught" }
+}
+r.Console.log(addCaught(100, 20))
+r.Console.log(addCaught(100, 30))
+r.Console.log(addPlain(100, 30))
+r.Console.log(mulCaught(1000, 1000))
+r.Console.log(mulCaught(100000, 100000))
+r.Console.log(subCaught(5, 3))
+r.Console.log(subCaught(3, 5))
+r.Console.log(negateCaught(5))
+r.Console.log(negateCaught(-128))
+r.Console.log(stepCaught(10))
+r.Console.log(stepCaught(127))
+r.Console.log(compoundCaught(1))
+
+// which catches see it: catch Exception does not (the sum wraps), catch SilentException and catch all do
+fun string byException(i8 a) {
+  i8 sum = a + 100
+  return $"Exception: wrapped to {sum}"
+  catch Exception { return "Exception caught it" }
+}
+fun string bySilent(i8 a) {
+  i8 sum = a + 100
+  return $"Silent: {sum}"
+  catch SilentException { return "SilentException caught it" }
+}
+fun string byAll(i8 a) {
+  i8 sum = a + 100
+  return $"All: {sum}"
+  catch all { return "all caught it" }
+}
+r.Console.log(byException(100))
+r.Console.log(bySilent(100))
+r.Console.log(byAll(100))
+
+// the overflow of a called function is not seen by the caller's catch: it stays in the function that does the operation
+fun i8 wrapper(i8 a) { a + 100 }
+fun string callerCatches(i8 a) {
+  i8 sum = wrapper(a)
+  return $"callee wrapped to {sum}"
+  catch OverflowException { return "caller saw it" }
+}
+r.Console.log(callerCatches(100))
+
+// casts that do not fit
+fun string castCaught(i32 a) {
+  i8 small = (i8)a
+  return $"cast {small}"
+  catch OutOfRangeCastException { return "cast out of range" }
+}
+fun i8 castPlain(i32 a) { (i8)a }
+fun string castReal(r64 a) {
+  u8 small = (u8)a
+  return $"real cast {small}"
+  catch OutOfRangeCastException { return "real cast out of range" }
+}
+r.Console.log(castCaught(100))
+r.Console.log(castCaught(1000))
+r.Console.log(castPlain(1000))
+r.Console.log(castReal(12.7))
+r.Console.log(castReal(300.5))
+r.Console.log(castReal(-3.5))

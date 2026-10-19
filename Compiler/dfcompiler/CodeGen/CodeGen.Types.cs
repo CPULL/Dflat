@@ -324,6 +324,9 @@ public sealed partial class CodeGen {
           return "arr<" + element + ">";
         }
         if (genericClasses.TryGetValue(t, out var genericClass)) {
+          if (genericClass.HasPlaceholders) {
+            throw Error($"'{t}' has placeholders: it is not the type of a value, use it as a constraint, as in <Source : {t}>", n);
+          }
           if (n.Children.Count == 0) {
             throw Error($"'{t}' is generic: write its type arguments, {t}<...>", n);
           }

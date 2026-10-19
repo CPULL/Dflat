@@ -1,0 +1,1 @@
+setconv_static.df(10): error: a set as a type argument needs a constructor call that gives the value, as in Box<Set>(value) (11.3.9)

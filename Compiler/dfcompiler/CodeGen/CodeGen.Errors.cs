@@ -35,6 +35,7 @@ sealed class Frame {
   public AssignState? StartAssign { get; set; }
   public string OuterHandler { get; set; } = "";
   public string? RanFlag { get; set; }
+  public string? CaughtVar { get; set; }   // catch bodies: the C variable that holds the exception the catch owns (released when the body is left)
 
   // atEnd bodies: the scope they belong to, their position (1 = first written) and the exit kind
   public Frame? Owner { get; set; }
@@ -255,8 +256,15 @@ public sealed partial class CodeGen {
   // atEnd sees every variable of its scope, wherever declared: they are created at the start
   // of the scope with their default value
   void HoistDeclarations(Frame frame, HashSet<Node>? only) {
+    // the type of 'var x = Foo(n)' needs the variables declared before it in this scope
+    var typingScope = new Scope(frame.ParentScope);
     void Hoist(Node decl) {
       if (only != null && !only.Contains(decl)) {
+        try {
+          typingScope.Vars[decl.Text!] = new VarInfo(TypeForHoist(decl, typingScope), "", false);
+        } catch (CompileException) {
+          // a type that cannot be worked out yet: the name is simply not visible to the later declarations
+        }
         return;
       }
       string name = decl.Text!;
@@ -265,11 +273,12 @@ public sealed partial class CodeGen {
       }
       var mods = decl.Children.FirstOrDefault(child => child.Kind == "Mods");
       bool isConst = mods?.Text?.Split(' ').Contains("const") == true;
-      string type = ResolveDeclType(decl, frame.ParentScope);
+      string type = TypeForHoist(decl, typingScope);
       frame.Hoisted[name] = new VarInfo(type, $"v_{name}_{frame.Id}", isConst) {
         Own = declOwner.TryGetValue(decl, out bool owns) && owns,
         IsWeak = decl.Children.Any(child => child.Kind == "WeakInit")
       };
+      typingScope.Vars[name] = frame.Hoisted[name];
     }
     foreach (var statement in frame.Statements) {
       if (statement.Kind == "Decl") {
@@ -285,6 +294,18 @@ public sealed partial class CodeGen {
       atEndScope.Vars[name] = variable;
     }
     frame.AtEndScope = atEndScope;
+  }
+
+  // the type of a declaration while the scope is prepared: only the type is wanted, so the code the expression makes is dropped
+  // (it needs a label for exceptions, and the frame that has them is not open yet)
+  string TypeForHoist(Node decl, Scope scope) {
+    string? saved = handlerOverride;
+    handlerOverride ??= "df_hoist_typing";
+    try {
+      return ResolveDeclType(decl, scope);
+    } finally {
+      handlerOverride = saved;
+    }
   }
 
   void EmitHoists(Frame frame, StringBuilder sb, string pad) {
@@ -353,6 +374,25 @@ public sealed partial class CodeGen {
 
   // ---------------------------------------------------------------- catch
 
+  // the exception of a catch belongs to it and ends with it (spec 15.1): the variable cannot be stored, returned or moved out of the catch
+  void CheckCatchVariableStays(Node node, string name) {
+    bool IsVariable(Node n) => n.Kind == "Name" && n.Text == name;
+    bool escapes = node.Kind switch {
+      "Return" => node.Children.Any(child => IsVariable(child)),
+      "Decl" => node.Children.FirstOrDefault(child => child.Kind is "Init" or "WeakInit") is { } init && IsVariable(init.Children[0]),
+      "Assign" => node.Text == "=" && node.Children.Count == 2 && IsVariable(node.Children[1]),
+      "Gift" => IsVariable(node.Children[0]),
+      "List" or "Tuple" => node.Children.Any(child => IsVariable(child)),
+      _ => false
+    };
+    if (escapes) {
+      throw Error($"the exception '{name}' belongs to its catch and ends with it: it cannot be stored, returned or moved out; copy its Id and Message, or throw it", node);
+    }
+    foreach (var child in node.Children) {
+      CheckCatchVariableStays(child, name);
+    }
+  }
+
   // (exception id or null for everything, variable name or null)
   (int? Id, string? Variable) CatchTarget(Node catchNode) {
     var typeNode = catchNode.Children.FirstOrDefault(child => child.Kind == "Type");
@@ -413,6 +453,9 @@ public sealed partial class CodeGen {
     string cbdone = $"f{frame.Id}_cbdone{ordinal}";
     sb.Append($"{pad}goto {skip};\n");
     sb.Append($"{pad}{frame.CatchLabel(ordinal)}: {{\n");
+    tempCounter++;
+    string caught = $"df_caught{tempCounter}";
+    sb.Append($"{pad}  df_exception* {caught} = df_err;\n");
     var catchScope = new Scope(frame.StatementScope);
     // the catch runs from any point above it: assignments made there may be missing
     var normalFlow = assign;
@@ -422,18 +465,22 @@ public sealed partial class CodeGen {
       tempCounter++;
       string cname = $"v_{variable}_{tempCounter}";
       string variableType = CatchClass(catchNode)?.Name ?? "Exception";
-      sb.Append($"{pad}  {CType(variableType)} {cname} = ({CType(variableType)})df_err;\n");
+      sb.Append($"{pad}  {CType(variableType)} {cname} = ({CType(variableType)}){caught};\n");
       catchScope.Vars[variable] = new VarInfo(variableType, cname, true);
+      CheckCatchVariableStays(catchNode.Children.First(child => child.Kind == "Block"), variable);
     }
     sb.Append($"{pad}  df_err = NULL;\n");
     var block = catchNode.Children.First(child => child.Kind == "Block");
     var body = PrepareFrame(block.Children, catchScope, FrameKind.CatchBody);
     body.OuterHandler = cbexit;
+    body.CaughtVar = caught;
     EmitHoists(body, sb, pad + "  ");
     EmitFrameBody(body, sb, indent + 1);
+    sb.Append($"{pad}  df_exc_release({caught});\n");
     sb.Append($"{pad}  goto {cbdone};\n");
-    // a throw goes to the enclosing level (later catches don't see it); any other error is a panic
-    sb.Append($"{pad}  {cbexit}: if (df_err_thrown) goto {frame.ExceptionExit};\n");
+    // a throw goes to the enclosing level (later catches don't see it); any other error is a panic. The exception the catch owned is released
+    // unless the body threw that same one again
+    sb.Append($"{pad}  {cbexit}: if (df_err_thrown) {{ if (df_err != {caught}) {{ df_exc_release({caught}); }} goto {frame.ExceptionExit}; }}\n");
     sb.Append($"{pad}  goto {fn!.PanicLabel};\n");
     sb.Append($"{pad}  {cbdone}: ;\n");
     sb.Append($"{pad}}}\n");
@@ -498,9 +545,9 @@ public sealed partial class CodeGen {
     frame.Owner = owner;
     frame.AtEndIndex = step;
     frame.ExceptionMode = exceptionMode;
-    // an error inside atEnd: while an exception is passing through it is a panic,
-    // otherwise it leaves the scope through the earlier atEnd blocks
-    frame.OuterHandler = exceptionMode ? fn!.PanicLabel : owner.ExcLabel(step - 1);
+    // an atEnd block has no error part (spec 15.7.6): an exception that is not silent and is not handled inside it is a panic,
+    // whether or not another exception is passing through
+    frame.OuterHandler = fn!.PanicLabel;
     sb.Append($"{pad}{{\n");
     EmitHoists(frame, sb, pad + "  ");
     EmitFrameBody(frame, sb, indent + 1);
@@ -549,6 +596,9 @@ public sealed partial class CodeGen {
       for (int step = frame.AtEnds.Count; step >= 1; step--) {
         EmitAtEnd(frame, step, false, sb, indent);
       }
+      if (frame.Kind == FrameKind.CatchBody && frame.CaughtVar != null) {
+        sb.Append($"{Pad(indent)}df_exc_release({frame.CaughtVar});\n");   // leaving the catch: the exception it owned ends
+      }
     }
   }
 
@@ -585,7 +635,7 @@ public sealed partial class CodeGen {
   // does a return from here pass any atEnd block?
   bool ReturnPassesAtEnd() {
     for (var frame = frames.Peek(); frame != null; frame = frame.Parent) {
-      if (frame.AtEnds.Count > 0 || frame.Kind == FrameKind.AtEndBody) {
+      if (frame.AtEnds.Count > 0 || frame.Kind is FrameKind.AtEndBody or FrameKind.CatchBody) {
         return true;
       }
     }
@@ -609,6 +659,9 @@ public sealed partial class CodeGen {
     while (frame != null) {
       for (int step = frame.AtEnds.Count; step >= 1; step--) {
         EmitAtEnd(frame, step, false, sb, indent);
+      }
+      if (frame.Kind == FrameKind.CatchBody && frame.CaughtVar != null) {
+        sb.Append($"{pad}df_exc_release({frame.CaughtVar});\n");
       }
       if (frame.Kind == FrameKind.AtEndBody) {
         var owner = frame.Owner!;
@@ -647,14 +700,16 @@ public sealed partial class CodeGen {
         throw Error($"'{value.Text}' is not an exception", s);
       }
       string rethrow = $"{{ df_err = (df_exception*){variable.CName}; df_err_thrown = true; goto {Handler}; }}";
-      bool mayBeSilent = silentBit.Count > 0 && (variable.Type == "Exception" || (IsExceptionClass(variable.Type) && IsSilentClass(classes[variable.Type])));
-      if (!mayBeSilent) {
+      bool mayBeSilent = variable.Type == "Exception" || (IsExceptionClass(variable.Type) && IsSilentClass(classes[variable.Type]));
+      if (!mayBeSilent || (currentFun?.CanEmitSilent == true && atEndDepth == 0)) {
         sb.Append($"{pad}{rethrow}\n");
         return true;
       }
-      // the variable may hold a silent exception: it leaves only where somebody observes it
-      string observed = currentFun?.TakesMask == true ? $"({ObservedMask()} | df_obs)" : ObservedMask();
-      sb.Append($"{pad}if (!((df_exception*){variable.CName})->descriptor->silent || ({observed} & df_obs_bit((df_exception*){variable.CName}))) {rethrow}\n");
+      // a silent exception cannot leave here (constructor, destructor, entry point): only a catch of this function sees it
+      string silentTest = silentBit.Count > 0
+        ? $"!((df_exception*){variable.CName})->descriptor->silent || ({ObservedMask()} & df_obs_bit((df_exception*){variable.CName}))"
+        : $"!((df_exception*){variable.CName})->descriptor->silent";
+      sb.Append($"{pad}if ({silentTest}) {rethrow}\n");
       return false;
     }
     if (value.Kind != "Call") {
@@ -703,8 +758,8 @@ public sealed partial class CodeGen {
   Expr ExceptionMember(Expr exception, string member, Node at) {
     return member switch {
       "Id" => new Expr($"(({exception.Code})->id)", "u64"),
-      "Message" => new Expr($"df_str_from_cstr(({exception.Code})->message)", "string"),
-      "Function" => new Expr($"df_str_from_cstr(({exception.Code})->function)", "string"),
+      "Message" => new Expr($"df_str_dup_cstr(({exception.Code})->message)", "string"),
+      "Function" => new Expr($"df_str_dup_cstr(({exception.Code})->function)", "string"),
       "Line" => new Expr($"(({exception.Code})->line)", "u64"),
       _ => throw Error($"member '{member}' of Exception is not supported yet", at)
     };

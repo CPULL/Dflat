@@ -151,7 +151,7 @@ Where a decision came from the spec the section is named; where I (Claude) chose
   inherited from the parent class counts; a missing implementation is an error; the return type must match.
 - The same member in two traits: unqualified use is an error; TraitName.member inside the class calls the trait's own body (not the
   override of the class), x.TraitName.member outside sees the object as that trait.
-- Not supported: generic traits, placeholders, trait constructors with parameters, a trait that redeclares a function of its
+- Not supported: trait constructors with parameters, a trait that redeclares a function of its
   parent trait, static members in traits, trait-typed `is` checks on non-objects.
 - Exception classes: class E(fields) : Exception [, SilentException]. The object keeps the layout of the runtime exception record
   (after the class header), so the error register can hold it and a catch gets it back as the class. The constructor takes the message
@@ -229,7 +229,7 @@ Owner or borrow is decided where a variable is declared:
 
 12. Summary of the main limits
 -------------------------------
-- Generics: functions and classes only (section 13); no generic traits, placeholders, value parameters, type switch.
+- Generics: see "Generics" below (functions, classes, traits, value parameters, placeholders, type switch are built; collections are not).
 - No collections other than arr, lambdas, pointers, references, imports, namespaces (the line is a comment).
 - Classes: primary constructors only; no parent constructor arguments; no secondary constructors.
 - Ownership: single owner and weak references only; no reference counting, clone or copy; borrows are not lifetime checked.
@@ -300,8 +300,8 @@ CHOICES where I (Claude) decided and the spec does not say, and limits of this v
 - The body of a generic is NOT checked at the definition (the spec says it is: the Rust model). It is checked in every copy, so an
   error appears with the first type that reaches it, and a generic that is never used is never checked at all.
 - Supported: generic functions at the top level and generic classes at the top level. NOT supported (error "feature not supported"):
-  generic methods, a class implementing a generic trait twice, a generic parent (class A<T> : B<T>), placeholders,
-  'where' on a placeholder or a type expression, conversion of a value to a set member (11.3.9),
+  generic methods, a class implementing a generic trait twice, a trait with both <T> and placeholders, a generic parent (class A<T> : B<T>), 
+  'where' on a type expression (only Source.Item is built),
   Box<Dog> -> Box<Animal> conversion. These are phase 7b.
 - Value parameters (11.3.3, built 2026-10-18): <u64 Width, bool On> on classes and functions. The type is an integer or bool (char, reals and dec give
   "feature not supported"). A value argument is kept as the string "#12" / "#-3" / "#true" next to the type names, so it is part of the mangled
@@ -319,6 +319,18 @@ CHOICES where I (Claude) decided and the spec does not say, and limits of this v
   Trait node named Container__string in the program, ClassInstanceName makes the name (restart through the seeds). RegisterClasses turns Container<string>
   in a class header into the copy; a trait copy as a constraint (Source : Container<i32>) is resolved with the arguments of the copy
   (CheckConstraints/Satisfies). Two copies of one generic trait on a class: "feature not supported yet". Parent generic traits: not in the language.
+- Placeholders (C2, built 2026-10-18): a trait with 'placeholder Item' is a GenericClass with HasPlaceholders whose Params are the placeholders; the class header
+  'Sequence with (Item is u32)' gives the arguments and the copy Sequence__u32 is made like any generic trait copy (Item? in it stays as it is for
+  string and classes, SubstituteTypes allowNullable). The bare trait name is only a constraint: Satisfies = the class implements a copy of it. 'where Source.Item : C'
+  is stored in TypeParam.PlaceholderConstraints and checked in CheckConstraints with PlaceholderValue (the type the class fixed). Inside the generic
+  body Source is the concrete class, so items.Next() is an ordinary call. A sequence of string cannot end with null (a null string is empty).
+- Conversion of a value to a set member (D, built 2026-10-18): only in a constructor call of a generic class, Box<Num>(x): GenericRefClass(reference, args, scope)
+  evaluates the arguments that mention the parameter (ChooseSetArgs, PatternPairs on the PrimaryCtor), then ChooseSetMember applies the order of 11.3.9: the
+  exact type, the same macrotype that holds it (Assignable, leftmost), any member it converts to (Assignable); classes: exact, nearest parent, then
+  members left to right (traits too). Not built: a set in an explicit generic function call f<Num>(x), a declared variable with a set argument (error),
+  secondary constructors as the source of the value. Fixed 2026-10-18: 'var f = Foo(n)' with n a variable of the same scope failed with "unknown name 'n'" when the scope had implicit drops: HoistDeclarations
+  typed the vars in the parent scope. It now types them in a scope that holds the variables declared before (TypeForHoist, with a dummy exception label
+  because the frame is not open yet); test varobjects.
 - Type arguments of a class are always written (Box<i32>(5)); a constructor call does not infer them.
 - A generic function cannot have the name of another function (no overloading between generic and plain ones).
 - The "unconstrained T is move-only" rule of 11.3.11 is not checked at the definition. ->Item on an object moves it, on a number it
@@ -691,7 +703,7 @@ rules of 4 to 6 for every kind of call and needs no copies of the functions. Wha
 exception per call chain; it removes it per program (a kind that no catch of the program handles has no code at all) and the C compiler removes
 the test when it sees a constant mask.
 
-The observed mask
+The observed mask (SUPERSEDED on 2026-10-19: see "EXCEPTIONS STEP 1" below; the hidden df_obs parameter is gone, the live kinds and ObservedMask stay)
 - LIVE silent kinds: the silent exception classes (the standard silent ones and the silent exception classes of the program) that at least one catch of the
   program handles (CatchHandles with silent = true: its own class, a parent, Exception, the SilentException trait, catch all). Each live kind has a bit
   (silentBit, 64 at most; more is a compile error).
@@ -728,6 +740,47 @@ Tests: tests/silentmodel.df (the rules with user exception classes: ignored, obs
 virtual and trait calls, non-silent exceptions unchanged), tests/silentfiles.df (the library), tests/silent.df and tests/exceptions.df (two lines changed
 back to the original rule after the fix). The other 29 old tests give the output of the compiler before stage 1.
 
+
+EXCEPTIONS STEP 1: BUILT (2026-10-19), following the rewritten spec 15
+=======================================================================
+- A silent exception thrown by a function leaves it like any exception: the function returns (zero value, error) at the throw. There is no
+  hidden mask parameter any more (TakesMask, maskFuns and the df_obs argument were removed).
+- FunSig.CanEmitSilent says where a silent throw can leave: not in constructors, init functions, static initializers, destructors, == operators, generic
+  equals copies and the entry point (main, including the top-level statements). There a silent throw is seen only by a catch of the same function
+  (SilentCaught) and otherwise does nothing and the code goes on (SilentThrowCondition returns null). This is the constructor rule of 15.7.6.
+- Leak analysis: the set of what leaves a function has a special member SilentLeak (-3): an uncovered silent throw (or a rethrow of a catch variable that
+  may be silent) in a function that CanEmitSilent. It makes the function failing (it returns the pair) but is never passed on to callers: a silent
+  exception goes one level only. Virtual and trait groups share it like any other member.
+- The call site (PairCheck): if the returned error is silent and no catch around the call handles it (SilentIgnored: bit test with ObservedMask,
+  or simply "silent" when no catch of the program handles any silent kind), the error is dropped and the call goes on with the value the function
+  returned. Otherwise it goes to the handler as before.
+- RELEASE OF THE RECORDS (built 2026-10-19, spec 15.1 and 15.7.5): df_exc_release (Runtime.cs) frees the message, the function text and the record (an exception
+  object of the program is dropped first, so its destructor runs). Who releases: the catch that handled it, when its body ends (normal end, or return / break /
+  continue / jump out of it, through the CaughtVar of the catch frame in EmitReturnUnwind / EmitUnwindTo); a catch body that throws a DIFFERENT exception
+  releases the original (cbexit compares df_err with the caught pointer; throw ex of the same record does not release); a silent exception ignored at a call
+  site (PairCheck). ReturnPassesAtEnd is true inside a catch body so a plain return does not skip the release. Panics do no cleanup. ex.Message / ex.Function
+  now copy the text (df_str_dup_cstr). A catch variable cannot be stored, returned, put in a list/tuple or moved with -> (CheckCatchVariableStays: compile error).
+  Leak check: run a program with the environment variable DF_EXC_COUNT=1: it prints "exceptions alive at exit: N" (df_exc_live), 0 expected (test exceptionrelease).
+  NOT done: static records for silent exceptions without fields (they are still allocated and released like any other).
+- SILENT OPERATIONS OF THE LANGUAGE (step 2, built 2026-10-19, spec 15.4): the overflow of integer + - * (also -x of a signed, ++ and --, and the compound
+  assignments, which go through BinaryOp) and a cast to an integer that does not fit are raised only where SilentCaught says a catch of the same
+  function handles them (OverflowException / OutOfRangeCastException, SilentException, catch all; catch Exception does not). Then the code is
+  CheckedArithmetic (__builtin_add/sub/mul_overflow, df_raise + RaiseJump) or SilentCall(df_satc_<type>_<src>, ...) (the checked casts of Runtime.cs leave a note
+  when the value does not fit). With no such catch the code is exactly what it was (wraps / saturates, nothing created). They never leave the function.
+  NOT done: (char)n with an invalid code point (InvalidCharacterCodePointException; the U+0000 fallback itself is not built), the exceptions of collections.
+- ATEND HAS NO ERROR PART (step 3, built 2026-10-19, spec 15.7.6): a non-silent exception not handled inside an atEnd block is a Panic (-1000, message first),
+  whether or not another exception is passing through (EmitAtEnd: OuterHandler is always the panic label). The leak analysis ignores what an atEnd block raises (it does
+  not leave the function). A destructor (the atEnd of a class) follows the same rule: its fail label panics, it is never a failing function, and the old rule "a
+  destructor that can raise makes every function failing" is gone. A silent throw inside an atEnd block is seen only by a catch inside the block (SilentCaught stops at
+  the atEnd frame, SilentThrowCondition returns null there), otherwise it does nothing. Tests: atendpanic, atendhandled.
+- CONSTRUCTORS (step 4, built 2026-10-19, spec 15.7.6): a constructor whose init functions (field initializers) can raise returns (object, error); when it raises the
+  half-built object is dropped (df_drop: the objects its fields already hold end) and the caller gets (null, error). A silent exception raised by a call in a field
+  initializer is ignored by the init function (it never leaves a constructor). Only primary constructors exist (secondary ones are "feature not supported"), and a
+  class body cannot have atEnd yet, so "the atEnd blocks registered so far run" has nothing to run today. Test: ctorfail.
+- Not done yet: silent operations of
+  the language (overflow, saturating casts) as local-only exceptions (step 2), and the atEnd panic rule (step 3). 64 live silent kinds is still the limit
+  of ObservedMask.
+- Tests changed because a silent throw now returns: silentmodel and bitfields (third()). New: silentreturn.
 
 THE TEST RUNNER (2026-10-17)
 =============================

@@ -124,6 +124,15 @@ static char* df_cstr_truncated(const char* text, uint64_t length, uint64_t maxBy
   return copy;
 }
 
+/* the exception records alive: the count is printed at exit when the environment variable DF_EXC_COUNT is set (to look for leaks) */
+static int64_t df_exc_live = 0;
+
+static void df_exc_report(void) {
+  if (getenv("DF_EXC_COUNT")) {
+    printf("exceptions alive at exit: %lld\n", (long long)df_exc_live);
+  }
+}
+
 static df_exception* df_new_exception(const df_descriptor* descriptor, const char* message, uint64_t messageLength, const char* function) {
   df_exception* exception = (df_exception*)df_alloc(sizeof(df_exception));
   exception->cls = NULL;
@@ -132,6 +141,7 @@ static df_exception* df_new_exception(const df_descriptor* descriptor, const cha
   exception->message = df_cstr_truncated(message, messageLength, 2048);
   exception->function = df_cstr_truncated(function, strlen(function), 1024);
   exception->line = 0;
+  df_exc_live++;
   return exception;
 }
 
@@ -198,6 +208,15 @@ static df_string df_str_from_buf(const char* buf) {
 
 static df_string df_str_from_cstr(const char* text) {
   df_string s = { text, strlen(text) };
+  return s;
+}
+
+/* a copy of the text: the Message of an exception stays valid after the exception is released */
+static df_string df_str_dup_cstr(const char* text) {
+  uint64_t n = strlen(text);
+  char* p = (char*)df_alloc(n);
+  memcpy(p, text, n);
+  df_string s = { p, n };
   return s;
 }
 
@@ -284,6 +303,20 @@ static void df_drop(void* obj) {
   if (c != NULL && c->drop != NULL) {
     c->drop(obj);
   }
+}
+
+/* the owner of an exception record is done with it (a catch ended, a silent exception was ignored): its buffers and the record are freed */
+static void df_exc_release(df_exception* exception) {
+  if (exception == NULL) {
+    return;
+  }
+  if (exception->cls != NULL) {
+    df_drop(exception);   /* an exception object of the program: its destructor runs */
+  }
+  free(exception->message);
+  free(exception->function);
+  free(exception);
+  df_exc_live--;
 }
 
 static df_string df_str_obj(const void* obj) {
@@ -565,6 +598,7 @@ static void df_init(void) {
   SetConsoleOutputCP(CP_UTF8);
   SetConsoleCP(CP_UTF8);
 #endif
+  atexit(df_exc_report);
 }
 
 /* ---- program arguments (spec 17.1): index 0 is the program name ---- */
@@ -664,6 +698,31 @@ DF_SAT_INT(uint8_t, u8, 0, UINT8_MAX)
 DF_SAT_INT(uint16_t, u16, 0, UINT16_MAX)
 DF_SAT_INT(uint32_t, u32, 0, UINT32_MAX)
 
+/* the same casts leaving a note of the silent OutOfRangeCastException when the value does not fit (used where a catch handles it) */
+#define DF_SAT_CHK(T, NAME, LO, HI) \
+  static T df_satc_##NAME##_i(int64_t v) { \
+    T r = df_sat_##NAME##_i(v); \
+    if ((int64_t)r != v) df_silent_note(&df_desc_OutOfRangeCastException); \
+    return r; \
+  } \
+  static T df_satc_##NAME##_u(uint64_t v) { \
+    T r = df_sat_##NAME##_u(v); \
+    if ((uint64_t)r != v) df_silent_note(&df_desc_OutOfRangeCastException); \
+    return r; \
+  } \
+  static T df_satc_##NAME##_r(double v) { \
+    T r = df_sat_##NAME##_r(v); \
+    if (isnan(v) || v <= (double)(LO) - 1.0 || v >= (double)(HI) + 1.0) df_silent_note(&df_desc_OutOfRangeCastException); \
+    return r; \
+  }
+
+DF_SAT_CHK(int8_t, i8, INT8_MIN, INT8_MAX)
+DF_SAT_CHK(int16_t, i16, INT16_MIN, INT16_MAX)
+DF_SAT_CHK(int32_t, i32, INT32_MIN, INT32_MAX)
+DF_SAT_CHK(uint8_t, u8, 0, UINT8_MAX)
+DF_SAT_CHK(uint16_t, u16, 0, UINT16_MAX)
+DF_SAT_CHK(uint32_t, u32, 0, UINT32_MAX)
+
 static int64_t df_sat_i64_i(int64_t v) { return v; }
 static int64_t df_sat_i64_u(uint64_t v) { return v > (uint64_t)INT64_MAX ? INT64_MAX : (int64_t)v; }
 static int64_t df_sat_i64_r(double v) {
@@ -678,6 +737,20 @@ static uint64_t df_sat_u64_r(double v) {
   if (isnan(v) || v <= 0) return 0;
   if (v >= 18446744073709551615.0) return UINT64_MAX;
   return (uint64_t)v;
+}
+
+/* the checked casts of the 64-bit types */
+static int64_t df_satc_i64_i(int64_t v) { return v; }
+static int64_t df_satc_i64_u(uint64_t v) { if (v > (uint64_t)INT64_MAX) df_silent_note(&df_desc_OutOfRangeCastException); return df_sat_i64_u(v); }
+static int64_t df_satc_i64_r(double v) {
+  if (isnan(v) || v <= -9223372036854775809.0 || v >= 9223372036854775808.0) df_silent_note(&df_desc_OutOfRangeCastException);
+  return df_sat_i64_r(v);
+}
+static uint64_t df_satc_u64_i(int64_t v) { if (v < 0) df_silent_note(&df_desc_OutOfRangeCastException); return df_sat_u64_i(v); }
+static uint64_t df_satc_u64_u(uint64_t v) { return v; }
+static uint64_t df_satc_u64_r(double v) {
+  if (isnan(v) || v <= -1.0 || v >= 18446744073709551616.0) df_silent_note(&df_desc_OutOfRangeCastException);
+  return df_sat_u64_r(v);
 }
 
 /* ---- date, clock, lapse (spec 3.2, 3.3) ---- */
@@ -2325,13 +2398,13 @@ static uint64_t df_obs_bit(const df_exception* e) {
 
 static const char df_fn1[] = "nothingCaught()";
 static const char df_fn6[] = "plainCatch()";
-static const char df_fn11[] = "ownType()";
-static const char df_fn17[] = "otherType()";
-static const char df_fn23[] = "wrongType()";
-static const char df_fn27[] = "catchAll()";
-static const char df_fn32[] = "valid()";
-static const char df_fn37[] = "time safe(string)";
-static const char df_fn43[] = "main()";
+static const char df_fn12[] = "ownType()";
+static const char df_fn19[] = "otherType()";
+static const char df_fn26[] = "wrongType()";
+static const char df_fn31[] = "catchAll()";
+static const char df_fn37[] = "valid()";
+static const char df_fn43[] = "time safe(string)";
+static const char df_fn50[] = "main()";
 
 
 static void f_nothingCaught(void);
@@ -2371,11 +2444,13 @@ static void f_plainCatch(void) {
   df_console_log(df_str_from_bool((v_b == INT64_MIN)));
   goto f7_skip0;
   f7_catch0: {
-    df_exception* v_ex_9 = (df_exception*)df_err;
+    df_exception* df_caught9 = df_err;
+    df_exception* v_ex_10 = (df_exception*)df_caught9;
     df_err = NULL;
     df_console_log(df_str_lit("wrong: catch ex must not see a silent exception", 47));
+    df_exc_release(df_caught9);
     goto f7_cbdone0;
-    f7_cbexit0: if (df_err_thrown) goto fn6_fail;
+    f7_cbexit0: if (df_err_thrown) { if (df_err != df_caught9) { df_exc_release(df_caught9); } goto fn6_fail; }
     goto fn6_panic;
     f7_cbdone0: ;
   }
@@ -2395,27 +2470,29 @@ static void f_ownType(void) {
   bool df_err_thrown = false;
   (void)df_err;
   (void)df_err_thrown;
-  int64_t v_c = ({ int64_t t_13 = df_date_from_str(df_str_lit("still bad", 9)); const df_descriptor* t_14 = df_silent_desc; df_silent_desc = NULL; if (t_14) { df_raise(t_14, df_fn11); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f12_dispatch0; } } t_13; });
+  int64_t v_c = ({ int64_t t_14 = df_date_from_str(df_str_lit("still bad", 9)); const df_descriptor* t_15 = df_silent_desc; df_silent_desc = NULL; if (t_15) { df_raise(t_15, df_fn12); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f13_dispatch0; } } t_14; });
   df_console_log(df_str_lit("not printed when raised", 23));
-  goto f12_skip0;
-  f12_catch0: {
-    df_exception* v_ex_15 = (df_exception*)df_err;
+  goto f13_skip0;
+  f13_catch0: {
+    df_exception* df_caught16 = df_err;
+    df_exception* v_ex_17 = (df_exception*)df_caught16;
     df_err = NULL;
-    df_console_log(df_str_concat(df_str_lit("caught: ", 8), df_str_from_cstr((v_ex_15)->message)));
-    goto f12_cbdone0;
-    f12_cbexit0: if (df_err_thrown) goto fn11_fail;
-    goto fn11_panic;
-    f12_cbdone0: ;
+    df_console_log(df_str_concat(df_str_lit("caught: ", 8), df_str_dup_cstr((v_ex_17)->message)));
+    df_exc_release(df_caught16);
+    goto f13_cbdone0;
+    f13_cbexit0: if (df_err_thrown) { if (df_err != df_caught16) { df_exc_release(df_caught16); } goto fn12_fail; }
+    goto fn12_panic;
+    f13_cbdone0: ;
   }
-  f12_skip0: ;
-  goto f12_done;
-  f12_dispatch0:
-    if (df_exc_is(df_err, 24)) goto f12_catch0;
-    goto fn11_fail;
-  f12_done: ;
+  f13_skip0: ;
+  goto f13_done;
+  f13_dispatch0:
+    if (df_exc_is(df_err, 24)) goto f13_catch0;
+    goto fn12_fail;
+  f13_done: ;
   return;
-  fn11_fail: df_panic_unhandled(df_err);
-  fn11_panic: df_panic_unhandled(df_err);
+  fn12_fail: df_panic_unhandled(df_err);
+  fn12_panic: df_panic_unhandled(df_err);
 }
 
 static void f_otherType(void) {
@@ -2423,27 +2500,29 @@ static void f_otherType(void) {
   bool df_err_thrown = false;
   (void)df_err;
   (void)df_err_thrown;
-  int32_t v_late = ({ int32_t t_19 = df_time_from_i32(((int32_t)90000000LL)); const df_descriptor* t_20 = df_silent_desc; df_silent_desc = NULL; if (t_20) { df_raise(t_20, df_fn17); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f18_dispatch0; } } t_19; });
+  int32_t v_late = ({ int32_t t_21 = df_time_from_i32(((int32_t)90000000LL)); const df_descriptor* t_22 = df_silent_desc; df_silent_desc = NULL; if (t_22) { df_raise(t_22, df_fn19); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f20_dispatch0; } } t_21; });
   df_console_log(df_str_lit("not printed either", 18));
-  goto f18_skip0;
-  f18_catch0: {
-    df_exception* v_ex_21 = (df_exception*)df_err;
+  goto f20_skip0;
+  f20_catch0: {
+    df_exception* df_caught23 = df_err;
+    df_exception* v_ex_24 = (df_exception*)df_caught23;
     df_err = NULL;
-    df_console_log(df_str_concat(df_str_lit("caught: ", 8), df_str_from_cstr((v_ex_21)->message)));
-    goto f18_cbdone0;
-    f18_cbexit0: if (df_err_thrown) goto fn17_fail;
-    goto fn17_panic;
-    f18_cbdone0: ;
+    df_console_log(df_str_concat(df_str_lit("caught: ", 8), df_str_dup_cstr((v_ex_24)->message)));
+    df_exc_release(df_caught23);
+    goto f20_cbdone0;
+    f20_cbexit0: if (df_err_thrown) { if (df_err != df_caught23) { df_exc_release(df_caught23); } goto fn19_fail; }
+    goto fn19_panic;
+    f20_cbdone0: ;
   }
-  f18_skip0: ;
-  goto f18_done;
-  f18_dispatch0:
-    if (df_exc_is(df_err, 17)) goto f18_catch0;
-    goto fn17_fail;
-  f18_done: ;
+  f20_skip0: ;
+  goto f20_done;
+  f20_dispatch0:
+    if (df_exc_is(df_err, 17)) goto f20_catch0;
+    goto fn19_fail;
+  f20_done: ;
   return;
-  fn17_fail: df_panic_unhandled(df_err);
-  fn17_panic: df_panic_unhandled(df_err);
+  fn19_fail: df_panic_unhandled(df_err);
+  fn19_panic: df_panic_unhandled(df_err);
 }
 
 static void f_wrongType(void) {
@@ -2451,26 +2530,28 @@ static void f_wrongType(void) {
   bool df_err_thrown = false;
   (void)df_err;
   (void)df_err_thrown;
-  int64_t v_d = ({ int64_t t_25 = df_date_from_str(df_str_lit("bad again", 9)); df_silent_desc = NULL; t_25; });
+  int64_t v_d = ({ int64_t t_28 = df_date_from_str(df_str_lit("bad again", 9)); df_silent_desc = NULL; t_28; });
   df_console_log(df_str_from_bool((v_d == INT64_MIN)));
-  goto f24_skip0;
-  f24_catch0: {
+  goto f27_skip0;
+  f27_catch0: {
+    df_exception* df_caught29 = df_err;
     df_err = NULL;
     df_console_log(df_str_lit("wrong: different exception", 26));
-    goto f24_cbdone0;
-    f24_cbexit0: if (df_err_thrown) goto fn23_fail;
-    goto fn23_panic;
-    f24_cbdone0: ;
+    df_exc_release(df_caught29);
+    goto f27_cbdone0;
+    f27_cbexit0: if (df_err_thrown) { if (df_err != df_caught29) { df_exc_release(df_caught29); } goto fn26_fail; }
+    goto fn26_panic;
+    f27_cbdone0: ;
   }
-  f24_skip0: ;
-  goto f24_done;
-  f24_dispatch0:
-    if (df_exc_is(df_err, 17)) goto f24_catch0;
-    goto fn23_fail;
-  f24_done: ;
+  f27_skip0: ;
+  goto f27_done;
+  f27_dispatch0:
+    if (df_exc_is(df_err, 17)) goto f27_catch0;
+    goto fn26_fail;
+  f27_done: ;
   return;
-  fn23_fail: df_panic_unhandled(df_err);
-  fn23_panic: df_panic_unhandled(df_err);
+  fn26_fail: df_panic_unhandled(df_err);
+  fn26_panic: df_panic_unhandled(df_err);
 }
 
 static void f_catchAll(void) {
@@ -2478,25 +2559,27 @@ static void f_catchAll(void) {
   bool df_err_thrown = false;
   (void)df_err;
   (void)df_err_thrown;
-  int32_t v_t = ({ int32_t t_29 = df_time_from_i64((int64_t)((((int32_t)-3LL)))); const df_descriptor* t_30 = df_silent_desc; df_silent_desc = NULL; if (t_30) { df_raise(t_30, df_fn27); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f28_dispatch0; } } t_29; });
+  int32_t v_t = ({ int32_t t_33 = df_time_from_i64((int64_t)((((int32_t)-3LL)))); const df_descriptor* t_34 = df_silent_desc; df_silent_desc = NULL; if (t_34) { df_raise(t_34, df_fn31); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f32_dispatch0; } } t_33; });
   df_console_log(df_str_lit("skipped", 7));
-  goto f28_skip0;
-  f28_catch0: {
+  goto f32_skip0;
+  f32_catch0: {
+    df_exception* df_caught35 = df_err;
     df_err = NULL;
     df_console_log(df_str_lit("catch all sees it", 17));
-    goto f28_cbdone0;
-    f28_cbexit0: if (df_err_thrown) goto fn27_fail;
-    goto fn27_panic;
-    f28_cbdone0: ;
+    df_exc_release(df_caught35);
+    goto f32_cbdone0;
+    f32_cbexit0: if (df_err_thrown) { if (df_err != df_caught35) { df_exc_release(df_caught35); } goto fn31_fail; }
+    goto fn31_panic;
+    f32_cbdone0: ;
   }
-  f28_skip0: ;
-  goto f28_done;
-  f28_dispatch0:
-    goto f28_catch0;
-  f28_done: ;
+  f32_skip0: ;
+  goto f32_done;
+  f32_dispatch0:
+    goto f32_catch0;
+  f32_done: ;
   return;
-  fn27_fail: df_panic_unhandled(df_err);
-  fn27_panic: df_panic_unhandled(df_err);
+  fn31_fail: df_panic_unhandled(df_err);
+  fn31_panic: df_panic_unhandled(df_err);
 }
 
 static void f_valid(void) {
@@ -2504,26 +2587,28 @@ static void f_valid(void) {
   bool df_err_thrown = false;
   (void)df_err;
   (void)df_err_thrown;
-  int64_t v_fine = ({ int64_t t_34 = df_date_from_str(df_str_lit("2024-02-02", 10)); const df_descriptor* t_35 = df_silent_desc; df_silent_desc = NULL; if (t_35) { df_raise(t_35, df_fn32); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f33_dispatch0; } } t_34; });
+  int64_t v_fine = ({ int64_t t_39 = df_date_from_str(df_str_lit("2024-02-02", 10)); const df_descriptor* t_40 = df_silent_desc; df_silent_desc = NULL; if (t_40) { df_raise(t_40, df_fn37); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f38_dispatch0; } } t_39; });
   df_console_log(df_str_from_date(v_fine));
-  goto f33_skip0;
-  f33_catch0: {
+  goto f38_skip0;
+  f38_catch0: {
+    df_exception* df_caught41 = df_err;
     df_err = NULL;
     df_console_log(df_str_lit("wrong: valid date", 17));
-    goto f33_cbdone0;
-    f33_cbexit0: if (df_err_thrown) goto fn32_fail;
-    goto fn32_panic;
-    f33_cbdone0: ;
+    df_exc_release(df_caught41);
+    goto f38_cbdone0;
+    f38_cbexit0: if (df_err_thrown) { if (df_err != df_caught41) { df_exc_release(df_caught41); } goto fn37_fail; }
+    goto fn37_panic;
+    f38_cbdone0: ;
   }
-  f33_skip0: ;
-  goto f33_done;
-  f33_dispatch0:
-    if (df_exc_is(df_err, 24)) goto f33_catch0;
-    goto fn32_fail;
-  f33_done: ;
+  f38_skip0: ;
+  goto f38_done;
+  f38_dispatch0:
+    if (df_exc_is(df_err, 24)) goto f38_catch0;
+    goto fn37_fail;
+  f38_done: ;
   return;
-  fn32_fail: df_panic_unhandled(df_err);
-  fn32_panic: df_panic_unhandled(df_err);
+  fn37_fail: df_panic_unhandled(df_err);
+  fn37_panic: df_panic_unhandled(df_err);
 }
 
 static int32_t f_safe(df_string v_text) {
@@ -2531,26 +2616,31 @@ static int32_t f_safe(df_string v_text) {
   bool df_err_thrown = false;
   (void)df_err;
   (void)df_err_thrown;
-  int32_t v_t = ({ int32_t t_39 = df_time_from_str(v_text); const df_descriptor* t_40 = df_silent_desc; df_silent_desc = NULL; if (t_40) { df_raise(t_40, df_fn37); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f38_dispatch0; } } t_39; });
-  goto f38_skip0;
-  f38_catch0: {
+  int32_t df_ret43 = (-1);
+  int32_t v_t = ({ int32_t t_45 = df_time_from_str(v_text); const df_descriptor* t_46 = df_silent_desc; df_silent_desc = NULL; if (t_46) { df_raise(t_46, df_fn43); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f44_dispatch0; } } t_45; });
+  goto f44_skip0;
+  f44_catch0: {
+    df_exception* df_caught47 = df_err;
     df_err = NULL;
-    return ({ int32_t t_42 = df_time_from_str(df_str_lit("00:00", 5)); df_silent_desc = NULL; t_42; });
-    goto f38_cbdone0;
-    f38_cbexit0: if (df_err_thrown) goto fn37_fail;
-    goto fn37_panic;
-    f38_cbdone0: ;
+    df_ret43 = ({ int32_t t_49 = df_time_from_str(df_str_lit("00:00", 5)); df_silent_desc = NULL; t_49; });
+    df_exc_release(df_caught47);
+    return df_ret43;
+    df_exc_release(df_caught47);
+    goto f44_cbdone0;
+    f44_cbexit0: if (df_err_thrown) { if (df_err != df_caught47) { df_exc_release(df_caught47); } goto fn43_fail; }
+    goto fn43_panic;
+    f44_cbdone0: ;
   }
-  f38_skip0: ;
+  f44_skip0: ;
   return v_t;
-  goto f38_done;
-  f38_dispatch0:
-    if (df_exc_is(df_err, 24)) goto f38_catch0;
-    goto fn37_fail;
-  f38_done: ;
+  goto f44_done;
+  f44_dispatch0:
+    if (df_exc_is(df_err, 24)) goto f44_catch0;
+    goto fn43_fail;
+  f44_done: ;
   return (-1);
-  fn37_fail: df_panic_unhandled(df_err);
-  fn37_panic: df_panic_unhandled(df_err);
+  fn43_fail: df_panic_unhandled(df_err);
+  fn43_panic: df_panic_unhandled(df_err);
   return (-1);
 }
 
@@ -2571,6 +2661,6 @@ int main(int argc, char** argv) {
   df_console_log(df_str_from_time(f_safe(df_str_lit("08:15", 5))));
   df_console_log(df_str_from_time(f_safe(df_str_lit("garbage", 7))));
   return 0;
-  fn43_panic: df_panic_unhandled(df_err);
+  fn50_panic: df_panic_unhandled(df_err);
   return 0;
 }

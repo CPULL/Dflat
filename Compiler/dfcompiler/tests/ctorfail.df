@@ -1,0 +1,57 @@
+// A constructor whose field initializers raise: the half-built object ends and the caller gets nothing but the exception (spec 15.7.6)
+alias Root as r
+
+public class Notice(string text) : Exception, SilentException { }
+
+public class Part(i32 id) {
+  public i32 id
+}
+
+fun i32 divide(i32 a, i32 b) { a / b }
+fun i32 noisy(i32 x) {
+  if x > 0 then throw Notice("noisy")
+  return 7
+}
+
+public class Machine(i32 size) {
+  public i32 size
+  public Part first = Part(1)
+  public i32 ratio = divide(10, size)
+  public Part second = Part(2)
+}
+
+public class Base {
+  public i32 ratio = divide(10, 0)        // always fails
+}
+public class Derived : Base {
+  public Part part = Part(3)
+}
+
+public class Quiet(i32 x) {
+  public i32 x
+  public i32 value = noisy(x)           // the silent exception of noisy never leaves a constructor
+}
+
+fun string build(i32 size) {
+  Machine m = Machine(size)
+  return $"built with ratio {m.ratio}"
+  catch DivisionByZeroException { return "construction failed" }
+}
+fun string buildDerived() {
+  Derived d = Derived()
+  return $"derived with ratio {d.ratio}"
+  catch DivisionByZeroException { return "derived construction failed" }
+}
+r.Console.log(build(5))
+r.Console.log(build(0))
+r.Console.log(buildDerived())
+Quiet q = Quiet(1)
+r.Console.log(q.value)
+
+i32 failures = 0
+i32 i = 0
+while i < 1000 {
+  if build(0).len > 0 then failures += 1
+  i += 1
+}
+r.Console.log(failures)

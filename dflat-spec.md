@@ -1,7 +1,7 @@
 # Dflat Language
 A new language D♭ that is the same as C# but easier to write and faster to execute
 
-**Version** 0.0.9  2026/10/16 by CPU
+**Version** 0.0.10  2026/10/17 by CPU
 
 ## D♭ — Dflat Language Specification (draft)
 
@@ -1457,7 +1457,7 @@ i32 ratio = 10 / divisor
 catch DivisionByZeroException ex { }
 catch NetworkException { }                    // no variable
 catch SilentException ex { }                  // by trait
-catch Exception { }                           // Catches all exception that are not silent without getting the actual exception (sinkhole) 
+catch Exception { }                           // all exceptions that are not silent, without getting the actual exception (sinkhole)
 catch all ex { }                              // everything, silent exceptions included
 catch all { }
 throw Exception("message")
@@ -1466,21 +1466,22 @@ throw Panic(3)
 ```
 
 - No `try`; a `catch` handles everything raised above it in its block; unhandled → caller; top level → program ends.
-- Catches are checked in order: the first one that handles the exception type runs, the following ones are ignored. A catch that doesn't handle the type is skipped, and a later one can.
-- `catch Type` handles that type and its subtypes; a catch can also name a trait.
-- `catch variable` is the same as `catch Exception variable`; it does not handle silent exceptions.
+- Catches are checked in the order written: the first one that handles the exception runs, the following ones are ignored. A catch that doesn't handle the exception is skipped, and a later one can.
+- `catch Type` handles that type and its subtypes, silent ones included. A catch can also name a trait.
+- `Exception` is the root of all exceptions. `catch Exception` and `catch variable` (the same as `catch Exception variable`) handle only the exceptions that are not silent, never a silent one.
+- `catch SilentException` handles every silent exception and no other.
 - `catch { }` (no type, no variable) is the same as `catch all { }`, with a level 2 warning.
 - `catch all [variable]` handles everything, silent exceptions included. After `catch`, `all` is always the catch-all keyword (fixed parser rule), so `catch all all { }` is valid.
 - After a catch that doesn't leave the scope, execution continues with the code after it.
 - `throw` inside a catch (including `throw ex`) passes the exception to the enclosing level; later catches in the same block don't see it.
 - An error raised inside a catch body and not handled there → `Panic`.
+- The exception a catch handles (its variable included) belongs to the catch and is released when the catch ends. The variable cannot be stored outside the catch (assigned to another variable, put in a field or in a collection, or returned): that is a compile error. To keep the information, copy `Id` and `Message`; to send the exception up, `throw` it.
 
 ### 15.2 Exception class
 
 ```
 class Exception {
   u64 Id
-  *ExceptionTrait Descriptor    // extra data to build the specific exception class
   string Message                // max 2 KB
   string Function               // minified header of the failing function, e.g. i32 divide(i32, i32); max 1 KB
   u64 Line                      // debug builds; 0 in release
@@ -1489,9 +1490,13 @@ class Exception {
 ```
 
 - Constructors: message first and optional, then the subclass fields: `MyException("Whoa a message!", 123)`, `MyException()`.
-- `Message` and `Function` are stored C-style (null-terminated, no length field) and truncated in bytes when the exception is built, never cutting a UTF-8 character.
+- The fields added by a subclass are the extra values of that exception. They have a fixed size (no variable length) and are stored inline in the exception record (15.7.5).
+- `Message` and `Function` are stored C-style (null-terminated) in fixed buffers of 2 KB and 1 KB, truncated in bytes when the exception is built, never cutting a UTF-8 character.
 - Standard runtime error messages: the exception name written with spaces.
 - Subclasses only when they carry extra fields.
+- Release, exception that is not silent: `Id`, `Message`, `Function` and the extra values are kept; `Line` is 0 and `StackTrace` is null.
+- Release, silent exception: only the `Id` and the type are kept. `Message` gives the name of the exception (read from its type), `Function` is null, `Line` is 0, `StackTrace` is null and the extra values hold their zero value (null for objects). The arguments of its constructor are still evaluated.
+- Debug builds keep the full description of silent exceptions too, and may store more information than listed here.
 
 ### 15.3 Standard exceptions
 
@@ -1538,6 +1543,7 @@ class Exception {
 | 45 | `StreamCloseFailureException` | |
 
 - The list grows during development; each new standard exception takes the next ID.
+- IDs are 64 bits. 0–255 are reserved for `Root`; every other exception has as ID a hash of its full name.
 
 ### 15.4 Silent exceptions
 
@@ -1545,128 +1551,152 @@ class Exception {
 class MySilentException : Exception, SilentException { ... }
 ```
 
-- A silent exception is raised only if a catch for it exists; otherwise execution continues as if nothing happened (like an alert or assertion).
+- A silent exception is only a notice (like an alert or assertion): it is returned like any other exception, but a caller without a matching catch discards it and goes on with the value the function returned. It never stops the program.
 - Standard silent exceptions have their own fallback (table above); custom ones just continue.
 - A class is silent when it implements the `SilentException` trait (a marker trait with a dummy method). Subclasses of a silent exception are silent too.
-- The silent flag is stored in the descriptor.
-- A silent exception needs a specific catch: its own type or the generic `SilentException` trait, or `catch all`. `catch Exception` / `catch variable` don't handle it directly.
-- Silent exceptions will not bubble up. In case they are ignored they are gone. If they need to propagate they need to be catched and re-trown
+- The silent flag is stored in the exception record (bit 31 of `length`, 15.7.5).
+- A silent exception needs a specific catch: its own type, a parent class below `Exception`, the `SilentException` trait, or `catch all`. `catch Exception` and `catch variable` don't handle it.
+- A silent exception never leaves the function where it was raised, unless that function throws it explicitly:
+  - an operation that raises a silent exception (the overflow of `+`, a saturating cast, a missing map key, ...) is seen only by a catch of the same function; without one, the fallback applies in place and nothing is created;
+  - a function returns a silent exception to its caller only with an explicit `throw` of it, or by catching it and throwing it again (`catch OverflowException ex { throw ex }`). This also holds for the library functions that document silent exceptions.
+- A silent exception returned by a function is seen by the immediate caller only, when a catch of the caller handles it and covers the call. Without one it is ignored and execution continues with the value the function returned (its fallback). It never goes further up.
+- Calling a function that can emit only silent exceptions does not make the caller raise. Only a matching catch of the caller, or a `throw` of its own, matters.
+
+```
+fun i64 mul(i64 a, i64 b) { a * b }                   // can overflow: silent, seen only by a catch in mul
+fun i64 limited(i64 a) {
+  if a > 100 { throw LimitException("too big") }      // LimitException is silent: returned to the caller
+  return a
+}
+fun i64 use(i64 a) {
+  return limited(a)
+  catch LimitException { return -1 }                  // sees the exception thrown by limited
+}
+fun i64 useWithoutCatch(i64 a) {
+  return limited(a)                                   // ignored here (and released): this function cannot raise
+}
+```
 
 ### 15.5 Panic and exit codes
 
 - `Panic(code)`: critical exit, not an exception; not catchable, no cleanup, exits with `code`.
 - Every panic prints `Panic <code>` on stdout and exits with `code`. An unhandled exception first prints its `Message` on its own line.
-- Unhandled exception at the top level, unhandled error inside a catch body, exception inside `atEnd` while another is propagating, double free: exit with -1000 for now. Every panic case will get its own code later.
+- Unhandled exception at the top level, unhandled error inside a catch body, an exception that is not silent leaving an `atEnd` block (15.7.6), double free: exit with -1000 for now. Every panic case will get its own code later.
 
 ### 15.6 Targets without exceptions
 
-- On targets that can't support exceptions (e.g. C64), `catch` blocks are ignored.
+- On targets that can't support exceptions (e.g. C64), `catch` blocks are ignored and the error part does not exist: functions return only their result and there are no exception records.
 - A silent exception (raised by the runtime or by `throw`) is ignored and falls back to its silent behavior.
 - A non-silent exception (raised by the runtime or by `throw`) terminates the program.
 
 ### 15.7 Implementation
 
-- Rust/Swift style: a failing function returns normally with an **error register** holding 0 or a pointer to an error record; the caller jumps to its `catch` or propagates. Functions that can't fail skip the check.
-- Error record: `{ id, descriptor*, message, subclass fields }`. Descriptor: `{ id, name, parent*, silent flag }`.
-- IDs: 0–255 reserved for `Root`, otherwise a hash of the full name. Exact catch = one compare; base-class catch walks the parents.
-- External libraries raise the base types with a short message; richer errors via an exported mapping function.
+#### 15.7.1 Principles
 
+- An exception is a value that a function returns next to its result: `(result, error)`, as in Rust and Swift. There is no unwinding. `error` is a pointer to the exception record, null when there is no exception.
+- `error` cannot be read or written by Dflat code, only by the compiler. The back end decides where it lives (for example a register reserved for it on each target architecture).
 
-### 15.8 Detailed comiler implementations
+#### 15.7.2 Which functions return the error
 
-### 15.8.1 Principles
-- An exception is a value that a function returns next to its result, as in Rust: one slot for the result, one for the exception. There is no
-  unwinding and no global error register. After a call, the caller looks at the exception slot: it handles the exception, returns it to its own
-  caller, or (for a silent exception nobody observes) does not even look.
-- A silent exception is an exception with a flag. It is created, passed back and checked exactly like any other exception, but only where
-  somebody observes it (rule [15.8.5](#1585-silent-exceptions-who-observes-them)). Where nobody does, ALL the code for it is removed: no trapping, no exception record, no passing back.
+- Every function returns `(result, error)`, except the functions the compiler can prove cannot raise: those return only the result and their callers never check anything. There is no `safe` keyword; the compiler decides.
+- A function can raise when something can leave it:
+  - a non-silent exception, coming from a `throw`, from an operation that raises (integer `/` and `%`, array and string indexing, access to a null object, ...), or from a call to a function that can emit non-silent exceptions;
+  - a silent exception that it throws explicitly (a `throw` of a silent exception, or a rethrow of one in a catch).
+- Calling a function that can emit only silent exceptions does not make the caller raise. Only a matching catch of the caller, or a rethrow, matters.
+- An exception does not make a function raise when it is dealt with inside it:
+  - a non-silent exception is fully handled when every point that can raise it is covered by a matching catch, and the bodies of those catches cannot raise a non-silent exception;
+  - a silent exception that the function does not catch is ignored there (15.4).
+- Example of a function that cannot raise (no error part):
 
-### 15.8.2 Which catch observes an exception
-- A catch handles an exception when the exception is of the class the catch names or of any subclass of it. This is the same rule for silent and
-  non-silent exceptions.
-- Exception is the root of all exceptions: "catch Exception e" (and the bare "catch e", which means the same) is the sinkhole and handles every
-  exception, silent are ignored by `catch Exception`.
-- SilentException is meant to be a trait that every silent exception class implements. "catch SilentException e" handles every silent exception and no other.
-- "catch all" handles everything, as it does today. A catch for a parent class handles all the silent children of that class too.
-- Catches of a function are tried in the order written; the first that matches handles the exception.
-
-### 15.8.3 Safety of function (decided by the compiler; there is no safe keyword)
-Some functions can be marked as `safe` by the compiler. This means they will not emit exception (silent exceptions are allowed.)
-Safe functions when the silent exceptions are ignored by the caller, will remove all code to check if an exception is emitted.
-- PURE: can raise nothing at all. Signature: the result only.
-- SAFE: no non-silent exception can leave it, and the silent exceptions it can emit are not observed by the call (see [15.8.5](#1585-silent-exceptions-who-observes-them) and [15.8.6](#1586-silent-exceptions-never-go-up-on-their-own)). Signature: the result only. Callers never check it.
-- FAILING: a non-silent exception can leave it, or a silent one that the call observes can. Signature: the result and the exception (see [15.8.4](#1584-how-a-failing-function-returns-the-rust-model)).
-- A function can raise when it contains a throw, an operation that raises (integer / and %, array and string indexing, access to a null
-  object ...), or a call to a function that can raise.
-- A non-silent exception that is fully handled inside the function and cannot get out of it counts as not emitted by the function. Every point
-  of the function that can raise it must be covered by a catch that handles it (rule [15.8.2](#1582-which-catch-observes-an-exception)), and the catch bodies must not raise a non-silent
-  exception themselves (no throw of one, no call that can raise one that escapes). Example, a SAFE function:
 ```
-		fun i64 safeDivide(i64 a, i64 b) {
-			return a / b
-			catch DivisionByZeroException { return 1 }
-		}
-```			
-  The division raises DivisionByZeroException, which is not silent, but the catch covers it and the body of the catch cannot raise: nothing
-  leaves the function, so callers do not check it. Without the catch, or with a catch for another class, the function is FAILING.
-- Virtual functions and trait functions: a slot is SAFE only if all its implementations are SAFE (one FAILING override makes the slot FAILING).
-  PURE needs the same: all implementations.
-
-### 15.8.4 How a FAILING function returns (the Rust model)
-- Two slots: the result and the exception. The exception slot is a pointer to the exception record, null when there is none.
-- A function without a result (void) returns only the exception slot. Several results or a tuple are one result slot.
-- Call site: call, then "if the exception slot is not null": run the matching catch of this function; if there is none, return the exception to our
-  own caller (this function is FAILING), after the atEnd blocks of the scopes left have run. An exception that nobody handles reaches the top of the
-  program: Panic, as today.
-- Non-silent exceptions go up the call chain to the first matching catch, as today.
-
-### 15.8.5 Silent exceptions: who observes them
-- A silent exception of class X emitted by function F is observed by a call statement of F's caller when that statement is covered by a catch of the
-  caller that handles X (rule [15.8.2](#1582-which-catch-observes-an-exception)). "Emitted by F" means: raised by one of F's own operations (for example the + that overflows), thrown by an explicit
-  throw in F, or declared by a library function that F calls directly (rule 8). It is NOT what F's own callees emit (rule [15.8.6](#1586-silent-exceptions-never-go-up-on-their-own)).
-- If no catch of the caller handles X, the call returns as if nothing had happened (spec [15.4](#154-silent-exceptions): execution continues) and nothing is generated for X.
-- A catch in the function that contains the emitting operation itself handles the exception as an ordinary local exception (same rule, the function
-  being its own caller).
-- Example, a function that can only overflow silently is SAFE for callers that do not catch it: `fun i64 add(i64 a, i64 b) { a + b }`
-
-### 15.8.6 Silent exceptions never go up on their own
-- If F calls G and G emits a silent exception that F does not observe (no catch of F handles it), the exception is ignored in F. F's caller does not see
-  G's exception, even if F's caller has a matching catch.
-- To send it up, F catches it and throws it again, explicitly: `catch OverflowException e { throw e }`
-  The new throw is F's own emission, so F's caller observes it (when it has a matching catch), as rule 5 says.
-- Examples:
-```
-      fun i64 mul(i64 a, i64 b) { a * b }                   // can overflow: silent
-      fun i64 add3(i64 a, i64 b, i64 c) { mul(a, b) + c }   // no catch: the overflow of mul is ignored here
-      fun i64 use() {
-        return add3(1, 2, 3)
-        catch OverflowException { return -1 }               // sees only the overflow of the + in add3, never the one of mul
-      }
+fun i64 safeDivide(i64 a, i64 b) {
+  return a / b
+  catch DivisionByZeroException { return 1 }
+}
 ```
 
-### 15.8.7 Variants (how the silent code is stripped)
-- A function that can emit silent exceptions is compiled once for every MASK its call sites ask for. The mask of a call site is the set of silent
-  exception classes, among those the called function can emit, that are handled by the catches covering that call statement in the caller.
-  A call outside any catch has the empty mask. A catch all covers every silent class the function can emit.
-- Empty mask: every silent path is removed from that version. If the function can raise nothing else, that version is SAFE (plain signature).
-- Non-empty mask: the silent classes in the mask are treated like any other exception in that version, which is then FAILING.
-- Masks do not flow down: the mask of the calls a function makes comes from that function's own catches (rule [15.8.6](#1586-silent-exceptions-never-go-up-on-their-own)).
-- Virtual and trait calls: every implementation of a slot is compiled with the union of the masks of all the call sites of that slot.
-- The number of versions stays small: a mask can only contain silent classes that the function can emit and that some catch of the program handles.
+- Example of a function that returns the error, because it throws a silent exception explicitly. A caller without a matching catch ignores it, but still releases the record (15.7.4):
 
-### 15.8.8 Library functions: black boxes with declared exceptions
-- The compiler does not look inside a library function (today they are C code of the runtime; later some will be written in Dflat). What it needs is the
-  list of exceptions each function may raise, silent and non-silent. That list is in the standard library specification (dflat-stdlib.md): every
-  function is listed with the exceptions it may throw. The compiler keeps the same list in its library tables.
-- A function that lists nothing (for example Math.sqrt) is PURE. A function that lists non-silent exceptions makes its caller FAILING (unless the caller handles
-  them all). A listed silent exception is observed through the mask of the call like any other (rule [15.8.5](#1585-silent-exceptions-who-observes-them)).
-- The C code of the runtime reports an exception in a temporary slot between its return and the wrapper that the compiler generates at the call site; the
-  wrapper moves it into the exception slot. The temporary slot is never visible to the program and is empty between statements.
-- When a library function is rewritten in Dflat, it follows the rules above and must propagate what its specification says it propagates: an exception
-  declared for the function is emitted by the function itself, or caught and thrown again explicitly (rule [15.8.6](#1586-silent-exceptions-never-go-up-on-their-own)). A helper that throws for its caller is not enough.
-  File and FileStream are written in Dflat today and must be changed this way (their silent exceptions, for example FileAccessException, must be emitted by the
-  public function the user calls).
+```
+fun i64 limited(i64 a) {
+  if a > 100 { throw LimitException("too big") }
+  return a
+}
+```
 
+- Virtual functions and trait functions: a slot has no error part only if all its implementations have none. One implementation that returns the error makes the slot return it.
+- Where the compiler cannot know what a callee emits (callbacks, function pointers, functions of compiled libraries, which are known only by the "returns the error" bit of 15.8), the call counts as one that can emit non-silent exceptions. At run time a silent exception returned by it is ignored (and released) when no catch handles it (15.7.4), and a non-silent one goes up.
+
+#### 15.7.3 Return values
+
+- A function without a result (void) returns only the error.
+- With several results or a tuple, the error is one more element after them.
+- When a function returns an exception, its result slots hold the zero value (null for objects).
+- A constructor that can raise returns `(object, error)`; when it raises, the object is null.
+
+#### 15.7.4 Call site and catches
+
+- After a call to a function that returns the error, the caller looks at it: if it is not null, it runs the matching catch of this function (the catches covering the call statement, in the order written).
+- An exact `catch Type` is one compare of the `id`; a catch for a base class walks the parent types in the descriptor; a catch for the `SilentException` trait checks the silent flag; `catch all` always matches.
+- If no catch matches and the exception is not silent, the function returns it to its own caller (this function returns the error too), after the `atEnd` blocks of the scopes left have run. Debug builds add the function to the stack trace.
+- If no catch matches and the exception is silent, it is ignored and execution continues with the value the function returned (its fallback, 15.3).
+- A function the compiler marks as safe returns only its result and its callers check nothing. Any other function always returns `(result, error)`, and `error` can be a null pointer. If it is not null, the caller owns the exception record and must release it, whether a catch handles it, it is ignored because it is silent, or it is passed to the caller's own caller.
+- An exception that nobody handles reaches the top of the program: its message is printed, then `Panic -1000`.
+- `throw` and the operations that raise a non-silent exception create the exception record and return it. An operation that raises a silent exception creates a record only when a matching catch of the same function covers it; otherwise the fallback applies in place.
+- Because a silent record in Release holds only the header, the compiler may use one static record per exception type and allocate nothing.
+
+#### 15.7.5 Exception record
+
+```c
+// One per exception type: static, shared by all records of that type
+typedef struct DfExceptionDescriptor {
+  uint64_t id;                                 // 0-255 reserved for Root, otherwise a hash of the full name
+  const char* name;
+  const struct DfExceptionDescriptor* parent;  // parent type, null for Exception
+} DfExceptionDescriptor;
+
+// One per raised exception, packed layout
+typedef struct DfException {
+  uint64_t id;                                 // copy of descriptor->id, for the one-compare catch
+  uint32_t length;                             // bit 31: silent flag; bits 0-30: size of the whole record in bytes
+  const DfExceptionDescriptor* descriptor;     // 20 bytes up to here on 64-bit targets
+  // Release, exception that is not silent:
+  char message[2048];
+  char functionName[1024];
+  // Debug builds add the line, the stack trace and anything else useful
+  // The extra values of the specific exception follow, inline, fixed size per type
+} DfException;
+```
+
+- A silent exception in Release is only the header: `id`, `length` and `descriptor`, 20 bytes on 64-bit targets. Its `Message` is the `name` of the descriptor.
+- `length` always tells the real size of the record, so a record can be copied or freed without knowing its type. Records are smaller than 2 GB.
+- The callee allocates and fills the record and gives it back with ownership. The caller owns it until the catch that handles it ends, or until it is dropped. A function that returns it to its own caller passes the ownership on.
+- The caller releases the record it owns in these cases, and only in these:
+  - the catch that handles it ends, by reaching its end or by `return`, `break`, `continue` or `jump` out of its body;
+  - the body of the catch throws a different exception: the original is released and the new one goes up;
+  - it is silent and no catch around the call handles it: it is released and the call goes on.
+- `throw` of the catch variable passes the same record up, so it is not released. A non-silent exception that no catch handles goes up to the next caller, which owns it from then on.
+- A `Panic` does no cleanup, so a record that reaches the top of the program, or that is alive when a panic happens, is not released.
+- A static record (15.7.4) is never allocated, so releasing it does nothing.
+- Small architectures (no heap, no multitasking or async) use a predefined memory space for the record.
+
+#### 15.7.6 Constructors and `atEnd` blocks
+
+- A constructor that raises destroys the half-built object before returning (11.1.1): the `atEnd` blocks registered so far run and the fields not yet reached hold their zero value. The caller gets `(null, error)`. Field initializers run as part of the constructor.
+- `atEnd` blocks have no error part, as the `drop` of Rust returns nothing. An exception that is not silent and is not handled inside an `atEnd` block is a `Panic`, whether or not another exception is propagating. Who needs to know about an error (for example when closing a stream) calls `close()` explicitly and catches it there.
+- Silent exceptions inside an `atEnd` block follow 15.4 like anywhere else.
+- Silent exceptions in a constructor (or a field initializer) are never returned to the caller. A `throw` of a silent exception there can only be handled by a catch of the same constructor that covers it; otherwise it does nothing and the construction goes on. A constructor that can raise only silent exceptions returns just the object. Non-silent exceptions follow the first bullet of this section.
+
+### 15.8 Libraries
+
+- The compiler needs one piece of information per exported function of a compiled Dflat library: whether it returns `(result, error)` or only the result. There are no lists of the exceptions a library can raise.
+- A library function is identified by its name, parameters, results and the error part. Changing any of them breaks compatibility in the same way.
+- Libraries do not exist yet. Two ways are planned to describe the exported functions (open):
+  - a `def` section listing every exported function with its whole definition;
+  - a query interface in COM style, for example `lib.queryFunction("name", <parameters>, <results>, <safe or not>)`, that returns the function pointer, or null if the library does not support that function.
+- External (C) libraries are considered safe: their functions never return an error. If they crash, it is a `Panic`. A Dflat wrapper can turn their own error reporting (for example the `HRESULT` of Win32, with the real result passed back in an output parameter) into `(result, error)`.
+- Standard library functions implemented by the runtime in C report an exception in a temporary slot between their return and the wrapper that the compiler generates at the call site; the wrapper moves it into `error`. The temporary slot is never visible to the program and is empty between statements.
+- A standard library function written in Dflat follows the same rules as any other function. A silent exception that its specification documents for it must be thrown by the public function the user calls, or caught and thrown again there (15.4); a helper that throws for its caller is not enough.
 
 ---
 

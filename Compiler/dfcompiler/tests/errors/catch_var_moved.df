@@ -1,0 +1,7 @@
+alias Root as r
+
+fun i32 divide(i32 a, i32 b) { a / b }
+
+fun take(->Exception e) { }
+divide(1, 0)
+catch DivisionByZeroException ex { take(->ex) }

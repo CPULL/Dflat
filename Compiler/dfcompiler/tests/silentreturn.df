@@ -1,0 +1,58 @@
+// A silent throw leaves its function like any throw; the caller ignores it unless a catch around the call handles it (spec 15.4, 15.7.4)
+alias Root as r
+
+public class Notice(string text) : Exception, SilentException { }
+public class Trouble : Exception { }
+
+fun note(i32 x) {
+  if x > 0 then throw Notice("note")
+  r.Console.log("  note finished")                 // not printed when it throws
+}
+fun callNote(i32 x) {                              // no catch: the notice is ignored here
+  note(x)
+  r.Console.log("  callNote goes on")
+}
+fun string seeNote(i32 x) {
+  note(x)
+  return "no notice"
+  catch Notice n { return "saw " + n.Message }
+}
+callNote(0)
+callNote(1)
+r.Console.log(seeNote(0))
+r.Console.log(seeNote(1))
+
+// the notice goes one level only: the middle function does not catch it, so the outer one never sees it
+fun middle(i32 x) { note(x) }
+fun string outer(i32 x) {
+  middle(x)
+  return "outer saw nothing"
+  catch Notice n { return "outer saw " + n.Message }
+}
+r.Console.log(outer(1))
+
+// a function that fails for another reason still ignores the silent one it does not catch
+fun i32 mixed(i32 x) {
+  note(x)
+  if x > 5 then throw Trouble("big")
+  return x
+}
+fun string mixedCaller(i32 x) {
+  return "mixed " + mixed(x)
+  catch Trouble t { return "Trouble: " + t.Message }
+}
+r.Console.log(mixedCaller(1))
+r.Console.log(mixedCaller(9))
+
+// a value-returning function gives its zero value to a caller that ignores the notice
+fun i32 value(i32 x) {
+  if x > 0 then throw Notice("value")
+  return 42
+}
+fun i32 plusOne(i32 x) { value(x) + 1 }
+r.Console.log(plusOne(0))
+r.Console.log(plusOne(1))
+
+// at the top level there is no caller above: the throw does nothing
+throw Notice("top")
+r.Console.log("top level went on")

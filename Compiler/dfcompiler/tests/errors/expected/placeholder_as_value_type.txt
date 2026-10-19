@@ -1,0 +1,1 @@
+placeholder_as_value_type.df(8): error: 'Sequence' has placeholders: it is not the type of a value, use it as a constraint, as in <Source : Sequence>

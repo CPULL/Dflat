@@ -1,0 +1,23 @@
+sum 120
+overflow caught
+-126
+product 1000000
+caught: Overflow Exception
+difference 2
+u8 underflow caught
+negative -5
+negation overflow caught
+step 11
+increment overflow caught
+compound overflow caught
+Exception: wrapped to -56
+SilentException caught it
+all caught it
+callee wrapped to -56
+cast 100
+cast out of range
+127
+real cast 12
+real cast out of range
+real cast out of range
+---- exit code 0 ----

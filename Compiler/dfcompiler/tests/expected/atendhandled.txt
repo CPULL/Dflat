@@ -1,0 +1,7 @@
+start
+end of body
+printed: a silent throw nobody handles does nothing
+caught inside atEnd: silent in atEnd
+handled inside the atEnd block
+after cleanup
+---- exit code 0 ----

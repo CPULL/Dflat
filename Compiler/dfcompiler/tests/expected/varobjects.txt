@@ -1,0 +1,7 @@
+Foo { v: 3 }
+Foo { v: 4 }
+Box<i64> { value: 200 }
+Box<r64> { value: 0.5 }
+Box<i32> { value: 3 }
+main ends
+---- exit code 0 ----

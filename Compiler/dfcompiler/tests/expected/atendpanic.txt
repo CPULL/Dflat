@@ -1,0 +1,6 @@
+working
+work done
+cleaning up
+failed while cleaning up
+Panic -1000
+---- exit code -1000 ----

@@ -1,0 +1,1 @@
+placeholder_with_on_plain_trait.df(12): error: 'Plain' has no placeholders: 'with' does not apply

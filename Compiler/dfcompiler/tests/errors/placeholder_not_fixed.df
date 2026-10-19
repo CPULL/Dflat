@@ -1,0 +1,10 @@
+alias Root as r
+
+trait Sequence {
+  placeholder Item
+  fun Item? Next()
+}
+
+public class Broken : Sequence {
+  override fun i32? Next() { 1 }
+}

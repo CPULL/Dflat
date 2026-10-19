@@ -1,0 +1,44 @@
+// Converting a value to a member of a set (11.3.9): Box<Num>(x) picks the member from the argument
+alias Root as r
+
+Generic ABC { u64, u32, u16 }
+Generic CBA { u16, u32 }
+Generic DEF { u64, u8 }
+Generic Num { i64, r64 }
+Generic Shapes { Circle, Shape }
+
+trait Named {
+  fun string Name()
+}
+
+public class Shape : Named {
+  override fun string Name() { "shape" }
+}
+
+public class Circle : Shape {
+}
+
+public class Square : Shape {
+}
+
+public class Box<Item>(->Item value) {
+  public Item value
+  public fun string Show() { $"{value}" }
+}
+
+var a = Box<ABC>((u8)200)
+var c = Box<CBA>((u8)200)
+var d = Box<DEF>((u8)200)
+var n = Box<Num>((u8)200)
+var real = Box<Num>(5.5)
+r.Console.log(a)
+r.Console.log(c)
+r.Console.log(d)
+r.Console.log(n)
+r.Console.log(real)
+Box<u64> check = a
+Box<i64> checkNum = n
+var circle = Box<Shapes>(Circle())
+var square = Box<Shapes>(Square())
+r.Console.log(circle)
+r.Console.log(square)

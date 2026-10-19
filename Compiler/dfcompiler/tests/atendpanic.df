@@ -1,0 +1,14 @@
+// An exception that is not silent and is not handled inside an atEnd block is a Panic, even when nothing else is propagating (spec 15.7.6)
+alias Root as r
+
+fun work() {
+  r.Console.log("working")
+  atEnd {
+    r.Console.log("cleaning up")
+    throw Exception("failed while cleaning up")
+  }
+  r.Console.log("work done")
+}
+
+work()
+r.Console.log("never printed")

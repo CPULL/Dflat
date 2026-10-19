@@ -43,7 +43,9 @@ sealed class FunSig {
   public bool ReturnsOwned { get; set; }      // returns new or moved objects (false: borrowed ones)
   public bool ReturnsOwnedSet { get; set; }
   public bool IsDtor { get; set; }            // the atEnd of a class
-  public bool TakesMask { get; set; }    // can throw a silent exception that a caller observes: takes the observed mask (CodeGen.Leaks.cs)
+  // can a silent throw leave this function? Constructors, init functions, destructors, == operators and the entry point never return
+  // a silent exception (spec 15.7.6): there it is seen only by a catch of the same function and otherwise does nothing
+  public bool CanEmitSilent => !IsCtor && !IsInit && !IsStaticInit && !IsDtor && !IsAbstract && GenericT == null && !Name.EndsWith(".==") && Name != "main";
   public bool IsAbstract { get; set; }   // a trait function without a body
   public int TSlot { get; set; } = -1;   // position among the functions of its trait
   public string? GenericT { get; set; } // a copy of equals(T other) made for this T
@@ -288,9 +290,6 @@ public sealed partial class CodeGen {
     if (entry.Params.Count == 1) {
       entryArgs.Add("df_args");
     }
-    if (entry.TakesMask) {
-      entryArgs.Add("0");   // nothing above main observes a silent exception
-    }
     string call = $"{entry.CName}({string.Join(", ", entryArgs)})";
     if (PairReturn(entry)) {
       // main returns its exit code with its exception: an exception nobody handled is a panic
@@ -395,9 +394,6 @@ public sealed partial class CodeGen {
 
   string Signature(FunSig f) {
     var list = f.Params.Select(p => $"{ParamCType(p)} {ParamName(p)}").ToList();
-    if (f.TakesMask) {
-      list.Add("uint64_t df_obs");
-    }
     if (f.Class != null && !f.IsStatic && !f.IsCtor) {
       list.Insert(0, $"{CType(f.Class.Name)} self");
     }
@@ -469,8 +465,6 @@ public sealed partial class CodeGen {
     string failValue = f.Ret == "void" ? "" : " " + ZeroValue(f.Ret);
     if (fn.PairOf != null) {
       sb.Append($"  {fn.FailLabel}: return {PairError(f)};\n");
-    } else if (f.IsDtor && failingFuns.Contains(f)) {
-      sb.Append($"  return{failValue};\n  {fn.FailLabel}: df_pending = df_err; return{failValue};\n");
     } else {
       sb.Append($"  return{failValue};\n  {fn.FailLabel}: df_panic_unhandled(df_err);\n");
     }
@@ -1114,9 +1108,18 @@ public sealed partial class CodeGen {
     }
   }
 
+  // a + b, a - b, a * b of integers with the overflow raised as a silent OverflowException (only used where a catch of the function handles it)
+  string CheckedArithmetic(string builtin, string cType, string left, string right) {
+    string result = NewTemp();
+    return $"({{ {cType} {result}; if ({builtin}({left}, {right}, &{result})) {{ df_raise(&df_desc_OverflowException, {fn!.NameConst}); {RaiseJump} }} {result}; }})";
+  }
+
   Expr Negate(Expr e, Node at) {
     if (!IsNumeric(e.Type)) {
       throw Error($"cannot negate {e.Type}", at);
+    }
+    if (SignedTypes.Contains(e.Type) && SilentCaught(StandardExceptions["OverflowException"])) {
+      return new Expr(CheckedArithmetic("__builtin_sub_overflow", CType(e.Type), $"(({CType(e.Type)})0)", e.Code), e.Type);
     }
     return new Expr(IsInt(e.Type) ? $"(({CType(e.Type)})(-{e.Code}))" : $"(-{e.Code})", e.Type);
   }
@@ -1141,6 +1144,14 @@ public sealed partial class CodeGen {
     }
     if (target.IsConst) {
       throw Error($"'{targetNode.Text}' is const", n);
+    }
+    if (IsInt(target.Type) && SilentCaught(StandardExceptions["OverflowException"])) {
+      // the step overflows: raise it; the variable wraps, as it does when nobody catches
+      string builtin = n.Kind is "PostInc" or "PreInc" ? "__builtin_add_overflow" : "__builtin_sub_overflow";
+      string type = CType(target.Type);
+      string old = NewTemp();
+      string result = n.Kind is "PostInc" or "PostDec" ? old : target.Code;
+      return new Expr($"({{ {type} {old} = {target.Code}; if ({builtin}({old}, ({type})1, &{target.Code})) {{ df_raise(&df_desc_OverflowException, {fn!.NameConst}); {RaiseJump} }} {result}; }})", target.Type);
     }
     string code = n.Kind switch {
       "PostInc" => $"{target.Code}++",
@@ -1442,6 +1453,11 @@ public sealed partial class CodeGen {
       case "+":
       case "-":
       case "*":
+        if (IsInt(t) && SilentCaught(StandardExceptions["OverflowException"])) {
+          // a catch of this function handles the overflow: raise it (without one the result wraps and nothing is raised, spec 15.4)
+          string builtin = op == "+" ? "__builtin_add_overflow" : op == "-" ? "__builtin_sub_overflow" : "__builtin_mul_overflow";
+          return new Expr(CheckedArithmetic(builtin, CType(t), lc, rc), t);
+        }
         return IsInt(t)
           ? new Expr($"(({CType(t)})({lc} {op} {rc}))", t)
           : new Expr($"({lc} {op} {rc})", t);
@@ -1531,6 +1547,10 @@ public sealed partial class CodeGen {
         : RealTypes.Contains(e.Type) ? $"_r((double)({e.Code}))"
         : e.Type == "bool" ? $"_u((uint64_t)({e.Code}))"
         : throw Error($"cannot cast {e.Type} to {to}", n);
+      if (SilentCaught(StandardExceptions["OutOfRangeCastException"])) {
+        // a catch of this function handles a value that does not fit: it is raised (the cast still saturates)
+        return new Expr(SilentCall($"df_satc_{to}{src}", to, "OutOfRangeCastException", n), to);
+      }
       return new Expr($"df_sat_{to}{src}", to);
     }
     if (RealTypes.Contains(to)) {
@@ -1609,7 +1629,7 @@ public sealed partial class CodeGen {
       if (genericFuns.TryGetValue(genericName.Text!, out var explicitFun)) {
         return UserCall(InstantiateForCall(explicitFun, callee.Children.Skip(1).ToList(), args, scope, n), args, scope, n);
       }
-      if (GenericRefClass(callee) is string instanceName) {
+      if (GenericRefClass(callee, args, scope) is string instanceName) {
         // Stack<i32>(args): the constructor of the copy
         return Call(Synthetic("Call", n).Add(Synthetic("Name", n, instanceName)).Add(n.Children[1]), scope);
       }
@@ -1691,9 +1711,6 @@ public sealed partial class CodeGen {
         arg = arg.Children[0];
       }
       codes.Add(ArgCode(param, arg, scope));
-    }
-    if (f.TakesMask) {
-      codes.Add(ObservedMask());
     }
     string call = $"{f.CName}({string.Join(", ", codes)})";
     return new Expr(UserCallCode(f, call), f.Ret, IsClass(f.Ret) && (f.IsCtor || f.ReturnsOwned));

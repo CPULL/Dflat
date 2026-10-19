@@ -1,0 +1,13 @@
+  note finished
+  callNote goes on
+  callNote goes on
+  note finished
+no notice
+saw note
+outer saw nothing
+mixed 1
+Trouble: big
+43
+1
+top level went on
+---- exit code 0 ----

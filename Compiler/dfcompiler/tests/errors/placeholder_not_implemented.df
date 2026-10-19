@@ -1,0 +1,13 @@
+alias Root as r
+
+trait Sequence {
+  placeholder Item
+  fun Item? Next()
+}
+
+public class Other {
+}
+
+fun i32 count<Source : Sequence>(Source items) { 1 }
+
+r.Console.log(count(Other()))

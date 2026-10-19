@@ -315,6 +315,9 @@ public sealed partial class CodeGen {
           }
         }
       }
+      if (frame.Kind == FrameKind.AtEndBody) {
+        break;   // an atEnd block is not covered by the catches around its scope (it has no error part)
+      }
       skipCatches = frame.Kind == FrameKind.CatchBody;
     }
     return false;
@@ -331,15 +334,19 @@ public sealed partial class CodeGen {
     return mask == 0 ? "0" : $"UINT64_C({mask})";
   }
 
-  // a throw of a silent exception: null when nobody can observe it (the statement does nothing and the function goes on), "" when a
-  // catch of this function handles it (an ordinary raise), otherwise the C condition under which the caller observes it
+  // a throw of a silent exception: "" when it raises (a catch of this function handles it, or the function returns it to its caller like any
+  // exception), null when it cannot leave this function and no catch of it handles it (the statement does nothing and the function goes on)
   string? SilentThrowCondition(int id) {
-    if (SilentCaught(id)) {
-      return "";
-    }
-    if (silentBit.TryGetValue(id, out int bit) && currentFun?.TakesMask == true) {
-      return $"(df_obs & UINT64_C({1UL << bit}))";
+    if (SilentCaught(id) || (currentFun?.CanEmitSilent == true && atEndDepth == 0)) {
+      return "";    // inside an atEnd block a silent throw cannot leave: only a catch inside the block sees it
     }
     return null;
+  }
+
+  // the C test that says a silent exception returned by a call is ignored here: no catch around the call handles it
+  string SilentIgnored(string error) {
+    return silentBit.Count == 0
+      ? $"{error}->descriptor->silent"
+      : $"({error}->descriptor->silent && !({ObservedMask()} & df_obs_bit({error})))";
   }
 }

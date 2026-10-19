@@ -22,7 +22,7 @@ alias Root as r
 catch, throw, Panic
 Standard exceptions with IDs (10 to 45, the Root.IO ones 25 to 45 are declared but nothing raises them yet)
 Exceptions as returned values (stage 1): a function that can let a non-silent exception out returns its result and its exception (Rust model); pure and safe functions (nothing can leave them, also when it is fully handled inside) return the result only; no global error register
-Silent exceptions (stage 2): a silent exception leaves a function only for a caller whose catch handles it (its class, a parent below Exception, SilentException or catch all) and never goes on through a function that does not catch it; the function goes on after a throw nobody observes; explicit throw e passes it up; built as a run-time observed mask (hidden parameter of the functions that throw silent exceptions)
+Silent exceptions (2026-10-19, spec 15 rewritten): a silent throw returns from its function like any throw; the immediate caller ignores it (and goes on with the value returned) unless a catch around the call handles it (its class, a parent below Exception, SilentException or catch all); it never goes further; explicit throw e passes it up; constructors, destructors, == and main never return one (the throw is seen only by a local catch). No mask parameter any more
 Bitfields (3.1.1): bitfield8/16/32/64, None, All, | & ^ _, set, clear, setAs, toggle, isSet, isAnySet (they return the new value), cast and transmute mask the undefined bits, toStr prints the flags; a bitfield is not nullable (undecided in the spec)
 Root.IO enums (17.6.4): DeleteOptions (bitfield8), OverwriteOptions, FileSystemObjectsType, FileWriteMode, StreamReadWriteAccessMode, StreamOpenMode, StreamSeekOrigin; written as fs.X (alias Root.IO as fs), Root.IO.X or the bare name
 File class (17.6.3): properties path, name, extension, parent, isDirectory, isFile, size, created, modified, accessed, isReadOnly; static and object exists, delete, copy / copyTo, move / moveTo, createDirectory, getAllFiles; getTempFile, getTempFileName, getTempDir, combinePaths; object readAll, readAllText, writeAll, writeAllText (all encodings). File.open is a shortcut for FileStream
@@ -57,9 +57,9 @@ Namespaces: the namespace line is accepted, names are not qualified
 Time zones: dates are UTC; z prints +0 and parses an offset
 
 Not yet -----------------------
-Exceptions stage 2 leftovers: library functions with a declared list of exceptions (the natives keep the same-function rule), silent exceptions from constructors, field initializers and destructors, silent operations of the language (overflow) that do not emit yet. See CompilerImplementation.txt
+Exceptions records are released (2026-10-19: catch end, replaced by another, ignored silent; check with DF_EXC_COUNT=1). Silent operations of the language (overflow of + - * -x ++ --, casts that do not fit) are raised only where a catch of the same function handles them (2026-10-19, test silentops). Exceptions to do: static records for silent exceptions without fields, (char) with an invalid code point, (done: an unhandled non-silent exception inside atEnd is a panic), constructors that return (null, error). Library exception lists: not needed (spec 15.8). See CompilerImplementation.txt
 
-Generics: placeholders (7b); definition-time checking of bodies
+Generics: definition-time checking of bodies
 vec, list, map, hmap, set, hset, dfoot (7c)
 Ownership, move, copy, refcount
 Move parameters on non-objects, volatile references, reference parameters on constructors, (&) borrows that replace an object
@@ -168,7 +168,7 @@ Phase 7  Generics (spec 11.3)                                     IN PROGRESS
  7b  value parameters DONE (2026-10-18: integers and bool; tests valueparams, errors/valueparam_*); the rest of 7b:
      DONE 2026-10-18: 'where' on class headers (tests genwhere, errors/genwhere_*), type switch value is ? { } (tests typeswitch, errors/typeswitch_*)
      DONE 2026-10-18 (C1): generic traits Container<string> (tests generictraits, errors/generictrait_*); a class implementing one generic trait twice and a
-     generic parent trait give "feature not supported". TODO: conversion to a set member, placeholders (C2)
+     generic parent trait give "feature not supported". C2 DONE 2026-10-18: placeholders (placeholder Item, with (Item is u32), where Source.Item : Numeric; tests placeholders, errors/placeholder_*). D DONE 2026-10-18: Box<Num>(x) picks the set member from the constructor argument (tests setconversion, errors/setconv_*). 7b is finished except the items of section 99
  7c  vec, list, map, hmap, set, hset as generic classes                                                                              TODO
 
 Decisions: operator is "fun bool ==(V o)"; only primary constructors for now; default toStr is

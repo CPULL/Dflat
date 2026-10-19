@@ -1,0 +1,1 @@
+catch_var_returned.df(8): error: the exception 'ex' belongs to its catch and ends with it: it cannot be stored, returned or moved out; copy its Id and Message, or throw it

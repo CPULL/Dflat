@@ -4,7 +4,7 @@ using dfparser;
 namespace dfcompiler;
 
 public static class Program {
-  public const string Version = "0.0.9alpha";
+  public const string Version = "0.0.11alpha";
 
   // the targets of --target and the clang triple of each (a target equal to this machine passes none: clang's own default)
   static readonly Dictionary<string, string> Targets = new() {

@@ -1,0 +1,14 @@
+3
+luna
+max
+rex
+true
+true fido
+1
+0
+1000
+10
+4
+2
+[a, b, c]
+---- exit code 0 ----

@@ -1,0 +1,1 @@
+vec_pop_plain.df(8): error: pop takes one writable variable: pop((&)x)

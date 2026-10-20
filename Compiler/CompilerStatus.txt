@@ -1,4 +1,4 @@
-Compiler 0.0.9alpha (spec 0.0.9)
+Compiler version 0.0.11 alpha for version 0.0.11 of the specs 2026/10/20
 
 Done -----------------------
 
@@ -60,7 +60,7 @@ Not yet -----------------------
 Exceptions records are released (2026-10-19: catch end, replaced by another, ignored silent; check with DF_EXC_COUNT=1). Silent operations of the language (overflow of + - * -x ++ --, casts that do not fit) are raised only where a catch of the same function handles them (2026-10-19, test silentops). Exceptions to do: static records for silent exceptions without fields, (char) with an invalid code point, (done: an unhandled non-silent exception inside atEnd is a panic), constructors that return (null, error). Library exception lists: not needed (spec 15.8). See CompilerImplementation.txt
 
 Generics: definition-time checking of bodies
-vec, list, map, hmap, set, hset, dfoot (7c)
+list, map, hmap, set, hset, dfoot (7c); vec is built (2026-10-20, see below)
 Ownership, move, copy, refcount
 Move parameters on non-objects, volatile references, reference parameters on constructors, (&) borrows that replace an object
 Lambdas and captures
@@ -169,7 +169,12 @@ Phase 7  Generics (spec 11.3)                                     IN PROGRESS
      DONE 2026-10-18: 'where' on class headers (tests genwhere, errors/genwhere_*), type switch value is ? { } (tests typeswitch, errors/typeswitch_*)
      DONE 2026-10-18 (C1): generic traits Container<string> (tests generictraits, errors/generictrait_*); a class implementing one generic trait twice and a
      generic parent trait give "feature not supported". C2 DONE 2026-10-18: placeholders (placeholder Item, with (Item is u32), where Source.Item : Numeric; tests placeholders, errors/placeholder_*). D DONE 2026-10-18: Box<Num>(x) picks the set member from the constructor argument (tests setconversion, errors/setconv_*). 7b is finished except the items of section 99
- 7c  vec, list, map, hmap, set, hset as generic classes                                                                              TODO
+ 7c  vec DONE 2026-10-20 (first slice: tests vec, vecown, customcollection, errors/vec_*); list, map, hmap, set, hset TODO
+     vec: literals, vec<T>[n], c[i] read/write, .len, .capacity, for, add (->), insert, pop((&)x), remove, removeAll, removeAt, clear, reserve, shrinkToFit,
+     fillAtCapacity, resize, truncate, swap(i, j), has, indexOf, fill, reverse, sort, sortUnstable, getIterator(); the items are owned (moved in, moved out, dropped)
+     traits Iterator, IndexIterator<Item> (u64 cursor + next()), IndexCollection<Item> (get_len + getIterator); arr.getIterator(); for-in over a class that implements IndexCollection
+     NOT yet: add(collection), copyFrom, views v[a..b], v!, sort(lambda), removeAt(range), swap(position, new), fill of objects (needs cloning), sized declaration vec<T>[n] name,
+     Collection<Item> (needs a generic parent trait), (&)Item in for, the compile error for changing a vec while it is iterated, `uns` for the cursor (u64 today)
 
 Decisions: operator is "fun bool ==(V o)"; only primary constructors for now; default toStr is
 "Px { a: Py{}, b: 3, c: BTree{}, ... }" (first 3 fields, one level, "..." when there are more);

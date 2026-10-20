@@ -1,7 +1,7 @@
 # Dflat Language
 A new language D♭ that is the same as C# but easier to write and faster to execute
 
-**Version** 0.0.10  2026/10/17 by CPU
+**Version** 0.0.11  2026/10/20 by CPU
 
 ## D♭ — Dflat Language Specification (draft)
 
@@ -452,7 +452,9 @@ A collection holds several items in one object. Dflat has seven: `arr`, `vec`, `
 - Hash against B-tree: `hmap` and `hset` are hash tables (fast lookup, no order); `map` and `set` are B-trees (kept sorted, O(log n)); `list` is a counted B-tree used by position. The items of a `list` need no key rules.
 - Type, size and capacity: the size of an `arr` and the capacity of a `vec` are given only at initialization and are not part of the type.
 - `arr<T>` is a primitive: a block of memory for the items, with no code of its own and no limit on the types. `vec`, `list`, `map`, `hmap`, `set` and `hset` are ordinary generic classes (11.3) with their own copy limit (11.3.12).
-- Index checks happen at compile time when possible, otherwise at runtime: an index outside the collection raises `IndexOutOfRangeException` (not silent), or is a compile error when it can be detected at compile time.
+- Index checks happen at compile time when possible, otherwise at runtime: an index outside the collection is a compile error when it can be detected at compile time. At runtime the check stays in every build (like Go, C#, Java and Rust): in Debug builds it raises `IndexOutOfRangeException` (not silent, catchable); in Release builds it is a `Panic`, and a `catch` for `IndexOutOfRangeException` is ignored with a level 3 warning.
+- The seven collections are written by the compiler as generated C code (speed first). Users can write their own collection classes in Dflat; the traits that impose the signatures are in 6.12.
+- A collection owns its items (Rust model, 12): the drop code of the items is generated per item type. A result that is not assigned is destroyed at the end of the statement, `c[k] = v` drops the previous item, `->c[k]` moves the item out (6.6) and a `for` loop only borrows (6.4).
 - The members are listed in 6.6; each collection has its own section for the details.
 
 ## 6.2 Keys
@@ -465,7 +467,9 @@ Applies to the keys of `map` / `hmap` and to the items of `set` / `hset`.
 - Default class hash: the hash of the class name and the memory address. It is meant for collections only (not for `dfoot`).
 - Class order when none is declared: the hash values are compared; two different objects with the same hash are ordered by their address.
 - Orderings: numbers, `char`, `bool` (false before true), `date` and `time` by value; strings by bytes (the same as code point order in UTF-8), culture-invariant for now; tuples item by item, left to right.
-- `bool` can be a key (two possible values). Reals can be keys, except NaN: a NaN key is never stored or retrieved, and a silent `NaNUsedAsKeyException` is raised (15.3).
+- `bool` can be a key (two possible values). Reals can be keys, except NaN: a NaN key is never stored or retrieved (no exception).
+- Maps and sets do not allow a null key (or a null item in a set). The empty string `""` is a valid key: for a `string`, `""` and null are the same value (7.1), so there is no separate null string key.
+- The way a `string` is stored in the generated C (and so whether the hash tables need an occupancy flag for string keys) is decided with the string implementation, not with the collections.
 
 ## 6.3 Literals
 
@@ -492,6 +496,7 @@ list<arr<i32>> grid = [[1, 2], [3, 4]]  // nested literals need the full type
 
 ```
 for i32 item in numbers { }                      // arr, vec, list: index 0 up to .len - 1
+for (&)Task task in tasks { task.done = true }   // read/write borrow of each item
 for (string key, i32 value) in ages { }          // map, hmap: (key, value) tuples
 for string key in ages.keys { }
 for i32 value in ages.values { }
@@ -504,19 +509,23 @@ for i32 index = 1..=10 { }                       // a range is a virtual collect
 - `arr`, `vec` and `list` iterate by position, like `index = 0; index < .len; index++`. `set` iterates sorted, `hset` in an unspecified order. `map` iterates sorted by key, `hmap` in an unspecified order.
 - A range such as `1..=10` is a virtual collection: the `for` creates an anonymous iterator on it.
 - `var` can be used as the type of the loop variable when the type can be inferred (10.3).
-- Modifying a collection while iterating it, or while a view of it exists, is a compile error (the loop borrows the collection).
+- The loop variable borrows the item; the collection keeps the ownership (there is no consuming loop). `for Item x in c` gives a read-only `x`; `for (&)Item x in c` gives a read/write `x` (`x.done = true` changes the object in the collection). The marker is written like on a parameter: `(&)Type variable` (13.1).
+- The items of a `set` / `hset` and the keys of a `map` / `hmap` are always read-only: `(&)` is a compile error on them.
+- On a basic value type without `(&)`, `x` is a copy: assigning to it (`x += 1`) changes only the copy and gives a level 3 warning. With `(&)` the item in the collection is changed in place.
+- A collection cannot be changed while it is iterated. When the compiler can prove that the loop body changes the collection, it is a compile error (Rust style, no cost at runtime); when it cannot prove it, the change is detected at runtime (C# style). What the runtime check raises is open (99).
+- Iterating custom collections: 6.12. For the collections of the compiler the `for` is emitted as a direct loop in C.
 
 ## 6.5 Views
 
 ```
 arr<i32> head = scores[..3]           // read-only view, no copy
 arr<i32> middle = scores[2..5]!       // copy
-reset((&)scores[2..5])                // writable view passed to a function
 ```
 
-- `c[a..b]`, `c[..b]`, `c[a..]` give a view: a reference to a part of the real collection, not a copy. A view is read-only; `(&)c[a..b]` is a writable view; `c[a..b]!` is a copy of the same type.
+- `c[a..b]`, `c[..b]`, `c[a..]` give a view: a reference to a part of the real collection, not a copy. A view is always read-only; there are no writable views.
+- A view can only be a local variable or a parameter: it cannot be stored in a field, put in a collection or returned from a function.
 - Views exist only on `arr`, `vec` and `list`. There are no ranges on keys (`map`, `hmap`, `set`, `hset`).
-- While a view exists, the collection cannot grow or shrink (compile error, ownership is borrowed).
+- While a view exists, the collection cannot be changed (the same rule as during an iteration, 6.4).
 
 ## 6.6 Members
 
@@ -532,7 +541,7 @@ reset((&)scores[2..5])                // writable view passed to a function
 | `add(v)` | – | ✓ | ✓ | `add(k, v)` bool | `add(k, v)` bool | bool | bool |
 | `add(collection)` | – | ✓ | ✓ | merge | merge | count | count |
 | `insert(index, v)` | – | ✓ | ✓ | – | – | – | – |
-| `pop()` | – | ✓ | – | – | – | – | – |
+| `pop((&)out)` bool | – | ✓ | – | – | – | – | – |
 | `has(v)` | ✓ | ✓ | ✓ | by value | by value | ✓ | ✓ |
 | `hasKey(k)` | – | – | – | ✓ | ✓ | – | – |
 | `indexOf(v)` | ✓ | ✓ | ✓ | – | – | – | – |
@@ -540,7 +549,12 @@ reset((&)scores[2..5])                // writable view passed to a function
 | `remove(v)` bool | – | ✓ | ✓ | by value | by value | ✓ | ✓ |
 | `removeAll(v)` count | – | ✓ | ✓ | by value | by value | – | – |
 | `removeAt(k / range)` | – | ✓ | ✓ | by key | by key | – | – |
-| `tryGet(k, (&)out[, default])` | – | – | – | ✓ | ✓ | – | – |
+| `tryGet(k, (&)out[, default])` bool | – | – | – | ✓ | ✓ | – | – |
+| `swap(position, new)` | ✓ | ✓ | ✓ | – | – | – | – |
+| `swap(key, new)` | – | – | – | ✓ | ✓ | – | – |
+| `swap(i, j)` | ✓ | ✓ | ✓ | – | – | – | – |
+| `swap(key1, key2)` | – | – | – | ✓ | ✓ | – | – |
+| `->c[k]` moves the item out | zeroed | zeroed | removed | removed | removed | removed | removed |
 | `clear()` | defaults | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `fill(value)` | ✓ | ✓ | – | – | – | – | – |
 | `fillAtCapacity(value)`, `resize`, `truncate` | – | ✓ | – | – | – | – | – |
@@ -554,17 +568,22 @@ A member marked `–` is a compile error on that collection (for example `hasKey
 - `.capacity`: items that fit without growing. `reserve(n)` makes room for at least `n` more items; `shrinkToFit()` lowers the capacity to the length.
 - `.keys`: keys of a map (`map`, `hmap`). `.values`: values of a map. To walk the positions of `arr`, `vec` and `list` use a range (`0..list.len`, 6.4).
 - `c[k] = v`: on `arr`, `vec` and `list` it replaces an existing item only; an index past the end raises `IndexOutOfRangeException` (not silent). On `map` and `hmap` it replaces the value, or adds the key and the value when the key is missing.
-- Reading a missing map key gives the null or zero value of the value type and raises a silent `InvalidMapKeyException` (15.3).
+- Reading a missing map key gives the null or zero value of the value type; no exception. Use `hasKey` or `tryGet` to know whether the key exists.
 - `add(v)`: appends to `vec` and `list`. `add(k, v)`: adds the pair to a map, or replaces the value of an existing key; returns `false` when it replaced, `true` when the key is new. On sets it returns `true` if the value was added.
 - `add(collection)`: appends the items of another collection to `vec` and `list`; on maps it merges another map (the new value wins, no return value); on sets it returns the number of items actually added.
 - `insert(index, value)`: `index` goes from `0` to `.len` (`.len` appends); a larger index raises `IndexOutOfRangeException`.
-- `pop()`: removes and returns the last item of a `vec`; on an empty `vec` it returns the zero value (null for objects) and raises a silent `EmptyVectorAccessException`.
+- `pop((&)out)`: removes the last item of a `vec` and moves it into `out` (the ownership passes to `out`); it returns `true` (the `isValid` of the result). On an empty `vec` it returns `false` and `out` gets the default value of its type (null for objects, `0` for numbers, `""` for `string`). There is no other form of `pop` and no `tryPop`; no exception is raised. The previous value of `out` is dropped.
 - `has(v)`: true if the value is present (on maps, searches the values). `hasKey(k)`: true if the key exists.
 - `indexOf(v)`: index of the first match, or the maximum `u64` value when not found (the `string` `IndexOf` keeps returning `-1`).
 - `keyOf(v)`: key of the first entry found with that value, or the default value of the key type when there is none; it raises no exception. Use `hasKey` to test a key.
 - `remove(v)`: removes the first match and returns `true` if something was removed. `removeAll(v)`: removes all matches and returns the number removed. On maps both work by value. Sets hold a value once, so they have `remove` only.
 - `removeAt(k / range)`: removes by index or range on `vec` and `list`, by key on maps.
-- `tryGet(k, (&)out[, default])`: reads a map entry into `out` (`(&)` because the call writes to it).
+- `bool tryGet(k, (&)out[, default])`: reads a map entry into `out` (`(&)` because the call writes to it) and returns `true` when the key exists. When the key is missing it returns `false` and `out` gets `default`, or the default value of its type when no `default` is given.
+- Swap, with the old item and the ownership:
+  - `Item old = sequence.swap(position, Item new)` and `Item old = map.swap(Key key, Item new)`: the item in the collection is replaced by `new`; the ownership of the old item moves to the caller and the collection owns `new`. On a map, a missing key adds the pair and returns a null (default) item.
+  - `sequence.swap(i, j)` exchanges two items of `arr`, `vec` or `list`; no ownership changes.
+  - `map.swap(key1, key2)` exchanges the two values: if both keys exist the values are exchanged; if only one exists its value moves to the missing key and the original key is removed; if both are missing nothing happens.
+- `->c[k]` moves the item out of the collection (ownership passes to the receiver; a basic value type is copied). The slot is zeroed (null for objects, `0` for numbers) in `arr` and `vec`, and the item is removed in `list`, `map`, `hmap`, `set` and `hset`.
 - `clear()`: removes all items; on an `arr` it sets every item to the default value.
 - `fill(value)`: sets every item up to the current `.len`. `fillAtCapacity(value)` (`vec`): fills the whole capacity and sets `.len` to the capacity.
 - `resize(newLen, value)`: sets `.len`; new items get `value`, extra items are cut. `truncate(len)`: cuts the `vec` to `len` items (no effect if shorter), the capacity is unchanged.
@@ -605,7 +624,8 @@ vec<i32> numbers = [1, 2, 3]
 vec<string>[50] parts                   // empty, capacity 50
 numbers.add(4)
 numbers.insert(0, 9)
-i32 last = numbers.pop()
+i32 last
+bool isValid = numbers.pop((&)last)     // false (and last = 0) when the vec is empty
 ```
 
 - Contiguous and growable (Rust `Vec` rules). `vec<T>` is empty; `vec<T>[n]` is empty with capacity `n`.
@@ -631,7 +651,7 @@ i32 age = ages["one"]
 - `map` (alias `bmap`) is sorted by key (B-tree); `hmap` is a hash map. Key rules: 6.2.
 - Default iterator: (key, value) tuples, sorted by key for `map`, unspecified order for `hmap`. `.keys` iterates the keys and `.values` the values.
 - `c[k]` read, `c[k] = v` (replaces or adds), `add(k, v)`, `add(map)` (merge, new value wins), `hasKey`, `has(v)`, `keyOf`, `tryGet`, `remove(v)`, `removeAll(v)`, `removeAt(k)`, `clear`.
-- A missing key on read gives the null or zero value and a silent `InvalidMapKeyException` (15.3).
+- A missing key on read gives the null or zero value of the value type; no exception (`hasKey` and `tryGet` tell whether the key exists). A null key is not allowed (6.2).
 - `hmap` also has `.capacity`, `reserve`, `shrinkToFit` and the `[n]` capacity form; `map` has none of them.
 
 ## 6.11 Sets `set`, `bset`, `hset`
@@ -652,6 +672,32 @@ tags -= "red"
 - In place: `|=` (union), `&=` (intersection), `-=` (difference), `^=` (symmetric difference); `+=` is the same as `|=`. With a single value, `|=` / `+=` add it and `-=` removes it. No operators that return a new set (`set1 | set2` is not defined).
 - Tests: `isSubsetOf(other)` (every item of this set is in `other`), `isSupersetOf(other)`, `isDisjointFrom(other)` → `bool`.
 - Iteration (`for T item in tags`): sorted for `set`, unspecified order for `hset`.
+
+## 6.12 Custom collections (partial)
+
+Users can write their own collection classes in Dflat. The compiler imposes the signatures with traits, so that `.len`, `for in`, `c[k]` and the literals can be mapped to the members of the class. Everything in this section is a first design: the open points are in 99.
+
+- Traits (mandatory members, only the signatures): `Collection` (all seven), `IndexCollection` (`arr`, `vec`, `list`), `MapCollection` (`map`, `hmap`), `SetCollection` (`set`, `hset`).
+- A collection trait takes the item type as a generic argument, and the class that implements it passes its own type parameter: `class MyCollection<Item> : IndexCollection<Item> { }`. There is no reserved type name; a generic parameter is always declared in the header (11.3).
+- `Collection` requires a read-only `len` (11.1.4) and `fun Iterator getIterator()`.
+- Iteration is done by an iterator: an object that implements the trait `Iterator` and holds the cursor. `Iterator` has two or three sub-traits, depending on how many kinds of cursor are needed (open, 99).
+- `next()` returns a tuple whose last item is the bool `isValid`: `(Item value, bool isValid)` for sequences, `(Key key, Value value, bool isValid)` for maps (the shape for sets is open, 99). When `isValid` is `false` the other items of the tuple are not valid (the iteration is over), so null keys, values and items are not a problem for the iteration.
+
+Sketch (the cursor types are open, 99):
+
+```
+trait IndexIterator<Item> {
+  uns cursor
+  fun (Item value, bool isValid) next()
+}
+trait MapIterator<Key, Value> {
+  Key cursor
+  fun (Key key, Value value, bool isValid) next()
+}
+```
+
+- `for x in c` on a custom collection asks `getIterator()` once and calls `next()` until `isValid` is `false`. For the collections of the compiler no iterator object is built: the `for` is a direct loop in C.
+- While the iterator exists the collection cannot be changed (6.4).
 
 ---
 
@@ -743,7 +789,7 @@ Examples with `1234.56`:
 - Locale names and first day of week: later.
 
 # 9. Parsing
-Integers, reals, `dec`, dates and times offer a `<type> <type>.parse(text[, default[, format]])` and bool `<type>.tryParse(text, <type>(&)result[, format]])`
+Integers, reals, `dec`, dates and times offer a `<type> <type>.parse(text[, default[, format]])` and bool `<type>.tryParse(text, (&)<type> result[, format])`
 
 ```
 i32 count = i32.parse(text, 0)
@@ -806,12 +852,14 @@ for u8 i = 10..=1 { }                 // start > end: counts down
 for char c in "text" { }
 for u64 k in 0..list.len { }
 for string message in messages { }
+for (&)Task task in tasks { }               // read/write borrow of the items
 for (string key, i32 value) in map { }      // map: (key, value) tuples
 for (var key, var value) in map { }
 for var (key, value) in map { }
 ```
 - A range whose start is greater than its end counts down.
 - The `for` variable always has a type; `var` is accepted when the type can be inferred (also in tuple forms); an untyped `for x in ...` is a compile error.
+- The loop variable is read-only by default; `(&)Type variable` makes it a read/write borrow of the item. Rules for the items, keys and basic values: 6.4.
 - Iterating collections (default iterators, maps, ranges as virtual collections): [Ref: Collections]
 
 ## 10.4 jumping
@@ -941,6 +989,27 @@ override fun bool equals(T other) {
 - Every path of `equals` must return a value, otherwise it is a compile error. The upward-check warning (level 2) does not fire in generic code when a check is true for one `T` only.
 - Null is handled by the compiler before `equals` is called: the function never receives a null argument.
 
+## 11.1.4 Fields and properties
+
+A field and a property are the same thing: the compiler tells them apart, developers do not need to. A plain field such as `i32 count` is a read/write property with automatic accessors (a private stored value plus a getter and a setter).
+```
+public i32 myFieldProperty = 3
+public i32 mySecondProperty { R: { field + 1 } W: { field = value - 1 } } = 3
+public readwrite i32 myProp { R: { field * 2 } }              // W is the default: field = value
+public i32 level { R: { field } private W: { field = 0 } }    // private writer
+```
+
+- Access: a property is read/write by default. The access `readonly`, `readwrite` or `writeonly` is written when the body is not defined and must be provided by the class (trait members, 11.2). When blocks are written they say what is allowed. Reading a property that cannot be read, or writing one that cannot be written, is a compile error.
+- Accessor blocks: `R: { ... }` calculates and returns the value (as in any function, the last expression is the result); `W: { ... }` runs when the property is assigned and gets the new value in `value`. A block that is not written gets its default: `R` is `{ field }` and `W` is `{ field = value }`.
+- `field` is the stored value of the property and `value` the incoming value of `W`. Both exist only inside the accessor blocks. Outside the accessors the name of the property always goes through them, so there is no recursion.
+- The storage exists only when an accessor uses `field` (the default accessors do). A purely computed property takes no memory.
+- A start value is written after the property (`= 3`) and is allowed in classes only, never in traits. It goes through the `W` code when one is defined (in the second example `field` starts at 2 and `R` returns 3).
+- Visibility: a visibility keyword before `R` or `W` sets the visibility of that accessor; the visibility of the property applies to the other one.
+- An exception that is not caught inside an accessor is a `Panic` (15.5): accessors have no error part.
+- Primary constructor parameters (11.1.1) become fields with the default accessibility rules. They can be redeclared in the body of the class or trait when they need something more specific.
+- Static properties work in the same way, but their accessors can use only static functions and other static fields or properties (11.1.2).
+- Moving a property out with `->`: 12.4.
+
 ## 11.2 Traits
 They are similar to C# interfaces and Rust traits
 
@@ -957,6 +1026,9 @@ trait Shape : Named { fun r64 Area() }
 - Single parent class (listed first in the header); any number of traits; base of everything: `Root.Class` (implicit, never written, 11.1).
 - Traits are implemented only in the class header; a trait cannot be added to an existing type (built-in or library) from outside its declaration.
 - Traits: properties, methods with or without body, constructor when they have properties; one parent trait; a supertrait inherited twice exists once.
+- A property in a trait declares how it is accessed (read only, read/write or write only, 11.1.4). It can have a default implementation (`R` and `W` blocks); when it has none the class must implement it, otherwise it is a compile error. A class can use the implementation of the trait or override it with `override`, giving the code for everything; a conflict is a compile error and a part not specified falls to the default implementation. A property that is read only in the trait stays read only in the class.
+- A trait has no start values (`= 3`). Its constructor can set values; the `W` code is used when one is defined.
+- How a property is read or written through a value of a trait type (`any Shape`) is left to the implementation of the compiler.
 - Same member in two traits: `TraitA.member` (inside), `px.TraitA.member` (outside), unqualified → compile error.
 - Trait-typed values: the compiler chooses static or dynamic dispatch; force with `specific Shape` (one type, known at compile time) / `any Shape` (any implementing type, dispatched at runtime). `list<any Shape>` holds mixed shapes.
 
@@ -1028,7 +1100,7 @@ class Grid<u64 Width, u64 Height, Cell> { arr<Cell>[Width * Height] cells }
 ```
 trait Sequence {
   placeholder Item
-  fun Item? Next()
+  fun (Item value, bool isValid) next()
 }
 
 class Countdown : Sequence with (Item is u32) { ... }
@@ -1303,6 +1375,7 @@ function(->a.c)                    // a.c is null afterwards, a stays usable
 - `->a.c` moves a field out of an object (also chains such as `->a.c.d`). The field holds null afterwards and the object stays usable; its class `atEnd` sees the field as null.
 - The owner of `a`, or a writable borrow `(&)A a`, can move a field out; a read-only borrow cannot (compile error).
 - `->` on a variable or field of a basic type is ignored and behaves like a plain copy; it is a level 1 warning (`i32 a; call(->a)` is the same as `call(a)`).
+- Moving out of a stored field or property: a value is copied; an object is passed with its ownership and the field becomes null. If the property is computed (its `R` returns a new object that is not stored), `->` gives away that new object, which needs no owner here; the property value is nullified in every case (11.1.4). Collections: `->c[k]` (6.6).
 - Finalizer: `f is atEnd.` is a statement only, never an expression. The final dot is mandatory, and only a line break or `;` may follow it (`f is atEnd.close()` is a compile error).
 - `f is atEnd.` releases the ownership held by the variable `f`: a single owner is destroyed running its full destructor (11.4); a reference counted object drops the counter by one and is destroyed when it reaches zero. In every case `f` becomes null; on a null `f` it does nothing.
 - When the object is destroyed, weak references to it see null (through `enforce`).
@@ -1516,9 +1589,7 @@ class Exception {
 | 18 | `InvalidCharacterCodePointException` | U+0000 (3.5) |
 | 19 | `IndexOutOfRangeException` | |
 | 20 | `ModifyingProtectedSourceException` | |
-| 21 | `NaNUsedAsKeyException` | the value is not stored or retrieved (6.2) |
-| 22 | `InvalidMapKeyException` | null or zero value (6.10) |
-| 23 | `EmptyVectorAccessException` | zero value, null for objects (6.6) |
+| 21–23 | retired (were `NaNUsedAsKeyException`, `InvalidMapKeyException`, `EmptyVectorAccessException`; the collections use the fallbacks without an exception, 6.2, 6.6); not reused | |
 | 24 | `InvalidDateTimeFormatException` | null (3.3) |
 | 25 | `FileNotFoundException` | |
 | 26 | `InvalidFileAccessException` | |
@@ -1557,7 +1628,7 @@ class MySilentException : Exception, SilentException { ... }
 - The silent flag is stored in the exception record (bit 31 of `length`, 15.7.5).
 - A silent exception needs a specific catch: its own type, a parent class below `Exception`, the `SilentException` trait, or `catch all`. `catch Exception` and `catch variable` don't handle it.
 - A silent exception never leaves the function where it was raised, unless that function throws it explicitly:
-  - an operation that raises a silent exception (the overflow of `+`, a saturating cast, a missing map key, ...) is seen only by a catch of the same function; without one, the fallback applies in place and nothing is created;
+  - an operation that raises a silent exception (the overflow of `+`, a saturating cast, ...) is seen only by a catch of the same function; without one, the fallback applies in place and nothing is created;
   - a function returns a silent exception to its caller only with an explicit `throw` of it, or by catching it and throwing it again (`catch OverflowException ex { throw ex }`). This also holds for the library functions that document silent exceptions.
 - A silent exception returned by a function is seen by the immediate caller only, when a catch of the caller handles it and covers the call. Without one it is ignored and execution continues with the value the function returned (its fallback). It never goes further up.
 - Calling a function that can emit only silent exceptions does not make the caller raise. Only a matching catch of the caller, or a `throw` of its own, matters.
@@ -1581,7 +1652,7 @@ fun i64 useWithoutCatch(i64 a) {
 
 - `Panic(code)`: critical exit, not an exception; not catchable, no cleanup, exits with `code`.
 - Every panic prints `Panic <code>` on stdout and exits with `code`. An unhandled exception first prints its `Message` on its own line.
-- Unhandled exception at the top level, unhandled error inside a catch body, an exception that is not silent leaving an `atEnd` block (15.7.6), double free: exit with -1000 for now. Every panic case will get its own code later.
+- Unhandled exception at the top level, unhandled error inside a catch body, an exception that is not silent leaving an `atEnd` block (15.7.6), an exception not caught inside a property accessor (11.1.4), an index outside a collection in a Release build (6.1), double free: exit with -1000 for now. Every panic case will get its own code later.
 
 ### 15.6 Targets without exceptions
 
@@ -1806,7 +1877,14 @@ Level 1 = most important, level 3 = least.
 - `.sizeof` for all types (whether it counts the items of a collection)
 - Functional collection members (`filter`, `map`, `reduce`)
 - Order of enum keys in sorted collections (declaration order or value)
-- `tryGet`: return value
+- Collections: the number of `Iterator` sub-traits (2 or 3) and the cursor types of the tree `map` / `set` and of `hmap` / `hset`; how `next()` returns a read-only or a writable borrow of the item (`for` and `for (&)`); how an iterator refers to its collection without a borrow stored in a field (6.12)
+- Collections: how a custom class provides `c[k]` (read and write), `.len` for `for`, and literals (`[...]`, `{ ... }`); which other members the collection traits require and which they supply by default
+- Collections: what the runtime check raises when a collection is changed during an iteration (6.4); `swap` and `->c[k]` on sets (`c[k]` read does not exist on sets); the shape of `next()` for sets
+- Collections: views are read-only and live only in locals and parameters; revisit with tasks (6.5), the full Rust borrow model stays an option
+- Collections: hash table and B-tree implementations (several implementations chosen by target or compiler option, node size, hash function), shared C helpers against one copy per type (code size, 11.3.12), literal typing and lowering (6.3, briefing 9)
+- Collections: whether the rule for the index out of range also covers `arr` indexing and the other non-silent operation exceptions; cost of `c[i]` as a failing operation (error part)
+- Strings: how a `string` is stored in the generated C (hash tables, empty and null strings); to be decided in a session on strings
+- Properties: position of `readonly` / `readwrite` / `writeonly` next to `public` and `static`, and their use together with a body (11.1.4); `override` of a property with only one half; access to a property through a trait-typed value (`any`), left to the compiler
 - Writing a character by index into a string (`text[3] = 'x'`)
 - DateTime library: import path, timezone database, parsing for `CalendarDate` / `ZonedDateTime`
 - Import paths of the standard library parts (`import stdrnd`)
@@ -2068,3 +2146,32 @@ Level 1 = most important, level 3 = least.
 - 6.1 `arr<T>` is a primitive; the other collections are ordinary generic classes
 - 19.3 Warnings: L1 same constraint repeated inline and in `where`; L2 unreachable case in a type switch
 - 99 Open items: `Generic` sets inside a class; variable declared with a set as type argument; conversion of borrowed generic values and of collections; `where` on class and trait headers; `clock`, `lapse`, `addr` and pointers as nullables in a set; `->` warning inside generic code; names of the compiler parameters for the limits; intermediate form of exported generics
+
+
+## Changes in 0.0.11
+
+- Header: version 0.0.11, 2026/10/20
+- 6.1 Index outside a collection: checked in every build; Debug raises `IndexOutOfRangeException` (catchable), Release is a `Panic`, a `catch` for it in Release is ignored with a level 3 warning
+- 6.1 The seven collections are generated by the compiler as C code (speed first); users can write their own collection classes; collections own their items (drop code per type, unassigned results destroyed at the end of the statement, `c[k] = v` drops the old item, `for` only borrows)
+- 6.2 Maps and sets do not allow null keys (or null set items); `""` is a valid string key; NaN keys are not stored or retrieved, without an exception
+- 6.2 How a `string` is stored in the generated C is decided with the strings, not with the collections
+- 6.4 `for` loop: read-only variable by default, `(&)Type variable` for a read/write borrow; set items and map keys always read-only; a basic value without `(&)` is a copy (level 3 warning when assigned); no consuming loop
+- 6.4 A collection cannot be changed while it is iterated: compile error when provable (Rust style), otherwise a version check at runtime (C# style)
+- 6.5 Views are read-only only (the writable view `(&)c[a..b]` and its example are removed) and can only be locals or parameters; while a view exists the collection cannot be changed
+- 6.6 `pop((&)out)` is the only form: returns `bool` (the `isValid`), moves the item into `out`, on an empty `vec` returns `false` and `out` gets the default value; no `tryPop`, no exception
+- 6.6 `bool tryGet(k, (&)out[, default])`: returns `true` when the key exists
+- 6.6 `swap(position, new)`, `swap(key, new)` (return the old item and its ownership), `swap(i, j)`, `swap(key1, key2)` (exchange, with the rules for missing keys)
+- 6.6 `->c[k]` moves the item out: zeroed in `arr` and `vec`, removed in `list`, `map`, `hmap`, `set` and `hset`
+- 6.6, 6.10 Reading a missing map key gives the null or zero value without an exception
+- 6.8 Example of `pop` updated
+- 6.12 Custom collections (new, partial): traits `Collection`, `IndexCollection`, `MapCollection`, `SetCollection` with a generic item type; `len` and `getIterator()`; `Iterator` with two or three sub-traits; `next()` returns a tuple ending with `isValid`; direct C loops for the collections of the compiler
+- 9 `tryParse` signature written with `(&)<type> result`; `(&)Type variable` is the placement everywhere
+- 10.3 `for (&)Type variable in collection` added
+- 11.1.4 Fields and properties (new): a field is a property with automatic accessors; `R:` and `W:` blocks with defaults (`field`, `field = value`); `field` and `value`; access `readonly` / `readwrite` / `writeonly` when there is no body; start value after the property (goes through `W`, classes only); visibility of each accessor; storage only when an accessor uses `field`; an exception not caught in an accessor is a `Panic`; primary constructor parameters become fields; static properties use only static members
+- 11.2 Trait properties are access contracts with an optional default implementation; the class must implement a missing one; `override` gives the code for everything, parts not given fall to the default; read only in the trait stays read only; no start values in traits, trait constructors can set values; access through `any` left to the compiler
+- 11.3.4 The `Sequence` placeholder example uses `next()` returning `(Item value, bool isValid)`
+- 12.4 Moving a stored field or property (value copied, object moved and the field nullified) and a computed property (a new object is given away)
+- 15.3 Silent exceptions `NaNUsedAsKeyException` (21), `InvalidMapKeyException` (22), `EmptyVectorAccessException` (23) removed; IDs 21 to 23 retired and not reused
+- 15.4 Example list of silent operations no longer mentions the missing map key
+- 15.5 Panic cases: exception not caught in an accessor, index outside a collection in Release
+- 99 Open items: `tryGet` return value removed (settled); new collections, strings and properties items added

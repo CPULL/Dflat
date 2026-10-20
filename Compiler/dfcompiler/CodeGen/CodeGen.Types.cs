@@ -596,6 +596,9 @@ public sealed partial class CodeGen {
     if (IsArr(e.Type)) {
       return $"{ArrStrFunction(ArrElem(e.Type), at)}({e.Code})";
     }
+    if (IsVec(e.Type)) {
+      return $"{VecStrFunction(e.Type, at)}({e.Code})";   // [a, b, c], like an array
+    }
     if (IsClass(e.Type)) {
       return $"df_str_obj({e.Code})";
     }

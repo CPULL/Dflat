@@ -1,0 +1,34 @@
+[9, 1, 2, 3, 4]
+5
+2
+[10, 1, 50, 3, 4]
+true 4
+false 0
+[pear, apple, fig]
+0 50
+true
+1
+[apple, fig, pear]
+[pear, fig, apple]
+[apple, fig, pear]
+true
+false
+3
+[6, 8]
+[8]
+0 []
+true
+1
+[1, 9, 9, 9]
+[1, 9]
+[3, 3]
+[4, 3]
+rex
+fido
+fido
+10 true 1 true
+false
+1
+-1
+false
+---- exit code 0 ----

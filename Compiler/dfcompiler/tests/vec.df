@@ -1,0 +1,104 @@
+// Vectors vec<T> (spec 6.8): a growable block of items, with the members of 6.6
+alias Root as r
+
+public class Dog(string name) {
+  public string name
+}
+
+vec<i32> numbers = [1, 2, 3]
+numbers.add(4)
+numbers.insert(0, 9)
+r.Console.log(numbers)
+r.Console.log(numbers.len)
+r.Console.log(numbers[2])
+numbers[2] = 50
+numbers[0] += 1
+r.Console.log(numbers)
+
+// pop moves the last item into the variable and says whether there was one
+i32 last
+bool found = numbers.pop((&)last)
+r.Console.log($"{found} {last}")
+vec<i32> empty = []
+last = 7
+found = empty.pop((&)last)
+r.Console.log($"{found} {last}")
+
+// a bare vec takes its type from the literal, the capacity form starts empty
+vec words = ["pear", "apple", "fig"]
+vec<string> spare = vec<string>[50]
+r.Console.log(words)
+r.Console.log($"{spare.len} {spare.capacity}")
+
+// searching, ordering and changing in place work on the live items
+r.Console.log(words.has("fig"))
+r.Console.log(words.indexOf("apple"))
+words.sort()
+r.Console.log(words)
+words.sort(SortDirection.DESC)
+r.Console.log(words)
+words.reverse()
+r.Console.log(words)
+
+// removing
+vec<i32> work = [5, 6, 5, 7, 5, 8]
+r.Console.log(work.remove(7))
+r.Console.log(work.remove(99))
+r.Console.log(work.removeAll(5))
+r.Console.log(work)
+work.removeAt(0)
+r.Console.log(work)
+work.clear()
+r.Console.log($"{work.len} {work}")
+
+// capacity
+vec<i32> grow = []
+grow.reserve(100)
+r.Console.log(grow.capacity >= 100)
+grow.add(1)
+grow.shrinkToFit()
+r.Console.log(grow.capacity)
+grow.resize(4, 9)
+r.Console.log(grow)
+grow.truncate(2)
+r.Console.log(grow)
+grow.fill(3)
+r.Console.log(grow)
+grow.swap(0, 1)
+grow[1] = 4
+grow.swap(0, 1)
+r.Console.log(grow)
+
+// objects
+vec<Dog> kennel = []
+kennel.add(Dog("rex"))
+kennel.add(Dog("fido"))
+for Dog dog in kennel {
+  r.Console.log(dog.name)
+}
+r.Console.log(kennel[1].name)
+
+// the iterator by hand
+var iterator = numbers.getIterator()
+var first = iterator.next()
+var second = iterator.next()
+r.Console.log($"{first.value} {first.isValid} {second.value} {second.isValid}")
+var more = iterator.next()
+more = iterator.next()
+more = iterator.next()
+more = iterator.next()
+r.Console.log(more.isValid)
+
+// an index outside the vector
+fun i32 outside(vec<i32> source, u64 index) {
+  return source[index]
+  catch IndexOutOfRangeException { return -1 }
+}
+r.Console.log(outside(numbers, 1))
+r.Console.log(outside(numbers, 40))
+fun bool badRemove(vec<i32> source) {
+  source.removeAt(10)
+  return true
+  catch IndexOutOfRangeException { return false }
+}
+r.Console.log(badRemove(numbers))

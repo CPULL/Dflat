@@ -1,0 +1,60 @@
+// A vector owns its items (spec 12): adding moves in, removing moves out or ends the item, a plain read borrows.
+// A double drop would end the program with "Double free": this test must run clean.
+alias Root as r
+
+public class Dog(string name) {
+  public string name
+}
+
+fun fill(vec<Dog> kennel, u64 count) {
+  u64 i = 0
+  while i < count {
+    kennel.add(Dog("dog"))
+    i += 1
+  }
+}
+
+vec<Dog> kennel = []
+Dog rex = Dog("rex")
+kennel.add(->rex)                  // rex is now owned by the vector
+kennel.add(Dog("fido"))
+kennel.insert(1, Dog("luna"))
+r.Console.log(kennel.len)
+r.Console.log(kennel[1].name)
+
+kennel[1] = Dog("max")             // the old item (luna) ends
+r.Console.log(kennel[1].name)
+
+Dog taken = ->kennel[0]            // moves rex out: the slot is empty
+r.Console.log(taken.name)
+r.Console.log(kennel[0] == null)
+
+Dog last
+bool had = kennel.pop((&)last)     // fido moves into last
+r.Console.log($"{had} {last.name}")
+
+kennel.removeAt(0)                 // the empty slot goes away
+r.Console.log(kennel.len)
+kennel.clear()
+r.Console.log(kennel.len)
+
+fill(kennel, 1000)
+r.Console.log(kennel.len)
+kennel.truncate(10)
+r.Console.log(kennel.len)
+kennel.clear()
+
+// vectors of vectors, and a vector kept in a field
+vec<vec<i32>> grid = []
+vec<i32> row = [1, 2, 3]
+grid.add(->row)
+grid.add([4, 5])
+r.Console.log(grid[1][0])
+r.Console.log(grid.len)
+
+public class Zoo {
+  public vec<string> names = ["a", "b"]
+}
+Zoo zoo = Zoo()
+zoo.names.add("c")
+r.Console.log(zoo.names)

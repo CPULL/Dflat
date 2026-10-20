@@ -177,6 +177,8 @@ public sealed partial class CodeGen {
   bool GuessOwner(Node e, Dictionary<FunSig, int>? state) {
     return e.Kind switch {
       "Null" or "Gift" => true,
+      "List" => true,   // a literal: a new collection (it only matters when the variable is an object)
+      "Index" => e.Children[0].Kind == "GenericRef",   // vec<T>[n]: a new collection
       "Paren" => GuessOwner(e.Children[0], state),
       "Call" => CallMoves(e, state),
       _ => false
@@ -190,6 +192,9 @@ public sealed partial class CodeGen {
     var typeNode = decl.Children.FirstOrDefault(child => TypeNodeKinds.Contains(child.Kind));
     if (typeNode == null) {
       return null;
+    }
+    if (typeNode is { Kind: "Type", Text: "vec", Children.Count: 0 } && vecPrelude) {
+      return "vec";   // vec values = [1, 2, 3]: the type comes from the literal
     }
     if (typeNode is { Kind: "Type", Text: "var" or "arr" }) {
       var init = decl.Children.FirstOrDefault(child => child.Kind == "Init");
@@ -263,6 +268,9 @@ public sealed partial class CodeGen {
     var operand = n.Children[0];
     if (operand.Kind == "Name" && operand.Text == "this") {
       throw Error("an object cannot give away its own ownership: ->this", n);
+    }
+    if (operand.Kind == "Index") {
+      return GiftIndex(n, operand, scope);
     }
     if (operand.Kind is not ("Name" or "Member")) {
       throw Error("only a variable or a field can be moved with ->", n);
@@ -414,6 +422,9 @@ public sealed partial class CodeGen {
     }
     foreach (var field in OwnedObjectFields(cls)) {
       sb.Append($"  if (self->{field.CName} != NULL) {{ void* o = (void*)self->{field.CName}; self->{field.CName} = NULL; df_drop(o); }}\n");
+    }
+    if (IsVec(cls.Name)) {
+      EmitVecDropGlue(sb, cls);
     }
     sb.Append("}\n");
     sb.Append($"static void df_dropall_{cls.Name}(void* p) {{\n");

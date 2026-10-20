@@ -15,7 +15,7 @@ public sealed partial class CodeGen {
     "  uint64_t id;\n  const df_descriptor* descriptor;\n  char* message;\n  char* function;\n  uint64_t line;\n";
 
   // exceptions that do nothing when no catch can handle them (spec 15.3)
-  static readonly HashSet<int> SilentStandard = new() { 12, 17, 18, 21, 22, 23, 24, 27, 28, 29, 32 };
+  static readonly HashSet<int> SilentStandard = new() { 12, 17, 18, 24, 27, 28, 29, 32 };
 
   bool IsExceptionClass(string type) => classes.TryGetValue(type, out var cls) && cls.IsException;
 

@@ -1,0 +1,8 @@
+alias Root as r
+
+public class Dog(string name) {
+  public string name
+}
+
+vec<i32> numbers = []
+numbers.add("text")

@@ -1,0 +1,1 @@
+vec_literal_borrowed.df(8): error: a vec owns its items: put a new object in the literal, or move one in with ->x

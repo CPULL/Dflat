@@ -1,0 +1,1 @@
+vec_add_borrowed.df(9): error: 'value' takes ownership of the object: write ->x

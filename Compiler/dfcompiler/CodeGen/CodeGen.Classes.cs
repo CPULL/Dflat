@@ -842,7 +842,7 @@ public sealed partial class CodeGen {
   Expr MethodCall(ClassInfo cls, string name, string? receiver, bool direct, List<Node> args, Scope scope, Node at) {
     var all = LookupMethods(cls, name);
     if (all.Count == 0) {
-      throw Error($"{cls.Name} has no function '{name}'", at);
+      throw Error($"{DisplayName(cls.Name)} has no function '{name}'", at);
     }
     var candidates = all.Where(f => f.IsStatic == (receiver == null)).ToList();
     if (candidates.Count == 0) {

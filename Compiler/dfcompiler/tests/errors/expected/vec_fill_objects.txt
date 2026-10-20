@@ -1,0 +1,1 @@
+vec_fill_objects.df(9): error: fill puts the same value in many places: for objects it needs cloning, which is not built yet

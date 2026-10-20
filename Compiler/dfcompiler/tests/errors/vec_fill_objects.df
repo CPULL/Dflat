@@ -1,0 +1,9 @@
+alias Root as r
+
+public class Dog(string name) {
+  public string name
+}
+
+vec<Dog> kennel = []
+kennel.add(Dog("rex"))
+kennel.fill(Dog("max"))

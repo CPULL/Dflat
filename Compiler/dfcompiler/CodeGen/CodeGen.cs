@@ -145,6 +145,9 @@ public sealed partial class CodeGen {
 
   // level 1 = most important, 3 = least (spec 19.1); 0 = tool notice without a level
   void Warn(string msg, Node at, int level = 0) {
+    if (at.Line >= LibraryLine) {
+      return;   // code of the compiler's own libraries (vec): not the program's business
+    }
     string tag = level > 0 ? $"warning L{level}" : "warning";
     warnings.Add($"({at.Line}): {tag}: {msg}");
   }
@@ -1093,6 +1096,9 @@ public sealed partial class CodeGen {
       case "List":
         if (expected != null && IsArr(expected)) {
           return ArrayLiteral(n, scope, expected);
+        }
+        if (expected != null && IsVec(expected)) {
+          return VecLiteral(n, scope, expected);
         }
         throw Error("a list needs a declared type: arr<T> name = [...]", n);
       case "Index":

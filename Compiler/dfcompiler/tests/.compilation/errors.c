@@ -78,9 +78,6 @@ static const df_descriptor df_desc_OutOfRangeCastException = { 17, "OutOfRangeCa
 static const df_descriptor df_desc_InvalidCharacterCodePointException = { 18, "InvalidCharacterCodePointException", &df_desc_Exception, true };
 static const df_descriptor df_desc_IndexOutOfRangeException = { 19, "IndexOutOfRangeException", &df_desc_Exception, false };
 static const df_descriptor df_desc_ModifyingProtectedSourceException = { 20, "ModifyingProtectedSourceException", &df_desc_Exception, false };
-static const df_descriptor df_desc_NaNUsedAsKeyException = { 21, "NaNUsedAsKeyException", &df_desc_Exception, true };
-static const df_descriptor df_desc_InvalidMapKeyException = { 22, "InvalidMapKeyException", &df_desc_Exception, true };
-static const df_descriptor df_desc_EmptyVectorAccessException = { 23, "EmptyVectorAccessException", &df_desc_Exception, true };
 static const df_descriptor df_desc_InvalidDateTimeFormatException = { 24, "InvalidDateTimeFormatException", &df_desc_Exception, true };
 static const df_descriptor df_desc_FileNotFoundException = { 25, "FileNotFoundException", &df_desc_Exception, false };
 static const df_descriptor df_desc_InvalidFileAccessException = { 26, "InvalidFileAccessException", &df_desc_Exception, false };
@@ -985,14 +982,11 @@ static uint64_t df_obs_bit(const df_exception* e) {
     case 12: return UINT64_C(1);
     case 17: return UINT64_C(2);
     case 18: return UINT64_C(4);
-    case 21: return UINT64_C(8);
-    case 22: return UINT64_C(16);
-    case 23: return UINT64_C(32);
-    case 24: return UINT64_C(64);
-    case 27: return UINT64_C(128);
-    case 28: return UINT64_C(256);
-    case 29: return UINT64_C(512);
-    case 32: return UINT64_C(1024);
+    case 24: return UINT64_C(8);
+    case 27: return UINT64_C(16);
+    case 28: return UINT64_C(32);
+    case 29: return UINT64_C(64);
+    case 32: return UINT64_C(128);
   }
   return 0;
 }
@@ -1286,7 +1280,7 @@ static void f_leaving(void) {
   (void)df_err;
   (void)df_err_thrown;
   df_exception* df_pend68 = NULL;
-  ({ df_exception* t_69 = f_fail(df_str_lit("x", 1)); if (t_69) { if ((t_69->descriptor->silent && !(UINT64_C(2047) & df_obs_bit(t_69)))) { df_exc_release(t_69); t_69 = NULL; } else { df_err = t_69; df_err_thrown = false; goto f68_dispatch0; } } });
+  ({ df_exception* t_69 = f_fail(df_str_lit("x", 1)); if (t_69) { if ((t_69->descriptor->silent && !(UINT64_C(255) & df_obs_bit(t_69)))) { df_exc_release(t_69); t_69 = NULL; } else { df_err = t_69; df_err_thrown = false; goto f68_dispatch0; } } });
   goto f68_skip0;
   f68_catch0: {
     df_exception* df_caught70 = df_err;
@@ -1339,7 +1333,7 @@ int main(int argc, char** argv) {
   f_check(((int32_t)1LL));
   f_check(((int32_t)2LL));
   f_check(((int32_t)3LL));
-  ({ df_exception* t_77 = f_relay(); if (t_77) { if ((t_77->descriptor->silent && !(UINT64_C(2047) & df_obs_bit(t_77)))) { df_exc_release(t_77); t_77 = NULL; } else { df_err = t_77; df_err_thrown = false; goto f76_dispatch0; } } });
+  ({ df_exception* t_77 = f_relay(); if (t_77) { if ((t_77->descriptor->silent && !(UINT64_C(255) & df_obs_bit(t_77)))) { df_exc_release(t_77); t_77 = NULL; } else { df_err = t_77; df_err_thrown = false; goto f76_dispatch0; } } });
   goto f76_skip0;
   f76_catch0: {
     df_exception* df_caught78 = df_err;

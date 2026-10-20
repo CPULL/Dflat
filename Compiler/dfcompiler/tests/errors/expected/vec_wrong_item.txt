@@ -1,0 +1,1 @@
+vec_wrong_item.df(8): error: cannot convert string to i32 implicitly; use a cast

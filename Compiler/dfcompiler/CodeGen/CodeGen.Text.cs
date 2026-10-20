@@ -209,6 +209,15 @@ public sealed partial class CodeGen {
     if (IsArr(receiver.Type)) {
       return ArrayMethod(receiver, name, args, scope, at);
     }
+    if (IsVec(receiver.Type) && IsClass(VecElem(receiver.Type)) && name is "fill" or "fillAtCapacity" or "resize") {
+      throw Error($"{name} puts the same value in many places: for objects it needs cloning, which is not built yet", at);
+    }
+    if (IsVec(receiver.Type) && name == "pop") {
+      return VecPop(receiver, args, scope, at);
+    }
+    if (IsVec(receiver.Type) && VecArrayMembers.Contains(name)) {
+      return ArrayMethod(VecView(receiver), name, args, scope, at);   // on the live items
+    }
     if (IsClass(receiver.Type)) {
       return ObjectCall(receiver, name, args, scope, at);
     }
@@ -303,6 +312,13 @@ public sealed partial class CodeGen {
     }
     if (usesStreams) {
       source.AppendLine(IoStreamPrelude);
+    }
+    // vec<T> (spec 6.8) is a generic class written in Dflat, with the collection traits (CodeGen.Vec.cs)
+    if (!userTypes.Contains("vec") && Mentions(program, node => node.Text is "vec" or "getIterator" or "IndexIterator" or "IndexCollection" or "Iterator")) {
+      // its lines are numbered from LibraryLine so that no warning of this code is shown (Warn) and the errors can be told apart
+      var vecLibrary = new Parser(new Lexer(VecPrelude, LibraryLine).Tokenize()).ParseProgram();
+      program.Children.InsertRange(0, vecLibrary.Children);
+      vecPrelude = true;
     }
     if (source.Length == 0) {
       return;

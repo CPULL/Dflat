@@ -53,6 +53,9 @@ public sealed partial class CodeGen {
   // arr<T>[size]: elements start as zero
   Expr ArrayNew(Node generic, Node sizeNode, Scope scope) {
     string target = generic.Children[0].Text!;
+    if (target == "vec" && vecPrelude) {
+      return VecNewWithCapacity(generic, sizeNode, scope);
+    }
     if (target != "arr") {
       throw NotSupported("Collections", generic);
     }
@@ -98,6 +101,10 @@ public sealed partial class CodeGen {
         && init?.Children[0].Kind == "List" && scope != null) {
       return InferArrayType(init.Children[0], scope);
     }
+    if (typeNode.Kind == "Type" && typeNode.Text == "vec" && typeNode.Children.Count == 0 && vecPrelude
+        && init?.Children[0].Kind == "List" && scope != null) {
+      return InferVecType(init.Children[0], scope, decl);
+    }
     // var x = value: the type of the value
     if (typeNode.Kind == "Type" && typeNode.Text == "var" && typeNode.Children.Count == 0 && !typeAliases.ContainsKey("var")) {
       if (init == null || scope == null) {
@@ -123,6 +130,9 @@ public sealed partial class CodeGen {
       string call = $"df_str_char_at({obj.Code}, {IndexValue(index, n)}, {fn!.NameConst})";
       return new Expr(CheckRaise(Need("text", call), "char"), "char");
     }
+    if (IsVec(obj.Type)) {
+      return VecIndex(obj, index, n);
+    }
     if (!IsArr(obj.Type)) {
       throw NotSupported("Collections", n);
     }
@@ -139,14 +149,17 @@ public sealed partial class CodeGen {
     if (obj.Type == "string") {
       throw Error("writing a character by index is not decided yet (spec 4)", s);
     }
-    if (!IsArr(obj.Type) || target.Children[0].Kind == "GenericRef") {
+    bool isVec = IsVec(obj.Type);
+    if (!(IsArr(obj.Type) || isVec) || target.Children[0].Kind == "GenericRef") {
       throw NotSupported("Collections", s);
     }
-    string elem = ArrElem(obj.Type);
+    string elem = isVec ? VecElem(obj.Type) : ArrElem(obj.Type);
     var index = ExprOf(target.Children[1], scope, "u64");
     string array = NewTemp();
     string position = NewTemp();
-    string slot = $"{array}.p[{position}]";
+    string slot = isVec ? $"{array}->{VecField(obj.Type, "items")}.p[{position}]" : $"{array}.p[{position}]";
+    string length = isVec ? $"{array}->{VecField(obj.Type, "count")}" : $"{array}.len";
+    string holder = isVec ? NullChecked(obj.Code, obj.Type) : obj.Code;
     string op = s.Text!;
     if (op == "_=") {
       throw NotSupported("Ownership", s);
@@ -160,8 +173,16 @@ public sealed partial class CodeGen {
     } else {
       value = Convert(BinaryOp(op[..^1], new Expr(slot, elem), s.Children[1], scope, s), elem, s);
     }
-    return $"({{ {CType(obj.Type)} {array} = {obj.Code}; uint64_t {position} = {IndexValue(index, target)}; "
-      + $"if (!df_idx_ok({array}.len, {position}, {fn!.NameConst})) {RaiseJump} {slot} = {value}; }})";
+    if (isVec && op == "=" && IsClass(elem)) {
+      // the vector owns its items: the one that is replaced ends (unless it is the same object)
+      string replaced = NewTemp();
+      string incoming = NewTemp();
+      return $"({{ {CType(obj.Type)} {array} = {holder}; uint64_t {position} = {IndexValue(index, target)}; {CType(elem)} {incoming} = {value}; "
+        + $"if (!df_idx_ok({length}, {position}, {fn!.NameConst})) {RaiseJump} {CType(elem)} {replaced} = {slot}; {slot} = {incoming}; "
+        + $"if ({replaced} != {incoming}) {{ df_drop((void*){replaced}); }} }})";
+    }
+    return $"({{ {CType(obj.Type)} {array} = {holder}; uint64_t {position} = {IndexValue(index, target)}; "
+      + $"if (!df_idx_ok({length}, {position}, {fn!.NameConst})) {RaiseJump} {slot} = {value}; }})";
   }
 
   // members of an array
@@ -245,6 +266,9 @@ public sealed partial class CodeGen {
       }
       case "copyFrom":
         return CopyFrom(array, args, scope, at);
+      case "getIterator":
+        Arity(0);
+        return ArrayIterator(array, at);
       default:
         return null;
     }
@@ -426,7 +450,13 @@ public sealed partial class CodeGen {
     var block = s.Children.Last();
     var collection = ExprOf(source, scope);
     string elem;
-    if (IsArr(collection.Type)) {
+    bool overVec = IsVec(collection.Type);
+    string? customElem = overVec ? null : CustomCollectionElem(collection.Type);
+    if (overVec) {
+      elem = VecElem(collection.Type);
+    } else if (customElem != null) {
+      elem = customElem;
+    } else if (IsArr(collection.Type)) {
       elem = ArrElem(collection.Type);
     } else if (collection.Type == "string") {
       elem = "char";
@@ -460,7 +490,17 @@ public sealed partial class CodeGen {
     if (cleanup) {
       EmitHoists(body, sb, innerPad);
     }
-    sb.Append($"{innerPad}{wholeType} {whole} = {collection.Code};\n");
+    sb.Append($"{innerPad}{wholeType} {whole} = {(overVec ? NullChecked(collection.Code, collection.Type) : collection.Code)};\n");
+    string iteration = "";
+    if (customElem != null) {
+      // the iterator is asked for once; each pass calls next() and stops when isValid is false
+      var iterator = ObjectCall(new Expr(whole, collection.Type), "getIterator", new List<Node>(), scope, s) ?? throw Error("no iterator", s);
+      string iterVar = $"df_iter{tempCounter}";
+      sb.Append($"{innerPad}{CType(iterator.Type)} {iterVar} = {iterator.Code};\n");
+      var step = ObjectCall(new Expr(iterVar, iterator.Type), "next", new List<Node>(), scope, s) ?? throw Error("no next()", s);
+      string tuple = $"df_step{tempCounter}";
+      iteration = $"({{ {CType(step.Type)} {tuple} = {step.Code}; if (!{tuple}.e1) {{ break; }} {tuple}.e0; }})";
+    }
     string itemCode;
     string loop;
     if (collection.Type == "string") {
@@ -468,6 +508,12 @@ public sealed partial class CodeGen {
       sb.Append($"{innerPad}uint64_t {byteOffset} = 0;\n");
       loop = $"for (uint64_t {position} = 0; {byteOffset} < {whole}.len; {position}++)";
       itemCode = $"df_utf8_next({whole}.p, {whole}.len, &{byteOffset})";
+    } else if (customElem != null) {
+      loop = "for (;;)";
+      itemCode = iteration;
+    } else if (overVec) {
+      loop = $"for (uint64_t {position} = 0; {position} < {whole}->{VecField(collection.Type, "count")}; {position}++)";
+      itemCode = $"{whole}->{VecField(collection.Type, "items")}.p[{position}]";
     } else {
       loop = $"for (uint64_t {position} = 0; {position} < {whole}.len; {position}++)";
       itemCode = $"{whole}.p[{position}]";

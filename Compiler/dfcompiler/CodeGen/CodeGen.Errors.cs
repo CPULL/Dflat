@@ -102,9 +102,7 @@ public sealed partial class CodeGen {
     ["InvalidCharacterCodePointException"] = 18,
     ["IndexOutOfRangeException"] = 19,
     ["ModifyingProtectedSourceException"] = 20,
-    ["NaNUsedAsKeyException"] = 21,
-    ["InvalidMapKeyException"] = 22,
-    ["EmptyVectorAccessException"] = 23,
+    // 21 to 23 are retired (spec 15.3): the collections use fallbacks without an exception
     ["InvalidDateTimeFormatException"] = 24,
     // Root.IO (spec 17.6.6)
     ["FileNotFoundException"] = 25,

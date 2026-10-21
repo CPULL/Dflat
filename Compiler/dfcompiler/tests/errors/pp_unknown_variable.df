@@ -1,0 +1,5 @@
+alias Root as r
+
+##if nothing == 1
+r.Console.log(1)
+##endif

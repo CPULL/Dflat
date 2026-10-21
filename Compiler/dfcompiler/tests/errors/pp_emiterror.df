@@ -1,0 +1,5 @@
+alias Root as r
+
+##if build == debug
+##emiterror "stop here"
+##endif

@@ -1,0 +1,80 @@
+// The preprocessor (spec 19.1): the directives remove the parts that are not valid; the removed lines and the directives become empty lines
+alias Root as r
+
+##define mode = fast
+##define amount = 40
+##define flag = true
+##define good = (os == windows && cpu == x64) || (os == linux && (cpu == x64 || cpu == arm))
+
+##if good
+r.Console.log("supported")
+##elseif os == osx
+r.Console.log("macOS")
+##else
+##emiterror "this platform is not supported"
+##endif
+
+##if build == debug
+r.Console.log("debug build")
+##else
+r.Console.log("release build")
+##endif
+
+##if mode == fast && amount >= 40
+r.Console.log("fast and big")
+##endif
+
+##if !flag
+r.Console.log("never")
+##elseif amount < 10
+r.Console.log("never")
+##elseif amount == 40
+r.Console.log("elseif taken")
+##elseif flag
+r.Console.log("never: an earlier branch was taken")
+##endif
+
+// variables can be compared with each other, and defined again
+##define first = 5
+##define second = 5
+##if first == second
+r.Console.log("equal variables")
+##endif
+##define second = 6
+##if first != second
+r.Console.log("changed variable")
+##endif
+
+// the variables of the compiler
+##if version.major == 0 && version.minor == 0
+r.Console.log("language 0.0")
+##endif
+##if ram >= 64kb && ram == 4gb
+r.Console.log("ram 4gb")
+##endif
+##if coptlev == 2 && coptmode == speed
+r.Console.log("optimization 2 for speed")
+##endif
+##if int == 32 && real == 64 && uns == int
+r.Console.log("native sizes")
+##endif
+##if endian == little && exceptions == on && bits >= 32
+r.Console.log("little endian, exceptions on")
+##endif
+
+// nested blocks, and a block removed by its parent
+##if mode == fast
+##if amount == 1
+r.Console.log("never")
+##else
+r.Console.log("inner else")
+##endif
+##else
+##if amount == 40
+r.Console.log("never: the outer block is removed")
+##endif
+##endif
+
+##region folded
+r.Console.log("inside a region")
+##endregion

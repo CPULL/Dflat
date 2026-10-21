@@ -1,0 +1,27 @@
+fun int main(arr<string> args) {
+  File output = File("fibonacci.txt") atEnd { output.close() }
+  u64 limit = 0
+  i64 limitInput = 0
+  bool isNumber = false
+  if args.len > 1 {
+    isNumber = i64.tryParse(args[1], (&)limitInput)
+		if isNumber then limit = (u64)limitInput
+  }
+  if !isNumber || limitInput < 0 {
+    output.writeAllText("Not a valid number")
+    throw Panic(1234)
+  }
+
+  string text = "0\n"
+  u64 previous = 0
+  u64 current = 1
+  while current <= limit {
+    text = text + $"{current}\n"
+    u64 next = previous + current
+    if next < current { break }          // the sum wrapped around: stop
+    previous = current
+    current = next
+  }
+  output.writeAllText(text)
+  return 0
+}

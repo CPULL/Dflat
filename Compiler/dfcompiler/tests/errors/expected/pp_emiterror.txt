@@ -1,0 +1,1 @@
+pp_emiterror.df(4,1): error: stop here

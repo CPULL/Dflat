@@ -1,0 +1,14 @@
+supported
+debug build
+fast and big
+elseif taken
+equal variables
+changed variable
+language 0.0
+ram 4gb
+optimization 2 for speed
+native sizes
+little endian, exceptions on
+inner else
+inside a region
+---- exit code 0 ----

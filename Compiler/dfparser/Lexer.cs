@@ -72,7 +72,6 @@ public sealed class Lexer {
 
   readonly string src;
   readonly List<Token> tokens = new();
-  readonly Stack<int> regions = new();
   int pos;
   int line = 1;
   int col = 1;
@@ -157,17 +156,11 @@ public sealed class Lexer {
         LexQuoted('\'', TokenKind.Char, l, cl);
         continue;
       }
-      if (c == '#' && cl == 1 && TryLexDirective()) {
-        continue;
-      }
       if (c == '#') {
         LexLabel(l, cl);
         continue;
       }
       LexOp(l, cl);
-    }
-    foreach (int regionLine in regions.Reverse()) {
-      Warnings.Add($"({regionLine}): warning L3: #region without #endregion");
     }
     AddNewline();
     tokens.Add(new Token(TokenKind.Eof, "", line, col));
@@ -457,43 +450,6 @@ public sealed class Lexer {
   }
 
   // ---------------------------------------------------------------- directives, labels and operators
-
-  // #region / #endregion in the first column: folding only. Returns false for anything else (a label).
-  bool TryLexDirective() {
-    int l = line;
-    int c = col;
-    int wordStart = pos + 1;
-    int wordEnd = wordStart;
-    while (wordEnd < src.Length && char.IsLetter(src[wordEnd])) {
-      wordEnd++;
-    }
-    string word = src[wordStart..wordEnd];
-    if (word is not ("region" or "endregion")) {
-      return false;
-    }
-    char after = wordEnd < src.Length ? src[wordEnd] : '\n';
-    if (char.IsLetterOrDigit(after) || after == '#' || IsLabelChar(after)) {
-      return false;
-    }
-    int lineEnd = src.IndexOf('\n', pos);
-    if (lineEnd < 0) {
-      lineEnd = src.Length;
-    }
-    if (src[wordEnd..lineEnd].Contains('#')) {
-      throw Error("'#' is not allowed in directive text", l, c);
-    }
-    if (word == "region") {
-      regions.Push(l);
-    } else if (regions.Count == 0) {
-      Warnings.Add($"({l}): warning L3: #endregion without #region");
-    } else {
-      regions.Pop();
-    }
-    while (pos < lineEnd) {
-      Advance();
-    }
-    return true;
-  }
 
   static bool IsLabelChar(char ch) {
     return char.IsLetterOrDigit(ch) || ch is '_' or '-' or '+' or '!' or '?' or '$' or '%';

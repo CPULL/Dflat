@@ -1,0 +1,1 @@
+pp_not_on_word.df(3,1): error: '!' works only on a bool variable: for 'os' use !=

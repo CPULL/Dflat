@@ -29,6 +29,10 @@ public static class Program {
 
     string src = File.ReadAllText(path);
     try {
+      // the preprocessor of spec 19.1, with the defaults of this machine (dfcompiler gives it the variables of its options)
+      string host = OperatingSystem.IsWindows() ? "win-x64" : OperatingSystem.IsMacOS() ? "osx-x64" : "linux-x64";
+      var preprocessor = new Preprocessor(PpVariables.Build(host, "debug", 2, "speed", "0.0.12"));
+      src = preprocessor.Process(src);
       var lexer = new Lexer(src);
       var tokens = lexer.Tokenize();
       if (showTokens) {
@@ -39,7 +43,7 @@ public static class Program {
       }
       var parser = new Parser(tokens);
       var tree = parser.ParseProgram();
-      foreach (var warning in lexer.Warnings.Concat(parser.Warnings)) {
+      foreach (var warning in preprocessor.Warnings.Concat(lexer.Warnings).Concat(parser.Warnings)) {
         Console.Error.WriteLine(path + warning);
       }
       tree.Dump(Console.Out, 0);

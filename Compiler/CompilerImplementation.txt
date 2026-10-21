@@ -15,7 +15,7 @@ Where a decision came from the spec the section is named; where I (Claude) chose
 - Options (all with two dashes, no short forms; an unknown option is an error): --output <file> (the executable, wherever the user
   wants), --target <target>, --emit-c (only the C file), --run (run the program), --cc <path>, --version, and "--" then the
   arguments of the program. (-o and -version of the earlier versions are gone.)
-  Since 2026-10-18 the names are not case sensitive (--VERSION, --Emit-C work), as in "Compiler Options.md", which is the list of the options of the compiler
+  Since 2026-10-18 the names are not case sensitive (--VERSION, --Emit-C work), as in "Compiler_Options.md", which is the list of the options of the compiler
   (the ones not built yet are described there). --run must be the very last option; the program arguments come after "--" (--run -- first second), and a
   "--" without --run, or anything but "--" after --run, is an error. Program.cs holds the usage text; the options and the .dsprj file are built as we go.
 - Targets: win-x64, win-x32, linux-x64, linux-arm64, osx-x64, osx-arm64 (clang triples in Program.Targets), or CL:<text>: the text is
@@ -647,7 +647,7 @@ does not change.
 
 8. Library functions: black boxes with declared exceptions
 - The compiler does not look inside a library function (today they are C code of the runtime; later some will be written in Dflat). What it needs is the
-  list of exceptions each function may raise, silent and non-silent. That list is in the standard library specification (dflat-stdlib.md): every
+  list of exceptions each function may raise, silent and non-silent. That list is in the standard library specification (Libraries/StdandardLibrary/dflat-stdlib.md): every
   function is listed with the exceptions it may throw. The compiler keeps the same list in its library tables.
 - A function that lists nothing (for example Math.sqrt) is PURE. A function that lists non-silent exceptions makes its caller FAILING (unless the caller handles
   them all). A listed silent exception is observed through the mask of the call like any other (rule 5).
@@ -664,7 +664,7 @@ does not change.
 
 10. Open points
 - The exact definition of the SilentException trait.
-- Whether library functions without a declared list in dflat-stdlib.md (only the IO section lists "raised by" today) need to be completed before the model is built.
+- Whether library functions without a declared list in Libraries/StdandardLibrary/dflat-stdlib.md (only the IO section lists "raised by" today) need to be completed before the model is built.
 - (closed) Spec 15.4: a catch of Exception does NOT handle silent exceptions. The compiler follows it since 2026-10-17.
 
 11. Plan and tests (for when it is built)
@@ -801,6 +801,30 @@ EXCEPTIONS STEP 1: BUILT (2026-10-19), following the rewritten spec 15
   the language (overflow, saturating casts) as local-only exceptions (step 2), and the atEnd panic rule (step 3). 64 live silent kinds is still the limit
   of ObservedMask.
 - Tests changed because a silent throw now returns: silentmodel and bitfields (third()). New: silentreturn.
+
+THE PREPROCESSOR AND THE OPTIONS (built 2026-10-21, compiler 0.0.12alpha, spec 19.1)
+==================================================================================
+- Preprocessor.cs (dfparser, shared with dfcompiler through the csproj): runs before the lexer on the source text. Lines starting with ## at the first column are
+  directives (define if elseif else endif region endregion emiterror emitwarning); directives and the lines of a removed block become empty lines (a \r is kept),
+  so the line numbers do not change. A '#' in the text of a directive is an error. Conditions: operands are variables, numbers (with kb mb gb), true / false,
+  words or "texts"; ==, != on any value, < <= > >= only on numbers; && and || have the same precedence, from left to right; ! only on a bool variable; the right
+  side of a comparison is a word unless it names a variable (then its value); a word that is not in the list of values of the left variable (os == windoes) is an error.
+  ##define takes a value or a condition. Errors: unknown variable, an order comparison on a word, ##elseif / ##else after ##else, ##endif alone, ##if without
+  ##endif, a name that is predefined or equals a value of a predefined variable or true / false, a redefinition of a project variable.
+  A variable defined in the source can be defined again; the ones of the project file (CompilerVar) and the predefined ones cannot.
+  ##region / ##endregion only fold (unmatched: level 3 warning). The Lexer does not know #region any more.
+- PpVariables.cs: the predefined variables from the target (os, cpu, arch, bits from the name of the target; endian little for x86 x64 arm; int=32 uns=32 real=64
+  until --native-int / --native-real are built; ram 4gb; exceptions on; build debug by default; coptlev, coptmode; version = LanguageVersion of Program.cs and
+  version.major / minor / build). A custom CL: target uses the variables of this machine.
+- Program.cs: Version 0.0.12alpha and LanguageVersion 0.0.12 (the version of the spec it was built for; --version prints both). Options added: --coptlev 0-3
+  (-O<n>), --coptmode size|speed (size = -Os), --debug / --release (only the variable `build` for now). The input can be a .df file, a .dsprj file or a folder with one
+  .dsprj. Settings: command line over the project file over the defaults (DFLAT_CC for the compiler). ReadProject: `key = value`, ; comments, paths relative to the
+  project, keys not case sensitive: source / root, output (a file), target, cc, emit-c, coptlev, coptmode, build and CompilerVar=name=value (true, false, a number or a
+  word without spaces; one line per variable); run and version are not allowed; any other key is "not built yet".
+- Tests: preprocessor (host independent conditions), errors/pp_*. The project file was tested by hand (the runner has no way to pass a project): CompilerVar,
+  precedence of the command line, an unknown key, a predefined variable, a repeated variable and a ##define of a project variable.
+- Not done: --native-int / --native-real / --native-addr (int uns real are fixed), bits and ram for custom architectures, --no-exceptions (exceptions is always on),
+  --force-lib, --libc, --c-std, --cachealign, --suppresswarning, --lazy-statics, the output as a folder, `name` and `include` in the project file.
 
 THE TEST RUNNER (2026-10-17)
 =============================

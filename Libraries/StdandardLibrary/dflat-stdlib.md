@@ -129,7 +129,7 @@ A folder listing returns a list of single `File` objects; `isDirectory` tells wh
 | `parent` | `File` | Containing directory |
 | `isDirectory` | `bool` | True for a directory |
 | `isFile` | `bool` | True for a file |
-| `size` | `u64` | Size in bytes |
+| `size` | `uns` | Size in bytes |
 | `created` | `date` | Creation date |
 | `modified` | `date` | Last modification date |
 | `accessed` | `date` | Last access date |
@@ -142,7 +142,7 @@ A folder listing returns a list of single `File` objects; `isDirectory` tells wh
 
 | Definition | Description |
 |---|---|
-| `bool exists(string path)` | True if the path exists |
+| `Root.IO.ExistResult exists(string path)` | Returns if the file exists or not, and if you can check for it |
 | `bool delete(string path, fs.DeleteOptions options = fs.DeleteOptions.None)` | Deletes a file or a directory; true if it was deleted, false if it was not |
 | `File copy(string from, string to, fs.OverwriteOptions options = fs.OverwriteOptions.None)` | Copies a file or a directory to the new location and returns the `File` at the new location |
 | `File move(string from, string to, fs.OverwriteOptions options = fs.OverwriteOptions.None)` | Moves a file or a directory to the new location and returns the `File` at the new location |
@@ -185,6 +185,7 @@ All the enums are in `Root.IO`.
 | `fs.StreamReadWriteAccessMode` | `None`, `Exclusive`, `Shared` (used for both `readMode` and `writeMode` of a stream) |
 | `fs.StreamOpenMode` | `OpenExisting`, `CreateOrOpen`, `CreateIfMissing`, `CreateOrTruncate`, `TruncateExisting`, `CreateOrAppend`, `AppendExisting` |
 | `fs.StreamSeekOrigin` | `Begin`, `CurrentPosition`, `End` |
+| `fs.ExistResult` | `None`, `IsThere`, `YouCantAccesIt`, `CannottellYou` |
 
 `String.StringEncoding` is the existing enum: `UTF8`, `UTF16`, `UTF32`, `UTF16BE`, `UTF32BE`, `ASCII`, `ISO88591`.
 

@@ -1,0 +1,7 @@
+alias Root as r
+
+##if build == release
+r.Console.log("removed")
+r.Console.log("removed")
+##endif
+i32 broken = "text"

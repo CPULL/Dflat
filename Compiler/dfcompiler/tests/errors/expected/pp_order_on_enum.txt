@@ -1,0 +1,1 @@
+pp_order_on_enum.df(3,1): error: '<' works only on numbers: strings and enum values have no order

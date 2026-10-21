@@ -1,0 +1,5 @@
+alias Root as r
+
+##if os == windoes
+r.Console.log(1)
+##endif

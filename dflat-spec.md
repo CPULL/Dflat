@@ -1,7 +1,7 @@
 # Dflat Language
 A new language D♭ that is the same as C# but easier to write and faster to execute
 
-**Version** 0.0.11  2026/10/20 by CPU
+**Version** 0.0.12  2026/10/21 by CPU
 
 ## D♭ — Dflat Language Specification (draft)
 
@@ -1802,21 +1802,68 @@ Check the [DFlat Standard library](dflat-stdlib.md) document for the full specif
 
 # 19 Compiler
 
-- `program.df` > `main.df` > `lib.df`: the first one found is the root (executable, or library for `lib.df`); a skipped root file gives a level 1 warning. `dfcompile -forcelib folder/` forces a library.
+- `program.df` > `main.df` > `lib.df`: the first one found is the root (executable, or library for `lib.df`); a skipped root file gives a level 1 warning. `dfcompiler --force-lib folder/` forces a library.
 
 
-## 19.1 Compiler Directives
+## 19.1 Compiler Directives and the preprocessor
 
-- A directive starts with `#` in the first column, then the keyword, then optional text that cannot contain `#`. Indented lines are not directives.
-- `#region` / `#endregion`: fold the code between them, no other effect. Regions nest and pair like braces. Unmatched → level 3 warning.
-- `#region parts #2#` is a compile error (`#` in the text).
-- Conditional compilation (`#if` family): open.
+Before the compilation a preprocessor builds the code that is actually compiled: it removes every part that is not valid for the current variables and replaces it with empty lines, so the line numbers do not change and the messages keep pointing to the real lines. The preprocessor is not part of the language: its syntax is separate and the language never sees the directives.
+
+```
+##define good = (os == windows && cpu == x64) || (os == linux && (cpu == x64 || cpu == arm))
+##if good
+Print("supported")
+##elseif os == osx
+Print("macOS")
+##else
+##emiterror "this platform is not supported"
+##endif
+```
+
+- A directive starts with `##` in the first column, then the keyword, then optional text. It ends at the end of the line. The text cannot contain `#`. Indented lines are not directives.
+- Directives:
+
+| Directive | Description |
+|---|---|
+| `##define <variable> = <value>` | defines a variable; there is no `##undef` |
+| `##if <condition>` | the lines that follow are kept when the condition is true |
+| `##elseif <condition>` | tested only when the previous conditions of the block were false |
+| `##else` | kept when all the previous conditions of the block were false |
+| `##endif` | ends the block |
+| `##region <text>` / `##endregion` | fold the code between them, no other effect; regions nest and pair like braces; unmatched → level 3 warning; `##region parts #2#` is a compile error (`#` in the text) |
+| `##emiterror <string>` | the compiler prints the string and stops with an error |
+| `##emitwarning <string>` | the compiler prints the string as a warning and goes on |
+
+- The rules of the variables:
+  - The predefined variables (the table below) cannot be redefined or reassigned. A variable whose name is one of their values (`windows`, `x64`, `debug`, `on`, `true`...) is an error, for example `the variable windows cannot be used: it matches one value of os`.
+  - A variable defined in the source can be defined again by a later `##define`. A variable defined in the project file (`CompilerVar`, see the compiler options) cannot be redefined, in the source or in the project file.
+  - A variable can be compared with another variable (`##if a == b`). In a comparison a word on the right is the value of the variable when it names a variable, and the word itself otherwise. A word that is not a value of a predefined variable (`os == windoes`) is an error.
+- Variables are never bool unless they are defined as a bool. The value of a variable is a static string (the name of an enum value, such as `linux`), a number or a bool (`true` / `false`). `##define todo = true` defines a bool; the result of a condition can be defined too (`##define good = os == windows && cpu == x64`) and is a bool.
+- A condition is `<variable> <operator> <value>`, or just a bool variable. The operators are `==`, `!=`, `<`, `<=`, `>` and `>=`. Conditions are joined with `&&` and `||`, and parentheses group them. `&&` and `||` have the same precedence and are evaluated from left to right.
+- `==` and `!=` work on every value. `<`, `<=`, `>` and `>=` work only when the value is a number: strings and enums have no order.
+- The unary `!` exists only for a bool variable (`##if !todo`). There is no other negation: for a variable that is not a bool use `!=` (`exceptions != on`).
+- A preprocessor error is an error: a misuse (`!` on a variable that is not a bool, an order comparison on an enum, an unknown variable, an unmatched `##else` or `##endif`) stops the compilation with a message.
+- The variables set by the compiler:
+
+| Variable | Values |
+|---|---|
+| `os` | `windows`, `linux`, `osx` |
+| `cpu` | `x86`, `x64`, `arm` |
+| `arch` | `<os>_<cpu>`, for example `linux_x64`; test `arch` for the combination, `os` or `cpu` alone for one of them |
+| `bits` | 8, 16, 32 or 64: from the target (64 for `win-x64` and `linux-x64`) or from a custom architecture |
+| `int`, `uns`, `real` | the native size in bits of the type (`--native-int`, `--native-real`; `uns` has the size of `int`) |
+| `endian` | `little`, `big`: derived from the cpu (`x86`, `x64` and `arm` are little endian; a custom architecture can be big endian) |
+| `build` | `debug` (the default), `release` (`--release`) |
+| `exceptions` | `on`, `off` (`off` when the target has no exceptions, 15.6) |
+| `ram` | a number of bytes; written as `<number>[kb\|mb\|gb]` (`ram >= 64kb`). 4gb unless a custom architecture says otherwise |
+| `version` | the language version: the version of this specification that the compiler was built for (`0.0.12`); `version.major`, `version.minor` and `version.build` are numbers |
+| `coptlev`, `coptmode` | the values of the options `--COptLev` (a number) and `--COptMode` (`size` or `speed`) |
 
 
 ## 19.2 Toolchain
 
-- **dfparse** `[--tokens] file.df`: .NET 10, hand-written lexer and recursive-descent parser, prints the syntax tree.
-- **dfcompile** (planned): parse → type check → emit C → clang; minimal or zero libc, calling the OS directly.
+- **dfcompiler** (build 0.0.12alpha): the only compiler, written in .NET 10. It runs the preprocessor (19.1), parses, type checks, emits C and calls clang. Its options are listed in `Compiler/Compiler_Options.md`. A minimal or zero libc, calling the OS directly, is planned (`--libc none`).
+- **dfparser** `[--tokens] file.df`: the parser alone (hand-written lexer and recursive-descent parser, shared with dfcompiler); it prints the syntax tree. It has no preprocessor and no version of its own yet.
 - **Native-size option**: forces the native size of integers and reals [Ref: Number literals].
 
 ### 19.3 Compiler Warnings
@@ -1841,7 +1888,7 @@ Level 1 = most important, level 3 = least.
 | 2 | Char compared with an integer | 2.5 |
 | 2 | `equals` and operator `==` both defined | 11.1.3 |
 | 2 | Unreachable case in a type switch | 11.3.7 |
-| 3 | Unmatched `#region` / `#endregion` | 19.1 |
+| 3 | Unmatched `##region` / `##endregion` | 19.1 |
 | 3 | `const` name not UPPER_SNAKE_CASE | 1.1 |
 | 3 | Folder ignored (invalid name) | 16 |
 | 3 | Generic call chosen over comparisons | 11.3.5 |
@@ -1858,7 +1905,6 @@ Level 1 = most important, level 3 = least.
 - Variadic parameters: position in the parameter list, passing an existing collection
 - Locale details
 - Date formatting week rules
-- Conditional compilation (`#if` family)
 - Panic exit codes (all -1000 for now)
 - Whether standard messages keep the word "Exception"
 - Class destructor that throws (15.x)
@@ -2175,3 +2221,18 @@ Level 1 = most important, level 3 = least.
 - 15.4 Example list of silent operations no longer mentions the missing map key
 - 15.5 Panic cases: exception not caught in an accessor, index outside a collection in Release
 - 99 Open items: `tryGet` return value removed (settled); new collections, strings and properties items added
+
+
+## Changes in 0.0.12
+
+- Header: version 0.0.12, 2026/10/21
+- 6.12 `GetIterator()` written `getIterator()` (edited by the user in 0.0.11)
+- 19.1 Compiler Directives and the preprocessor (rewritten): a preprocessor step before the compilation removes the invalid parts and keeps the line numbers (empty lines); it is not part of the language
+- 19.1 All directives start with `##` in the first column and end at the end of the line; the text cannot contain `#`; `#region` / `#endregion` become `##region` / `##endregion`
+- 19.1 New directives: `##define <variable> = <value>` (no `##undef`), `##if`, `##elseif`, `##else`, `##endif`, `##emiterror <string>` (prints the string and stops with an error), `##emitwarning <string>` (prints the string as a warning)
+- 19.1 Variable values: static strings (enum values), numbers and bools; the result of a condition can be defined as a bool
+- 19.1 Conditions: `<variable> <operator> <value>` or a bool variable; operators `==`, `!=`, `<`, `<=`, `>`, `>=`; `&&` and `||` with the same precedence, left to right; parentheses; order operators only on numbers (strings and enums have no order); unary `!` only on bool variables
+- 19.1 Misuses are preprocessor errors that stop the compilation
+- 19.1 Variables set by the compiler: `os` (`windows`, `linux`, `osx`), `cpu` (`x86`, `x64`, `arm`), `arch` (`<os>_<cpu>`), `bits` (8, 16, 32, 64), `int`, `uns`, `real`, `endian`, `build`, `exceptions`, `ram` (`<number>[kb|mb|gb]`), `version` (`.major`, `.minor`, `.build`), `coptlev` and `coptmode` (`--COptLev`, `--COptMode`)
+- 19.3 Warnings table: `##region` / `##endregion`
+- 99 Open items: the conditional compilation item is removed

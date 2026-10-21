@@ -1,4 +1,4 @@
-Compiler version 0.0.11 alpha for version 0.0.11 of the specs 2026/10/20
+Compiler version 0.0.12 alpha for version 0.0.12 of the specs 2026/10/21
 
 Done -----------------------
 
@@ -30,7 +30,8 @@ Stream and FileStream (stdlib 6.8): read, write, readByte, writeByte, seek, flus
 String formats (8.3): w / wc width in characters / columns, f fill, a< a^ a>, t<'marker' / t>'marker' (needs a width), cU cL cS cT, q, s sl sr; a width never cuts; wc uses an approximate table of wide East Asian and emoji ranges
 Reference parameters (13.1): &T x (read-only, no marker in the call) and (&)T x (writable, the call writes (&)x) for variables, fields, tuple fields and array items; also through another reference parameter; with overloads, named arguments and defaults (read-only only). tryParse still has its own library form
 A catch always names an exception type (catch Exception { } is the sinkhole of the non silent exceptions); the old shorthand catch ex { } is an error
-Options of the compiler: the built ones (--output, --target, --emit-c, --run, --cc, --version) follow Compiler Options.md: names not case sensitive, --run last, program arguments after --. The rest of the options and the .dsprj project file are defined in Compiler Options.md and not built yet
+Preprocessor (spec 19.1, 2026/10/21): ##define ##if ##elseif ##else ##endif ##region ##endregion ##emiterror ##emitwarning, with the variables os cpu arch bits int uns real endian build exceptions ram version coptlev coptmode and the variables of the project file (CompilerVar). Project file .dsprj: source/root output target cc emit-c coptlev coptmode build CompilerVar (the other options give "not built yet")
+Options of the compiler: the built ones (--output, --target, --emit-c, --run, --cc, --version, --coptlev, --coptmode, --debug, --release) follow Compiler_Options.md: names not case sensitive, --run last, program arguments after --. The rest of the options and the .dsprj project file are defined in Compiler_Options.md and not built yet
 Test runner: tests\run-tests.ps1 compares the output of every test program with tests\expected\<name>.txt, and the compiler errors of the programs in tests\errors (60 cases that must not compile) with tests\errors\expected (see CompilerImplementation.txt, THE TEST RUNNER)
 Naming: the standard library functions are camelCase (Root.Console.log, Root.getArgs, Root.Time.now, Root.Random.int, Math.sqrt, string.trim, char.isDigit ...); namespaces and types stay PascalCase, constants UPPERCASE. aSin, aCos, aTan, aTan2 are accepted next to asin, acos, atan, atan2; Math.PI2 added
 Scope atEnd

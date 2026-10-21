@@ -8,7 +8,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>dfcompiler</AssemblyName>
     <RootNamespace>dfcompiler</RootNamespace>
-    <Version>0.0.9-alpha</Version>
+    <Version>0.0.12-alpha</Version>
   </PropertyGroup>
 
   <!-- shared with dfparser: the two project folders must be side by side -->
@@ -16,6 +16,8 @@
     <Compile Include="..\dfparser\Lexer.cs" Link="Shared\Lexer.cs" />
     <Compile Include="..\dfparser\Parser.cs" Link="Shared\Parser.cs" />
     <Compile Include="..\dfparser\Node.cs" Link="Shared\Node.cs" />
+    <Compile Include="..\dfparser\Preprocessor.cs" Link="Shared\Preprocessor.cs" />
+    <Compile Include="..\dfparser\PpVariables.cs" Link="Shared\PpVariables.cs" />
   </ItemGroup>
 
 </Project>

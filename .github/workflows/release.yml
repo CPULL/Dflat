@@ -1,0 +1,232 @@
+# Builds dfcompiler for win-x64, linux-x64 and linux-arm64 and publishes a GitHub Release.
+#
+# The version comes from Program.Version in Compiler/dfcompiler/Program.cs: 0.0.15alpha becomes the tag v0.0.15-alpha.
+# A push to main makes a release only when that tag does not exist yet, so a release happens when the version is raised.
+# A version with a suffix (alpha, beta ...) is published as a pre-release.
+#
+# Release notes come from Compiler/CompilerStatus.txt:
+#  * first release (no v* tag yet): every line of the "Done" section
+#  * later releases: the lines of the "Changes from the previous version" section (it must not be empty)
+# After the release the workflow empties that section and commits the file to main (pull before you edit it again).
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  STATUS_FILE: Compiler/CompilerStatus.txt
+  PROGRAM_FILE: Compiler/dfcompiler/Program.cs
+  PROJECT: Compiler/dfcompiler/dfcompiler.csproj
+  CHANGES_HEADING: Changes from the previous version
+  DONE_HEADING: Done
+
+jobs:
+  version:
+    name: Read the version
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.version.outputs.release }}
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version and tag
+        id: version
+        run: |
+          version=$(sed -n 's/.*const string Version = "\([^"]*\)".*/\1/p' "$PROGRAM_FILE" | head -n 1)
+          if [ -z "$version" ]; then echo "::error file=$PROGRAM_FILE::Program.Version not found"; exit 1; fi
+          number=$(echo "$version" | sed -n 's/^\([0-9]\+\.[0-9]\+\.[0-9]\+\).*/\1/p')
+          suffix=${version#"$number"}
+          suffix=${suffix#-}
+          if [ -z "$number" ]; then echo "::error file=$PROGRAM_FILE::Program.Version '$version' does not start with a number like 0.0.15"; exit 1; fi
+          if [ -n "$suffix" ]; then tag="v$number-$suffix"; prerelease=true; else tag="v$number"; prerelease=false; fi
+
+          project_version=$(sed -n 's/.*<Version>\([^<]*\)<\/Version>.*/\1/p' "$PROJECT" | head -n 1)
+          if [ "v$project_version" != "$tag" ]; then
+            echo "::warning file=$PROJECT::<Version>$project_version</Version> does not match Program.Version $version"
+          fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" > /dev/null; then
+            echo "Tag $tag already exists: nothing to release"
+            release=false
+          else
+            echo "Releasing $tag"
+            release=true
+          fi
+          {
+            echo "release=$release"
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Release notes
+        if: steps.version.outputs.release == 'true'
+        run: |
+          # the non-empty lines of a section of the status file, as a list; a section ends at the next "... -----" heading
+          section() {
+            tr -d '\r' < "$STATUS_FILE" | awk -v h="$1 -----" '
+              index($0, h) == 1 { on = 1; next }
+              on && / -----+$/ { exit }
+              on && NF { sub(/^[-*] +/, ""); print "- " $0 }'
+          }
+
+          {
+            tr -d '\r' < "$STATUS_FILE" | head -n 1
+            echo
+          } > notes.md
+
+          if [ -z "$(git ls-remote --tags origin 'refs/tags/v*')" ]; then
+            body=$(section "$DONE_HEADING")
+            title="Features"
+          else
+            body=$(section "$CHANGES_HEADING")
+            title="Changes from the previous version"
+            if [ -z "$body" ]; then
+              echo "::error file=$STATUS_FILE::the section '$CHANGES_HEADING' is empty: write the changes of this version before releasing"
+              exit 1
+            fi
+          fi
+          if [ -z "$body" ]; then echo "::error file=$STATUS_FILE::no release notes found"; exit 1; fi
+          {
+            echo "## $title"
+            echo
+            echo "$body"
+            echo
+            echo "The compiler needs clang (on PATH, in DFLAT_CC, or passed with --cc)."
+          } >> notes.md
+          cat notes.md
+
+      - uses: actions/upload-artifact@v4
+        if: steps.version.outputs.release == 'true'
+        with:
+          name: notes
+          path: notes.md
+
+  test:
+    name: Run the tests
+    needs: version
+    if: needs.version.outputs.release == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: clang
+        run: clang --version
+
+      - name: Tests
+        shell: pwsh
+        run: ./Compiler/dfcompiler/tests/run-tests.ps1 -Build
+
+  build:
+    name: Build ${{ matrix.rid }}
+    needs: version
+    if: needs.version.outputs.release == 'true'
+    strategy:
+      matrix:
+        include:
+          # win-x64 is built on Windows: only there the SDK can put the icon in the exe
+          - rid: win-x64
+            os: windows-latest
+          - rid: linux-x64
+            os: ubuntu-latest
+          - rid: linux-arm64
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    env:
+      PACKAGE: dfcompiler-${{ needs.version.outputs.version }}-${{ matrix.rid }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Publish
+        shell: bash
+        run: >
+          dotnet publish "$PROJECT" -c Release -r ${{ matrix.rid }} --self-contained true
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None
+          -o "out/$PACKAGE"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Copy-Item LICENSE, README.md "out/$env:PACKAGE"
+          Compress-Archive -Path "out/$env:PACKAGE" -DestinationPath "$env:PACKAGE.zip"
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cp LICENSE README.md "out/$PACKAGE"
+          chmod +x "out/$PACKAGE/dfcompiler"
+          tar -czf "$PACKAGE.tar.gz" -C out "$PACKAGE"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.rid }}
+          path: ${{ env.PACKAGE }}.*
+
+  release:
+    name: Publish the release
+    needs: [version, test, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.version.outputs.tag }}
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: GitHub Release
+        run: |
+          prerelease=""
+          if [ "${{ needs.version.outputs.prerelease }}" = "true" ]; then prerelease="--prerelease"; fi
+          gh release create "$TAG" dist/dfcompiler-* \
+            --target "$GITHUB_SHA" \
+            --title "dfcompiler $VERSION" \
+            --notes-file dist/notes.md \
+            $prerelease
+
+      - name: Empty the changes section
+        run: |
+          git fetch origin main
+          git checkout -B main origin/main
+          tr -d '\r' < "$STATUS_FILE" | awk -v h="$CHANGES_HEADING -----" '
+            index($0, h) == 1 { print; print ""; skip = 1; next }
+            skip && / -----+$/ { skip = 0 }
+            !skip { print }' > status.tmp
+          mv status.tmp "$STATUS_FILE"
+          if git diff --quiet -- "$STATUS_FILE"; then
+            echo "The section is already empty"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$STATUS_FILE"
+          git commit -m "Clear release changes after $TAG"
+          git push origin main

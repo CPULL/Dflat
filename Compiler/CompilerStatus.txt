@@ -1,5 +1,7 @@
 Compiler version 0.0.15 alpha for version 0.0.13 of the specs 2026/10/22
 
+Changes from the previous version -----------------------
+
 Done -----------------------
 
 Numeric, bool, char, string types

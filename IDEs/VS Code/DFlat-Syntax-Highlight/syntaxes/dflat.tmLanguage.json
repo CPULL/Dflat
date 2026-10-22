@@ -1,20 +1,46 @@
 {
-  "$schema": "https://githubusercontent.com",
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "Dflat",
   "scopeName": "source.df",
   "patterns": [
-    { "include": "#comments" },
-    { "include": "#strings" },
-    { "include": "#numbers" },
-    { "include": "#keywords_control" },
-    { "include": "#keywords_declaration" },
-    { "include": "#keywords_types" },
-    { "include": "#keywords_modifiers" },
-    { "include": "#keywords_constants" },
-    { "include": "#keywords_builtins" },
-    { "include": "#operators" }
+    { "include": "#directives" },
+    { "include": "#code" }
   ],
   "repository": {
+    "code": {
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#strings" },
+        { "include": "#labels" },
+        { "include": "#numbers" },
+        { "include": "#catch_all" },
+        { "include": "#keywords_control" },
+        { "include": "#keywords_declaration" },
+        { "include": "#keywords_types" },
+        { "include": "#keywords_modifiers" },
+        { "include": "#keywords_constants" },
+        { "include": "#keywords_language_variables" },
+        { "include": "#keywords_builtins" },
+        { "include": "#operators" }
+      ]
+    },
+    "directives": {
+      "name": "meta.preprocessor.df",
+      "match": "^(##)([A-Za-z]+)\\b(.*)$",
+      "captures": {
+        "1": { "name": "punctuation.definition.directive.df" },
+        "2": { "name": "keyword.control.directive.df" },
+        "3": {
+          "patterns": [
+            { "include": "#comments" },
+            { "include": "#strings" },
+            { "include": "#numbers" },
+            { "include": "#keywords_constants" },
+            { "include": "#operators" }
+          ]
+        }
+      }
+    },
     "comments": {
       "patterns": [
         {
@@ -28,30 +54,46 @@
         }
       ]
     },
+    "escapes": {
+      "name": "constant.character.escape.df",
+      "match": "\\\\(u\\{[0-9a-fA-F]+\\}|#\\{[0-9]+\\}|.)"
+    },
     "strings": {
       "patterns": [
+        {
+          "name": "string.interpolated.df",
+          "begin": "\\$\"",
+          "end": "\"",
+          "patterns": [
+            { "include": "#escapes" },
+            {
+              "name": "meta.interpolation.df",
+              "begin": "\\{",
+              "end": "\\}",
+              "beginCaptures": { "0": { "name": "punctuation.section.interpolation.begin.df" } },
+              "endCaptures": { "0": { "name": "punctuation.section.interpolation.end.df" } },
+              "contentName": "source.df",
+              "patterns": [ { "include": "#code" } ]
+            }
+          ]
+        },
         {
           "name": "string.quoted.double.df",
           "begin": "\"",
           "end": "\"",
-          "patterns": [
-            { "name": "constant.character.escape.df", "match": "\\\\." }
-          ]
+          "patterns": [ { "include": "#escapes" } ]
         },
         {
           "name": "string.quoted.single.df",
           "begin": "'",
           "end": "'",
-          "patterns": [
-            { "name": "constant.character.escape.df", "match": "\\\\." }
-          ]
-        },
-        {
-          "name": "string.interpolated.raw.df",
-          "begin": "#",
-          "end": "#"
+          "patterns": [ { "include": "#escapes" } ]
         }
       ]
+    },
+    "labels": {
+      "name": "entity.name.label.df",
+      "match": "#[\\p{L}\\p{N}_\\-+!?$%]+#"
     },
     "numbers": {
       "patterns": [
@@ -69,33 +111,44 @@
         }
       ]
     },
+    "catch_all": {
+      "match": "\\b(catch)\\s+(all)\\b",
+      "captures": {
+        "1": { "name": "keyword.control.df" },
+        "2": { "name": "keyword.control.df" }
+      }
+    },
     "keywords_control": {
       "name": "keyword.control.df",
-      "match": "\\b(if|then|else|while|for|in|step|switch|default|jump|break|continue|return|throw|catch|atEnd|enforce|is)\\b"
+      "match": "\\b(if|then|else|while|for|in|step|switch|default|jump|break|continue|return|throw|catch|atEnd|of|enforce|is|where|with)\\b"
     },
     "keywords_declaration": {
       "name": "keyword.declaration.df",
-      "match": "\\b(fun|class|trait|enum|alias|namespace|import|local)\\b"
+      "match": "\\b(fun|class|trait|enum|bitfield8|bitfield16|bitfield32|bitfield64|Generic|placeholder|alias|as|namespace|import|local|var)\\b"
     },
     "keywords_types": {
       "name": "storage.type.df",
-      "match": "\\b(i8|i16|i32|i64|i128|i256|u8|u16|u32|u64|u128|u256|r16|r32|r64|r128|int|uns|real|dec|bool|char|byte|date|clock|lapse|string|vec|list|map|hmap|dfoot)\\b"
+      "match": "\\b(i8|i16|i32|i64|i128|i256|u8|u16|u32|u64|u128|u256|r16|r32|r64|r128|int|uns|real|dec|bool|char|byte|date|time|clock|lapse|addr|string|arr|vec|list|map|bmap|hmap|set|bset|hset|dfoot)\\b"
     },
     "keywords_modifiers": {
       "name": "storage.modifier.df",
-      "match": "\\b(public|internal|private|const|override|dyn|impl)\\b"
+      "match": "\\b(public|internal|private|const|static|override|specific|any|volatile|readonly|readwrite|writeonly)\\b"
     },
     "keywords_constants": {
       "name": "constant.language.df",
       "match": "\\b(true|false|null)\\b"
     },
+    "keywords_language_variables": {
+      "name": "variable.language.df",
+      "match": "\\b(this|parent)\\b"
+    },
     "keywords_builtins": {
       "name": "support.type.builtin.df",
-      "match": "\\b(root|Root|Panic|asRefCount|asSharedRefCount|isRC)\\b"
+      "match": "\\b(Root|Panic|asRefCount|asSharedRefCount|isRC)\\b"
     },
     "operators": {
       "name": "keyword.operator.df",
-      "match": "(\\+|\\-|\\*|\\/|%|&|\\||\\^|!|=|<|>|\\?|:|;|\\.|,)"
+      "match": "->|\\.\\.\\.|\\.\\.=|\\.\\.|\\?\\?=|\\?\\?|\\?\\.|_=|\\^\\^|&&|\\|\\||<<=|<<|\\+\\+|--|[-+*/%&|^=!<>]=|(?<![\\p{L}\\p{N}_])_(?=[\\p{L}\\p{N}(\\[])|[-+*/%&|^!=<>?:;.,]"
     }
   }
 }

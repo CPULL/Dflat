@@ -100,6 +100,7 @@ static const df_descriptor df_desc_InvalidBufferRangeException = { 42, "InvalidB
 static const df_descriptor df_desc_GenericIOErrorException = { 43, "GenericIOErrorException", &df_desc_Exception, false };
 static const df_descriptor df_desc_FileRemovedWhileOpenException = { 44, "FileRemovedWhileOpenException", &df_desc_Exception, false };
 static const df_descriptor df_desc_StreamCloseFailureException = { 45, "StreamCloseFailureException", &df_desc_Exception, false };
+static const df_descriptor df_desc_ModifyingIteratedCollectionException = { 46, "ModifyingIteratedCollectionException", &df_desc_Exception, false };
 
 /* The exception of a function is a local of that function (df_err in the generated code) and travels back to the caller as the second
    value it returns. The runtime functions written in C cannot return it that way: they leave it here, and the code generated around
@@ -153,6 +154,14 @@ static void df_raise(const df_descriptor* descriptor, const char* function) {
     spaced[length++] = *letter;
   }
   spaced[length] = 0;
+#ifdef DF_RELEASE
+  /* in a release build an index outside a collection, or a collection changed while it is iterated, is a panic, not an exception (spec 6.1, 6.4) */
+  if (descriptor->id == 19 || descriptor->id == 46) {
+    fflush(stdout);
+    printf("%s\n", spaced);
+    df_panic(DF_PANIC_UNHANDLED);
+  }
+#endif
   df_pending = df_new_exception(descriptor, spaced, length, function);
 }
 
@@ -2060,23 +2069,23 @@ static const char df_fn100[] = "File File.move(string, string, OverwriteOptions)
 static const char df_fn109[] = "File File.createDirectory(string)";
 static const char df_fn116[] = "File File.createDirectory()";
 static const char df_fn122[] = "arr<File> File.getAllFiles(string, bool, FileSystemObjectsType, string)";
-static const char df_fn134[] = "arr<File> File.getAllFiles(bool, FileSystemObjectsType, string)";
-static const char df_fn137[] = "File File.getTempFile()";
-static const char df_fn140[] = "string File.getTempFileName()";
-static const char df_fn142[] = "string File.getTempDir()";
-static const char df_fn144[] = "string File.combinePaths(string, string)";
-static const char df_fn148[] = "File File.copyTo(string, OverwriteOptions)";
-static const char df_fn154[] = "File File.moveTo(string, OverwriteOptions)";
-static const char df_fn160[] = "arr<u8> File.readAll()";
-static const char df_fn163[] = "string File.readAllText(StringEncoding)";
-static const char df_fn166[] = "File.writeAll(arr<u8>, FileWriteMode)";
-static const char df_fn169[] = "File.writeAllText(string, StringEncoding, FileWriteMode)";
-static const char df_fn172[] = "File.__init(string)";
-static const char df_fn175[] = "string readMissing()";
-static const char df_fn196[] = "string badPath()";
-static const char df_fn214[] = "string createOnly(File)";
-static const char df_fn221[] = "string noParent(string)";
-static const char df_fn228[] = "main()";
+static const char df_fn136[] = "arr<File> File.getAllFiles(bool, FileSystemObjectsType, string)";
+static const char df_fn139[] = "File File.getTempFile()";
+static const char df_fn142[] = "string File.getTempFileName()";
+static const char df_fn144[] = "string File.getTempDir()";
+static const char df_fn146[] = "string File.combinePaths(string, string)";
+static const char df_fn150[] = "File File.copyTo(string, OverwriteOptions)";
+static const char df_fn156[] = "File File.moveTo(string, OverwriteOptions)";
+static const char df_fn162[] = "arr<u8> File.readAll()";
+static const char df_fn165[] = "string File.readAllText(StringEncoding)";
+static const char df_fn168[] = "File.writeAll(arr<u8>, FileWriteMode)";
+static const char df_fn171[] = "File.writeAllText(string, StringEncoding, FileWriteMode)";
+static const char df_fn174[] = "File.__init(string)";
+static const char df_fn177[] = "string readMissing()";
+static const char df_fn198[] = "string badPath()";
+static const char df_fn216[] = "string createOnly(File)";
+static const char df_fn223[] = "string noParent(string)";
+static const char df_fn230[] = "main()";
 
 static df_string df_enum_str_StringEncoding(int32_t value) {
   switch (value) {
@@ -2596,7 +2605,7 @@ static df_res5 f_File_getAllFiles(df_string v_path, bool v_recursive, int32_t v_
   (void)(({ df_res1 t_125 = f_File_check(v_p); if (t_125.err) { if ((t_125.err->descriptor->silent && !(0 & df_obs_bit(t_125.err)))) { df_exc_release(t_125.err); t_125.err = NULL; } else { df_err = t_125.err; df_err_thrown = false; goto fn122_fail; } } t_125.value; }));
   df_arr_File v_files = ({ uint64_t t_126 = ((uint64_t)(((v_names).len))); (df_arr_File){ (c_File**)df_calloc(t_126, sizeof(c_File*)), t_126 }; });
   for (uint64_t v_index = ((uint64_t)0ULL), df_end128 = ((v_names).len), df_down128 = (v_index > df_end128), df_go128 = (v_index != df_end128); df_go128; df_down128 ? v_index-- : v_index++, df_go128 = (v_index != df_end128)) {
-    ({ df_arr_File t_129 = v_files; uint64_t t_130 = ((uint64_t)(v_index)); if (!df_idx_ok(t_129.len, t_130, df_fn122)) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn122_fail; } t_129.p[t_130] = ({ df_res2 t_133 = f_File(({ uint64_t t_131 = ((uint64_t)(v_index)); ({ df_string t_132 = (df_idx_ok(v_names.len, t_131, df_fn122) ? v_names.p[t_131] : df_str_lit("", 0)); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn122_fail; } t_132; }); })); if (t_133.err) { if ((t_133.err->descriptor->silent && !(0 & df_obs_bit(t_133.err)))) { df_exc_release(t_133.err); t_133.err = NULL; } else { df_err = t_133.err; df_err_thrown = false; goto fn122_fail; } } t_133.value; }); });
+    ({ df_arr_File t_129 = v_files; uint64_t t_130 = ((uint64_t)(v_index)); c_File* t_135 = ({ df_res2 t_133 = f_File(({ uint64_t t_131 = ((uint64_t)(v_index)); ({ df_string t_132 = (df_idx_ok(v_names.len, t_131, df_fn122) ? v_names.p[t_131] : df_str_lit("", 0)); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn122_fail; } t_132; }); })); if (t_133.err) { if ((t_133.err->descriptor->silent && !(0 & df_obs_bit(t_133.err)))) { df_exc_release(t_133.err); t_133.err = NULL; } else { df_err = t_133.err; df_err_thrown = false; goto fn122_fail; } } t_133.value; }); if (!df_idx_ok(t_129.len, t_130, df_fn122)) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn122_fail; } c_File* t_134 = t_129.p[t_130]; t_129.p[t_130] = t_135; if (t_134 != t_135) { df_drop((void*)t_134); } });
   }
   return (df_res5){ v_files, NULL };
   fn122_fail: return (df_res5){ ((df_arr_File){0}), df_err };
@@ -2609,9 +2618,9 @@ static df_res5 f_File_getAllFiles_1(c_File* self, bool v_recursive, int32_t v_it
   bool df_err_thrown = false;
   (void)df_err;
   (void)df_err_thrown;
-  return (df_res5){ ({ df_res5 t_136 = f_File_getAllFiles(self->m_full, v_recursive, v_itemType, v_match); if (t_136.err) { if ((t_136.err->descriptor->silent && !(0 & df_obs_bit(t_136.err)))) { df_exc_release(t_136.err); t_136.err = NULL; } else { df_err = t_136.err; df_err_thrown = false; goto fn134_fail; } } t_136.value; }), NULL };
-  fn134_fail: return (df_res5){ ((df_arr_File){0}), df_err };
-  fn134_panic: df_panic_unhandled(df_err);
+  return (df_res5){ ({ df_res5 t_138 = f_File_getAllFiles(self->m_full, v_recursive, v_itemType, v_match); if (t_138.err) { if ((t_138.err->descriptor->silent && !(0 & df_obs_bit(t_138.err)))) { df_exc_release(t_138.err); t_138.err = NULL; } else { df_err = t_138.err; df_err_thrown = false; goto fn136_fail; } } t_138.value; }), NULL };
+  fn136_fail: return (df_res5){ ((df_arr_File){0}), df_err };
+  fn136_panic: df_panic_unhandled(df_err);
   return (df_res5){ ((df_arr_File){0}), df_err };
 }
 
@@ -2620,9 +2629,9 @@ static df_res2 f_File_getTempFile(void) {
   bool df_err_thrown = false;
   (void)df_err;
   (void)df_err_thrown;
-  return (df_res2){ ({ df_res2 t_139 = f_File(df_io_temp_name()); if (t_139.err) { if ((t_139.err->descriptor->silent && !(0 & df_obs_bit(t_139.err)))) { df_exc_release(t_139.err); t_139.err = NULL; } else { df_err = t_139.err; df_err_thrown = false; goto fn137_fail; } } t_139.value; }), NULL };
-  fn137_fail: return (df_res2){ NULL, df_err };
-  fn137_panic: df_panic_unhandled(df_err);
+  return (df_res2){ ({ df_res2 t_141 = f_File(df_io_temp_name()); if (t_141.err) { if ((t_141.err->descriptor->silent && !(0 & df_obs_bit(t_141.err)))) { df_exc_release(t_141.err); t_141.err = NULL; } else { df_err = t_141.err; df_err_thrown = false; goto fn139_fail; } } t_141.value; }), NULL };
+  fn139_fail: return (df_res2){ NULL, df_err };
+  fn139_panic: df_panic_unhandled(df_err);
   return (df_res2){ NULL, df_err };
 }
 
@@ -2633,8 +2642,8 @@ static df_string f_File_getTempFileName(void) {
   (void)df_err_thrown;
   return df_io_temp_name();
   return df_str_lit("", 0);
-  fn140_fail: df_panic_unhandled(df_err);
-  fn140_panic: df_panic_unhandled(df_err);
+  fn142_fail: df_panic_unhandled(df_err);
+  fn142_panic: df_panic_unhandled(df_err);
   return df_str_lit("", 0);
 }
 
@@ -2645,8 +2654,8 @@ static df_string f_File_getTempDir(void) {
   (void)df_err_thrown;
   return df_io_temp_dir();
   return df_str_lit("", 0);
-  fn142_fail: df_panic_unhandled(df_err);
-  fn142_panic: df_panic_unhandled(df_err);
+  fn144_fail: df_panic_unhandled(df_err);
+  fn144_panic: df_panic_unhandled(df_err);
   return df_str_lit("", 0);
 }
 
@@ -2655,9 +2664,9 @@ static df_res0 f_File_combinePaths(df_string v_path1, df_string v_path2) {
   bool df_err_thrown = false;
   (void)df_err;
   (void)df_err_thrown;
-  return (df_res0){ df_io_combine(({ df_res0 t_146 = f_File_fixPath(v_path1); if (t_146.err) { if ((t_146.err->descriptor->silent && !(0 & df_obs_bit(t_146.err)))) { df_exc_release(t_146.err); t_146.err = NULL; } else { df_err = t_146.err; df_err_thrown = false; goto fn144_fail; } } t_146.value; }), ({ df_res0 t_147 = f_File_fixPath(v_path2); if (t_147.err) { if ((t_147.err->descriptor->silent && !(0 & df_obs_bit(t_147.err)))) { df_exc_release(t_147.err); t_147.err = NULL; } else { df_err = t_147.err; df_err_thrown = false; goto fn144_fail; } } t_147.value; })), NULL };
-  fn144_fail: return (df_res0){ df_str_lit("", 0), df_err };
-  fn144_panic: df_panic_unhandled(df_err);
+  return (df_res0){ df_io_combine(({ df_res0 t_148 = f_File_fixPath(v_path1); if (t_148.err) { if ((t_148.err->descriptor->silent && !(0 & df_obs_bit(t_148.err)))) { df_exc_release(t_148.err); t_148.err = NULL; } else { df_err = t_148.err; df_err_thrown = false; goto fn146_fail; } } t_148.value; }), ({ df_res0 t_149 = f_File_fixPath(v_path2); if (t_149.err) { if ((t_149.err->descriptor->silent && !(0 & df_obs_bit(t_149.err)))) { df_exc_release(t_149.err); t_149.err = NULL; } else { df_err = t_149.err; df_err_thrown = false; goto fn146_fail; } } t_149.value; })), NULL };
+  fn146_fail: return (df_res0){ df_str_lit("", 0), df_err };
+  fn146_panic: df_panic_unhandled(df_err);
   return (df_res0){ df_str_lit("", 0), df_err };
 }
 
@@ -2666,27 +2675,27 @@ static df_res2 f_File_copyTo(c_File* self, df_string v_to, int32_t v_options) {
   bool df_err_thrown = false;
   (void)df_err;
   (void)df_err_thrown;
-  return (df_res2){ ({ df_res2 t_150 = f_File_copy(self->m_full, v_to, v_options); if (t_150.err) { if ((t_150.err->descriptor->silent && !(UINT64_C(255) & df_obs_bit(t_150.err)))) { df_exc_release(t_150.err); t_150.err = NULL; } else { df_err = t_150.err; df_err_thrown = false; goto f149_dispatch0; } } t_150.value; }), NULL };
-  goto f149_skip0;
-  f149_catch0: {
-    df_exception* df_caught151 = df_err;
-    df_exception* v_e_152 = (df_exception*)df_caught151;
+  return (df_res2){ ({ df_res2 t_152 = f_File_copy(self->m_full, v_to, v_options); if (t_152.err) { if ((t_152.err->descriptor->silent && !(UINT64_C(255) & df_obs_bit(t_152.err)))) { df_exc_release(t_152.err); t_152.err = NULL; } else { df_err = t_152.err; df_err_thrown = false; goto f151_dispatch0; } } t_152.value; }), NULL };
+  goto f151_skip0;
+  f151_catch0: {
+    df_exception* df_caught153 = df_err;
+    df_exception* v_e_154 = (df_exception*)df_caught153;
     df_err = NULL;
-    { df_err = (df_exception*)v_e_152; df_err_thrown = true; goto f149_cbexit0; }
-    df_exc_release(df_caught151);
-    goto f149_cbdone0;
-    f149_cbexit0: if (df_err_thrown) { if (df_err != df_caught151) { df_exc_release(df_caught151); } goto fn148_fail; }
-    goto fn148_panic;
-    f149_cbdone0: ;
+    { df_err = (df_exception*)v_e_154; df_err_thrown = true; goto f151_cbexit0; }
+    df_exc_release(df_caught153);
+    goto f151_cbdone0;
+    f151_cbexit0: if (df_err_thrown) { if (df_err != df_caught153) { df_exc_release(df_caught153); } goto fn150_fail; }
+    goto fn150_panic;
+    f151_cbdone0: ;
   }
-  f149_skip0: ;
-  goto f149_done;
-  f149_dispatch0:
-    if (df_err->descriptor->silent) goto f149_catch0;
-    goto fn148_fail;
-  f149_done: ;
-  fn148_fail: return (df_res2){ NULL, df_err };
-  fn148_panic: df_panic_unhandled(df_err);
+  f151_skip0: ;
+  goto f151_done;
+  f151_dispatch0:
+    if (df_err->descriptor->silent) goto f151_catch0;
+    goto fn150_fail;
+  f151_done: ;
+  fn150_fail: return (df_res2){ NULL, df_err };
+  fn150_panic: df_panic_unhandled(df_err);
   return (df_res2){ NULL, df_err };
 }
 
@@ -2695,27 +2704,27 @@ static df_res2 f_File_moveTo(c_File* self, df_string v_to, int32_t v_options) {
   bool df_err_thrown = false;
   (void)df_err;
   (void)df_err_thrown;
-  return (df_res2){ ({ df_res2 t_156 = f_File_move(self->m_full, v_to, v_options); if (t_156.err) { if ((t_156.err->descriptor->silent && !(UINT64_C(255) & df_obs_bit(t_156.err)))) { df_exc_release(t_156.err); t_156.err = NULL; } else { df_err = t_156.err; df_err_thrown = false; goto f155_dispatch0; } } t_156.value; }), NULL };
-  goto f155_skip0;
-  f155_catch0: {
-    df_exception* df_caught157 = df_err;
-    df_exception* v_e_158 = (df_exception*)df_caught157;
+  return (df_res2){ ({ df_res2 t_158 = f_File_move(self->m_full, v_to, v_options); if (t_158.err) { if ((t_158.err->descriptor->silent && !(UINT64_C(255) & df_obs_bit(t_158.err)))) { df_exc_release(t_158.err); t_158.err = NULL; } else { df_err = t_158.err; df_err_thrown = false; goto f157_dispatch0; } } t_158.value; }), NULL };
+  goto f157_skip0;
+  f157_catch0: {
+    df_exception* df_caught159 = df_err;
+    df_exception* v_e_160 = (df_exception*)df_caught159;
     df_err = NULL;
-    { df_err = (df_exception*)v_e_158; df_err_thrown = true; goto f155_cbexit0; }
-    df_exc_release(df_caught157);
-    goto f155_cbdone0;
-    f155_cbexit0: if (df_err_thrown) { if (df_err != df_caught157) { df_exc_release(df_caught157); } goto fn154_fail; }
-    goto fn154_panic;
-    f155_cbdone0: ;
+    { df_err = (df_exception*)v_e_160; df_err_thrown = true; goto f157_cbexit0; }
+    df_exc_release(df_caught159);
+    goto f157_cbdone0;
+    f157_cbexit0: if (df_err_thrown) { if (df_err != df_caught159) { df_exc_release(df_caught159); } goto fn156_fail; }
+    goto fn156_panic;
+    f157_cbdone0: ;
   }
-  f155_skip0: ;
-  goto f155_done;
-  f155_dispatch0:
-    if (df_err->descriptor->silent) goto f155_catch0;
-    goto fn154_fail;
-  f155_done: ;
-  fn154_fail: return (df_res2){ NULL, df_err };
-  fn154_panic: df_panic_unhandled(df_err);
+  f157_skip0: ;
+  goto f157_done;
+  f157_dispatch0:
+    if (df_err->descriptor->silent) goto f157_catch0;
+    goto fn156_fail;
+  f157_done: ;
+  fn156_fail: return (df_res2){ NULL, df_err };
+  fn156_panic: df_panic_unhandled(df_err);
   return (df_res2){ NULL, df_err };
 }
 
@@ -2725,10 +2734,10 @@ static df_res6 f_File_readAll(c_File* self) {
   (void)df_err;
   (void)df_err_thrown;
   df_arr_u8 v_bytes = df_io_read_all(self->m_full);
-  (void)(({ df_res1 t_162 = f_File_check(self->m_full); if (t_162.err) { if ((t_162.err->descriptor->silent && !(0 & df_obs_bit(t_162.err)))) { df_exc_release(t_162.err); t_162.err = NULL; } else { df_err = t_162.err; df_err_thrown = false; goto fn160_fail; } } t_162.value; }));
+  (void)(({ df_res1 t_164 = f_File_check(self->m_full); if (t_164.err) { if ((t_164.err->descriptor->silent && !(0 & df_obs_bit(t_164.err)))) { df_exc_release(t_164.err); t_164.err = NULL; } else { df_err = t_164.err; df_err_thrown = false; goto fn162_fail; } } t_164.value; }));
   return (df_res6){ v_bytes, NULL };
-  fn160_fail: return (df_res6){ ((df_arr_u8){0}), df_err };
-  fn160_panic: df_panic_unhandled(df_err);
+  fn162_fail: return (df_res6){ ((df_arr_u8){0}), df_err };
+  fn162_panic: df_panic_unhandled(df_err);
   return (df_res6){ ((df_arr_u8){0}), df_err };
 }
 
@@ -2738,10 +2747,10 @@ static df_res0 f_File_readAllText(c_File* self, int32_t v_encoding) {
   (void)df_err;
   (void)df_err_thrown;
   df_string v_text = df_io_read_all_text(self->m_full, v_encoding);
-  (void)(({ df_res1 t_165 = f_File_check(self->m_full); if (t_165.err) { if ((t_165.err->descriptor->silent && !(0 & df_obs_bit(t_165.err)))) { df_exc_release(t_165.err); t_165.err = NULL; } else { df_err = t_165.err; df_err_thrown = false; goto fn163_fail; } } t_165.value; }));
+  (void)(({ df_res1 t_167 = f_File_check(self->m_full); if (t_167.err) { if ((t_167.err->descriptor->silent && !(0 & df_obs_bit(t_167.err)))) { df_exc_release(t_167.err); t_167.err = NULL; } else { df_err = t_167.err; df_err_thrown = false; goto fn165_fail; } } t_167.value; }));
   return (df_res0){ v_text, NULL };
-  fn163_fail: return (df_res0){ df_str_lit("", 0), df_err };
-  fn163_panic: df_panic_unhandled(df_err);
+  fn165_fail: return (df_res0){ df_str_lit("", 0), df_err };
+  fn165_panic: df_panic_unhandled(df_err);
   return (df_res0){ df_str_lit("", 0), df_err };
 }
 
@@ -2751,9 +2760,9 @@ static df_exception* f_File_writeAll(c_File* self, df_arr_u8 v_buffer, int32_t v
   (void)df_err;
   (void)df_err_thrown;
   (void)(df_io_write_all(self->m_full, v_buffer, v_mode));
-  (void)(({ df_res1 t_168 = f_File_check(self->m_full); if (t_168.err) { if ((t_168.err->descriptor->silent && !(0 & df_obs_bit(t_168.err)))) { df_exc_release(t_168.err); t_168.err = NULL; } else { df_err = t_168.err; df_err_thrown = false; goto fn166_fail; } } t_168.value; }));
-  fn166_fail: return df_err;
-  fn166_panic: df_panic_unhandled(df_err);
+  (void)(({ df_res1 t_170 = f_File_check(self->m_full); if (t_170.err) { if ((t_170.err->descriptor->silent && !(0 & df_obs_bit(t_170.err)))) { df_exc_release(t_170.err); t_170.err = NULL; } else { df_err = t_170.err; df_err_thrown = false; goto fn168_fail; } } t_170.value; }));
+  fn168_fail: return df_err;
+  fn168_panic: df_panic_unhandled(df_err);
   return df_err;
 }
 
@@ -2763,9 +2772,9 @@ static df_exception* f_File_writeAllText(c_File* self, df_string v_text, int32_t
   (void)df_err;
   (void)df_err_thrown;
   (void)(df_io_write_all_text(self->m_full, v_text, v_encoding, v_mode));
-  (void)(({ df_res1 t_171 = f_File_check(self->m_full); if (t_171.err) { if ((t_171.err->descriptor->silent && !(0 & df_obs_bit(t_171.err)))) { df_exc_release(t_171.err); t_171.err = NULL; } else { df_err = t_171.err; df_err_thrown = false; goto fn169_fail; } } t_171.value; }));
-  fn169_fail: return df_err;
-  fn169_panic: df_panic_unhandled(df_err);
+  (void)(({ df_res1 t_173 = f_File_check(self->m_full); if (t_173.err) { if ((t_173.err->descriptor->silent && !(0 & df_obs_bit(t_173.err)))) { df_exc_release(t_173.err); t_173.err = NULL; } else { df_err = t_173.err; df_err_thrown = false; goto fn171_fail; } } t_173.value; }));
+  fn171_fail: return df_err;
+  fn171_panic: df_panic_unhandled(df_err);
   return df_err;
 }
 
@@ -2775,9 +2784,9 @@ static df_exception* f_File___init(c_File* self, df_string v_path) {
   (void)df_err;
   (void)df_err_thrown;
   (self)->m_path = v_path;
-  (self)->m_full = ({ df_res0 t_174 = f_File_fixPath(v_path); if (t_174.err) { if ((t_174.err->descriptor->silent && !(0 & df_obs_bit(t_174.err)))) { df_exc_release(t_174.err); t_174.err = NULL; } else { df_err = t_174.err; df_err_thrown = false; goto fn172_fail; } } t_174.value; });
-  fn172_fail: return df_err;
-  fn172_panic: df_panic_unhandled(df_err);
+  (self)->m_full = ({ df_res0 t_176 = f_File_fixPath(v_path); if (t_176.err) { if ((t_176.err->descriptor->silent && !(0 & df_obs_bit(t_176.err)))) { df_exc_release(t_176.err); t_176.err = NULL; } else { df_err = t_176.err; df_err_thrown = false; goto fn174_fail; } } t_176.value; });
+  fn174_fail: return df_err;
+  fn174_panic: df_panic_unhandled(df_err);
   return df_err;
 }
 
@@ -2797,50 +2806,50 @@ static df_res0 f_readMissing(void) {
   bool df_err_thrown = false;
   (void)df_err;
   (void)df_err_thrown;
-  df_exception* df_pend176 = NULL;
-  df_string df_ret175 = df_str_lit("", 0);
-  c_File* v_missing_176 = NULL;
-  v_missing_176 = ({ df_res2 t_178 = f_File(({ df_res0 t_177 = f_File_combinePaths(f_File_getTempDir(), df_str_lit("dflat-no-such-file.txt", 22)); if (t_177.err) { if ((t_177.err->descriptor->silent && !(0 & df_obs_bit(t_177.err)))) { df_exc_release(t_177.err); t_177.err = NULL; } else { df_err = t_177.err; df_err_thrown = false; goto f176_dispatch0; } } t_177.value; })); if (t_178.err) { if ((t_178.err->descriptor->silent && !(0 & df_obs_bit(t_178.err)))) { df_exc_release(t_178.err); t_178.err = NULL; } else { df_err = t_178.err; df_err_thrown = false; goto f176_dispatch0; } } t_178.value; });
-  df_string v_text = ({ df_res0 t_180 = f_File_readAllText(((c_File*)({ c_File* t_179 = v_missing_176; if (t_179 == NULL || DF_IS_DEAD(t_179)) { df_raise(&df_desc_NullPointerException, df_fn175); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f176_dispatch0; } } t_179; })), ((int32_t)0LL)); if (t_180.err) { if ((t_180.err->descriptor->silent && !(0 & df_obs_bit(t_180.err)))) { df_exc_release(t_180.err); t_180.err = NULL; } else { df_err = t_180.err; df_err_thrown = false; goto f176_dispatch0; } } t_180.value; });
-  df_ret175 = df_str_lit("no error", 8);
+  df_exception* df_pend178 = NULL;
+  df_string df_ret177 = df_str_lit("", 0);
+  c_File* v_missing_178 = NULL;
+  v_missing_178 = ({ df_res2 t_180 = f_File(({ df_res0 t_179 = f_File_combinePaths(f_File_getTempDir(), df_str_lit("dflat-no-such-file.txt", 22)); if (t_179.err) { if ((t_179.err->descriptor->silent && !(0 & df_obs_bit(t_179.err)))) { df_exc_release(t_179.err); t_179.err = NULL; } else { df_err = t_179.err; df_err_thrown = false; goto f178_dispatch0; } } t_179.value; })); if (t_180.err) { if ((t_180.err->descriptor->silent && !(0 & df_obs_bit(t_180.err)))) { df_exc_release(t_180.err); t_180.err = NULL; } else { df_err = t_180.err; df_err_thrown = false; goto f178_dispatch0; } } t_180.value; });
+  df_string v_text = ({ df_res0 t_182 = f_File_readAllText(((c_File*)({ c_File* t_181 = v_missing_178; if (t_181 == NULL || DF_IS_DEAD(t_181)) { df_raise(&df_desc_NullPointerException, df_fn177); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f178_dispatch0; } } t_181; })), ((int32_t)0LL)); if (t_182.err) { if ((t_182.err->descriptor->silent && !(0 & df_obs_bit(t_182.err)))) { df_exc_release(t_182.err); t_182.err = NULL; } else { df_err = t_182.err; df_err_thrown = false; goto f178_dispatch0; } } t_182.value; });
+  df_ret177 = df_str_lit("no error", 8);
   {
-    ({ ({ c_File** t_182 = &(v_missing_176); void* t_183 = (void*)*t_182; *t_182 = NULL; df_drop(t_183); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn175_panic; } });
+    ({ ({ c_File** t_184 = &(v_missing_178); void* t_185 = (void*)*t_184; *t_184 = NULL; df_drop(t_185); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn177_panic; } });
   }
-  return (df_res0){ df_ret175, NULL };
-  goto f176_skip0;
-  f176_catch0: {
-    df_exception* df_caught184 = df_err;
-    df_exception* v_ex_185 = (df_exception*)df_caught184;
+  return (df_res0){ df_ret177, NULL };
+  goto f178_skip0;
+  f178_catch0: {
+    df_exception* df_caught186 = df_err;
+    df_exception* v_ex_187 = (df_exception*)df_caught186;
     df_err = NULL;
-    df_ret175 = df_str_concat(df_str_lit("FileNotFoundException id ", 25), df_str_from_u64((uint64_t)(((v_ex_185)->id))));
-    df_exc_release(df_caught184);
+    df_ret177 = df_str_concat(df_str_lit("FileNotFoundException id ", 25), df_str_from_u64((uint64_t)(((v_ex_187)->id))));
+    df_exc_release(df_caught186);
     {
-      ({ ({ c_File** t_188 = &(v_missing_176); void* t_189 = (void*)*t_188; *t_188 = NULL; df_drop(t_189); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn175_panic; } });
+      ({ ({ c_File** t_190 = &(v_missing_178); void* t_191 = (void*)*t_190; *t_190 = NULL; df_drop(t_191); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn177_panic; } });
     }
-    return (df_res0){ df_ret175, NULL };
-    df_exc_release(df_caught184);
-    goto f176_cbdone0;
-    f176_cbexit0: if (df_err_thrown) { if (df_err != df_caught184) { df_exc_release(df_caught184); } goto f176_exc1; }
-    goto fn175_panic;
-    f176_cbdone0: ;
+    return (df_res0){ df_ret177, NULL };
+    df_exc_release(df_caught186);
+    goto f178_cbdone0;
+    f178_cbexit0: if (df_err_thrown) { if (df_err != df_caught186) { df_exc_release(df_caught186); } goto f178_exc1; }
+    goto fn177_panic;
+    f178_cbdone0: ;
   }
-  f176_skip0: ;
+  f178_skip0: ;
   {
-    ({ ({ c_File** t_191 = &(v_missing_176); void* t_192 = (void*)*t_191; *t_191 = NULL; df_drop(t_192); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn175_panic; } });
+    ({ ({ c_File** t_193 = &(v_missing_178); void* t_194 = (void*)*t_193; *t_193 = NULL; df_drop(t_194); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn177_panic; } });
   }
-  goto f176_done;
-  f176_dispatch0:
-    if (df_exc_is(df_err, 25)) goto f176_catch0;
-    goto f176_exc1;
-  f176_exc1: if (df_err) { df_pend176 = df_err; df_err = NULL; }
+  goto f178_done;
+  f178_dispatch0:
+    if (df_exc_is(df_err, 25)) goto f178_catch0;
+    goto f178_exc1;
+  f178_exc1: if (df_err) { df_pend178 = df_err; df_err = NULL; }
   {
-    ({ ({ c_File** t_194 = &(v_missing_176); void* t_195 = (void*)*t_194; *t_194 = NULL; df_drop(t_195); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn175_panic; } });
+    ({ ({ c_File** t_196 = &(v_missing_178); void* t_197 = (void*)*t_196; *t_196 = NULL; df_drop(t_197); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn177_panic; } });
   }
-  f176_exc0: if (df_err == NULL) { df_err = df_pend176; } df_pend176 = NULL;
-  goto fn175_fail;
-  f176_done: ;
-  fn175_fail: return (df_res0){ df_str_lit("", 0), df_err };
-  fn175_panic: df_panic_unhandled(df_err);
+  f178_exc0: if (df_err == NULL) { df_err = df_pend178; } df_pend178 = NULL;
+  goto fn177_fail;
+  f178_done: ;
+  fn177_fail: return (df_res0){ df_str_lit("", 0), df_err };
+  fn177_panic: df_panic_unhandled(df_err);
   return (df_res0){ df_str_lit("", 0), df_err };
 }
 
@@ -2849,49 +2858,49 @@ static df_res0 f_badPath(void) {
   bool df_err_thrown = false;
   (void)df_err;
   (void)df_err_thrown;
-  df_exception* df_pend197 = NULL;
-  df_string df_ret196 = df_str_lit("", 0);
-  c_File* v_bad_197 = NULL;
-  v_bad_197 = ({ df_res2 t_198 = f_File(df_str_lit("/d:/bad|name", 12)); if (t_198.err) { if ((t_198.err->descriptor->silent && !(0 & df_obs_bit(t_198.err)))) { df_exc_release(t_198.err); t_198.err = NULL; } else { df_err = t_198.err; df_err_thrown = false; goto f197_dispatch0; } } t_198.value; });
-  df_ret196 = df_str_lit("no error", 8);
+  df_exception* df_pend199 = NULL;
+  df_string df_ret198 = df_str_lit("", 0);
+  c_File* v_bad_199 = NULL;
+  v_bad_199 = ({ df_res2 t_200 = f_File(df_str_lit("/d:/bad|name", 12)); if (t_200.err) { if ((t_200.err->descriptor->silent && !(0 & df_obs_bit(t_200.err)))) { df_exc_release(t_200.err); t_200.err = NULL; } else { df_err = t_200.err; df_err_thrown = false; goto f199_dispatch0; } } t_200.value; });
+  df_ret198 = df_str_lit("no error", 8);
   {
-    ({ ({ c_File** t_200 = &(v_bad_197); void* t_201 = (void*)*t_200; *t_200 = NULL; df_drop(t_201); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn196_panic; } });
+    ({ ({ c_File** t_202 = &(v_bad_199); void* t_203 = (void*)*t_202; *t_202 = NULL; df_drop(t_203); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn198_panic; } });
   }
-  return (df_res0){ df_ret196, NULL };
-  goto f197_skip0;
-  f197_catch0: {
-    df_exception* df_caught202 = df_err;
-    df_exception* v_ex_203 = (df_exception*)df_caught202;
+  return (df_res0){ df_ret198, NULL };
+  goto f199_skip0;
+  f199_catch0: {
+    df_exception* df_caught204 = df_err;
+    df_exception* v_ex_205 = (df_exception*)df_caught204;
     df_err = NULL;
-    df_ret196 = df_str_concat(df_str_lit("InvalidPathException id ", 24), df_str_from_u64((uint64_t)(((v_ex_203)->id))));
-    df_exc_release(df_caught202);
+    df_ret198 = df_str_concat(df_str_lit("InvalidPathException id ", 24), df_str_from_u64((uint64_t)(((v_ex_205)->id))));
+    df_exc_release(df_caught204);
     {
-      ({ ({ c_File** t_206 = &(v_bad_197); void* t_207 = (void*)*t_206; *t_206 = NULL; df_drop(t_207); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn196_panic; } });
+      ({ ({ c_File** t_208 = &(v_bad_199); void* t_209 = (void*)*t_208; *t_208 = NULL; df_drop(t_209); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn198_panic; } });
     }
-    return (df_res0){ df_ret196, NULL };
-    df_exc_release(df_caught202);
-    goto f197_cbdone0;
-    f197_cbexit0: if (df_err_thrown) { if (df_err != df_caught202) { df_exc_release(df_caught202); } goto f197_exc1; }
-    goto fn196_panic;
-    f197_cbdone0: ;
+    return (df_res0){ df_ret198, NULL };
+    df_exc_release(df_caught204);
+    goto f199_cbdone0;
+    f199_cbexit0: if (df_err_thrown) { if (df_err != df_caught204) { df_exc_release(df_caught204); } goto f199_exc1; }
+    goto fn198_panic;
+    f199_cbdone0: ;
   }
-  f197_skip0: ;
+  f199_skip0: ;
   {
-    ({ ({ c_File** t_209 = &(v_bad_197); void* t_210 = (void*)*t_209; *t_209 = NULL; df_drop(t_210); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn196_panic; } });
+    ({ ({ c_File** t_211 = &(v_bad_199); void* t_212 = (void*)*t_211; *t_211 = NULL; df_drop(t_212); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn198_panic; } });
   }
-  goto f197_done;
-  f197_dispatch0:
-    if (df_exc_is(df_err, 30)) goto f197_catch0;
-    goto f197_exc1;
-  f197_exc1: if (df_err) { df_pend197 = df_err; df_err = NULL; }
+  goto f199_done;
+  f199_dispatch0:
+    if (df_exc_is(df_err, 30)) goto f199_catch0;
+    goto f199_exc1;
+  f199_exc1: if (df_err) { df_pend199 = df_err; df_err = NULL; }
   {
-    ({ ({ c_File** t_212 = &(v_bad_197); void* t_213 = (void*)*t_212; *t_212 = NULL; df_drop(t_213); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn196_panic; } });
+    ({ ({ c_File** t_214 = &(v_bad_199); void* t_215 = (void*)*t_214; *t_214 = NULL; df_drop(t_215); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn198_panic; } });
   }
-  f197_exc0: if (df_err == NULL) { df_err = df_pend197; } df_pend197 = NULL;
-  goto fn196_fail;
-  f197_done: ;
-  fn196_fail: return (df_res0){ df_str_lit("", 0), df_err };
-  fn196_panic: df_panic_unhandled(df_err);
+  f199_exc0: if (df_err == NULL) { df_err = df_pend199; } df_pend199 = NULL;
+  goto fn198_fail;
+  f199_done: ;
+  fn198_fail: return (df_res0){ df_str_lit("", 0), df_err };
+  fn198_panic: df_panic_unhandled(df_err);
   return (df_res0){ df_str_lit("", 0), df_err };
 }
 
@@ -2900,31 +2909,31 @@ static df_res0 f_createOnly(c_File* v_target) {
   bool df_err_thrown = false;
   (void)df_err;
   (void)df_err_thrown;
-  df_string df_ret214 = df_str_lit("", 0);
-  ({ df_exception* t_217 = f_File_writeAllText(((c_File*)({ c_File* t_216 = v_target; if (t_216 == NULL || DF_IS_DEAD(t_216)) { df_raise(&df_desc_NullPointerException, df_fn214); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f215_dispatch0; } } t_216; })), df_str_lit("again", 5), ((int32_t)0LL), ((int32_t)0LL)); if (t_217) { if ((t_217->descriptor->silent && !(0 & df_obs_bit(t_217)))) { df_exc_release(t_217); t_217 = NULL; } else { df_err = t_217; df_err_thrown = false; goto f215_dispatch0; } } });
+  df_string df_ret216 = df_str_lit("", 0);
+  ({ df_exception* t_219 = f_File_writeAllText(((c_File*)({ c_File* t_218 = v_target; if (t_218 == NULL || DF_IS_DEAD(t_218)) { df_raise(&df_desc_NullPointerException, df_fn216); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f217_dispatch0; } } t_218; })), df_str_lit("again", 5), ((int32_t)0LL), ((int32_t)0LL)); if (t_219) { if ((t_219->descriptor->silent && !(0 & df_obs_bit(t_219)))) { df_exc_release(t_219); t_219 = NULL; } else { df_err = t_219; df_err_thrown = false; goto f217_dispatch0; } } });
   return (df_res0){ df_str_lit("no error", 8), NULL };
-  goto f215_skip0;
-  f215_catch0: {
-    df_exception* df_caught218 = df_err;
-    df_exception* v_ex_219 = (df_exception*)df_caught218;
+  goto f217_skip0;
+  f217_catch0: {
+    df_exception* df_caught220 = df_err;
+    df_exception* v_ex_221 = (df_exception*)df_caught220;
     df_err = NULL;
-    df_ret214 = df_str_concat(df_str_lit("FileAlreadyExistsException id ", 30), df_str_from_u64((uint64_t)(((v_ex_219)->id))));
-    df_exc_release(df_caught218);
-    return (df_res0){ df_ret214, NULL };
-    df_exc_release(df_caught218);
-    goto f215_cbdone0;
-    f215_cbexit0: if (df_err_thrown) { if (df_err != df_caught218) { df_exc_release(df_caught218); } goto fn214_fail; }
-    goto fn214_panic;
-    f215_cbdone0: ;
+    df_ret216 = df_str_concat(df_str_lit("FileAlreadyExistsException id ", 30), df_str_from_u64((uint64_t)(((v_ex_221)->id))));
+    df_exc_release(df_caught220);
+    return (df_res0){ df_ret216, NULL };
+    df_exc_release(df_caught220);
+    goto f217_cbdone0;
+    f217_cbexit0: if (df_err_thrown) { if (df_err != df_caught220) { df_exc_release(df_caught220); } goto fn216_fail; }
+    goto fn216_panic;
+    f217_cbdone0: ;
   }
-  f215_skip0: ;
-  goto f215_done;
-  f215_dispatch0:
-    if (df_exc_is(df_err, 33)) goto f215_catch0;
-    goto fn214_fail;
-  f215_done: ;
-  fn214_fail: return (df_res0){ df_str_lit("", 0), df_err };
-  fn214_panic: df_panic_unhandled(df_err);
+  f217_skip0: ;
+  goto f217_done;
+  f217_dispatch0:
+    if (df_exc_is(df_err, 33)) goto f217_catch0;
+    goto fn216_fail;
+  f217_done: ;
+  fn216_fail: return (df_res0){ df_str_lit("", 0), df_err };
+  fn216_panic: df_panic_unhandled(df_err);
   return (df_res0){ df_str_lit("", 0), df_err };
 }
 
@@ -2933,31 +2942,31 @@ static df_res0 f_noParent(df_string v_where) {
   bool df_err_thrown = false;
   (void)df_err;
   (void)df_err_thrown;
-  df_string df_ret221 = df_str_lit("", 0);
-  ({ df_drop((void*)(({ df_res2 t_224 = f_File_createDirectory(({ df_res0 t_223 = f_File_combinePaths(v_where, df_str_lit("a/b/c", 5)); if (t_223.err) { if ((t_223.err->descriptor->silent && !(0 & df_obs_bit(t_223.err)))) { df_exc_release(t_223.err); t_223.err = NULL; } else { df_err = t_223.err; df_err_thrown = false; goto f222_dispatch0; } } t_223.value; })); if (t_224.err) { if ((t_224.err->descriptor->silent && !(0 & df_obs_bit(t_224.err)))) { df_exc_release(t_224.err); t_224.err = NULL; } else { df_err = t_224.err; df_err_thrown = false; goto f222_dispatch0; } } t_224.value; }))); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f222_dispatch0; } });
+  df_string df_ret223 = df_str_lit("", 0);
+  ({ df_drop((void*)(({ df_res2 t_226 = f_File_createDirectory(({ df_res0 t_225 = f_File_combinePaths(v_where, df_str_lit("a/b/c", 5)); if (t_225.err) { if ((t_225.err->descriptor->silent && !(0 & df_obs_bit(t_225.err)))) { df_exc_release(t_225.err); t_225.err = NULL; } else { df_err = t_225.err; df_err_thrown = false; goto f224_dispatch0; } } t_225.value; })); if (t_226.err) { if ((t_226.err->descriptor->silent && !(0 & df_obs_bit(t_226.err)))) { df_exc_release(t_226.err); t_226.err = NULL; } else { df_err = t_226.err; df_err_thrown = false; goto f224_dispatch0; } } t_226.value; }))); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f224_dispatch0; } });
   return (df_res0){ df_str_lit("no error", 8), NULL };
-  goto f222_skip0;
-  f222_catch0: {
-    df_exception* df_caught225 = df_err;
-    df_exception* v_ex_226 = (df_exception*)df_caught225;
+  goto f224_skip0;
+  f224_catch0: {
+    df_exception* df_caught227 = df_err;
+    df_exception* v_ex_228 = (df_exception*)df_caught227;
     df_err = NULL;
-    df_ret221 = df_str_concat(df_str_lit("InvalidPathException id ", 24), df_str_from_u64((uint64_t)(((v_ex_226)->id))));
-    df_exc_release(df_caught225);
-    return (df_res0){ df_ret221, NULL };
-    df_exc_release(df_caught225);
-    goto f222_cbdone0;
-    f222_cbexit0: if (df_err_thrown) { if (df_err != df_caught225) { df_exc_release(df_caught225); } goto fn221_fail; }
-    goto fn221_panic;
-    f222_cbdone0: ;
+    df_ret223 = df_str_concat(df_str_lit("InvalidPathException id ", 24), df_str_from_u64((uint64_t)(((v_ex_228)->id))));
+    df_exc_release(df_caught227);
+    return (df_res0){ df_ret223, NULL };
+    df_exc_release(df_caught227);
+    goto f224_cbdone0;
+    f224_cbexit0: if (df_err_thrown) { if (df_err != df_caught227) { df_exc_release(df_caught227); } goto fn223_fail; }
+    goto fn223_panic;
+    f224_cbdone0: ;
   }
-  f222_skip0: ;
-  goto f222_done;
-  f222_dispatch0:
-    if (df_exc_is(df_err, 30)) goto f222_catch0;
-    goto fn221_fail;
-  f222_done: ;
-  fn221_fail: return (df_res0){ df_str_lit("", 0), df_err };
-  fn221_panic: df_panic_unhandled(df_err);
+  f224_skip0: ;
+  goto f224_done;
+  f224_dispatch0:
+    if (df_exc_is(df_err, 30)) goto f224_catch0;
+    goto fn223_fail;
+  f224_done: ;
+  fn223_fail: return (df_res0){ df_str_lit("", 0), df_err };
+  fn223_panic: df_panic_unhandled(df_err);
   return (df_res0){ df_str_lit("", 0), df_err };
 }
 
@@ -2968,91 +2977,91 @@ int main(int argc, char** argv) {
   bool df_err_thrown = false;
   (void)df_err;
   (void)df_err_thrown;
-  df_exception* df_pend229 = NULL;
-  c_File* v_root_229 = NULL;
-  c_File* v_report_229 = NULL;
-  c_File* v_sub_229 = NULL;
-  c_File* v_copied_229 = NULL;
-  c_File* v_moved_229 = NULL;
+  df_exception* df_pend231 = NULL;
+  c_File* v_root_231 = NULL;
+  c_File* v_report_231 = NULL;
+  c_File* v_sub_231 = NULL;
+  c_File* v_copied_231 = NULL;
+  c_File* v_moved_231 = NULL;
   /* Namespace files */
-  df_string v_base = ({ df_res0 t_230 = f_File_combinePaths(f_File_getTempDir(), df_str_lit("dflat-files-test", 16)); if (t_230.err) { if ((t_230.err->descriptor->silent && !(0 & df_obs_bit(t_230.err)))) { df_exc_release(t_230.err); t_230.err = NULL; } else { df_err = t_230.err; df_err_thrown = false; goto f229_exc5; } } t_230.value; });
-  (void)(({ df_res4 t_231 = f_File_delete(v_base, ((uint8_t)1ULL)); if (t_231.err) { if ((t_231.err->descriptor->silent && !(0 & df_obs_bit(t_231.err)))) { df_exc_release(t_231.err); t_231.err = NULL; } else { df_err = t_231.err; df_err_thrown = false; goto f229_exc5; } } t_231.value; }));
-  v_root_229 = ({ df_res2 t_232 = f_File_createDirectory(v_base); if (t_232.err) { if ((t_232.err->descriptor->silent && !(0 & df_obs_bit(t_232.err)))) { df_exc_release(t_232.err); t_232.err = NULL; } else { df_err = t_232.err; df_err_thrown = false; goto f229_exc5; } } t_232.value; });
-  df_console_log(({ df_string t_234 = f_File_get_name(((c_File*)({ c_File* t_233 = v_root_229; if (t_233 == NULL || DF_IS_DEAD(t_233)) { df_raise(&df_desc_NullPointerException, df_fn228); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } } t_233; }))); df_string t_236 = df_str_from_bool(f_File_get_isDirectory(((c_File*)({ c_File* t_235 = v_root_229; if (t_235 == NULL || DF_IS_DEAD(t_235)) { df_raise(&df_desc_NullPointerException, df_fn228); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } } t_235; })))); df_string t_239 = df_str_from_bool(({ df_res4 t_238 = f_File_exists_1(((c_File*)({ c_File* t_237 = v_root_229; if (t_237 == NULL || DF_IS_DEAD(t_237)) { df_raise(&df_desc_NullPointerException, df_fn228); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } } t_237; }))); if (t_238.err) { if ((t_238.err->descriptor->silent && !(0 & df_obs_bit(t_238.err)))) { df_exc_release(t_238.err); t_238.err = NULL; } else { df_err = t_238.err; df_err_thrown = false; goto f229_exc5; } } t_238.value; })); df_str_concat(df_str_concat(df_str_concat(df_str_concat(df_str_concat(df_str_lit("created ", 8), t_234), df_str_lit(", isDirectory ", 14)), t_236), df_str_lit(", exists ", 9)), t_239); }));
-  v_report_229 = ({ df_res2 t_241 = f_File(({ df_res0 t_240 = f_File_combinePaths(v_base, df_str_lit("report.txt", 10)); if (t_240.err) { if ((t_240.err->descriptor->silent && !(0 & df_obs_bit(t_240.err)))) { df_exc_release(t_240.err); t_240.err = NULL; } else { df_err = t_240.err; df_err_thrown = false; goto f229_exc5; } } t_240.value; })); if (t_241.err) { if ((t_241.err->descriptor->silent && !(0 & df_obs_bit(t_241.err)))) { df_exc_release(t_241.err); t_241.err = NULL; } else { df_err = t_241.err; df_err_thrown = false; goto f229_exc5; } } t_241.value; });
-  df_console_log(({ df_string t_243 = f_File_get_name(((c_File*)({ c_File* t_242 = v_report_229; if (t_242 == NULL || DF_IS_DEAD(t_242)) { df_raise(&df_desc_NullPointerException, df_fn228); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } } t_242; }))); df_string t_245 = f_File_get_extension(((c_File*)({ c_File* t_244 = v_report_229; if (t_244 == NULL || DF_IS_DEAD(t_244)) { df_raise(&df_desc_NullPointerException, df_fn228); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } } t_244; }))); df_string t_248 = df_str_from_bool(({ df_res4 t_247 = f_File_exists_1(((c_File*)({ c_File* t_246 = v_report_229; if (t_246 == NULL || DF_IS_DEAD(t_246)) { df_raise(&df_desc_NullPointerException, df_fn228); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } } t_246; }))); if (t_247.err) { if ((t_247.err->descriptor->silent && !(0 & df_obs_bit(t_247.err)))) { df_exc_release(t_247.err); t_247.err = NULL; } else { df_err = t_247.err; df_err_thrown = false; goto f229_exc5; } } t_247.value; })); df_string t_252 = f_File_get_name(((c_File*)({ c_File* t_251 = ({ df_res2 t_250 = f_File_get_parent(((c_File*)({ c_File* t_249 = v_report_229; if (t_249 == NULL || DF_IS_DEAD(t_249)) { df_raise(&df_desc_NullPointerException, df_fn228); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } } t_249; }))); if (t_250.err) { if ((t_250.err->descriptor->silent && !(0 & df_obs_bit(t_250.err)))) { df_exc_release(t_250.err); t_250.err = NULL; } else { df_err = t_250.err; df_err_thrown = false; goto f229_exc5; } } t_250.value; }); if (t_251 == NULL || DF_IS_DEAD(t_251)) { df_raise(&df_desc_NullPointerException, df_fn228); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } } t_251; }))); df_str_concat(df_str_concat(df_str_concat(df_str_concat(df_str_concat(df_str_concat(df_str_concat(df_str_lit("report: name ", 13), t_243), df_str_lit(", extension ", 12)), t_245), df_str_lit(", exists ", 9)), t_248), df_str_lit(", parent ", 9)), t_252); }));
-  ({ df_exception* t_254 = f_File_writeAllText(((c_File*)({ c_File* t_253 = v_report_229; if (t_253 == NULL || DF_IS_DEAD(t_253)) { df_raise(&df_desc_NullPointerException, df_fn228); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } } t_253; })), df_str_lit("Done", 4), ((int32_t)0LL), ((int32_t)2LL)); if (t_254) { if ((t_254->descriptor->silent && !(0 & df_obs_bit(t_254)))) { df_exc_release(t_254); t_254 = NULL; } else { df_err = t_254; df_err_thrown = false; goto f229_exc5; } } });
-  ({ df_exception* t_256 = f_File_writeAllText(((c_File*)({ c_File* t_255 = v_report_229; if (t_255 == NULL || DF_IS_DEAD(t_255)) { df_raise(&df_desc_NullPointerException, df_fn228); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } } t_255; })), df_str_lit(" more", 5), ((int32_t)0LL), ((int32_t)3LL)); if (t_256) { if ((t_256->descriptor->silent && !(0 & df_obs_bit(t_256)))) { df_exc_release(t_256); t_256 = NULL; } else { df_err = t_256; df_err_thrown = false; goto f229_exc5; } } });
-  df_console_log(({ df_string t_259 = ({ df_res0 t_258 = f_File_readAllText(((c_File*)({ c_File* t_257 = v_report_229; if (t_257 == NULL || DF_IS_DEAD(t_257)) { df_raise(&df_desc_NullPointerException, df_fn228); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } } t_257; })), ((int32_t)0LL)); if (t_258.err) { if ((t_258.err->descriptor->silent && !(0 & df_obs_bit(t_258.err)))) { df_exc_release(t_258.err); t_258.err = NULL; } else { df_err = t_258.err; df_err_thrown = false; goto f229_exc5; } } t_258.value; }); df_string t_262 = df_str_from_u64((uint64_t)(({ df_res1 t_261 = f_File_get_size(((c_File*)({ c_File* t_260 = v_report_229; if (t_260 == NULL || DF_IS_DEAD(t_260)) { df_raise(&df_desc_NullPointerException, df_fn228); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } } t_260; }))); if (t_261.err) { if ((t_261.err->descriptor->silent && !(0 & df_obs_bit(t_261.err)))) { df_exc_release(t_261.err); t_261.err = NULL; } else { df_err = t_261.err; df_err_thrown = false; goto f229_exc5; } } t_261.value; }))); df_string t_264 = df_str_from_bool(f_File_get_isFile(((c_File*)({ c_File* t_263 = v_report_229; if (t_263 == NULL || DF_IS_DEAD(t_263)) { df_raise(&df_desc_NullPointerException, df_fn228); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } } t_263; })))); df_string t_267 = df_str_from_bool(({ df_res4 t_266 = f_File_get_isReadOnly(((c_File*)({ c_File* t_265 = v_report_229; if (t_265 == NULL || DF_IS_DEAD(t_265)) { df_raise(&df_desc_NullPointerException, df_fn228); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } } t_265; }))); if (t_266.err) { if ((t_266.err->descriptor->silent && !(0 & df_obs_bit(t_266.err)))) { df_exc_release(t_266.err); t_266.err = NULL; } else { df_err = t_266.err; df_err_thrown = false; goto f229_exc5; } } t_266.value; })); df_str_concat(df_str_concat(df_str_concat(df_str_concat(df_str_concat(df_str_concat(df_str_concat(df_str_lit("text = ", 7), t_259), df_str_lit(", size ", 7)), t_262), df_str_lit(", isFile ", 9)), t_264), df_str_lit(", readonly ", 11)), t_267); }));
-  df_console_log(({ df_string t_270 = df_str_from_bool((!(({ df_res3 t_269 = f_File_get_modified(((c_File*)({ c_File* t_268 = v_report_229; if (t_268 == NULL || DF_IS_DEAD(t_268)) { df_raise(&df_desc_NullPointerException, df_fn228); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } } t_268; }))); if (t_269.err) { if ((t_269.err->descriptor->silent && !(0 & df_obs_bit(t_269.err)))) { df_exc_release(t_269.err); t_269.err = NULL; } else { df_err = t_269.err; df_err_thrown = false; goto f229_exc5; } } t_269.value; }) == INT64_MIN))); df_string t_273 = df_str_from_bool((!(({ df_res3 t_272 = f_File_get_created(((c_File*)({ c_File* t_271 = v_report_229; if (t_271 == NULL || DF_IS_DEAD(t_271)) { df_raise(&df_desc_NullPointerException, df_fn228); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } } t_271; }))); if (t_272.err) { if ((t_272.err->descriptor->silent && !(0 & df_obs_bit(t_272.err)))) { df_exc_release(t_272.err); t_272.err = NULL; } else { df_err = t_272.err; df_err_thrown = false; goto f229_exc5; } } t_272.value; }) == INT64_MIN))); df_str_concat(df_str_concat(df_str_concat(df_str_lit("modified is not null: ", 22), t_270), df_str_lit(", created ", 10)), t_273); }));
-  ({ df_exception* t_275 = f_File_writeAllText(((c_File*)({ c_File* t_274 = v_report_229; if (t_274 == NULL || DF_IS_DEAD(t_274)) { df_raise(&df_desc_NullPointerException, df_fn228); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } } t_274; })), df_str_lit("h\303\251llo", 6), ((int32_t)1LL), ((int32_t)2LL)); if (t_275) { if ((t_275->descriptor->silent && !(0 & df_obs_bit(t_275)))) { df_exc_release(t_275); t_275 = NULL; } else { df_err = t_275; df_err_thrown = false; goto f229_exc5; } } });
-  df_console_log(({ df_string t_278 = df_str_from_u64((uint64_t)(({ df_res1 t_277 = f_File_get_size(((c_File*)({ c_File* t_276 = v_report_229; if (t_276 == NULL || DF_IS_DEAD(t_276)) { df_raise(&df_desc_NullPointerException, df_fn228); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } } t_276; }))); if (t_277.err) { if ((t_277.err->descriptor->silent && !(0 & df_obs_bit(t_277.err)))) { df_exc_release(t_277.err); t_277.err = NULL; } else { df_err = t_277.err; df_err_thrown = false; goto f229_exc5; } } t_277.value; }))); df_string t_281 = ({ df_res0 t_280 = f_File_readAllText(((c_File*)({ c_File* t_279 = v_report_229; if (t_279 == NULL || DF_IS_DEAD(t_279)) { df_raise(&df_desc_NullPointerException, df_fn228); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } } t_279; })), ((int32_t)1LL)); if (t_280.err) { if ((t_280.err->descriptor->silent && !(0 & df_obs_bit(t_280.err)))) { df_exc_release(t_280.err); t_280.err = NULL; } else { df_err = t_280.err; df_err_thrown = false; goto f229_exc5; } } t_280.value; }); df_str_concat(df_str_concat(df_str_concat(df_str_lit("utf16 size ", 11), t_278), df_str_lit(", read back ", 12)), t_281); }));
-  df_arr_u8 v_bytes = ({ df_res6 t_283 = f_File_readAll(((c_File*)({ c_File* t_282 = v_report_229; if (t_282 == NULL || DF_IS_DEAD(t_282)) { df_raise(&df_desc_NullPointerException, df_fn228); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } } t_282; }))); if (t_283.err) { if ((t_283.err->descriptor->silent && !(0 & df_obs_bit(t_283.err)))) { df_exc_release(t_283.err); t_283.err = NULL; } else { df_err = t_283.err; df_err_thrown = false; goto f229_exc5; } } t_283.value; });
-  df_console_log(({ df_string t_284 = df_str_from_u64((uint64_t)(((v_bytes).len))); df_string t_287 = df_str_from_u64((uint64_t)(({ uint64_t t_285 = ((uint64_t)(((uint64_t)0ULL))); ({ uint8_t t_286 = (df_idx_ok(v_bytes.len, t_285, df_fn228) ? v_bytes.p[t_285] : 0); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } t_286; }); }))); df_string t_290 = df_str_from_u64((uint64_t)(({ uint64_t t_288 = ((uint64_t)(((uint64_t)1ULL))); ({ uint8_t t_289 = (df_idx_ok(v_bytes.len, t_288, df_fn228) ? v_bytes.p[t_288] : 0); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } t_289; }); }))); df_str_concat(df_str_concat(df_str_concat(df_str_concat(df_str_concat(df_str_lit("bytes ", 6), t_284), df_str_lit(": ", 2)), t_287), df_str_lit(" ", 1)), t_290); }));
-  ({ df_exception* t_293 = f_File_writeAll(((c_File*)({ c_File* t_292 = v_report_229; if (t_292 == NULL || DF_IS_DEAD(t_292)) { df_raise(&df_desc_NullPointerException, df_fn228); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } } t_292; })), ({ df_arr_u8 t_291 = { (uint8_t*)df_calloc(2, sizeof(uint8_t)), 2 }; t_291.p[0] = ((uint8_t)72ULL); t_291.p[1] = ((uint8_t)105ULL); t_291; }), ((int32_t)2LL)); if (t_293) { if ((t_293->descriptor->silent && !(0 & df_obs_bit(t_293)))) { df_exc_release(t_293); t_293 = NULL; } else { df_err = t_293; df_err_thrown = false; goto f229_exc5; } } });
-  df_console_log(df_str_concat(df_str_lit("writeAll: ", 10), ({ df_res0 t_295 = f_File_readAllText(((c_File*)({ c_File* t_294 = v_report_229; if (t_294 == NULL || DF_IS_DEAD(t_294)) { df_raise(&df_desc_NullPointerException, df_fn228); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } } t_294; })), ((int32_t)0LL)); if (t_295.err) { if ((t_295.err->descriptor->silent && !(0 & df_obs_bit(t_295.err)))) { df_exc_release(t_295.err); t_295.err = NULL; } else { df_err = t_295.err; df_err_thrown = false; goto f229_exc5; } } t_295.value; })));
-  v_sub_229 = ({ df_res2 t_297 = f_File_createDirectory(({ df_res0 t_296 = f_File_combinePaths(v_base, df_str_lit("sub", 3)); if (t_296.err) { if ((t_296.err->descriptor->silent && !(0 & df_obs_bit(t_296.err)))) { df_exc_release(t_296.err); t_296.err = NULL; } else { df_err = t_296.err; df_err_thrown = false; goto f229_exc5; } } t_296.value; })); if (t_297.err) { if ((t_297.err->descriptor->silent && !(0 & df_obs_bit(t_297.err)))) { df_exc_release(t_297.err); t_297.err = NULL; } else { df_err = t_297.err; df_err_thrown = false; goto f229_exc5; } } t_297.value; });
-  v_copied_229 = ({ df_res2 t_300 = f_File_copyTo(((c_File*)({ c_File* t_299 = v_report_229; if (t_299 == NULL || DF_IS_DEAD(t_299)) { df_raise(&df_desc_NullPointerException, df_fn228); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } } t_299; })), ({ df_res0 t_298 = f_File_combinePaths(v_base, df_str_lit("sub/copy.txt", 12)); if (t_298.err) { if ((t_298.err->descriptor->silent && !(0 & df_obs_bit(t_298.err)))) { df_exc_release(t_298.err); t_298.err = NULL; } else { df_err = t_298.err; df_err_thrown = false; goto f229_exc5; } } t_298.value; }), ((int32_t)0LL)); if (t_300.err) { if ((t_300.err->descriptor->silent && !(0 & df_obs_bit(t_300.err)))) { df_exc_release(t_300.err); t_300.err = NULL; } else { df_err = t_300.err; df_err_thrown = false; goto f229_exc5; } } t_300.value; });
-  df_console_log(({ df_string t_302 = f_File_get_name(((c_File*)({ c_File* t_301 = v_copied_229; if (t_301 == NULL || DF_IS_DEAD(t_301)) { df_raise(&df_desc_NullPointerException, df_fn228); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } } t_301; }))); df_string t_306 = f_File_get_name(((c_File*)({ c_File* t_305 = ({ df_res2 t_304 = f_File_get_parent(((c_File*)({ c_File* t_303 = v_copied_229; if (t_303 == NULL || DF_IS_DEAD(t_303)) { df_raise(&df_desc_NullPointerException, df_fn228); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } } t_303; }))); if (t_304.err) { if ((t_304.err->descriptor->silent && !(0 & df_obs_bit(t_304.err)))) { df_exc_release(t_304.err); t_304.err = NULL; } else { df_err = t_304.err; df_err_thrown = false; goto f229_exc5; } } t_304.value; }); if (t_305 == NULL || DF_IS_DEAD(t_305)) { df_raise(&df_desc_NullPointerException, df_fn228); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } } t_305; }))); df_string t_309 = ({ df_res0 t_308 = f_File_readAllText(((c_File*)({ c_File* t_307 = v_copied_229; if (t_307 == NULL || DF_IS_DEAD(t_307)) { df_raise(&df_desc_NullPointerException, df_fn228); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } } t_307; })), ((int32_t)0LL)); if (t_308.err) { if ((t_308.err->descriptor->silent && !(0 & df_obs_bit(t_308.err)))) { df_exc_release(t_308.err); t_308.err = NULL; } else { df_err = t_308.err; df_err_thrown = false; goto f229_exc5; } } t_308.value; }); df_str_concat(df_str_concat(df_str_concat(df_str_concat(df_str_concat(df_str_lit("copied ", 7), t_302), df_str_lit(", parent ", 9)), t_306), df_str_lit(", text ", 7)), t_309); }));
-  v_moved_229 = ({ df_res2 t_312 = f_File_moveTo(((c_File*)({ c_File* t_311 = v_copied_229; if (t_311 == NULL || DF_IS_DEAD(t_311)) { df_raise(&df_desc_NullPointerException, df_fn228); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } } t_311; })), ({ df_res0 t_310 = f_File_combinePaths(v_base, df_str_lit("sub/moved.txt", 13)); if (t_310.err) { if ((t_310.err->descriptor->silent && !(0 & df_obs_bit(t_310.err)))) { df_exc_release(t_310.err); t_310.err = NULL; } else { df_err = t_310.err; df_err_thrown = false; goto f229_exc5; } } t_310.value; }), ((int32_t)0LL)); if (t_312.err) { if ((t_312.err->descriptor->silent && !(0 & df_obs_bit(t_312.err)))) { df_exc_release(t_312.err); t_312.err = NULL; } else { df_err = t_312.err; df_err_thrown = false; goto f229_exc5; } } t_312.value; });
-  df_console_log(({ df_string t_314 = f_File_get_name(((c_File*)({ c_File* t_313 = v_moved_229; if (t_313 == NULL || DF_IS_DEAD(t_313)) { df_raise(&df_desc_NullPointerException, df_fn228); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } } t_313; }))); df_string t_317 = df_str_from_bool(({ df_res4 t_316 = f_File_exists(({ df_res0 t_315 = f_File_combinePaths(v_base, df_str_lit("sub/copy.txt", 12)); if (t_315.err) { if ((t_315.err->descriptor->silent && !(0 & df_obs_bit(t_315.err)))) { df_exc_release(t_315.err); t_315.err = NULL; } else { df_err = t_315.err; df_err_thrown = false; goto f229_exc5; } } t_315.value; })); if (t_316.err) { if ((t_316.err->descriptor->silent && !(0 & df_obs_bit(t_316.err)))) { df_exc_release(t_316.err); t_316.err = NULL; } else { df_err = t_316.err; df_err_thrown = false; goto f229_exc5; } } t_316.value; })); df_str_concat(df_str_concat(df_str_concat(df_str_lit("moved ", 6), t_314), df_str_lit(", copy exists ", 14)), t_317); }));
-  ({ df_drop((void*)(({ df_res2 t_320 = f_File_copy(({ df_res0 t_318 = f_File_combinePaths(v_base, df_str_lit("sub", 3)); if (t_318.err) { if ((t_318.err->descriptor->silent && !(0 & df_obs_bit(t_318.err)))) { df_exc_release(t_318.err); t_318.err = NULL; } else { df_err = t_318.err; df_err_thrown = false; goto f229_exc5; } } t_318.value; }), ({ df_res0 t_319 = f_File_combinePaths(v_base, df_str_lit("sub2", 4)); if (t_319.err) { if ((t_319.err->descriptor->silent && !(0 & df_obs_bit(t_319.err)))) { df_exc_release(t_319.err); t_319.err = NULL; } else { df_err = t_319.err; df_err_thrown = false; goto f229_exc5; } } t_319.value; }), ((int32_t)0LL)); if (t_320.err) { if ((t_320.err->descriptor->silent && !(0 & df_obs_bit(t_320.err)))) { df_exc_release(t_320.err); t_320.err = NULL; } else { df_err = t_320.err; df_err_thrown = false; goto f229_exc5; } } t_320.value; }))); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } });
-  df_console_log(df_str_concat(df_str_lit("sub2 holds ", 11), df_str_from_bool(({ df_res4 t_322 = f_File_exists(({ df_res0 t_321 = f_File_combinePaths(v_base, df_str_lit("sub2/moved.txt", 14)); if (t_321.err) { if ((t_321.err->descriptor->silent && !(0 & df_obs_bit(t_321.err)))) { df_exc_release(t_321.err); t_321.err = NULL; } else { df_err = t_321.err; df_err_thrown = false; goto f229_exc5; } } t_321.value; })); if (t_322.err) { if ((t_322.err->descriptor->silent && !(0 & df_obs_bit(t_322.err)))) { df_exc_release(t_322.err); t_322.err = NULL; } else { df_err = t_322.err; df_err_thrown = false; goto f229_exc5; } } t_322.value; }))));
-  df_arr_File v_all = ({ df_res5 t_323 = f_File_getAllFiles(v_base, true, ((int32_t)2LL), df_str_lit("*", 1)); if (t_323.err) { if ((t_323.err->descriptor->silent && !(0 & df_obs_bit(t_323.err)))) { df_exc_release(t_323.err); t_323.err = NULL; } else { df_err = t_323.err; df_err_thrown = false; goto f229_exc5; } } t_323.value; });
+  df_string v_base = ({ df_res0 t_232 = f_File_combinePaths(f_File_getTempDir(), df_str_lit("dflat-files-test", 16)); if (t_232.err) { if ((t_232.err->descriptor->silent && !(0 & df_obs_bit(t_232.err)))) { df_exc_release(t_232.err); t_232.err = NULL; } else { df_err = t_232.err; df_err_thrown = false; goto f231_exc5; } } t_232.value; });
+  (void)(({ df_res4 t_233 = f_File_delete(v_base, ((uint8_t)1ULL)); if (t_233.err) { if ((t_233.err->descriptor->silent && !(0 & df_obs_bit(t_233.err)))) { df_exc_release(t_233.err); t_233.err = NULL; } else { df_err = t_233.err; df_err_thrown = false; goto f231_exc5; } } t_233.value; }));
+  v_root_231 = ({ df_res2 t_234 = f_File_createDirectory(v_base); if (t_234.err) { if ((t_234.err->descriptor->silent && !(0 & df_obs_bit(t_234.err)))) { df_exc_release(t_234.err); t_234.err = NULL; } else { df_err = t_234.err; df_err_thrown = false; goto f231_exc5; } } t_234.value; });
+  df_console_log(({ df_string t_236 = f_File_get_name(((c_File*)({ c_File* t_235 = v_root_231; if (t_235 == NULL || DF_IS_DEAD(t_235)) { df_raise(&df_desc_NullPointerException, df_fn230); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } } t_235; }))); df_string t_238 = df_str_from_bool(f_File_get_isDirectory(((c_File*)({ c_File* t_237 = v_root_231; if (t_237 == NULL || DF_IS_DEAD(t_237)) { df_raise(&df_desc_NullPointerException, df_fn230); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } } t_237; })))); df_string t_241 = df_str_from_bool(({ df_res4 t_240 = f_File_exists_1(((c_File*)({ c_File* t_239 = v_root_231; if (t_239 == NULL || DF_IS_DEAD(t_239)) { df_raise(&df_desc_NullPointerException, df_fn230); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } } t_239; }))); if (t_240.err) { if ((t_240.err->descriptor->silent && !(0 & df_obs_bit(t_240.err)))) { df_exc_release(t_240.err); t_240.err = NULL; } else { df_err = t_240.err; df_err_thrown = false; goto f231_exc5; } } t_240.value; })); df_str_concat(df_str_concat(df_str_concat(df_str_concat(df_str_concat(df_str_lit("created ", 8), t_236), df_str_lit(", isDirectory ", 14)), t_238), df_str_lit(", exists ", 9)), t_241); }));
+  v_report_231 = ({ df_res2 t_243 = f_File(({ df_res0 t_242 = f_File_combinePaths(v_base, df_str_lit("report.txt", 10)); if (t_242.err) { if ((t_242.err->descriptor->silent && !(0 & df_obs_bit(t_242.err)))) { df_exc_release(t_242.err); t_242.err = NULL; } else { df_err = t_242.err; df_err_thrown = false; goto f231_exc5; } } t_242.value; })); if (t_243.err) { if ((t_243.err->descriptor->silent && !(0 & df_obs_bit(t_243.err)))) { df_exc_release(t_243.err); t_243.err = NULL; } else { df_err = t_243.err; df_err_thrown = false; goto f231_exc5; } } t_243.value; });
+  df_console_log(({ df_string t_245 = f_File_get_name(((c_File*)({ c_File* t_244 = v_report_231; if (t_244 == NULL || DF_IS_DEAD(t_244)) { df_raise(&df_desc_NullPointerException, df_fn230); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } } t_244; }))); df_string t_247 = f_File_get_extension(((c_File*)({ c_File* t_246 = v_report_231; if (t_246 == NULL || DF_IS_DEAD(t_246)) { df_raise(&df_desc_NullPointerException, df_fn230); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } } t_246; }))); df_string t_250 = df_str_from_bool(({ df_res4 t_249 = f_File_exists_1(((c_File*)({ c_File* t_248 = v_report_231; if (t_248 == NULL || DF_IS_DEAD(t_248)) { df_raise(&df_desc_NullPointerException, df_fn230); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } } t_248; }))); if (t_249.err) { if ((t_249.err->descriptor->silent && !(0 & df_obs_bit(t_249.err)))) { df_exc_release(t_249.err); t_249.err = NULL; } else { df_err = t_249.err; df_err_thrown = false; goto f231_exc5; } } t_249.value; })); df_string t_254 = f_File_get_name(((c_File*)({ c_File* t_253 = ({ df_res2 t_252 = f_File_get_parent(((c_File*)({ c_File* t_251 = v_report_231; if (t_251 == NULL || DF_IS_DEAD(t_251)) { df_raise(&df_desc_NullPointerException, df_fn230); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } } t_251; }))); if (t_252.err) { if ((t_252.err->descriptor->silent && !(0 & df_obs_bit(t_252.err)))) { df_exc_release(t_252.err); t_252.err = NULL; } else { df_err = t_252.err; df_err_thrown = false; goto f231_exc5; } } t_252.value; }); if (t_253 == NULL || DF_IS_DEAD(t_253)) { df_raise(&df_desc_NullPointerException, df_fn230); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } } t_253; }))); df_str_concat(df_str_concat(df_str_concat(df_str_concat(df_str_concat(df_str_concat(df_str_concat(df_str_lit("report: name ", 13), t_245), df_str_lit(", extension ", 12)), t_247), df_str_lit(", exists ", 9)), t_250), df_str_lit(", parent ", 9)), t_254); }));
+  ({ df_exception* t_256 = f_File_writeAllText(((c_File*)({ c_File* t_255 = v_report_231; if (t_255 == NULL || DF_IS_DEAD(t_255)) { df_raise(&df_desc_NullPointerException, df_fn230); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } } t_255; })), df_str_lit("Done", 4), ((int32_t)0LL), ((int32_t)2LL)); if (t_256) { if ((t_256->descriptor->silent && !(0 & df_obs_bit(t_256)))) { df_exc_release(t_256); t_256 = NULL; } else { df_err = t_256; df_err_thrown = false; goto f231_exc5; } } });
+  ({ df_exception* t_258 = f_File_writeAllText(((c_File*)({ c_File* t_257 = v_report_231; if (t_257 == NULL || DF_IS_DEAD(t_257)) { df_raise(&df_desc_NullPointerException, df_fn230); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } } t_257; })), df_str_lit(" more", 5), ((int32_t)0LL), ((int32_t)3LL)); if (t_258) { if ((t_258->descriptor->silent && !(0 & df_obs_bit(t_258)))) { df_exc_release(t_258); t_258 = NULL; } else { df_err = t_258; df_err_thrown = false; goto f231_exc5; } } });
+  df_console_log(({ df_string t_261 = ({ df_res0 t_260 = f_File_readAllText(((c_File*)({ c_File* t_259 = v_report_231; if (t_259 == NULL || DF_IS_DEAD(t_259)) { df_raise(&df_desc_NullPointerException, df_fn230); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } } t_259; })), ((int32_t)0LL)); if (t_260.err) { if ((t_260.err->descriptor->silent && !(0 & df_obs_bit(t_260.err)))) { df_exc_release(t_260.err); t_260.err = NULL; } else { df_err = t_260.err; df_err_thrown = false; goto f231_exc5; } } t_260.value; }); df_string t_264 = df_str_from_u64((uint64_t)(({ df_res1 t_263 = f_File_get_size(((c_File*)({ c_File* t_262 = v_report_231; if (t_262 == NULL || DF_IS_DEAD(t_262)) { df_raise(&df_desc_NullPointerException, df_fn230); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } } t_262; }))); if (t_263.err) { if ((t_263.err->descriptor->silent && !(0 & df_obs_bit(t_263.err)))) { df_exc_release(t_263.err); t_263.err = NULL; } else { df_err = t_263.err; df_err_thrown = false; goto f231_exc5; } } t_263.value; }))); df_string t_266 = df_str_from_bool(f_File_get_isFile(((c_File*)({ c_File* t_265 = v_report_231; if (t_265 == NULL || DF_IS_DEAD(t_265)) { df_raise(&df_desc_NullPointerException, df_fn230); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } } t_265; })))); df_string t_269 = df_str_from_bool(({ df_res4 t_268 = f_File_get_isReadOnly(((c_File*)({ c_File* t_267 = v_report_231; if (t_267 == NULL || DF_IS_DEAD(t_267)) { df_raise(&df_desc_NullPointerException, df_fn230); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } } t_267; }))); if (t_268.err) { if ((t_268.err->descriptor->silent && !(0 & df_obs_bit(t_268.err)))) { df_exc_release(t_268.err); t_268.err = NULL; } else { df_err = t_268.err; df_err_thrown = false; goto f231_exc5; } } t_268.value; })); df_str_concat(df_str_concat(df_str_concat(df_str_concat(df_str_concat(df_str_concat(df_str_concat(df_str_lit("text = ", 7), t_261), df_str_lit(", size ", 7)), t_264), df_str_lit(", isFile ", 9)), t_266), df_str_lit(", readonly ", 11)), t_269); }));
+  df_console_log(({ df_string t_272 = df_str_from_bool((!(({ df_res3 t_271 = f_File_get_modified(((c_File*)({ c_File* t_270 = v_report_231; if (t_270 == NULL || DF_IS_DEAD(t_270)) { df_raise(&df_desc_NullPointerException, df_fn230); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } } t_270; }))); if (t_271.err) { if ((t_271.err->descriptor->silent && !(0 & df_obs_bit(t_271.err)))) { df_exc_release(t_271.err); t_271.err = NULL; } else { df_err = t_271.err; df_err_thrown = false; goto f231_exc5; } } t_271.value; }) == INT64_MIN))); df_string t_275 = df_str_from_bool((!(({ df_res3 t_274 = f_File_get_created(((c_File*)({ c_File* t_273 = v_report_231; if (t_273 == NULL || DF_IS_DEAD(t_273)) { df_raise(&df_desc_NullPointerException, df_fn230); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } } t_273; }))); if (t_274.err) { if ((t_274.err->descriptor->silent && !(0 & df_obs_bit(t_274.err)))) { df_exc_release(t_274.err); t_274.err = NULL; } else { df_err = t_274.err; df_err_thrown = false; goto f231_exc5; } } t_274.value; }) == INT64_MIN))); df_str_concat(df_str_concat(df_str_concat(df_str_lit("modified is not null: ", 22), t_272), df_str_lit(", created ", 10)), t_275); }));
+  ({ df_exception* t_277 = f_File_writeAllText(((c_File*)({ c_File* t_276 = v_report_231; if (t_276 == NULL || DF_IS_DEAD(t_276)) { df_raise(&df_desc_NullPointerException, df_fn230); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } } t_276; })), df_str_lit("h\303\251llo", 6), ((int32_t)1LL), ((int32_t)2LL)); if (t_277) { if ((t_277->descriptor->silent && !(0 & df_obs_bit(t_277)))) { df_exc_release(t_277); t_277 = NULL; } else { df_err = t_277; df_err_thrown = false; goto f231_exc5; } } });
+  df_console_log(({ df_string t_280 = df_str_from_u64((uint64_t)(({ df_res1 t_279 = f_File_get_size(((c_File*)({ c_File* t_278 = v_report_231; if (t_278 == NULL || DF_IS_DEAD(t_278)) { df_raise(&df_desc_NullPointerException, df_fn230); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } } t_278; }))); if (t_279.err) { if ((t_279.err->descriptor->silent && !(0 & df_obs_bit(t_279.err)))) { df_exc_release(t_279.err); t_279.err = NULL; } else { df_err = t_279.err; df_err_thrown = false; goto f231_exc5; } } t_279.value; }))); df_string t_283 = ({ df_res0 t_282 = f_File_readAllText(((c_File*)({ c_File* t_281 = v_report_231; if (t_281 == NULL || DF_IS_DEAD(t_281)) { df_raise(&df_desc_NullPointerException, df_fn230); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } } t_281; })), ((int32_t)1LL)); if (t_282.err) { if ((t_282.err->descriptor->silent && !(0 & df_obs_bit(t_282.err)))) { df_exc_release(t_282.err); t_282.err = NULL; } else { df_err = t_282.err; df_err_thrown = false; goto f231_exc5; } } t_282.value; }); df_str_concat(df_str_concat(df_str_concat(df_str_lit("utf16 size ", 11), t_280), df_str_lit(", read back ", 12)), t_283); }));
+  df_arr_u8 v_bytes = ({ df_res6 t_285 = f_File_readAll(((c_File*)({ c_File* t_284 = v_report_231; if (t_284 == NULL || DF_IS_DEAD(t_284)) { df_raise(&df_desc_NullPointerException, df_fn230); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } } t_284; }))); if (t_285.err) { if ((t_285.err->descriptor->silent && !(0 & df_obs_bit(t_285.err)))) { df_exc_release(t_285.err); t_285.err = NULL; } else { df_err = t_285.err; df_err_thrown = false; goto f231_exc5; } } t_285.value; });
+  df_console_log(({ df_string t_286 = df_str_from_u64((uint64_t)(((v_bytes).len))); df_string t_289 = df_str_from_u64((uint64_t)(({ uint64_t t_287 = ((uint64_t)(((uint64_t)0ULL))); ({ uint8_t t_288 = (df_idx_ok(v_bytes.len, t_287, df_fn230) ? v_bytes.p[t_287] : 0); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } t_288; }); }))); df_string t_292 = df_str_from_u64((uint64_t)(({ uint64_t t_290 = ((uint64_t)(((uint64_t)1ULL))); ({ uint8_t t_291 = (df_idx_ok(v_bytes.len, t_290, df_fn230) ? v_bytes.p[t_290] : 0); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } t_291; }); }))); df_str_concat(df_str_concat(df_str_concat(df_str_concat(df_str_concat(df_str_lit("bytes ", 6), t_286), df_str_lit(": ", 2)), t_289), df_str_lit(" ", 1)), t_292); }));
+  ({ df_exception* t_295 = f_File_writeAll(((c_File*)({ c_File* t_294 = v_report_231; if (t_294 == NULL || DF_IS_DEAD(t_294)) { df_raise(&df_desc_NullPointerException, df_fn230); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } } t_294; })), ({ df_arr_u8 t_293 = { (uint8_t*)df_calloc(2, sizeof(uint8_t)), 2 }; t_293.p[0] = ((uint8_t)72ULL); t_293.p[1] = ((uint8_t)105ULL); t_293; }), ((int32_t)2LL)); if (t_295) { if ((t_295->descriptor->silent && !(0 & df_obs_bit(t_295)))) { df_exc_release(t_295); t_295 = NULL; } else { df_err = t_295; df_err_thrown = false; goto f231_exc5; } } });
+  df_console_log(df_str_concat(df_str_lit("writeAll: ", 10), ({ df_res0 t_297 = f_File_readAllText(((c_File*)({ c_File* t_296 = v_report_231; if (t_296 == NULL || DF_IS_DEAD(t_296)) { df_raise(&df_desc_NullPointerException, df_fn230); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } } t_296; })), ((int32_t)0LL)); if (t_297.err) { if ((t_297.err->descriptor->silent && !(0 & df_obs_bit(t_297.err)))) { df_exc_release(t_297.err); t_297.err = NULL; } else { df_err = t_297.err; df_err_thrown = false; goto f231_exc5; } } t_297.value; })));
+  v_sub_231 = ({ df_res2 t_299 = f_File_createDirectory(({ df_res0 t_298 = f_File_combinePaths(v_base, df_str_lit("sub", 3)); if (t_298.err) { if ((t_298.err->descriptor->silent && !(0 & df_obs_bit(t_298.err)))) { df_exc_release(t_298.err); t_298.err = NULL; } else { df_err = t_298.err; df_err_thrown = false; goto f231_exc5; } } t_298.value; })); if (t_299.err) { if ((t_299.err->descriptor->silent && !(0 & df_obs_bit(t_299.err)))) { df_exc_release(t_299.err); t_299.err = NULL; } else { df_err = t_299.err; df_err_thrown = false; goto f231_exc5; } } t_299.value; });
+  v_copied_231 = ({ df_res2 t_302 = f_File_copyTo(((c_File*)({ c_File* t_301 = v_report_231; if (t_301 == NULL || DF_IS_DEAD(t_301)) { df_raise(&df_desc_NullPointerException, df_fn230); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } } t_301; })), ({ df_res0 t_300 = f_File_combinePaths(v_base, df_str_lit("sub/copy.txt", 12)); if (t_300.err) { if ((t_300.err->descriptor->silent && !(0 & df_obs_bit(t_300.err)))) { df_exc_release(t_300.err); t_300.err = NULL; } else { df_err = t_300.err; df_err_thrown = false; goto f231_exc5; } } t_300.value; }), ((int32_t)0LL)); if (t_302.err) { if ((t_302.err->descriptor->silent && !(0 & df_obs_bit(t_302.err)))) { df_exc_release(t_302.err); t_302.err = NULL; } else { df_err = t_302.err; df_err_thrown = false; goto f231_exc5; } } t_302.value; });
+  df_console_log(({ df_string t_304 = f_File_get_name(((c_File*)({ c_File* t_303 = v_copied_231; if (t_303 == NULL || DF_IS_DEAD(t_303)) { df_raise(&df_desc_NullPointerException, df_fn230); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } } t_303; }))); df_string t_308 = f_File_get_name(((c_File*)({ c_File* t_307 = ({ df_res2 t_306 = f_File_get_parent(((c_File*)({ c_File* t_305 = v_copied_231; if (t_305 == NULL || DF_IS_DEAD(t_305)) { df_raise(&df_desc_NullPointerException, df_fn230); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } } t_305; }))); if (t_306.err) { if ((t_306.err->descriptor->silent && !(0 & df_obs_bit(t_306.err)))) { df_exc_release(t_306.err); t_306.err = NULL; } else { df_err = t_306.err; df_err_thrown = false; goto f231_exc5; } } t_306.value; }); if (t_307 == NULL || DF_IS_DEAD(t_307)) { df_raise(&df_desc_NullPointerException, df_fn230); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } } t_307; }))); df_string t_311 = ({ df_res0 t_310 = f_File_readAllText(((c_File*)({ c_File* t_309 = v_copied_231; if (t_309 == NULL || DF_IS_DEAD(t_309)) { df_raise(&df_desc_NullPointerException, df_fn230); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } } t_309; })), ((int32_t)0LL)); if (t_310.err) { if ((t_310.err->descriptor->silent && !(0 & df_obs_bit(t_310.err)))) { df_exc_release(t_310.err); t_310.err = NULL; } else { df_err = t_310.err; df_err_thrown = false; goto f231_exc5; } } t_310.value; }); df_str_concat(df_str_concat(df_str_concat(df_str_concat(df_str_concat(df_str_lit("copied ", 7), t_304), df_str_lit(", parent ", 9)), t_308), df_str_lit(", text ", 7)), t_311); }));
+  v_moved_231 = ({ df_res2 t_314 = f_File_moveTo(((c_File*)({ c_File* t_313 = v_copied_231; if (t_313 == NULL || DF_IS_DEAD(t_313)) { df_raise(&df_desc_NullPointerException, df_fn230); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } } t_313; })), ({ df_res0 t_312 = f_File_combinePaths(v_base, df_str_lit("sub/moved.txt", 13)); if (t_312.err) { if ((t_312.err->descriptor->silent && !(0 & df_obs_bit(t_312.err)))) { df_exc_release(t_312.err); t_312.err = NULL; } else { df_err = t_312.err; df_err_thrown = false; goto f231_exc5; } } t_312.value; }), ((int32_t)0LL)); if (t_314.err) { if ((t_314.err->descriptor->silent && !(0 & df_obs_bit(t_314.err)))) { df_exc_release(t_314.err); t_314.err = NULL; } else { df_err = t_314.err; df_err_thrown = false; goto f231_exc5; } } t_314.value; });
+  df_console_log(({ df_string t_316 = f_File_get_name(((c_File*)({ c_File* t_315 = v_moved_231; if (t_315 == NULL || DF_IS_DEAD(t_315)) { df_raise(&df_desc_NullPointerException, df_fn230); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } } t_315; }))); df_string t_319 = df_str_from_bool(({ df_res4 t_318 = f_File_exists(({ df_res0 t_317 = f_File_combinePaths(v_base, df_str_lit("sub/copy.txt", 12)); if (t_317.err) { if ((t_317.err->descriptor->silent && !(0 & df_obs_bit(t_317.err)))) { df_exc_release(t_317.err); t_317.err = NULL; } else { df_err = t_317.err; df_err_thrown = false; goto f231_exc5; } } t_317.value; })); if (t_318.err) { if ((t_318.err->descriptor->silent && !(0 & df_obs_bit(t_318.err)))) { df_exc_release(t_318.err); t_318.err = NULL; } else { df_err = t_318.err; df_err_thrown = false; goto f231_exc5; } } t_318.value; })); df_str_concat(df_str_concat(df_str_concat(df_str_lit("moved ", 6), t_316), df_str_lit(", copy exists ", 14)), t_319); }));
+  ({ df_drop((void*)(({ df_res2 t_322 = f_File_copy(({ df_res0 t_320 = f_File_combinePaths(v_base, df_str_lit("sub", 3)); if (t_320.err) { if ((t_320.err->descriptor->silent && !(0 & df_obs_bit(t_320.err)))) { df_exc_release(t_320.err); t_320.err = NULL; } else { df_err = t_320.err; df_err_thrown = false; goto f231_exc5; } } t_320.value; }), ({ df_res0 t_321 = f_File_combinePaths(v_base, df_str_lit("sub2", 4)); if (t_321.err) { if ((t_321.err->descriptor->silent && !(0 & df_obs_bit(t_321.err)))) { df_exc_release(t_321.err); t_321.err = NULL; } else { df_err = t_321.err; df_err_thrown = false; goto f231_exc5; } } t_321.value; }), ((int32_t)0LL)); if (t_322.err) { if ((t_322.err->descriptor->silent && !(0 & df_obs_bit(t_322.err)))) { df_exc_release(t_322.err); t_322.err = NULL; } else { df_err = t_322.err; df_err_thrown = false; goto f231_exc5; } } t_322.value; }))); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } });
+  df_console_log(df_str_concat(df_str_lit("sub2 holds ", 11), df_str_from_bool(({ df_res4 t_324 = f_File_exists(({ df_res0 t_323 = f_File_combinePaths(v_base, df_str_lit("sub2/moved.txt", 14)); if (t_323.err) { if ((t_323.err->descriptor->silent && !(0 & df_obs_bit(t_323.err)))) { df_exc_release(t_323.err); t_323.err = NULL; } else { df_err = t_323.err; df_err_thrown = false; goto f231_exc5; } } t_323.value; })); if (t_324.err) { if ((t_324.err->descriptor->silent && !(0 & df_obs_bit(t_324.err)))) { df_exc_release(t_324.err); t_324.err = NULL; } else { df_err = t_324.err; df_err_thrown = false; goto f231_exc5; } } t_324.value; }))));
+  df_arr_File v_all = ({ df_res5 t_325 = f_File_getAllFiles(v_base, true, ((int32_t)2LL), df_str_lit("*", 1)); if (t_325.err) { if ((t_325.err->descriptor->silent && !(0 & df_obs_bit(t_325.err)))) { df_exc_release(t_325.err); t_325.err = NULL; } else { df_err = t_325.err; df_err_thrown = false; goto f231_exc5; } } t_325.value; });
   df_console_log(df_str_concat(df_str_lit("all items: ", 11), df_str_from_u64((uint64_t)(((v_all).len)))));
-  df_arr_File v_texts = ({ df_res5 t_324 = f_File_getAllFiles(v_base, true, ((int32_t)0LL), df_str_lit("*.TXT", 5)); if (t_324.err) { if ((t_324.err->descriptor->silent && !(0 & df_obs_bit(t_324.err)))) { df_exc_release(t_324.err); t_324.err = NULL; } else { df_err = t_324.err; df_err_thrown = false; goto f229_exc5; } } t_324.value; });
+  df_arr_File v_texts = ({ df_res5 t_326 = f_File_getAllFiles(v_base, true, ((int32_t)0LL), df_str_lit("*.TXT", 5)); if (t_326.err) { if ((t_326.err->descriptor->silent && !(0 & df_obs_bit(t_326.err)))) { df_exc_release(t_326.err); t_326.err = NULL; } else { df_err = t_326.err; df_err_thrown = false; goto f231_exc5; } } t_326.value; });
   df_console_log(df_str_concat(df_str_lit("txt files: ", 11), df_str_from_u64((uint64_t)(((v_texts).len)))));
-  df_arr_File v_dirs = ({ df_res5 t_326 = f_File_getAllFiles_1(((c_File*)({ c_File* t_325 = v_root_229; if (t_325 == NULL || DF_IS_DEAD(t_325)) { df_raise(&df_desc_NullPointerException, df_fn228); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f229_exc5; } } t_325; })), false, ((int32_t)1LL), df_str_lit("*", 1)); if (t_326.err) { if ((t_326.err->descriptor->silent && !(0 & df_obs_bit(t_326.err)))) { df_exc_release(t_326.err); t_326.err = NULL; } else { df_err = t_326.err; df_err_thrown = false; goto f229_exc5; } } t_326.value; });
+  df_arr_File v_dirs = ({ df_res5 t_328 = f_File_getAllFiles_1(((c_File*)({ c_File* t_327 = v_root_231; if (t_327 == NULL || DF_IS_DEAD(t_327)) { df_raise(&df_desc_NullPointerException, df_fn230); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f231_exc5; } } t_327; })), false, ((int32_t)1LL), df_str_lit("*", 1)); if (t_328.err) { if ((t_328.err->descriptor->silent && !(0 & df_obs_bit(t_328.err)))) { df_exc_release(t_328.err); t_328.err = NULL; } else { df_err = t_328.err; df_err_thrown = false; goto f231_exc5; } } t_328.value; });
   df_console_log(df_str_concat(df_str_lit("directories: ", 13), df_str_from_u64((uint64_t)(((v_dirs).len)))));
-  df_console_log(df_str_concat(df_str_lit("delete sub without Recursive: ", 30), df_str_from_bool(({ df_res4 t_328 = f_File_delete(({ df_res0 t_327 = f_File_combinePaths(v_base, df_str_lit("sub", 3)); if (t_327.err) { if ((t_327.err->descriptor->silent && !(0 & df_obs_bit(t_327.err)))) { df_exc_release(t_327.err); t_327.err = NULL; } else { df_err = t_327.err; df_err_thrown = false; goto f229_exc5; } } t_327.value; }), ((uint8_t)0ULL)); if (t_328.err) { if ((t_328.err->descriptor->silent && !(0 & df_obs_bit(t_328.err)))) { df_exc_release(t_328.err); t_328.err = NULL; } else { df_err = t_328.err; df_err_thrown = false; goto f229_exc5; } } t_328.value; }))));
-  df_console_log(df_str_concat(df_str_lit("delete sub recursive: ", 22), df_str_from_bool(({ df_res4 t_330 = f_File_delete(({ df_res0 t_329 = f_File_combinePaths(v_base, df_str_lit("sub", 3)); if (t_329.err) { if ((t_329.err->descriptor->silent && !(0 & df_obs_bit(t_329.err)))) { df_exc_release(t_329.err); t_329.err = NULL; } else { df_err = t_329.err; df_err_thrown = false; goto f229_exc5; } } t_329.value; }), ((uint8_t)1ULL)); if (t_330.err) { if ((t_330.err->descriptor->silent && !(0 & df_obs_bit(t_330.err)))) { df_exc_release(t_330.err); t_330.err = NULL; } else { df_err = t_330.err; df_err_thrown = false; goto f229_exc5; } } t_330.value; }))));
-  df_console_log(df_str_concat(df_str_lit("delete missing: ", 16), df_str_from_bool(({ df_res4 t_332 = f_File_delete(({ df_res0 t_331 = f_File_combinePaths(v_base, df_str_lit("nothing", 7)); if (t_331.err) { if ((t_331.err->descriptor->silent && !(0 & df_obs_bit(t_331.err)))) { df_exc_release(t_331.err); t_331.err = NULL; } else { df_err = t_331.err; df_err_thrown = false; goto f229_exc5; } } t_331.value; }), ((uint8_t)0ULL)); if (t_332.err) { if ((t_332.err->descriptor->silent && !(0 & df_obs_bit(t_332.err)))) { df_exc_release(t_332.err); t_332.err = NULL; } else { df_err = t_332.err; df_err_thrown = false; goto f229_exc5; } } t_332.value; }))));
-  df_console_log(({ df_res0 t_333 = f_readMissing(); if (t_333.err) { if ((t_333.err->descriptor->silent && !(0 & df_obs_bit(t_333.err)))) { df_exc_release(t_333.err); t_333.err = NULL; } else { df_err = t_333.err; df_err_thrown = false; goto f229_exc5; } } t_333.value; }));
-  df_console_log(({ df_res0 t_334 = f_badPath(); if (t_334.err) { if ((t_334.err->descriptor->silent && !(0 & df_obs_bit(t_334.err)))) { df_exc_release(t_334.err); t_334.err = NULL; } else { df_err = t_334.err; df_err_thrown = false; goto f229_exc5; } } t_334.value; }));
-  df_console_log(({ df_res0 t_335 = f_createOnly(v_report_229); if (t_335.err) { if ((t_335.err->descriptor->silent && !(0 & df_obs_bit(t_335.err)))) { df_exc_release(t_335.err); t_335.err = NULL; } else { df_err = t_335.err; df_err_thrown = false; goto f229_exc5; } } t_335.value; }));
-  df_console_log(({ df_res0 t_336 = f_noParent(v_base); if (t_336.err) { if ((t_336.err->descriptor->silent && !(0 & df_obs_bit(t_336.err)))) { df_exc_release(t_336.err); t_336.err = NULL; } else { df_err = t_336.err; df_err_thrown = false; goto f229_exc5; } } t_336.value; }));
-  (void)(({ df_res4 t_337 = f_File_delete(v_base, ((uint8_t)1ULL)); if (t_337.err) { if ((t_337.err->descriptor->silent && !(0 & df_obs_bit(t_337.err)))) { df_exc_release(t_337.err); t_337.err = NULL; } else { df_err = t_337.err; df_err_thrown = false; goto f229_exc5; } } t_337.value; }));
-  df_console_log(df_str_concat(df_str_lit("cleaned: ", 9), df_str_from_bool((!({ df_res4 t_338 = f_File_exists(v_base); if (t_338.err) { if ((t_338.err->descriptor->silent && !(0 & df_obs_bit(t_338.err)))) { df_exc_release(t_338.err); t_338.err = NULL; } else { df_err = t_338.err; df_err_thrown = false; goto f229_exc5; } } t_338.value; })))));
+  df_console_log(df_str_concat(df_str_lit("delete sub without Recursive: ", 30), df_str_from_bool(({ df_res4 t_330 = f_File_delete(({ df_res0 t_329 = f_File_combinePaths(v_base, df_str_lit("sub", 3)); if (t_329.err) { if ((t_329.err->descriptor->silent && !(0 & df_obs_bit(t_329.err)))) { df_exc_release(t_329.err); t_329.err = NULL; } else { df_err = t_329.err; df_err_thrown = false; goto f231_exc5; } } t_329.value; }), ((uint8_t)0ULL)); if (t_330.err) { if ((t_330.err->descriptor->silent && !(0 & df_obs_bit(t_330.err)))) { df_exc_release(t_330.err); t_330.err = NULL; } else { df_err = t_330.err; df_err_thrown = false; goto f231_exc5; } } t_330.value; }))));
+  df_console_log(df_str_concat(df_str_lit("delete sub recursive: ", 22), df_str_from_bool(({ df_res4 t_332 = f_File_delete(({ df_res0 t_331 = f_File_combinePaths(v_base, df_str_lit("sub", 3)); if (t_331.err) { if ((t_331.err->descriptor->silent && !(0 & df_obs_bit(t_331.err)))) { df_exc_release(t_331.err); t_331.err = NULL; } else { df_err = t_331.err; df_err_thrown = false; goto f231_exc5; } } t_331.value; }), ((uint8_t)1ULL)); if (t_332.err) { if ((t_332.err->descriptor->silent && !(0 & df_obs_bit(t_332.err)))) { df_exc_release(t_332.err); t_332.err = NULL; } else { df_err = t_332.err; df_err_thrown = false; goto f231_exc5; } } t_332.value; }))));
+  df_console_log(df_str_concat(df_str_lit("delete missing: ", 16), df_str_from_bool(({ df_res4 t_334 = f_File_delete(({ df_res0 t_333 = f_File_combinePaths(v_base, df_str_lit("nothing", 7)); if (t_333.err) { if ((t_333.err->descriptor->silent && !(0 & df_obs_bit(t_333.err)))) { df_exc_release(t_333.err); t_333.err = NULL; } else { df_err = t_333.err; df_err_thrown = false; goto f231_exc5; } } t_333.value; }), ((uint8_t)0ULL)); if (t_334.err) { if ((t_334.err->descriptor->silent && !(0 & df_obs_bit(t_334.err)))) { df_exc_release(t_334.err); t_334.err = NULL; } else { df_err = t_334.err; df_err_thrown = false; goto f231_exc5; } } t_334.value; }))));
+  df_console_log(({ df_res0 t_335 = f_readMissing(); if (t_335.err) { if ((t_335.err->descriptor->silent && !(0 & df_obs_bit(t_335.err)))) { df_exc_release(t_335.err); t_335.err = NULL; } else { df_err = t_335.err; df_err_thrown = false; goto f231_exc5; } } t_335.value; }));
+  df_console_log(({ df_res0 t_336 = f_badPath(); if (t_336.err) { if ((t_336.err->descriptor->silent && !(0 & df_obs_bit(t_336.err)))) { df_exc_release(t_336.err); t_336.err = NULL; } else { df_err = t_336.err; df_err_thrown = false; goto f231_exc5; } } t_336.value; }));
+  df_console_log(({ df_res0 t_337 = f_createOnly(v_report_231); if (t_337.err) { if ((t_337.err->descriptor->silent && !(0 & df_obs_bit(t_337.err)))) { df_exc_release(t_337.err); t_337.err = NULL; } else { df_err = t_337.err; df_err_thrown = false; goto f231_exc5; } } t_337.value; }));
+  df_console_log(({ df_res0 t_338 = f_noParent(v_base); if (t_338.err) { if ((t_338.err->descriptor->silent && !(0 & df_obs_bit(t_338.err)))) { df_exc_release(t_338.err); t_338.err = NULL; } else { df_err = t_338.err; df_err_thrown = false; goto f231_exc5; } } t_338.value; }));
+  (void)(({ df_res4 t_339 = f_File_delete(v_base, ((uint8_t)1ULL)); if (t_339.err) { if ((t_339.err->descriptor->silent && !(0 & df_obs_bit(t_339.err)))) { df_exc_release(t_339.err); t_339.err = NULL; } else { df_err = t_339.err; df_err_thrown = false; goto f231_exc5; } } t_339.value; }));
+  df_console_log(df_str_concat(df_str_lit("cleaned: ", 9), df_str_from_bool((!({ df_res4 t_340 = f_File_exists(v_base); if (t_340.err) { if ((t_340.err->descriptor->silent && !(0 & df_obs_bit(t_340.err)))) { df_exc_release(t_340.err); t_340.err = NULL; } else { df_err = t_340.err; df_err_thrown = false; goto f231_exc5; } } t_340.value; })))));
   {
-    ({ ({ c_File** t_340 = &(v_moved_229); void* t_341 = (void*)*t_340; *t_340 = NULL; df_drop(t_341); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn228_panic; } });
+    ({ ({ c_File** t_342 = &(v_moved_231); void* t_343 = (void*)*t_342; *t_342 = NULL; df_drop(t_343); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn230_panic; } });
   }
   {
-    ({ ({ c_File** t_343 = &(v_copied_229); void* t_344 = (void*)*t_343; *t_343 = NULL; df_drop(t_344); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn228_panic; } });
+    ({ ({ c_File** t_345 = &(v_copied_231); void* t_346 = (void*)*t_345; *t_345 = NULL; df_drop(t_346); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn230_panic; } });
   }
   {
-    ({ ({ c_File** t_346 = &(v_sub_229); void* t_347 = (void*)*t_346; *t_346 = NULL; df_drop(t_347); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn228_panic; } });
+    ({ ({ c_File** t_348 = &(v_sub_231); void* t_349 = (void*)*t_348; *t_348 = NULL; df_drop(t_349); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn230_panic; } });
   }
   {
-    ({ ({ c_File** t_349 = &(v_report_229); void* t_350 = (void*)*t_349; *t_349 = NULL; df_drop(t_350); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn228_panic; } });
+    ({ ({ c_File** t_351 = &(v_report_231); void* t_352 = (void*)*t_351; *t_351 = NULL; df_drop(t_352); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn230_panic; } });
   }
   {
-    ({ ({ c_File** t_352 = &(v_root_229); void* t_353 = (void*)*t_352; *t_352 = NULL; df_drop(t_353); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn228_panic; } });
+    ({ ({ c_File** t_354 = &(v_root_231); void* t_355 = (void*)*t_354; *t_354 = NULL; df_drop(t_355); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn230_panic; } });
   }
-  goto f229_done;
-  f229_exc5: if (df_err) { df_pend229 = df_err; df_err = NULL; }
+  goto f231_done;
+  f231_exc5: if (df_err) { df_pend231 = df_err; df_err = NULL; }
   {
-    ({ ({ c_File** t_355 = &(v_moved_229); void* t_356 = (void*)*t_355; *t_355 = NULL; df_drop(t_356); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn228_panic; } });
+    ({ ({ c_File** t_357 = &(v_moved_231); void* t_358 = (void*)*t_357; *t_357 = NULL; df_drop(t_358); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn230_panic; } });
   }
-  f229_exc4: if (df_err) { df_pend229 = df_err; df_err = NULL; }
+  f231_exc4: if (df_err) { df_pend231 = df_err; df_err = NULL; }
   {
-    ({ ({ c_File** t_358 = &(v_copied_229); void* t_359 = (void*)*t_358; *t_358 = NULL; df_drop(t_359); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn228_panic; } });
+    ({ ({ c_File** t_360 = &(v_copied_231); void* t_361 = (void*)*t_360; *t_360 = NULL; df_drop(t_361); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn230_panic; } });
   }
-  f229_exc3: if (df_err) { df_pend229 = df_err; df_err = NULL; }
+  f231_exc3: if (df_err) { df_pend231 = df_err; df_err = NULL; }
   {
-    ({ ({ c_File** t_361 = &(v_sub_229); void* t_362 = (void*)*t_361; *t_361 = NULL; df_drop(t_362); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn228_panic; } });
+    ({ ({ c_File** t_363 = &(v_sub_231); void* t_364 = (void*)*t_363; *t_363 = NULL; df_drop(t_364); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn230_panic; } });
   }
-  f229_exc2: if (df_err) { df_pend229 = df_err; df_err = NULL; }
+  f231_exc2: if (df_err) { df_pend231 = df_err; df_err = NULL; }
   {
-    ({ ({ c_File** t_364 = &(v_report_229); void* t_365 = (void*)*t_364; *t_364 = NULL; df_drop(t_365); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn228_panic; } });
+    ({ ({ c_File** t_366 = &(v_report_231); void* t_367 = (void*)*t_366; *t_366 = NULL; df_drop(t_367); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn230_panic; } });
   }
-  f229_exc1: if (df_err) { df_pend229 = df_err; df_err = NULL; }
+  f231_exc1: if (df_err) { df_pend231 = df_err; df_err = NULL; }
   {
-    ({ ({ c_File** t_367 = &(v_root_229); void* t_368 = (void*)*t_367; *t_367 = NULL; df_drop(t_368); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn228_panic; } });
+    ({ ({ c_File** t_369 = &(v_root_231); void* t_370 = (void*)*t_369; *t_369 = NULL; df_drop(t_370); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn230_panic; } });
   }
-  f229_exc0: if (df_err == NULL) { df_err = df_pend229; } df_pend229 = NULL;
-  goto fn228_panic;
-  f229_done: ;
+  f231_exc0: if (df_err == NULL) { df_err = df_pend231; } df_pend231 = NULL;
+  goto fn230_panic;
+  f231_done: ;
   return 0;
-  fn228_panic: df_panic_unhandled(df_err);
+  fn230_panic: df_panic_unhandled(df_err);
   return 0;
 }

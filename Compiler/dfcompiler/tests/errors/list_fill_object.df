@@ -1,0 +1,8 @@
+alias Root as r
+
+public class Dog(string name) {
+  public string name
+}
+
+list<Dog> kennel = [Dog("a")]
+kennel.fill(Dog("rex"))

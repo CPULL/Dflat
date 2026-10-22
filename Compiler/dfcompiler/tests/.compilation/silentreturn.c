@@ -100,6 +100,7 @@ static const df_descriptor df_desc_InvalidBufferRangeException = { 42, "InvalidB
 static const df_descriptor df_desc_GenericIOErrorException = { 43, "GenericIOErrorException", &df_desc_Exception, false };
 static const df_descriptor df_desc_FileRemovedWhileOpenException = { 44, "FileRemovedWhileOpenException", &df_desc_Exception, false };
 static const df_descriptor df_desc_StreamCloseFailureException = { 45, "StreamCloseFailureException", &df_desc_Exception, false };
+static const df_descriptor df_desc_ModifyingIteratedCollectionException = { 46, "ModifyingIteratedCollectionException", &df_desc_Exception, false };
 
 /* The exception of a function is a local of that function (df_err in the generated code) and travels back to the caller as the second
    value it returns. The runtime functions written in C cannot return it that way: they leave it here, and the code generated around
@@ -153,6 +154,14 @@ static void df_raise(const df_descriptor* descriptor, const char* function) {
     spaced[length++] = *letter;
   }
   spaced[length] = 0;
+#ifdef DF_RELEASE
+  /* in a release build an index outside a collection, or a collection changed while it is iterated, is a panic, not an exception (spec 6.1, 6.4) */
+  if (descriptor->id == 19 || descriptor->id == 46) {
+    fflush(stdout);
+    printf("%s\n", spaced);
+    df_panic(DF_PANIC_UNHANDLED);
+  }
+#endif
   df_pending = df_new_exception(descriptor, spaced, length, function);
 }
 

@@ -1,0 +1,9 @@
+alias Root as r
+
+public class Dog(string name) {
+  public string name
+}
+
+arr<Dog> kennel = [Dog("a"), Dog("b")]
+Dog rex = Dog("rex")
+Dog old = kennel.swap(0, rex)

@@ -92,7 +92,9 @@ public sealed partial class CodeGen {
 
   // Compiles the tree. A generic class instance that the code needs and the attempt has not made (found while resolving
   // a type) is added to the seeds and the whole compilation starts again from a fresh copy of the tree.
-  public static (string C, IReadOnlyList<string> Warnings) Compile(Node tree) {
+  public static (string C, IReadOnlyList<string> Warnings) Compile(Node tree, bool release = false, int nativeBits = 64) {
+    ReleaseBuild = release;
+    NativeUns = nativeBits >= 64 ? "u64" : "u32";
     var seeds = new GenericSeeds();
     for (int attempt = 0; ; attempt++) {
       var gen = new CodeGen(seeds);

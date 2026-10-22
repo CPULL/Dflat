@@ -1,0 +1,9 @@
+alias Root as r
+
+public class Dog(string name) {
+  public string name
+}
+
+list<i32> numbers = [1]
+i32 last
+numbers.pop((&)last)

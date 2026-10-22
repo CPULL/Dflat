@@ -1,0 +1,12 @@
+3 2 cy
+3 4 2 3
+[5, 5, 5]
+[cy, bob, ann]
+bob [cy, zed, ann]
+rex max
+fido luna
+rover spot
+rover true
+true true
+2
+---- exit code 0 ----

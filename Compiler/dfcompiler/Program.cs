@@ -4,10 +4,10 @@ using dfparser;
 namespace dfcompiler;
 
 public static class Program {
-  public const string Version = "0.0.12alpha";
+  public const string Version = "0.0.15alpha";
 
   // the version of the specification this compiler was built for: the variable `version` of the preprocessor (spec 19.1)
-  public const string LanguageVersion = "0.0.12";
+  public const string LanguageVersion = "0.0.13";
 
   // the targets of --target and the clang triple of each (a target equal to this machine passes none: clang's own default)
   static readonly Dictionary<string, string> Targets = new() {
@@ -146,7 +146,8 @@ public static class Program {
       var tokens = lexer.Tokenize();
       var parser = new Parser(tokens);
       var tree = parser.ParseProgram();
-      var (c, genWarnings) = CodeGen.Compile(tree);
+      string typeTarget = custom || !Targets.ContainsKey(effective) ? host : effective;
+      var (c, genWarnings) = CodeGen.Compile(tree, build == "release", typeTarget.EndsWith("x64") || typeTarget.EndsWith("arm64") ? 64 : 32);
       foreach (var warning in preprocessor.Warnings.Concat(lexer.Warnings).Concat(parser.Warnings).Concat(genWarnings)) {
         Console.Error.WriteLine(path + warning);
       }
@@ -177,6 +178,9 @@ public static class Program {
       "-std=c11", optimization, "-fwrapv", "-Wno-unused-function",
       "-Wno-parentheses-equality", "-Wno-tautological-compare", "-o", output, cPath
     };
+    if (build == "release") {
+      ccArgs.Insert(0, "-DDF_RELEASE");   // an index outside a collection is a panic (spec 6.1)
+    }
     if (custom) {
       // the text after CL: as it is, split at the spaces; nothing else is added for the target
       ccArgs.AddRange(target!["CL:".Length..].Split(' ', StringSplitOptions.RemoveEmptyEntries));

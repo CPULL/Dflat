@@ -802,6 +802,50 @@ EXCEPTIONS STEP 1: BUILT (2026-10-19), following the rewritten spec 15
   of ObservedMask.
 - Tests changed because a silent throw now returns: silentmodel and bitfields (third()). New: silentreturn.
 
+LISTS list<T> (built 2026-10-22, compiler 0.0.15alpha, spec 6.8.3; CodeGen.List.cs and the class `list` of VecPrelude)
+=====================================================================================================================
+- Same approach as vec: a generic class `list<T>` written in Dflat (VecPrelude) with the hot paths emitted as C. The singly linked list is stored in two arrays: `items`
+  (slot n holds the item of node n) and `links` (the slot of the next node, UINT64_MAX at the end); the list keeps first, last, count, used, a chain of free slots and a
+  version. A removed node goes to the free chain and is reused; growing doubles the two arrays (add is amortized O(1)). So the nodes are slots, not separate allocations:
+  the observable cost table of the spec holds (c[i] O(n) walk, add O(1), insert / removeAt O(1) at the ends, reverse relinks).
+- Glue: c[i] / c[i] = v / += walk the links (ListIndex, ListIndexAssign), the for loop walks them once, the literal (ListLiteral), a bare `list x = [..]` (InferListType), printing
+  (ListStrFunction), sort / sortUnstable (the items go to a temporary array, the arrays' sort orders it, they go back in the same nodes: not the relinking of the spec), swap
+  (the class methods exchange / replace, same rule as the arrays), ->list[i] (takeAt: the item leaves and the node goes away), the drop of the list (EmitListDropGlue: a loop over
+  the nodes, so a long list does not recurse, then the two blocks are freed). The class has add, insert, takeAt, removeAt, indexOf, has, remove, removeAll, clear, fill(value),
+  fill(count, value), reverse, exchange, replace and getIterator. There is no capacity, resize, truncate or pop (compile error "has no function").
+- The ownership rules and the ModifyingIteratedCollectionException check are those of vec. getIterator() copies the items into an array first (a snapshot, O(n)) and gives an
+  arrIterator; the node pointer cursor of the spec needs pointers.
+- Not done yet: add(collection), copyFrom, views l[a..b], l!, sort by relinking nodes, the iterator with a node cursor, .sizeof.
+
+VEC ALIGNED WITH THE SPEC 0.0.13 (built 2026-10-22, compiler 0.0.14alpha)
+=======================================================================
+- Generic parent trait (spec 11.3.2): RegisterTraits resolves `trait IndexCollection<Item> : Collection<Item>` with ClassInstanceName (the copy of the parent), like a class header.
+  The prelude now has Collection<Item> { get_len, has, clear } and IndexCollection<Item> : Collection<Item> { getIterator }; vec implements has and clear as methods
+  (the call v.has(x) still uses the fast code on the live items). getIterator is not in Collection<Item> yet: its return type (Iterator) differs per collection.
+- `->` rule for existing objects now also on v[i] = x; a replaced item ends. fill(null) / fillAtCapacity(null) / resize(n, null) are allowed for objects and end the items they
+  replace (ArrayMethod fill drops the old items of an arr or a vec); a class instance there is an error. swap(i, j) and swap(position, new) of a vec use the code of the arrays.
+- ModifyingIteratedCollectionException (ID 46, not silent): vec has a private `version` that every change adds one to (add, insert, pop, remove*, clear, reserve, shrinkToFit,
+  fillAtCapacity, resize, truncate, v[i] = x, fill, reverse, sort, sortUnstable); the `for` loop over a vec remembers it and checks it at each pass (EmitForEach) and raises the exception
+  (Debug: catchable; Release: Panic -1000, the catch gets the level 3 warning). The explicit iterator (getIterator) holds a snapshot and does not check. The compile-time proof is not built.
+- Not done yet: `.sizeof`, `add(collection)`, copyFrom / views / v! on vec, `writableNext()` and `*Collection collection` (pointers), the compile-time detection of a change inside a loop.
+
+ARRAYS ALIGNED WITH THE SPEC 0.0.13 (built 2026-10-22, compiler 0.0.13alpha)
+==========================================================================
+- `uns` is a type: Normalize maps it to CodeGen.NativeUns (u64, or u32 when the target is 32 bits; Program passes the bits of the target to CodeGen.Compile). The arrays
+  still use uint64_t lengths in C, so a 32-bit target is not really supported yet. `int` and `real` are still not types (the default signed integer stays i32 although the
+  spec 1.3 says the native size).
+- Release builds (--release): CodeGen.ReleaseBuild and the C flag -DDF_RELEASE. df_raise (Runtime.cs) turns IndexOutOfRangeException into a panic (message, then Panic -1000);
+  an explicit `throw IndexOutOfRangeException` does the same; a catch for it gives a level 3 warning ("ignored in a release build"). Debug (the default) is unchanged.
+  ModifyingIteratedCollectionException (ID 46) is not built yet (vec).
+- Sized declarations of arrays: `arr<T>[n] name` / `= []` / `= [items]` / `= arr<T>[n]` are rewritten before the compilation (RewriteSizedArrays): no init or [] become arr<T>[n];
+  different sizes (constants) are a compile error. vec<T>[n] name and the others still say "not built".
+- Ownership of the items of an arr (6.1): `a[i] = x`, the literal and swap(position, new) need ->x for an object that already exists (a new object needs nothing); a replaced item
+  ends (df_drop, unless it is the same object); fill(value) with a class instance is an error, fill(null) is allowed. The code of the compiler's own preludes (lines from 900000) is
+  not checked. Arrays are still never freed and their items are not dropped when the array ends.
+- swap on an arr: swap(i, j) exchanges, swap(position, new) replaces and gives the old item. With two integer arguments the call is the exchange (ArraySwap); the spec does not
+  say how to tell swap(i, j) from swap(position, new) for an array of integers (to settle).
+- Tests: arrowned, errors/arr_*; traits.df changed (the arrays of objects get new objects or ->x).
+
 THE PREPROCESSOR AND THE OPTIONS (built 2026-10-21, compiler 0.0.12alpha, spec 19.1)
 ==================================================================================
 - Preprocessor.cs (dfparser, shared with dfcompiler through the csproj): runs before the lexer on the source text. Lines starting with ## at the first column are

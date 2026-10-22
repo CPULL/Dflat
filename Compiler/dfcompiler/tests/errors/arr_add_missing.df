@@ -1,0 +1,8 @@
+alias Root as r
+
+public class Dog(string name) {
+  public string name
+}
+
+arr<i32> a = [1]
+a.add(2)

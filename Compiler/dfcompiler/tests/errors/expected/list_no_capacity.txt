@@ -1,0 +1,1 @@
+list_no_capacity.df(8): error: list<i32> has no function 'reserve'

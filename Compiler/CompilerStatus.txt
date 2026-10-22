@@ -1,4 +1,4 @@
-Compiler version 0.0.12 alpha for version 0.0.12 of the specs 2026/10/21
+Compiler version 0.0.15 alpha for version 0.0.13 of the specs 2026/10/22
 
 Done -----------------------
 
@@ -170,12 +170,12 @@ Phase 7  Generics (spec 11.3)                                     IN PROGRESS
      DONE 2026-10-18: 'where' on class headers (tests genwhere, errors/genwhere_*), type switch value is ? { } (tests typeswitch, errors/typeswitch_*)
      DONE 2026-10-18 (C1): generic traits Container<string> (tests generictraits, errors/generictrait_*); a class implementing one generic trait twice and a
      generic parent trait give "feature not supported". C2 DONE 2026-10-18: placeholders (placeholder Item, with (Item is u32), where Source.Item : Numeric; tests placeholders, errors/placeholder_*). D DONE 2026-10-18: Box<Num>(x) picks the set member from the constructor argument (tests setconversion, errors/setconv_*). 7b is finished except the items of section 99
- 7c  vec DONE 2026-10-20 (first slice: tests vec, vecown, customcollection, errors/vec_*); list, map, hmap, set, hset TODO
+ 7c  list DONE 2026-10-22 (singly linked list: tests list, listown, errors/list_*; same approach as vec, see CompilerImplementation.txt); vec DONE 2026-10-20 (first slice: tests vec, vecown, customcollection, errors/vec_*); list, map, hmap, set, hset TODO
      vec: literals, vec<T>[n], c[i] read/write, .len, .capacity, for, add (->), insert, pop((&)x), remove, removeAll, removeAt, clear, reserve, shrinkToFit,
      fillAtCapacity, resize, truncate, swap(i, j), has, indexOf, fill, reverse, sort, sortUnstable, getIterator(); the items are owned (moved in, moved out, dropped)
      traits Iterator, IndexIterator<Item> (u64 cursor + next()), IndexCollection<Item> (get_len + getIterator); arr.getIterator(); for-in over a class that implements IndexCollection
-     NOT yet: add(collection), copyFrom, views v[a..b], v!, sort(lambda), removeAt(range), swap(position, new), fill of objects (needs cloning), sized declaration vec<T>[n] name,
-     Collection<Item> (needs a generic parent trait), (&)Item in for, the compile error for changing a vec while it is iterated, `uns` for the cursor (u64 today)
+     aligned with the spec 0.0.13 (2026-10-22): Collection<Item> as the generic parent of IndexCollection<Item>, ->, fill(null), swap, uns, ModifyingIteratedCollectionException (runtime check of the for loop), Debug / Release
+     NOT yet: add(collection), copyFrom, views v[a..b], v!, sort(lambda), removeAt(range), .sizeof, sized declaration vec<T>[n] name, (&)Item in for, writableNext / *Collection collection (pointers), the compile-time proof of a change in a loop, getIterator in Collection<Item>
 
 Decisions: operator is "fun bool ==(V o)"; only primary constructors for now; default toStr is
 "Px { a: Py{}, b: 3, c: BTree{}, ... }" (first 3 fields, one level, "..." when there are more);

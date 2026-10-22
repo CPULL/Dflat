@@ -175,6 +175,7 @@ public sealed partial class CodeGen {
         DeclareEnum(statement);
       }
     }
+    RewriteSizedArrays(program);
     RegisterGenerics(program);
     DeclareClasses(program);
     foreach (var statement in program.Children) {
@@ -1099,6 +1100,9 @@ public sealed partial class CodeGen {
         }
         if (expected != null && IsVec(expected)) {
           return VecLiteral(n, scope, expected);
+        }
+        if (expected != null && IsList(expected)) {
+          return ListLiteral(n, scope, expected);
         }
         throw Error("a list needs a declared type: arr<T> name = [...]", n);
       case "Index":

@@ -99,10 +99,15 @@ public sealed partial class CodeGen {
         continue;
       }
       var baseType = bases.Children[0];
-      if (baseType.Children.Count > 0 || baseType.Kind != "Type") {
+      string parentName = baseType.Text ?? "";
+      if (baseType.Kind == "Type" && baseType.Children.Count > 0 && genericClasses.TryGetValue(parentName, out var genericParent)
+          && genericParent is { IsTrait: true, HasPlaceholders: false }) {
+        // trait Indexed<Item> : Container<Item>: the copy of the generic parent for these arguments (spec 11.3.2)
+        parentName = ClassInstanceName(genericParent, TypeArgsOf(baseType.Children, genericParent.Params), baseType);
+      } else if (baseType.Children.Count > 0 || baseType.Kind != "Type") {
         throw NotSupported("Generic parent traits", baseType);
       }
-      trait.Super = traits.TryGetValue(baseType.Text ?? "", out var super)
+      trait.Super = traits.TryGetValue(parentName, out var super)
         ? super
         : throw Error($"unknown parent trait '{baseType.Text}'", baseType);
     }

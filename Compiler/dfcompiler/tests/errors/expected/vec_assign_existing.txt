@@ -1,0 +1,1 @@
+vec_assign_existing.df(9): error: a collection owns its items: move an existing object in with ->x, or put a new one

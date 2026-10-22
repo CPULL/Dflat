@@ -56,6 +56,9 @@ public sealed partial class CodeGen {
     if (target == "vec" && vecPrelude) {
       return VecNewWithCapacity(generic, sizeNode, scope);
     }
+    if (target == "list" && vecPrelude) {
+      throw Error("a list has no capacity: the form list<T>[n] does not apply (spec 6.3)", generic);
+    }
     if (target != "arr") {
       throw NotSupported("Collections", generic);
     }
@@ -78,7 +81,11 @@ public sealed partial class CodeGen {
     sb.Append($"({{ {CType(type)} {array} = {{ ({CType(elem)}*)df_calloc({list.Children.Count}, sizeof({CType(elem)})), {list.Children.Count} }}; ");
     for (int index = 0; index < list.Children.Count; index++) {
       var item = list.Children[index];
-      sb.Append($"{array}.p[{index}] = {Convert(ExprOf(item, scope, elem), elem, item)}; ");
+      var itemValue = ExprOf(item, scope, elem);
+      if (IsClass(elem) && !itemValue.Fresh && itemValue.Type != "null") {
+        throw Error("a collection owns its items: put a new object in the literal, or move one in with ->x", item);
+      }
+      sb.Append($"{array}.p[{index}] = {Convert(itemValue, elem, item)}; ");
     }
     sb.Append($"{array}; }})");
     return new Expr(sb.ToString(), type);
@@ -104,6 +111,10 @@ public sealed partial class CodeGen {
     if (typeNode.Kind == "Type" && typeNode.Text == "vec" && typeNode.Children.Count == 0 && vecPrelude
         && init?.Children[0].Kind == "List" && scope != null) {
       return InferVecType(init.Children[0], scope, decl);
+    }
+    if (typeNode.Kind == "Type" && typeNode.Text == "list" && typeNode.Children.Count == 0 && vecPrelude
+        && init?.Children[0].Kind == "List" && scope != null) {
+      return InferListType(init.Children[0], scope, decl);
     }
     // var x = value: the type of the value
     if (typeNode.Kind == "Type" && typeNode.Text == "var" && typeNode.Children.Count == 0 && !typeAliases.ContainsKey("var")) {
@@ -133,6 +144,9 @@ public sealed partial class CodeGen {
     if (IsVec(obj.Type)) {
       return VecIndex(obj, index, n);
     }
+    if (IsList(obj.Type)) {
+      return ListIndex(obj, index, n);
+    }
     if (!IsArr(obj.Type)) {
       throw NotSupported("Collections", n);
     }
@@ -149,6 +163,9 @@ public sealed partial class CodeGen {
     if (obj.Type == "string") {
       throw Error("writing a character by index is not decided yet (spec 4)", s);
     }
+    if (IsList(obj.Type) && target.Children[0].Kind != "GenericRef") {
+      return ListIndexAssign(s, scope, obj, target);
+    }
     bool isVec = IsVec(obj.Type);
     if (!(IsArr(obj.Type) || isVec) || target.Children[0].Kind == "GenericRef") {
       throw NotSupported("Collections", s);
@@ -160,6 +177,7 @@ public sealed partial class CodeGen {
     string slot = isVec ? $"{array}->{VecField(obj.Type, "items")}.p[{position}]" : $"{array}.p[{position}]";
     string length = isVec ? $"{array}->{VecField(obj.Type, "count")}" : $"{array}.len";
     string holder = isVec ? NullChecked(obj.Code, obj.Type) : obj.Code;
+    string bump = isVec ? $"{array}->{VecField(obj.Type, "version")} += 1; " : "";   // a vec counts its changes (6.4)
     string op = s.Text!;
     if (op == "_=") {
       throw NotSupported("Ownership", s);
@@ -169,20 +187,24 @@ public sealed partial class CodeGen {
     }
     string value;
     if (op == "=") {
-      value = Convert(ExprOf(s.Children[1], scope, elem), elem, s);
+      var assigned = ExprOf(s.Children[1], scope, elem);
+      if (IsClass(elem) && !assigned.Fresh && assigned.Type != "null" && s.Line < LibraryLine) {
+        throw Error("a collection owns its items: move an existing object in with ->x, or put a new one", s);
+      }
+      value = Convert(assigned, elem, s);
     } else {
       value = Convert(BinaryOp(op[..^1], new Expr(slot, elem), s.Children[1], scope, s), elem, s);
     }
-    if (isVec && op == "=" && IsClass(elem)) {
-      // the vector owns its items: the one that is replaced ends (unless it is the same object)
+    if (op == "=" && IsClass(elem)) {
+      // the collection owns its items: the one that is replaced ends (unless it is the same object)
       string replaced = NewTemp();
       string incoming = NewTemp();
       return $"({{ {CType(obj.Type)} {array} = {holder}; uint64_t {position} = {IndexValue(index, target)}; {CType(elem)} {incoming} = {value}; "
-        + $"if (!df_idx_ok({length}, {position}, {fn!.NameConst})) {RaiseJump} {CType(elem)} {replaced} = {slot}; {slot} = {incoming}; "
+        + $"if (!df_idx_ok({length}, {position}, {fn!.NameConst})) {RaiseJump} {CType(elem)} {replaced} = {slot}; {slot} = {incoming}; {bump}"
         + $"if ({replaced} != {incoming}) {{ df_drop((void*){replaced}); }} }})";
     }
     return $"({{ {CType(obj.Type)} {array} = {holder}; uint64_t {position} = {IndexValue(index, target)}; "
-      + $"if (!df_idx_ok({length}, {position}, {fn!.NameConst})) {RaiseJump} {slot} = {value}; }})";
+      + $"if (!df_idx_ok({length}, {position}, {fn!.NameConst})) {RaiseJump} {slot} = {value}; {bump}}})";
   }
 
   // members of an array
@@ -218,10 +240,16 @@ public sealed partial class CodeGen {
       }
       case "fill": {
         Arity(1);
+        if (IsClass(elem) && args[0].Kind != "Null") {
+          throw Error("fill would put one object in every item: a class instance is not allowed, fill(null) is", at);
+        }
         var value = Value(args[0]);
         string i = NewTemp();
-        string code = WithTemp(array, a => WithTemp(value, v =>
-          $"({{ for (uint64_t {i} = 0; {i} < {a}.len; {i}++) {{ {Elem(a, i)} = {v}; }} }})"));
+        string replacedItem = NewTemp();
+        string code = WithTemp(array, a => WithTemp(value, v => IsClass(elem)
+          // the objects the items held end (fill(null))
+          ? $"({{ for (uint64_t {i} = 0; {i} < {a}.len; {i}++) {{ {CType(elem)} {replacedItem} = {Elem(a, i)}; {Elem(a, i)} = {v}; if ({replacedItem} != {v}) {{ df_drop((void*){replacedItem}); }} }} }})"
+          : $"({{ for (uint64_t {i} = 0; {i} < {a}.len; {i}++) {{ {Elem(a, i)} = {v}; }} }})"));
         return new Expr(code, "void");
       }
       case "clear": {
@@ -269,9 +297,85 @@ public sealed partial class CodeGen {
       case "getIterator":
         Arity(0);
         return ArrayIterator(array, at);
+      case "swap":
+        return ArraySwap(array, args, scope, at);
       default:
         return null;
     }
+  }
+
+  // sequence.swap(i, j) exchanges two items; Item old = sequence.swap(position, new) replaces one and gives the old (spec 6.6).
+  // With two integer arguments the call is the exchange: for an array of integers the replacement is written with a variable of the item type
+  Expr ArraySwap(Expr array, List<Node> args, Scope scope, Node at) {
+    if (args.Count != 2 || args.Any(arg => arg.Kind == "Named")) {
+      throw Error("swap takes two positions, or a position and a new item", at);
+    }
+    string elem = ArrElem(array.Type);
+    var first = ExprOf(args[0], scope, "u64");
+    var second = ExprOf(args[1], scope);
+    bool exchange = !IsClass(elem) && args[1].Kind != "Gift" && IsInt(second.Type) && (IsInt(elem) || !Assignable(elem, second.Type));
+    string a = NewTemp();
+    string i = NewTemp();
+    if (exchange) {
+      var other = ExprOf(args[1], scope, "u64");
+      string j = NewTemp();
+      string swapped = NewTemp();
+      string code = $"({{ {CType(array.Type)} {a} = {array.Code}; uint64_t {i} = {IndexValue(first, args[0])}; uint64_t {j} = {IndexValue(other, args[1])}; "
+        + $"if (!df_idx_ok({a}.len, {i}, {fn!.NameConst})) {RaiseJump} if (!df_idx_ok({a}.len, {j}, {fn!.NameConst})) {RaiseJump} "
+        + $"{CType(elem)} {swapped} = {a}.p[{i}]; {a}.p[{i}] = {a}.p[{j}]; {a}.p[{j}] = {swapped}; }})";
+      return new Expr(code, "void");
+    }
+    var replacement = ExprOf(args[1], scope, elem);
+    if (IsClass(elem) && !replacement.Fresh && replacement.Type != "null") {
+      throw Error("a collection owns its items: move an existing object in with ->x, or put a new one", args[1]);
+    }
+    string incoming = NewTemp();
+    string old = NewTemp();
+    string replaced = $"({{ {CType(array.Type)} {a} = {array.Code}; uint64_t {i} = {IndexValue(first, args[0])}; {CType(elem)} {incoming} = {Convert(replacement, elem, args[1])}; "
+      + $"if (!df_idx_ok({a}.len, {i}, {fn!.NameConst})) {RaiseJump} {CType(elem)} {old} = {a}.p[{i}]; {a}.p[{i}] = {incoming}; {old}; }})";
+    return new Expr(replaced, elem, IsClass(elem));
+  }
+
+  // arr<T>[n] name = [] / = [items] / = arr<T>[n]: the size on the declaration (spec 6.8.1); the declaration is rewritten before the compilation
+  void RewriteSizedArrays(Node node) {
+    foreach (var child in node.Children) {
+      RewriteSizedArrays(child);
+    }
+    if (node.Kind != "Decl") {
+      return;
+    }
+    var size = node.Children.FirstOrDefault(child => child.Kind == "Size");
+    var typeNode = node.Children.FirstOrDefault(child => child.Kind == "Type");
+    if (size == null || typeNode is not { Text: "arr", Children.Count: 1 }) {
+      return;   // vec<T>[n] name and the others are not built (EmitDecl says so)
+    }
+    var init = node.Children.FirstOrDefault(child => child.Kind == "Init");
+    var sizeExpr = size.Children[0];
+    long? declared = IntLiteralValue(sizeExpr) is System.Numerics.BigInteger value ? (long)value : null;
+    Node NewArray() => Synthetic("Index", size)
+      .Add(Synthetic("GenericRef", size).Add(Synthetic("Name", size, "arr")).Add(typeNode.Children[0]))
+      .Add(sizeExpr);
+    node.Children.Remove(size);
+    if (init == null || (init.Children[0].Kind == "List" && init.Children[0].Children.Count == 0)) {
+      node.Children.Remove(init!);
+      node.Add(Synthetic("Init", size).Add(NewArray()));
+      return;
+    }
+    var written = init.Children[0];
+    if (written.Kind == "List") {
+      if (declared != null && declared != written.Children.Count) {
+        throw Error($"arr<T>[{declared}] {node.Text} has a literal of {written.Children.Count} items: the sizes must be the same", node);
+      }
+      return;
+    }
+    if (written.Kind == "Index" && written.Children[0].Kind == "GenericRef" && written.Children.Count == 2) {
+      long? other = IntLiteralValue(written.Children[1]) is System.Numerics.BigInteger otherValue ? (long)otherValue : null;
+      if (declared != null && other != null && declared != other) {
+        throw Error($"the size on the declaration ({declared}) and the size of arr<T>[{other}] are different", node);
+      }
+      return;
+    }
+    throw Error("arr<T>[n] name takes nothing, [], a literal of n items or arr<T>[n]", node);
   }
 
   // the comparer of the runtime for an item type (RuntimeSort), or null when there is none
@@ -450,9 +554,12 @@ public sealed partial class CodeGen {
     var block = s.Children.Last();
     var collection = ExprOf(source, scope);
     string elem;
-    bool overVec = IsVec(collection.Type);
+    bool overList = IsList(collection.Type);
+    bool overVec = IsVec(collection.Type) || overList;   // the list is walked through its links: its own loop below
     string? customElem = overVec ? null : CustomCollectionElem(collection.Type);
-    if (overVec) {
+    if (overList) {
+      elem = ListElem(collection.Type);
+    } else if (overVec) {
       elem = VecElem(collection.Type);
     } else if (customElem != null) {
       elem = customElem;
@@ -491,6 +598,18 @@ public sealed partial class CodeGen {
       EmitHoists(body, sb, innerPad);
     }
     sb.Append($"{innerPad}{wholeType} {whole} = {(overVec ? NullChecked(collection.Code, collection.Type) : collection.Code)};\n");
+    string versionAtStart = $"df_ver{tempCounter}";
+    string versionCheck = "";
+    if (overVec) {
+      // a vec changed while it is iterated raises ModifyingIteratedCollectionException (spec 6.4); a change is counted in its version
+      string? savedOverride = handlerOverride;
+      if (cleanup) {
+        handlerOverride = body.LoopExcLabel;
+      }
+      versionCheck = $"if ({whole}->{VecField(collection.Type, "version")} != {versionAtStart}) {{ df_raise(&df_desc_ModifyingIteratedCollectionException, {fn!.NameConst}); {RaiseJump} }} ";
+      handlerOverride = savedOverride;
+      sb.Append($"{innerPad}uint64_t {versionAtStart} = {whole}->{VecField(collection.Type, "version")};\n");
+    }
     string iteration = "";
     if (customElem != null) {
       // the iterator is asked for once; each pass calls next() and stops when isValid is false
@@ -511,6 +630,9 @@ public sealed partial class CodeGen {
     } else if (customElem != null) {
       loop = "for (;;)";
       itemCode = iteration;
+    } else if (overList) {
+      loop = $"for (uint64_t {position} = {whole}->{VecField(collection.Type, "first")}; {position} != {ListEnd}; {position} = {whole}->{VecField(collection.Type, "links")}.p[{position}])";
+      itemCode = $"{whole}->{VecField(collection.Type, "items")}.p[{position}]";
     } else if (overVec) {
       loop = $"for (uint64_t {position} = 0; {position} < {whole}->{VecField(collection.Type, "count")}; {position}++)";
       itemCode = $"{whole}->{VecField(collection.Type, "items")}.p[{position}]";
@@ -521,6 +643,9 @@ public sealed partial class CodeGen {
     sb.Append($"{innerPad}{loop} {{\n");
     if (cleanup) {
       sb.Append($"{innerPad}  {body.RanFlag} = true;\n");
+    }
+    if (versionCheck.Length > 0) {
+      sb.Append($"{innerPad}  {versionCheck}\n");
     }
     sb.Append($"{innerPad}  {CType(type)} {cname} = {Convert(new Expr(itemCode, elem), type, s)};\n");
     var before = assign.Clone();

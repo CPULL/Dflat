@@ -82,7 +82,9 @@ r.Console.log(ci.name)
 r.Console.log(s.Hello())
 
 // a mixed array of any shape
-arr<any Shape> shapes = [sq, ci, loud]
+Loud loud2 = Loud()
+loud2.side = 3.0
+arr<any Shape> shapes = [Square(), Circle(), ->loud2]   // an array owns its items: new objects, or moved in with ->
 r64 total = 0.0
 for any Shape item in shapes { total += item.Area() }
 r.Console.log(total)
@@ -104,7 +106,7 @@ r.Console.log(sq is Shape)
 r.Console.log(d is Shape)
 r.Console.log(d is Named)
 r.Console.log(n is Base)
-arr<Named> mixed = [sq, d, ci]
+arr<Named> mixed = [Square(), Derived(), Circle()]   // new objects: the variables keep theirs
 for Named item in mixed {
   if item is Shape sh {
     r.Console.log("shape " + sh.Area())

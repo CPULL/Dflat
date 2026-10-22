@@ -1,0 +1,1 @@
+list_no_pop.df(9): error: list<i32> has no function 'pop'

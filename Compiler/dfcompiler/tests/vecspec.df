@@ -1,0 +1,77 @@
+// Vectors aligned with the spec 0.0.13: Collection<Item>, a change during an iteration, fill(null), swap, ->
+alias Root as r
+
+public class Dog(string name) {
+  public string name
+}
+
+// a vec is an IndexCollection<T>, which extends Collection<T>: it can be given to a function of those types
+fun u64 sizeOf(Collection<i32> items) { items.len }
+fun bool contains(Collection<string> items, string text) { items.has(text) }
+vec<i32> numbers = [3, 1, 2]
+vec<string> words = ["a", "b"]
+r.Console.log(sizeOf(numbers))
+r.Console.log(contains(words, "b"))
+r.Console.log(contains(words, "z"))
+IndexCollection<i32> indexed = numbers
+r.Console.log(indexed.len)
+indexed.clear()
+r.Console.log(numbers.len)
+
+// changing a vec while it is iterated raises ModifyingIteratedCollectionException (a Panic in a release build)
+fun string addWhileLooping(vec<i32> source) {
+  for i32 n in source {
+    source.add(n)
+  }
+  return "no exception"
+  catch ModifyingIteratedCollectionException { return "changed while iterated" }
+}
+fun string replaceWhileLooping(vec<i32> source) {
+  for i32 n in source {
+    source[0] = 9
+  }
+  return "no exception"
+  catch ModifyingIteratedCollectionException { return "item replaced while iterated" }
+}
+fun string sortWhileLooping(vec<i32> source) {
+  for i32 n in source {
+    source.reverse()
+  }
+  return "no exception"
+  catch ModifyingIteratedCollectionException e { return "reordered: " + e.Message }
+}
+fun string readOnly(vec<i32> source) {
+  i32 total = 0
+  for i32 n in source {
+    total += n
+  }
+  return $"sum {total}"
+  catch ModifyingIteratedCollectionException { return "never" }
+}
+vec<i32> values = [1, 2, 3]
+r.Console.log(readOnly(values))
+r.Console.log(addWhileLooping(values))
+r.Console.log(replaceWhileLooping(values))
+r.Console.log(sortWhileLooping(values))
+r.Console.log(readOnly(values))
+
+// swap: two positions, or a position and a new item
+vec<string> letters = ["x", "y", "z"]
+letters.swap(0, 2)
+r.Console.log(letters)
+string was = letters.swap(1, "Y")
+r.Console.log($"{was} {letters}")
+
+// objects: ->, fill(null) and resize with null end the objects the items held
+vec<Dog> kennel = [Dog("rex"), Dog("fido")]
+Dog extra = Dog("luna")
+kennel.add(->extra)
+kennel[0] = Dog("max")
+Dog spare = Dog("spare")
+kennel[1] = ->spare
+r.Console.log($"{kennel[0].name} {kennel[1].name} {kennel[2].name}")
+kennel.fill(null)
+r.Console.log($"{kennel.len} {kennel[0] == null} {kennel[2] == null}")
+kennel.resize(5, null)
+r.Console.log(kennel.len)
+kennel.clear()

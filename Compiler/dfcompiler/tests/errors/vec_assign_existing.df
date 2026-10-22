@@ -1,0 +1,9 @@
+alias Root as r
+
+public class Dog(string name) {
+  public string name
+}
+
+vec<Dog> kennel = [Dog("rex")]
+Dog max = Dog("max")
+kennel[0] = max

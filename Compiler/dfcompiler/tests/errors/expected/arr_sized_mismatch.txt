@@ -1,0 +1,1 @@
+arr_sized_mismatch.df(7): error: the size on the declaration (100) and the size of arr<T>[120] are different

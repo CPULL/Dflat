@@ -100,6 +100,7 @@ static const df_descriptor df_desc_InvalidBufferRangeException = { 42, "InvalidB
 static const df_descriptor df_desc_GenericIOErrorException = { 43, "GenericIOErrorException", &df_desc_Exception, false };
 static const df_descriptor df_desc_FileRemovedWhileOpenException = { 44, "FileRemovedWhileOpenException", &df_desc_Exception, false };
 static const df_descriptor df_desc_StreamCloseFailureException = { 45, "StreamCloseFailureException", &df_desc_Exception, false };
+static const df_descriptor df_desc_ModifyingIteratedCollectionException = { 46, "ModifyingIteratedCollectionException", &df_desc_Exception, false };
 
 /* The exception of a function is a local of that function (df_err in the generated code) and travels back to the caller as the second
    value it returns. The runtime functions written in C cannot return it that way: they leave it here, and the code generated around
@@ -153,6 +154,14 @@ static void df_raise(const df_descriptor* descriptor, const char* function) {
     spaced[length++] = *letter;
   }
   spaced[length] = 0;
+#ifdef DF_RELEASE
+  /* in a release build an index outside a collection, or a collection changed while it is iterated, is a panic, not an exception (spec 6.1, 6.4) */
+  if (descriptor->id == 19 || descriptor->id == 46) {
+    fflush(stdout);
+    printf("%s\n", spaced);
+    df_panic(DF_PANIC_UNHANDLED);
+  }
+#endif
   df_pending = df_new_exception(descriptor, spaced, length, function);
 }
 
@@ -993,6 +1002,11 @@ struct c_arrIterator__string {
 };
 
 typedef struct {
+  bool value;
+  df_exception* err;
+} df_res0;
+
+typedef struct {
   uint64_t e0;
   bool e1;
 } df_tup0;
@@ -1000,7 +1014,7 @@ typedef struct {
 typedef struct {
   df_tup0 value;
   df_exception* err;
-} df_res0;
+} df_res1;
 
 typedef struct {
   df_string e0;
@@ -1010,16 +1024,18 @@ typedef struct {
 typedef struct {
   df_tup1 value;
   df_exception* err;
-} df_res1;
+} df_res2;
 
 static const char df_fn1[] = "u64 Evens.get_len()";
-static const char df_fn3[] = "IndexIterator__u64 Evens.getIterator()";
-static const char df_fn5[] = "(u64 value,bool isValid) EvenIterator.next()";
-static const char df_fn12[] = "(string value,bool isValid) arrIterator__string.next()";
-static const char df_fn22[] = "Evens.__init(u64)";
-static const char df_fn24[] = "EvenIterator.__init(u64)";
-static const char df_fn26[] = "arrIterator__string.__init(arr<string>)";
-static const char df_fn28[] = "main()";
+static const char df_fn3[] = "bool Evens.has(u64)";
+static const char df_fn6[] = "Evens.clear()";
+static const char df_fn8[] = "IndexIterator__u64 Evens.getIterator()";
+static const char df_fn10[] = "(u64 value,bool isValid) EvenIterator.next()";
+static const char df_fn17[] = "(string value,bool isValid) arrIterator__string.next()";
+static const char df_fn27[] = "Evens.__init(u64)";
+static const char df_fn29[] = "EvenIterator.__init(u64)";
+static const char df_fn31[] = "arrIterator__string.__init(arr<string>)";
+static const char df_fn33[] = "main()";
 
 static df_string df_arr_str_string(df_arr_string a) {
   df_string r = df_str_lit("[", 1);
@@ -1034,9 +1050,11 @@ static df_string df_arr_str_string(df_arr_string a) {
 
 
 static uint64_t f_Evens_get_len(c_Evens* self);
+static df_res0 f_Evens_has(c_Evens* self, uint64_t v_value);
+static void f_Evens_clear(c_Evens* self);
 static void* f_Evens_getIterator(c_Evens* self);
-static df_res0 f_EvenIterator_next(c_EvenIterator* self);
-static df_res1 f_arrIterator__string_next(c_arrIterator__string* self);
+static df_res1 f_EvenIterator_next(c_EvenIterator* self);
+static df_res2 f_arrIterator__string_next(c_arrIterator__string* self);
 static void f_Evens___init(c_Evens* self, uint64_t v_limit);
 static c_Evens* f_Evens(uint64_t v_limit);
 static void f_EvenIterator___init(c_EvenIterator* self, uint64_t v_limit);
@@ -1045,9 +1063,10 @@ static void f_arrIterator__string___init(c_arrIterator__string* self, df_arr_str
 static c_arrIterator__string* f_arrIterator__string(df_arr_string v_items);
 
 static const df_trait df_trait_Iterator = { 2048, "Iterator" };
+static const df_trait df_trait_Collection__u64 = { 2051, "Collection__u64" };
 static const df_trait df_trait_IndexCollection__u64 = { 2049, "IndexCollection__u64" };
 static const df_trait df_trait_IndexIterator__u64 = { 2050, "IndexIterator__u64" };
-static const df_trait df_trait_IndexIterator__string = { 2051, "IndexIterator__string" };
+static const df_trait df_trait_IndexIterator__string = { 2052, "IndexIterator__string" };
 
 
 
@@ -1065,9 +1084,10 @@ static df_string df_strp_Evens(const void* o) {
   return df_str_Evens((const c_Evens*)o);
 }
 
-static const void* const df_vt_Evens[] = { (const void*)f_Evens_get_len, (const void*)f_Evens_getIterator };
-static const void* const df_im_Evens_IndexCollection__u64[] = { (const void*)f_Evens_get_len, (const void*)f_Evens_getIterator };
-static const df_impl df_impls_Evens[] = { { &df_trait_IndexCollection__u64, df_im_Evens_IndexCollection__u64, NULL } };
+static const void* const df_vt_Evens[] = { (const void*)f_Evens_get_len, (const void*)f_Evens_has, (const void*)f_Evens_clear, (const void*)f_Evens_getIterator };
+static const void* const df_im_Evens_Collection__u64[] = { (const void*)f_Evens_get_len, (const void*)f_Evens_has, (const void*)f_Evens_clear };
+static const void* const df_im_Evens_IndexCollection__u64[] = { (const void*)f_Evens_getIterator };
+static const df_impl df_impls_Evens[] = { { &df_trait_Collection__u64, df_im_Evens_Collection__u64, NULL }, { &df_trait_IndexCollection__u64, df_im_Evens_IndexCollection__u64, NULL } };
 static void df_dropc_Evens(c_Evens* self) {
 }
 static void df_dropall_Evens(void* p) {
@@ -1075,7 +1095,7 @@ static void df_dropall_Evens(void* p) {
   ((df_object*)p)->cls = &df_dead_class;
 }
 
-static const df_class df_cls_Evens = { 256, "Evens", NULL, df_vt_Evens, df_strp_Evens, df_impls_Evens, 1, df_dropall_Evens };
+static const df_class df_cls_Evens = { 256, "Evens", NULL, df_vt_Evens, df_strp_Evens, df_impls_Evens, 2, df_dropall_Evens };
 
 static df_string df_str_EvenIterator(const c_EvenIterator* o) {
   if (o == NULL) {
@@ -1147,6 +1167,27 @@ static uint64_t f_Evens_get_len(c_Evens* self) {
   return 0;
 }
 
+static df_res0 f_Evens_has(c_Evens* self, uint64_t v_value) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
+  return (df_res0){ ((({ uint64_t t_5 = df_mod_u64(v_value, ((uint64_t)2ULL), df_fn3); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn3_fail; } t_5; }) == ((uint64_t)0ULL)) && (v_value < ((uint64_t)(self->m_limit * ((uint64_t)2ULL))))), NULL };
+  fn3_fail: return (df_res0){ false, df_err };
+  fn3_panic: df_panic_unhandled(df_err);
+  return (df_res0){ false, df_err };
+}
+
+static void f_Evens_clear(c_Evens* self) {
+  df_exception* df_err = NULL;
+  bool df_err_thrown = false;
+  (void)df_err;
+  (void)df_err_thrown;
+  return;
+  fn6_fail: df_panic_unhandled(df_err);
+  fn6_panic: df_panic_unhandled(df_err);
+}
+
 static void* f_Evens_getIterator(c_Evens* self) {
   df_exception* df_err = NULL;
   bool df_err_thrown = false;
@@ -1154,42 +1195,42 @@ static void* f_Evens_getIterator(c_Evens* self) {
   (void)df_err_thrown;
   return ((void*)(f_EvenIterator(self->m_limit)));
   return NULL;
-  fn3_fail: df_panic_unhandled(df_err);
-  fn3_panic: df_panic_unhandled(df_err);
+  fn8_fail: df_panic_unhandled(df_err);
+  fn8_panic: df_panic_unhandled(df_err);
   return NULL;
 }
 
-static df_res0 f_EvenIterator_next(c_EvenIterator* self) {
+static df_res1 f_EvenIterator_next(c_EvenIterator* self) {
   df_exception* df_err = NULL;
   bool df_err_thrown = false;
   (void)df_err;
   (void)df_err_thrown;
   if ((self->t_IndexIterator__u64_cursor >= self->m_limit)) {
-    return (df_res0){ ({ uint64_t t_8 = ((uint64_t)0ULL); bool t_9 = false; (df_tup0){ t_8, t_9 }; }), NULL };
+    return (df_res1){ ({ uint64_t t_13 = ((uint64_t)0ULL); bool t_14 = false; (df_tup0){ t_13, t_14 }; }), NULL };
   }
   uint64_t v_item = ((uint64_t)(self->t_IndexIterator__u64_cursor * ((uint64_t)2ULL)));
   self->t_IndexIterator__u64_cursor = ((uint64_t)(self->t_IndexIterator__u64_cursor + ((uint64_t)1ULL)));
-  return (df_res0){ ({ uint64_t t_10 = v_item; bool t_11 = true; (df_tup0){ t_10, t_11 }; }), NULL };
-  fn5_fail: return (df_res0){ ((df_tup0){ 0, false }), df_err };
-  fn5_panic: df_panic_unhandled(df_err);
-  return (df_res0){ ((df_tup0){ 0, false }), df_err };
+  return (df_res1){ ({ uint64_t t_15 = v_item; bool t_16 = true; (df_tup0){ t_15, t_16 }; }), NULL };
+  fn10_fail: return (df_res1){ ((df_tup0){ 0, false }), df_err };
+  fn10_panic: df_panic_unhandled(df_err);
+  return (df_res1){ ((df_tup0){ 0, false }), df_err };
 }
 
-static df_res1 f_arrIterator__string_next(c_arrIterator__string* self) {
+static df_res2 f_arrIterator__string_next(c_arrIterator__string* self) {
   df_exception* df_err = NULL;
   bool df_err_thrown = false;
   (void)df_err;
   (void)df_err_thrown;
   df_string v_none = df_str_lit("", 0);
   if ((self->t_IndexIterator__string_cursor >= ((self->m_items).len))) {
-    return (df_res1){ ({ df_string t_15 = v_none; bool t_16 = false; (df_tup1){ t_15, t_16 }; }), NULL };
+    return (df_res2){ ({ df_string t_20 = v_none; bool t_21 = false; (df_tup1){ t_20, t_21 }; }), NULL };
   }
-  df_string v_item = ({ df_arr_string t_17 = self->m_items; ({ uint64_t t_18 = ((uint64_t)(self->t_IndexIterator__string_cursor)); ({ df_string t_19 = (df_idx_ok(t_17.len, t_18, df_fn12) ? t_17.p[t_18] : df_str_lit("", 0)); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn12_fail; } t_19; }); }); });
+  df_string v_item = ({ df_arr_string t_22 = self->m_items; ({ uint64_t t_23 = ((uint64_t)(self->t_IndexIterator__string_cursor)); ({ df_string t_24 = (df_idx_ok(t_22.len, t_23, df_fn17) ? t_22.p[t_23] : df_str_lit("", 0)); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn17_fail; } t_24; }); }); });
   self->t_IndexIterator__string_cursor = ((uint64_t)(self->t_IndexIterator__string_cursor + ((uint64_t)1ULL)));
-  return (df_res1){ ({ df_string t_20 = v_item; bool t_21 = true; (df_tup1){ t_20, t_21 }; }), NULL };
-  fn12_fail: return (df_res1){ ((df_tup1){ df_str_lit("", 0), false }), df_err };
-  fn12_panic: df_panic_unhandled(df_err);
-  return (df_res1){ ((df_tup1){ df_str_lit("", 0), false }), df_err };
+  return (df_res2){ ({ df_string t_25 = v_item; bool t_26 = true; (df_tup1){ t_25, t_26 }; }), NULL };
+  fn17_fail: return (df_res2){ ((df_tup1){ df_str_lit("", 0), false }), df_err };
+  fn17_panic: df_panic_unhandled(df_err);
+  return (df_res2){ ((df_tup1){ df_str_lit("", 0), false }), df_err };
 }
 
 static void f_Evens___init(c_Evens* self, uint64_t v_limit) {
@@ -1199,8 +1240,8 @@ static void f_Evens___init(c_Evens* self, uint64_t v_limit) {
   (void)df_err_thrown;
   (self)->m_limit = v_limit;
   return;
-  fn22_fail: df_panic_unhandled(df_err);
-  fn22_panic: df_panic_unhandled(df_err);
+  fn27_fail: df_panic_unhandled(df_err);
+  fn27_panic: df_panic_unhandled(df_err);
 }
 
 static c_Evens* f_Evens(uint64_t v_limit) {
@@ -1217,8 +1258,8 @@ static void f_EvenIterator___init(c_EvenIterator* self, uint64_t v_limit) {
   (void)df_err_thrown;
   (self)->m_limit = v_limit;
   return;
-  fn24_fail: df_panic_unhandled(df_err);
-  fn24_panic: df_panic_unhandled(df_err);
+  fn29_fail: df_panic_unhandled(df_err);
+  fn29_panic: df_panic_unhandled(df_err);
 }
 
 static c_EvenIterator* f_EvenIterator(uint64_t v_limit) {
@@ -1235,8 +1276,8 @@ static void f_arrIterator__string___init(c_arrIterator__string* self, df_arr_str
   (void)df_err_thrown;
   (self)->m_items = v_items;
   return;
-  fn26_fail: df_panic_unhandled(df_err);
-  fn26_panic: df_panic_unhandled(df_err);
+  fn31_fail: df_panic_unhandled(df_err);
+  fn31_panic: df_panic_unhandled(df_err);
 }
 
 static c_arrIterator__string* f_arrIterator__string(df_arr_string v_items) {
@@ -1253,33 +1294,33 @@ int main(int argc, char** argv) {
   bool df_err_thrown = false;
   (void)df_err;
   (void)df_err_thrown;
-  df_exception* df_pend29 = NULL;
-  c_Evens* v_evens_29 = NULL;
-  v_evens_29 = f_Evens(((uint64_t)4ULL));
+  df_exception* df_pend34 = NULL;
+  c_Evens* v_evens_34 = NULL;
+  v_evens_34 = f_Evens(((uint64_t)4ULL));
   {
-    c_Evens* df_coll33 = v_evens_29;
-    void* df_iter34 = f_Evens_getIterator(((c_Evens*)({ c_Evens* t_34 = df_coll33; if (t_34 == NULL || DF_IS_DEAD(t_34)) { df_raise(&df_desc_NullPointerException, df_fn28); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f29_exc1; } } t_34; })));
+    c_Evens* df_coll38 = v_evens_34;
+    void* df_iter39 = f_Evens_getIterator(((c_Evens*)({ c_Evens* t_39 = df_coll38; if (t_39 == NULL || DF_IS_DEAD(t_39)) { df_raise(&df_desc_NullPointerException, df_fn33); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f34_exc1; } } t_39; })));
     for (;;) {
-      uint64_t v_n = ({ df_tup0 df_step37 = ({ df_res0 t_37 = ({ void* t_36 = (void*)(({ void* t_35 = df_iter34; if (t_35 == NULL || DF_IS_DEAD(t_35)) { df_raise(&df_desc_NullPointerException, df_fn28); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f29_exc1; } } t_35; })); ((df_res0(*)(void*))(df_impl_of(t_36, &df_trait_IndexIterator__u64)->methods[0]))(t_36); }); if (t_37.err) { if (t_37.err->descriptor->silent) { df_exc_release(t_37.err); t_37.err = NULL; } else { df_err = t_37.err; df_err_thrown = false; goto f29_exc1; } } t_37.value; }); if (!df_step37.e1) { break; } df_step37.e0; });
+      uint64_t v_n = ({ df_tup0 df_step42 = ({ df_res1 t_42 = ({ void* t_41 = (void*)(({ void* t_40 = df_iter39; if (t_40 == NULL || DF_IS_DEAD(t_40)) { df_raise(&df_desc_NullPointerException, df_fn33); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f34_exc1; } } t_40; })); ((df_res1(*)(void*))(df_impl_of(t_41, &df_trait_IndexIterator__u64)->methods[0]))(t_41); }); if (t_42.err) { if (t_42.err->descriptor->silent) { df_exc_release(t_42.err); t_42.err = NULL; } else { df_err = t_42.err; df_err_thrown = false; goto f34_exc1; } } t_42.value; }); if (!df_step42.e1) { break; } df_step42.e0; });
       df_console_log(df_str_from_u64((uint64_t)(v_n)));
     }
   }
-  df_arr_string v_names = ({ df_arr_string t_38 = { (df_string*)df_calloc(2, sizeof(df_string)), 2 }; t_38.p[0] = df_str_lit("a", 1); t_38.p[1] = df_str_lit("b", 1); t_38; });
+  df_arr_string v_names = ({ df_arr_string t_43 = { (df_string*)df_calloc(2, sizeof(df_string)), 2 }; t_43.p[0] = df_str_lit("a", 1); t_43.p[1] = df_str_lit("b", 1); t_43; });
   c_arrIterator__string* v_iterator = f_arrIterator__string(v_names);
-  df_tup1 v_taken = ({ df_res1 t_42 = f_arrIterator__string_next(((c_arrIterator__string*)({ c_arrIterator__string* t_41 = v_iterator; if (t_41 == NULL || DF_IS_DEAD(t_41)) { df_raise(&df_desc_NullPointerException, df_fn28); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f29_exc1; } } t_41; }))); if (t_42.err) { if (t_42.err->descriptor->silent) { df_exc_release(t_42.err); t_42.err = NULL; } else { df_err = t_42.err; df_err_thrown = false; goto f29_exc1; } } t_42.value; });
-  df_console_log(({ df_string t_43 = (v_taken).e0; df_string t_44 = df_str_from_bool((v_taken).e1); df_str_concat(df_str_concat(t_43, df_str_lit(" ", 1)), t_44); }));
+  df_tup1 v_taken = ({ df_res2 t_47 = f_arrIterator__string_next(((c_arrIterator__string*)({ c_arrIterator__string* t_46 = v_iterator; if (t_46 == NULL || DF_IS_DEAD(t_46)) { df_raise(&df_desc_NullPointerException, df_fn33); { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto f34_exc1; } } t_46; }))); if (t_47.err) { if (t_47.err->descriptor->silent) { df_exc_release(t_47.err); t_47.err = NULL; } else { df_err = t_47.err; df_err_thrown = false; goto f34_exc1; } } t_47.value; });
+  df_console_log(({ df_string t_48 = (v_taken).e0; df_string t_49 = df_str_from_bool((v_taken).e1); df_str_concat(df_str_concat(t_48, df_str_lit(" ", 1)), t_49); }));
   {
-    ({ ({ c_Evens** t_46 = &(v_evens_29); void* t_47 = (void*)*t_46; *t_46 = NULL; df_drop(t_47); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn28_panic; } });
+    ({ ({ c_Evens** t_51 = &(v_evens_34); void* t_52 = (void*)*t_51; *t_51 = NULL; df_drop(t_52); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn33_panic; } });
   }
-  goto f29_done;
-  f29_exc1: if (df_err) { df_pend29 = df_err; df_err = NULL; }
+  goto f34_done;
+  f34_exc1: if (df_err) { df_pend34 = df_err; df_err = NULL; }
   {
-    ({ ({ c_Evens** t_49 = &(v_evens_29); void* t_50 = (void*)*t_49; *t_49 = NULL; df_drop(t_50); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn28_panic; } });
+    ({ ({ c_Evens** t_54 = &(v_evens_34); void* t_55 = (void*)*t_54; *t_54 = NULL; df_drop(t_55); }); if (df_pending) { df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto fn33_panic; } });
   }
-  f29_exc0: if (df_err == NULL) { df_err = df_pend29; } df_pend29 = NULL;
-  goto fn28_panic;
-  f29_done: ;
+  f34_exc0: if (df_err == NULL) { df_err = df_pend34; } df_pend34 = NULL;
+  goto fn33_panic;
+  f34_done: ;
   return 0;
-  fn28_panic: df_panic_unhandled(df_err);
+  fn33_panic: df_panic_unhandled(df_err);
   return 0;
 }

@@ -32,7 +32,7 @@ Option names are not case sensitive. The arguments after `CL:`, file names and p
 - Root file and root namespace: which file starts the program, and the name of the root namespace (`namespace local` is built from the folder path).
 
 ## Preprocessor variables
-The variables of the preprocessor (spec 19.1) that are set by the compiler take their values from these options. `endian` comes from the cpu, `bits` from the target, and `ram` is 4gb until a custom architecture defines it (planned). The native sizes `int`, `uns` and `real` are 32, 32 and 64 bits until the options `--native-int` and `--native-real` are built. `version` is the language version (the version of the specification the compiler was built for).
+The variables of the preprocessor (spec 19.1) that are set by the compiler take their values from these options. `endian` comes from the cpu, `bits` from the target, and `ram` is 4gb until a custom architecture defines it (planned). The native sizes `int`, `uns` and `real` are the size of the cpu: 64 bits on x64 and 32 bits on x86 (`uns` has the size of `int`); the options `--native-int` and `--native-real` will force another size. `version` is the language version (the version of the specification the compiler was built for).
 
 | Variable | Option |
 |---|---|

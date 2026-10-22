@@ -18,12 +18,17 @@ public sealed partial class CodeGen {
 trait Iterator { }
 
 trait IndexIterator<Item> : Iterator {
-  u64 cursor
+  uns cursor
   fun (Item value, bool isValid) next()
 }
 
-trait IndexCollection<Item> {
-  fun u64 get_len()
+trait Collection<Item> {
+  fun uns get_len()
+  fun bool has(Item value)
+  fun clear()
+}
+
+trait IndexCollection<Item> : Collection<Item> {
   fun IndexIterator<Item> getIterator()
 }
 
@@ -56,8 +61,20 @@ public class arrIterator<T>(arr<T> items) : IndexIterator<T> {
 public class vec<T> : IndexCollection<T> {
   arr<T> items = arr<T>[0]
   u64 count = 0
+  u64 version = 0
 
-  override fun u64 get_len() { count }
+  override fun uns get_len() { count }
+
+  override fun bool has(T value) {
+    u64 i = 0
+    while i < count {
+      if items[i] == value {
+        return true
+      }
+      i += 1
+    }
+    return false
+  }
   public fun u64 get_capacity() { items.len }
 
   override fun IndexIterator<T> getIterator() {
@@ -86,6 +103,7 @@ public class vec<T> : IndexCollection<T> {
   }
 
   public fun add(->T value) {
+    version += 1
     if count == items.len {
       grow(count + 1)
     }
@@ -94,6 +112,7 @@ public class vec<T> : IndexCollection<T> {
   }
 
   public fun insert(u64 index, ->T value) {
+    version += 1
     if index > count {
       throw IndexOutOfRangeException("Index Out Of Range Exception")
     }
@@ -110,6 +129,7 @@ public class vec<T> : IndexCollection<T> {
   }
 
   public fun removeAt(u64 index) {
+    version += 1
     if index >= count {
       throw IndexOutOfRangeException("Index Out Of Range Exception")
     }
@@ -135,6 +155,7 @@ public class vec<T> : IndexCollection<T> {
   }
 
   public fun u64 removeAll(T value) {
+    version += 1
     u64 kept = 0
     u64 i = 0
     while i < count {
@@ -153,7 +174,8 @@ public class vec<T> : IndexCollection<T> {
     return removed
   }
 
-  public fun clear() {
+  override fun clear() {
+    version += 1
     u64 i = 0
     while i < count {
       T gone = ->items[i]
@@ -163,18 +185,21 @@ public class vec<T> : IndexCollection<T> {
   }
 
   public fun reserve(u64 extra) {
+    version += 1
     if count + extra > items.len {
       resizeStorage(count + extra)
     }
   }
 
   public fun shrinkToFit() {
+    version += 1
     if items.len > count {
       resizeStorage(count)
     }
   }
 
   public fun fillAtCapacity(T value) {
+    version += 1
     u64 i = 0
     while i < items.len {
       items[i] = value
@@ -184,6 +209,7 @@ public class vec<T> : IndexCollection<T> {
   }
 
   public fun resize(u64 newLength, T value) {
+    version += 1
     if newLength > items.len {
       resizeStorage(newLength)
     }
@@ -201,6 +227,7 @@ public class vec<T> : IndexCollection<T> {
   }
 
   public fun truncate(u64 length) {
+    version += 1
     if length < count {
       u64 i = length
       while i < count {
@@ -210,14 +237,273 @@ public class vec<T> : IndexCollection<T> {
       count = length
     }
   }
+}
 
-  public fun swap(u64 first, u64 second) {
-    if first >= count || second >= count {
+// list<T> (spec 6.8.3): a singly linked list. The nodes are slots of two arrays (the items and the link to the next node); a removed node goes to a free chain
+// and is reused, so no node is allocated one by one. The nodes own their items. The list keeps the count, the first and the last node.
+public class list<T> : IndexCollection<T> {
+  arr<T> items = arr<T>[0]
+  arr<u64> links = arr<u64>[0]
+  u64 first = 18446744073709551615
+  u64 last = 18446744073709551615
+  u64 freeNode = 18446744073709551615
+  u64 used = 0
+  u64 count = 0
+  u64 version = 0
+
+  override fun uns get_len() { count }
+
+  fun u64 newNode() {
+    if freeNode != 18446744073709551615 {
+      u64 reused = freeNode
+      freeNode = links[reused]
+      return reused
+    }
+    if used == items.len {
+      growSlots()
+    }
+    u64 node = used
+    used += 1
+    return node
+  }
+
+  fun growSlots() {
+    u64 capacity = items.len * 2
+    if capacity < 4 {
+      capacity = 4
+    }
+    arr<T> biggerItems = arr<T>[capacity]
+    arr<u64> biggerLinks = arr<u64>[capacity]
+    u64 i = 0
+    while i < used {
+      biggerItems[i] = ->items[i]
+      biggerLinks[i] = links[i]
+      i += 1
+    }
+    items = biggerItems
+    links = biggerLinks
+  }
+
+  fun u64 nodeAt(u64 index) {
+    u64 node = first
+    u64 i = 0
+    while i < index {
+      node = links[node]
+      i += 1
+    }
+    return node
+  }
+
+  fun releaseNode(u64 node) {
+    links[node] = freeNode
+    freeNode = node
+    count -= 1
+  }
+
+  public fun add(->T value) {
+    version += 1
+    u64 node = newNode()
+    items[node] = ->value
+    links[node] = 18446744073709551615
+    if last == 18446744073709551615 {
+      first = node
+    } else {
+      links[last] = node
+    }
+    last = node
+    count += 1
+  }
+
+  public fun insert(u64 index, ->T value) {
+    if index > count {
       throw IndexOutOfRangeException("Index Out Of Range Exception")
     }
-    T held = ->items[first]
-    items[first] = ->items[second]
-    items[second] = ->held
+    if index == count {
+      add(->value)
+      return
+    }
+    version += 1
+    u64 node = newNode()
+    items[node] = ->value
+    if index == 0 {
+      links[node] = first
+      first = node
+    } else {
+      u64 before = nodeAt(index - 1)
+      links[node] = links[before]
+      links[before] = node
+    }
+    count += 1
+  }
+
+  public fun T takeAt(u64 index) {
+    if index >= count {
+      throw IndexOutOfRangeException("Index Out Of Range Exception")
+    }
+    version += 1
+    u64 node = 0
+    if index == 0 {
+      node = first
+      first = links[node]
+      if first == 18446744073709551615 {
+        last = 18446744073709551615
+      }
+    } else {
+      u64 before = nodeAt(index - 1)
+      node = links[before]
+      links[before] = links[node]
+      if node == last {
+        last = before
+      }
+    }
+    T taken = ->items[node]
+    releaseNode(node)
+    return taken
+  }
+
+  public fun removeAt(u64 index) {
+    T gone = takeAt(index)
+  }
+
+  public fun u64 indexOf(T value) {
+    u64 node = first
+    u64 index = 0
+    while node != 18446744073709551615 {
+      if items[node] == value {
+        return index
+      }
+      node = links[node]
+      index += 1
+    }
+    return 18446744073709551615
+  }
+
+  override fun bool has(T value) {
+    return indexOf(value) != 18446744073709551615
+  }
+
+  public fun bool remove(T value) {
+    u64 index = indexOf(value)
+    if index == 18446744073709551615 {
+      return false
+    }
+    removeAt(index)
+    return true
+  }
+
+  public fun u64 removeAll(T value) {
+    version += 1
+    u64 removed = 0
+    u64 before = 18446744073709551615
+    u64 node = first
+    while node != 18446744073709551615 {
+      u64 after = links[node]
+      if items[node] == value {
+        if before == 18446744073709551615 {
+          first = after
+        } else {
+          links[before] = after
+        }
+        if node == last {
+          last = before
+        }
+        T gone = ->items[node]
+        releaseNode(node)
+        removed += 1
+      } else {
+        before = node
+      }
+      node = after
+    }
+    return removed
+  }
+
+  override fun clear() {
+    version += 1
+    u64 node = first
+    while node != 18446744073709551615 {
+      T gone = ->items[node]
+      node = links[node]
+    }
+    first = 18446744073709551615
+    last = 18446744073709551615
+    freeNode = 18446744073709551615
+    used = 0
+    count = 0
+  }
+
+  public fun fill(T value) {
+    version += 1
+    u64 node = first
+    while node != 18446744073709551615 {
+      items[node] = value
+      node = links[node]
+    }
+  }
+
+  public fun fill(u64 amount, T value) {
+    version += 1
+    u64 i = 0
+    while i < amount {
+      u64 node = newNode()
+      items[node] = value
+      links[node] = 18446744073709551615
+      if last == 18446744073709551615 {
+        first = node
+      } else {
+        links[last] = node
+      }
+      last = node
+      count += 1
+      i += 1
+    }
+  }
+
+  public fun reverse() {
+    version += 1
+    u64 previous = 18446744073709551615
+    u64 node = first
+    last = first
+    while node != 18446744073709551615 {
+      u64 after = links[node]
+      links[node] = previous
+      previous = node
+      node = after
+    }
+    first = previous
+  }
+
+  public fun exchange(u64 a, u64 b) {
+    if a >= count || b >= count {
+      throw IndexOutOfRangeException("Index Out Of Range Exception")
+    }
+    u64 nodeA = nodeAt(a)
+    u64 nodeB = nodeAt(b)
+    T held = ->items[nodeA]
+    items[nodeA] = ->items[nodeB]
+    items[nodeB] = ->held
+  }
+
+  public fun T replace(u64 position, ->T value) {
+    if position >= count {
+      throw IndexOutOfRangeException("Index Out Of Range Exception")
+    }
+    u64 node = nodeAt(position)
+    T old = ->items[node]
+    items[node] = ->value
+    return old
+  }
+
+  override fun IndexIterator<T> getIterator() {
+    arr<T> snapshot = arr<T>[count]
+    u64 node = first
+    u64 i = 0
+    while node != 18446744073709551615 {
+      snapshot[i] = items[node]
+      node = links[node]
+      i += 1
+    }
+    return arrIterator<T>(snapshot)
   }
 }
 """;
@@ -341,6 +627,11 @@ public class vec<T> : IndexCollection<T> {
   // ->v[i]: the item goes to the receiver and the slot is zeroed (spec 6.6); a basic value is copied
   Expr GiftIndex(Node gift, Node operand, Scope scope) {
     var obj = ExprOf(operand.Children[0], scope);
+    if (IsList(obj.Type)) {
+      // the item leaves the list and the node goes away (spec 6.6)
+      var removed = ObjectCall(obj, "takeAt", new List<Node> { operand.Children[1] }, scope, gift) ?? throw Error("no takeAt", gift);
+      return new Expr(removed.Code, removed.Type, IsClass(removed.Type));
+    }
     bool isVec = IsVec(obj.Type);
     if (!isVec && !IsArr(obj.Type)) {
       throw Error("only a variable, a field or an item of an array or a vector can be moved with ->", gift);
@@ -397,7 +688,7 @@ public class vec<T> : IndexCollection<T> {
     string zero = ZeroValue(elem);
     string store = Convert(new Expr(incoming, elem), target.Type, at);
     string code = $"({{ {CType(vec.Type)} {held} = {NullChecked(vec.Code, vec.Type)}; bool {ok} = false; {CType(elem)} {incoming} = {zero}; "
-      + $"if ({held}->{count} > 0) {{ {held}->{count} -= 1; {incoming} = {held}->{items}.p[{held}->{count}]; {held}->{items}.p[{held}->{count}] = {zero}; {ok} = true; }} "
+      + $"if ({held}->{count} > 0) {{ {held}->{count} -= 1; {held}->{VecField(vec.Type, "version")} += 1; {incoming} ={held}->{items}.p[{held}->{count}]; {held}->{items}.p[{held}->{count}] = {zero}; {ok} = true; }} "
       + $"{CType(target.Type)} {old} = {target.Code}; {target.Code} = {store}; "
       + (owned ? $"if ({old} != {target.Code}) {{ df_drop((void*){old}); }} " : "")
       + $"{ok}; }})";
@@ -405,5 +696,21 @@ public class vec<T> : IndexCollection<T> {
   }
 
   // members of a vec that the arrays already have: they work on the live items
-  static readonly HashSet<string> VecArrayMembers = new() { "has", "indexOf", "fill", "reverse", "sort", "sortUnstable" };
+  static readonly HashSet<string> VecArrayMembers = new() { "has", "indexOf", "fill", "reverse", "sort", "sortUnstable", "swap" };
+
+  // the ones that change the items count as a change of the vec (a loop over it raises ModifyingIteratedCollectionException)
+  static readonly HashSet<string> VecChangingMembers = new() { "fill", "reverse", "sort", "sortUnstable" };
+
+  Expr? VecArrayMember(Expr vec, string name, List<Node> args, Scope scope, Node at) {
+    if (!VecChangingMembers.Contains(name)) {
+      return ArrayMethod(VecView(vec), name, args, scope, at);
+    }
+    string held = NewTemp();
+    var inner = ArrayMethod(VecView(new Expr(held, vec.Type)), name, args, scope, at);
+    if (inner == null) {
+      return null;
+    }
+    string code = $"({{ {CType(vec.Type)} {held} = {NullChecked(vec.Code, vec.Type)}; {inner.Value.Code}; {held}->{VecField(vec.Type, "version")} += 1; }})";
+    return new Expr(code, "void");
+  }
 }

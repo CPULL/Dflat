@@ -1,0 +1,8 @@
+alias Root as r
+
+public class Dog(string name) {
+  public string name
+}
+
+list<i32> numbers = []
+numbers.reserve(10)

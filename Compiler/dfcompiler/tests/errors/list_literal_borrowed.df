@@ -1,0 +1,8 @@
+alias Root as r
+
+public class Dog(string name) {
+  public string name
+}
+
+Dog rex = Dog("rex")
+list<Dog> kennel = [rex]

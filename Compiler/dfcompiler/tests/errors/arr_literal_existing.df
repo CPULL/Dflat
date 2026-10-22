@@ -1,0 +1,8 @@
+alias Root as r
+
+public class Dog(string name) {
+  public string name
+}
+
+Dog rex = Dog("rex")
+arr<Dog> kennel = [rex]

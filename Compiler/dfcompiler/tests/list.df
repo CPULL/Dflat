@@ -1,0 +1,129 @@
+// Lists list<T> (spec 6.8.3): a singly linked list
+alias Root as r
+
+public class Dog(string name) {
+  public string name
+}
+
+list<i32> numbers = [1, 2, 3]
+numbers.add(4)
+numbers.insert(0, 9)
+numbers.insert(2, 7)
+numbers.insert(numbers.len, 8)
+r.Console.log(numbers)
+r.Console.log(numbers.len)
+r.Console.log(numbers[2])
+numbers[2] = 50
+numbers[0] += 1
+r.Console.log(numbers)
+
+// a bare list takes its type from the literal
+list words = ["pear", "apple", "fig"]
+list<string> empty = []
+r.Console.log(words)
+r.Console.log($"{empty.len} {empty}")
+
+// searching, ordering and changing
+r.Console.log(words.has("fig"))
+r.Console.log(words.has("kiwi"))
+r.Console.log(words.indexOf("apple"))
+words.sort()
+r.Console.log(words)
+words.sort(SortDirection.DESC)
+r.Console.log(words)
+words.reverse()
+r.Console.log(words)
+r.Console.log(words[0])
+
+// removing
+list<i32> work = [5, 6, 5, 7, 5, 8]
+r.Console.log(work.remove(7))
+r.Console.log(work.remove(99))
+r.Console.log(work.removeAll(5))
+r.Console.log(work)
+work.removeAt(0)
+r.Console.log(work)
+work.removeAt(0)
+r.Console.log($"{work.len} {work}")
+work.add(1)
+work.add(2)
+work.removeAt(1)
+work.add(3)
+r.Console.log(work)
+work.clear()
+r.Console.log($"{work.len} {work}")
+
+// fill: every item, or count new items
+list<i32> filled = [1, 2, 3]
+filled.fill(0)
+filled.fill(2, 7)
+r.Console.log(filled)
+
+// swap: two positions, or a position and a new item
+list<string> letters = ["x", "y", "z"]
+letters.swap(0, 2)
+r.Console.log(letters)
+string was = letters.swap(1, "Y")
+r.Console.log($"{was} {letters}")
+
+// ->list[i] takes the item out of the list
+list<string> queue = ["a", "b", "c"]
+string firstOut = ->queue[0]
+string lastOut = ->queue[1]
+r.Console.log($"{firstOut} {lastOut} {queue}")
+
+// objects
+list<Dog> kennel = [Dog("rex"), Dog("fido")]
+kennel.add(Dog("luna"))
+r.Console.log(kennel[2].name)
+for Dog dog in kennel {
+  r.Console.print(dog.name + ";")
+}
+r.Console.log("")
+r.Console.log(kennel[1].name)
+
+// the iterator by hand
+var iterator = numbers.getIterator()
+var first = iterator.next()
+var second = iterator.next()
+r.Console.log($"{first.value} {first.isValid} {second.value} {second.isValid}")
+
+// an index outside the list
+fun i32 outside(list<i32> source, u64 index) {
+  return source[index]
+  catch IndexOutOfRangeException { return -1 }
+}
+r.Console.log(outside(numbers, 1))
+r.Console.log(outside(numbers, 40))
+fun bool badRemove(list<i32> source) {
+  source.removeAt(10)
+  return true
+  catch IndexOutOfRangeException { return false }
+}
+r.Console.log(badRemove(numbers))
+
+// a list that changes while it is iterated
+fun string addWhileLooping(list<i32> source) {
+  for i32 n in source {
+    source.add(n)
+  }
+  return "no exception"
+  catch ModifyingIteratedCollectionException { return "changed while iterated" }
+}
+r.Console.log(addWhileLooping(numbers))
+
+// a generic function over a list, and a list of lists
+fun T total<T : Numeric>(list<T> items) {
+  T sum = 0
+  for T item in items {
+    sum += item
+  }
+  return sum
+}
+list<i32> ints = [1, 2, 3]
+r.Console.log(total(ints))
+list<list<i32>> grid = []
+grid.add([1, 2])
+grid.add([3])
+r.Console.log(grid[0][1])
+r.Console.log(grid.len)

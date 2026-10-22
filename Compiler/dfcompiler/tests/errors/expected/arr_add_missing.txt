@@ -1,0 +1,1 @@
+arr_add_missing.df(8): error: arr<i32> has no function 'add'

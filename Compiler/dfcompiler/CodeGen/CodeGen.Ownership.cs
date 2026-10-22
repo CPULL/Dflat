@@ -193,8 +193,8 @@ public sealed partial class CodeGen {
     if (typeNode == null) {
       return null;
     }
-    if (typeNode is { Kind: "Type", Text: "vec", Children.Count: 0 } && vecPrelude) {
-      return "vec";   // vec values = [1, 2, 3]: the type comes from the literal
+    if (typeNode is { Kind: "Type", Text: "vec" or "list", Children.Count: 0 } && vecPrelude) {
+      return typeNode.Text;   // vec values = [1, 2, 3]: the type comes from the literal
     }
     if (typeNode is { Kind: "Type", Text: "var" or "arr" }) {
       var init = decl.Children.FirstOrDefault(child => child.Kind == "Init");
@@ -425,6 +425,9 @@ public sealed partial class CodeGen {
     }
     if (IsVec(cls.Name)) {
       EmitVecDropGlue(sb, cls);
+    }
+    if (IsList(cls.Name)) {
+      EmitListDropGlue(sb, cls);
     }
     sb.Append("}\n");
     sb.Append($"static void df_dropall_{cls.Name}(void* p) {{\n");

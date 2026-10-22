@@ -1,0 +1,8 @@
+alias Root as r
+
+public class Dog(string name) {
+  public string name
+}
+
+vec<Dog> kennel = []
+kennel.resize(3, Dog("rex"))

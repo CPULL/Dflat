@@ -125,7 +125,8 @@ public sealed partial class CodeGen {
     ["InvalidBufferRangeException"] = 42,
     ["GenericIOErrorException"] = 43,
     ["FileRemovedWhileOpenException"] = 44,
-    ["StreamCloseFailureException"] = 45
+    ["StreamCloseFailureException"] = 45,
+    ["ModifyingIteratedCollectionException"] = 46
   };
 
   readonly Stack<Frame> frames = new();
@@ -443,6 +444,9 @@ public sealed partial class CodeGen {
   void EmitCatch(Frame frame, int ordinal, Node catchNode, StringBuilder sb, int indent) {
     string pad = Pad(indent);
     var (id, variable) = CatchTarget(catchNode);
+    if (ReleaseBuild && id is 19 or 46) {
+      Warn($"a catch for {ExceptionName(id!.Value)} is ignored in a release build: the program ends", catchNode, 3);
+    }
     if (catchNode.Text == null && !catchNode.Children.Any(child => child.Kind == "Type")) {
       Warn("'catch { }' catches everything, like 'catch all { }'", catchNode, 2);
     }
@@ -742,6 +746,11 @@ public sealed partial class CodeGen {
     }
     if (args.Count > 1) {
       throw Error($"{ExceptionName(id)} takes only an optional message", s);
+    }
+    if (ReleaseBuild && id is 19 or 46) {
+      // an index outside a collection, and a collection changed while it is iterated, are panics in a release build (spec 6.1, 6.4)
+      sb.Append($"{pad}df_raise(&df_desc_{ExceptionName(id)}, {fn!.NameConst});\n");
+      return true;
     }
     string message = args.Count == 1 ? Convert(ExprOf(args[0], scope, "string"), "string", s) : "df_str_lit(\"\", 0)";
     string temp = NewTemp();

@@ -1,0 +1,1 @@
+arr_sized_value.df(7): error: arr<T>[n] name takes nothing, [], a literal of n items or arr<T>[n]

@@ -59,10 +59,16 @@ public sealed partial class CodeGen {
 
   bool IsKnownType(string t) {
     return SignedTypes.Contains(t) || UnsignedTypes.Contains(t) || RealTypes.Contains(t)
-      || t is "bool" or "char" or "string" or "byte" or "date" or "time" or "clock" or "lapse" or "Exception" || IsEnum(t) || IsClass(t);
+      || t is "bool" or "char" or "string" or "byte" or "uns" or "date" or "time" or "clock" or "lapse" or "Exception" || IsEnum(t) || IsClass(t);
   }
 
-  static string Normalize(string t) => t == "byte" ? "u8" : t;
+  // the native unsigned type (spec 3.1): the size of the cpu, set for each compilation (u64 on x64, u32 on x86)
+  public static string NativeUns { get; set; } = "u64";
+
+  // true in a release build: an index outside a collection is a panic (spec 6.1)
+  public static bool ReleaseBuild { get; set; }
+
+  static string Normalize(string t) => t == "byte" ? "u8" : t == "uns" ? NativeUns : t;
 
   static string Family(string t) {
     if (SignedTypes.Contains(t)) {
@@ -598,6 +604,9 @@ public sealed partial class CodeGen {
     }
     if (IsVec(e.Type)) {
       return $"{VecStrFunction(e.Type, at)}({e.Code})";   // [a, b, c], like an array
+    }
+    if (IsList(e.Type)) {
+      return $"{ListStrFunction(e.Type, at)}({e.Code})";
     }
     if (IsClass(e.Type)) {
       return $"df_str_obj({e.Code})";

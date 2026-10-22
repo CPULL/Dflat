@@ -1,0 +1,8 @@
+alias Root as r
+
+public class Dog(string name) {
+  public string name
+}
+
+arr<Dog> kennel = arr<Dog>[2]
+kennel.fill(Dog("rex"))

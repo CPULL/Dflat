@@ -1,7 +1,7 @@
 # Dflat Language
 A new language D♭ that is the same as C# but easier to write and faster to execute
 
-**Version** 0.0.12  2026/10/21 by CPU
+**Version** 0.0.13  2026/10/22 by CPU
 
 ## D♭ — Dflat Language Specification (draft)
 
@@ -437,25 +437,27 @@ A collection holds several items in one object. Dflat has seven: `arr`, `vec`, `
 
 | Type | Description |
 |---|---|
-| `arr<T>` | array: fixed size set at initialization (compile-time or runtime), contiguous; cannot grow or shrink (6.7) |
-| `vec<T>` | vector: contiguous and growable (Rust `Vec` rules) (6.8) |
-| `list<T>` | growable, counted B-tree, O(log n) insert/remove (6.9) |
-| `map<K, V>` | sorted map (B-tree); alias `bmap` (6.10) |
-| `hmap<K, V>` | hash map (6.10) |
-| `set<T>` | sorted set (B-tree); alias `bset` (6.11) |
-| `hset<T>` | hash set (6.11) |
+| `arr<T>` | array: fixed size set at initialization (compile-time or runtime), contiguous; cannot grow or shrink (6.8.1) |
+| `vec<T>` | vector: contiguous and growable (Rust `Vec` rules) (6.8.2) |
+| `list<T>` | singly linked list, growable (6.8.3) |
+| `map<K, V>` | sorted map (B-tree); alias `bmap` (6.8.4) |
+| `hmap<K, V>` | hash map (6.8.5) |
+| `set<T>` | sorted set (B-tree); alias `bset` (6.8.6) |
+| `hset<T>` | hash set (6.8.7) |
 
 - Collections are objects: they are nullable by default (`type?` is a compile error, 7.1) and they own their elements (12).
 - `==` between two collections compares identity only, never the content. `c!` makes a copy (`.clone()`, 12).
-- Lengths and default indexes are `u64` everywhere; `.len` is the number of items.
+- Lengths and default indexes are `uns` everywhere; `.len` is the number of items.
+- Every collection implements the trait `Collection<Item>` and one of its sub-traits `IndexCollection`, `MapCollection` or `SetCollection` (6.7).
 - By access: `arr`, `vec`, `list` are indexed by position (0 to `.len` - 1); `map` and `hmap` hold key/value pairs; `set` and `hset` hold each value once.
-- Hash against B-tree: `hmap` and `hset` are hash tables (fast lookup, no order); `map` and `set` are B-trees (kept sorted, O(log n)); `list` is a counted B-tree used by position. The items of a `list` need no key rules.
+- Hash against B-tree: `hmap` and `hset` are hash tables (fast lookup, no order); `map` and `set` are B-trees (kept sorted, O(log n)); `list` is a singly linked list used by position. The items of a `list` need no key rules.
 - Type, size and capacity: the size of an `arr` and the capacity of a `vec` are given only at initialization and are not part of the type.
 - `arr<T>` is a primitive: a block of memory for the items, with no code of its own and no limit on the types. `vec`, `list`, `map`, `hmap`, `set` and `hset` are ordinary generic classes (11.3) with their own copy limit (11.3.12).
-- Index checks happen at compile time when possible, otherwise at runtime: an index outside the collection is a compile error when it can be detected at compile time. At runtime the check stays in every build (like Go, C#, Java and Rust): in Debug builds it raises `IndexOutOfRangeException` (not silent, catchable); in Release builds it is a `Panic`, and a `catch` for `IndexOutOfRangeException` is ignored with a level 3 warning.
-- The seven collections are written by the compiler as generated C code (speed first). Users can write their own collection classes in Dflat; the traits that impose the signatures are in 6.12.
+- Index checks happen at compile time when possible, otherwise at runtime: an index outside the collection is a compile error when it can be detected at compile time. At runtime the check stays in every build (like Go, C#, Java and Rust): in Debug builds it raises `IndexOutOfRangeException` (not silent, catchable); in Release builds it is a `Panic`, and a `catch` for `IndexOutOfRangeException` is ignored with a level 3 warning. The rule is the same for `arr`, `vec` and `list`, and the check compares the index with `.len` before any work, so a failing `c[i]` costs O(1) in the three of them.
+- The seven collections are written by the compiler as generated C code (speed first). Users can write their own collection classes in Dflat; the traits that impose the signatures are in 6.7 and the custom collections in 6.9.
 - A collection owns its items (Rust model, 12): the drop code of the items is generated per item type. A result that is not assigned is destroyed at the end of the statement, `c[k] = v` drops the previous item, `->c[k]` moves the item out (6.6) and a `for` loop only borrows (6.4).
-- The members are listed in 6.6; each collection has its own section for the details.
+- Moving an object into a collection that owns its items needs `->` when the object already exists (`list[3] = ->task`, `list.add(->task)`, `insert`, `swap`): the plain form with an existing object is a compile error, so the passage of the ownership is always visible. An object created in the same statement (`list.add(Task("a"))`) needs no marker. Basic values are copied and need no marker (12.4).
+- The members are listed in 6.6; each collection has its own section for the details (6.8).
 
 ## 6.2 Keys
 
@@ -512,8 +514,8 @@ for i32 index = 1..=10 { }                       // a range is a virtual collect
 - The loop variable borrows the item; the collection keeps the ownership (there is no consuming loop). `for Item x in c` gives a read-only `x`; `for (&)Item x in c` gives a read/write `x` (`x.done = true` changes the object in the collection). The marker is written like on a parameter: `(&)Type variable` (13.1).
 - The items of a `set` / `hset` and the keys of a `map` / `hmap` are always read-only: `(&)` is a compile error on them.
 - On a basic value type without `(&)`, `x` is a copy: assigning to it (`x += 1`) changes only the copy and gives a level 3 warning. With `(&)` the item in the collection is changed in place.
-- A collection cannot be changed while it is iterated. When the compiler can prove that the loop body changes the collection, it is a compile error (Rust style, no cost at runtime); when it cannot prove it, the change is detected at runtime (C# style). What the runtime check raises is open (99).
-- Iterating custom collections: 6.12. For the collections of the compiler the `for` is emitted as a direct loop in C.
+- A collection cannot be changed while it is iterated. When the compiler can prove that the loop body changes the collection, it is a compile error (Rust style, no cost at runtime); when it cannot prove it, the change is detected at runtime (C# style). The runtime check raises `ModifyingIteratedCollectionException` (15.3, not silent): in Debug builds it is catchable; in Release builds it is a `Panic`, and a `catch` for it is ignored with a level 3 warning (the same rule as `IndexOutOfRangeException`, 6.1).
+- Iterating custom collections: 6.9. For the collections of the compiler the `for` is emitted as a direct loop in C.
 
 ## 6.5 Views
 
@@ -556,13 +558,13 @@ arr<i32> middle = scores[2..5]!       // copy
 | `swap(key1, key2)` | – | – | – | ✓ | ✓ | – | – |
 | `->c[k]` moves the item out | zeroed | zeroed | removed | removed | removed | removed | removed |
 | `clear()` | defaults | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `fill(value)` | ✓ | ✓ | – | – | – | – | – |
+| `fill(value)` | ✓ | ✓ | ✓, and `fill(count, value)` | – | – | – | – |
 | `fillAtCapacity(value)`, `resize`, `truncate` | – | ✓ | – | – | – | – | – |
 | `sort`, `sortUnstable`, `reverse` | ✓ | ✓ | ✓ | – | – | – | – |
 | `copyFrom` | ✓ | ✓ | ✓ | – | – | – | – |
 | set operations and tests | – | – | – | – | – | ✓ | ✓ |
 
-A member marked `–` is a compile error on that collection (for example `hasKey` on a `vec`).
+A member marked `–` is a compile error on that collection (for example `hasKey` on a `vec`). The trait that provides each member is in 6.7.
 
 - `.len`: count of items. `.sizeof`: bytes to store the object itself (for all types: to be discussed).
 - `.capacity`: items that fit without growing. `reserve(n)` makes room for at least `n` more items; `shrinkToFit()` lowers the capacity to the length.
@@ -585,7 +587,9 @@ A member marked `–` is a compile error on that collection (for example `hasKey
   - `map.swap(key1, key2)` exchanges the two values: if both keys exist the values are exchanged; if only one exists its value moves to the missing key and the original key is removed; if both are missing nothing happens.
 - `->c[k]` moves the item out of the collection (ownership passes to the receiver; a basic value type is copied). The slot is zeroed (null for objects, `0` for numbers) in `arr` and `vec`, and the item is removed in `list`, `map`, `hmap`, `set` and `hset`.
 - `clear()`: removes all items; on an `arr` it sets every item to the default value.
-- `fill(value)`: sets every item up to the current `.len`. `fillAtCapacity(value)` (`vec`): fills the whole capacity and sets `.len` to the capacity.
+- `fill(value)`: sets every item up to the current `.len` (the whole array for `arr`; on an empty `list` it does nothing). `fillAtCapacity(value)` (`vec`): fills the whole capacity and sets `.len` to the capacity.
+- The value of `fill` can be any value: basic values, strings (duplicated, they are values), dates, times and every other type that is not a class. `null` is allowed: every item becomes null and the objects they held are no longer owned by the collection (they end, running their `atEnd` if they have one). A class instance is a compile error (the items would share one object).
+- `list` also has `fill(count, value)`: it adds `count` items with that value, under the same rules (`myList.fill(256, 'c')`).
 - `resize(newLen, value)`: sets `.len`; new items get `value`, extra items are cut. `truncate(len)`: cuts the `vec` to `len` items (no effect if shorter), the capacity is unchanged.
 - Sorting: `sort(SortDirection.ASC)` sorts in place with the default comparer (the `.order` of the items); `sort()` is ascending. `sort(lambda)` uses a temporary custom sorter. `SortDirection` has the entries `ASC` and `DESC`. The lambda returns a bool (true is -1, "first goes before second"; false is 1) or a number (negative, zero, positive). `sort` is stable; `sortUnstable` is not (it needs no extra memory). `reverse()` flips the current order in place.
 - `copyFrom(dstIndex, srcCollection, srcIndex, count)` and `copyFrom(dstIndex, srcCollection, range)`: copy items from another collection into this one; object items are cloned. A range outside either collection raises `IndexOutOfRangeException`, or is a compile error when it can be detected at compile time. Using the same collection as source and destination is a compile error when detectable, otherwise a non-silent `ModifyingProtectedSourceException` is raised.
@@ -600,7 +604,50 @@ names.sort(SortDirection.DESC)
 names.sort((first, second) { first.len < second.len })
 ```
 
-## 6.7 Array `arr`
+## 6.7 Collection traits
+
+Every collection implements the trait `Collection` and one of its three sub-traits. The traits impose the signatures of the members that every collection must have, so the compiler can map `.len`, `for in`, `c[k]` and the literals to them (6.9 shows how a custom collection uses them).
+
+| Trait | Implemented by | Items |
+|---|---|---|
+| `Collection<Item>` | all seven | |
+| `IndexCollection<Item>` : `Collection<Item>` | `arr`, `vec`, `list` | accessed by position, 0 to `.len` - 1 |
+| `MapCollection<Key, Value>` : `Collection<Value>` | `map`, `hmap` | key/value pairs |
+| `SetCollection<Item>` : `Collection<Item>` | `set`, `hset` | each value held once |
+
+- Rule: whatever is shared by the collections stays in the trait (in `Collection` when all seven have it, like `.len`); whatever is specific to one collection is defined by that collection class. Every collection is in a trait.
+- `arr` is a primitive: the traits do not really exist for it, but its properties and members are accessible in the same way.
+- `Collection<Item>` has: the read-only `len` property (the number of items, `uns`), `.sizeof`, `has(v)`, `->c[k]`, `clear()` and `fun Iterator getIterator()`. The meaning of each member is in 6.6.
+- `Item` is the type of the items. A map passes its `Value` (`has(v)` on a map searches the values); the key type is given by `MapCollection<Key, Value>`. `->c[k]` is a requirement of `Collection<Item>` whose key is given by each sub-trait: a position in `IndexCollection`, the key in `MapCollection`, the item in `SetCollection`.
+- The sub-traits extend `Collection<Item>` with a generic parent trait (11.3.2): a class that implements `IndexCollection<T>` implements `Collection<T>` too.
+- Iteration is done by an iterator: an object that implements the trait `Iterator` and holds the cursor and a read-only pointer to its collection (`*Collection collection`, 12.1) to check the end. `next()` returns a tuple whose last item is the bool `isValid`; `writableNext()` returns the same tuple with the item as a writable borrow `(&)` (the one `for (&)` uses). When `isValid` is `false` the other items of the tuple are not valid (the iteration is over), so null values and items are not a problem for the iteration.
+- Only the iterator of the index collections is defined in this version; the iterators of maps and sets, and their sub-traits, come later.
+- The collections of the compiler do not build an iterator object: the `for` is emitted as a direct loop in C (6.4).
+
+### 6.7.1 IndexCollection
+
+- Implemented by `arr`, `vec` and `list`: the items are accessed by position, `c[i]`, from 0 to `.len` - 1.
+- Members: `c[i]` read, `c[i] = v`, `c[a..b]` view, `indexOf`, `swap(position, new)`, `swap(i, j)`, `sort`, `sortUnstable`, `reverse`, `copyFrom`, `fill(value)`. `vec` and `list` also have `add(v)`, `add(collection)`, `insert`, `remove`, `removeAll` and `removeAt`; `arr` does not provide them (compile error).
+- `list` adds the overload `fill(count, value)` (6.6).
+- Iterator: `IndexIterator`, with `uns cursor` for `arr` and `vec` and a pointer to the node for `list`. `next()` returns `(Item value, bool isValid)` and `writableNext()` returns `((&)Item value, bool isValid)`.
+
+### 6.7.2 MapCollection
+
+- Implemented by `map` and `hmap`: key/value pairs. A null key is not allowed (6.2). The keys are always read-only in a loop (6.4).
+- Members: `.keys`, `.values`, `c[k]` read, `c[k] = v` (replaces or adds), `add(k, v)`, `add(map)`, `hasKey`, `keyOf`, `tryGet`, `remove(v)`, `removeAll(v)`, `removeAt(k)`, `swap(key, new)`, `swap(key1, key2)`.
+- Iterator (not yet defined, first idea): `next()` returns `(Key key, Value value, bool isValid)`. The sub-traits and the cursor types of the tree `map` and of `hmap` are defined later.
+
+### 6.7.3 SetCollection
+
+- Implemented by `set` and `hset`: each value is held once. A null item is not allowed (6.2). The items are always read-only in a loop (6.4).
+- The sets are defined later: their members, the set operations and `->c[k]` on a set (the key is the item, probably valid).
+- Iterator (not yet defined): the shape of `next()` for sets is open, and so are the cursor types of the tree `set` and of `hset`.
+
+## 6.8 Default collections
+
+The seven collections generated by the compiler as C code (6.1). The table of the members is in 6.6; each type has its own section with the details.
+
+### 6.8.1 Array `arr`
 
 ```
 var buffer = arr<i32>[100]              // 100 elements, not initialized
@@ -615,9 +662,11 @@ flat[row * width + column] = 7          // a matrix on a flat array
 - Arrays are not initialized automatically: `fill(value)` sets every element. Reading an element before it is filled or assigned gives a level 1 warning. Arrays of objects start as null.
 - No built-in multi-dimensional arrays: use an `arr` of `arr`, or a flat `arr` indexed by `row * width + column`.
 - Default iterator: index 0 up to `.len` - 1.
-- Members: `.len`, `c[k]`, `c[k] = v` (replace only), views, `has`, `indexOf`, `clear`, `fill`, `sort`, `sortUnstable`, `reverse`, `copyFrom`. No `add`, `insert`, `remove` or `pop`.
+- Trait: `IndexCollection` (6.7.1). `arr` is a primitive, so the trait does not really exist for it, but the properties and members of `Collection` and `IndexCollection` are accessible in the same way.
+- Differences from the trait: `c[k] = v` replaces only; `clear()` sets every item to the default value; `fill(value)` fills the whole array. `add`, `add(collection)`, `insert`, `remove`, `removeAll`, `removeAt` and `pop` are not available (compile error).
+- Default iterator: `IndexIterator` with `uns cursor`.
 
-## 6.8 Vectors `vec`
+### 6.8.2 Vectors `vec`
 
 ```
 vec<i32> numbers = [1, 2, 3]
@@ -629,32 +678,63 @@ bool isValid = numbers.pop((&)last)     // false (and last = 0) when the vec is 
 ```
 
 - Contiguous and growable (Rust `Vec` rules). `vec<T>` is empty; `vec<T>[n]` is empty with capacity `n`.
-- Default iterator: index 0 up to `.len` - 1.
-- Members: everything in the `vec` column of 6.6: `add`, `add(collection)`, `insert`, `pop`, `remove`, `removeAll`, `removeAt`, `clear`, `fill`, `fillAtCapacity`, `resize`, `truncate`, `.capacity`, `reserve`, `shrinkToFit`, `has`, `indexOf`, `sort`, `sortUnstable`, `reverse`, `copyFrom`, views.
+- Trait: `IndexCollection` (6.7.1). It has all the members of `Collection` and `IndexCollection`.
+- Specific to `vec`: `pop`, `fillAtCapacity`, `resize`, `truncate`, `.capacity`, `reserve`, `shrinkToFit` and the `[n]` capacity form.
+- Default iterator: `IndexIterator` with `uns cursor`, index 0 up to `.len` - 1.
 
-## 6.9 Lists `list`
+### 6.8.3 Lists `list`
 
-- Growable, counted B-tree used by position: O(log n) insert and remove. It has no capacity: `.capacity`, `reserve`, `shrinkToFit`, `fillAtCapacity` and the `[n]` form do not apply.
-- Default iterator: position 0 up to `.len` - 1.
-- Members: the `list` column of 6.6: `add`, `add(collection)`, `insert`, `remove`, `removeAll`, `removeAt`, `clear`, `has`, `indexOf`, `sort`, `sortUnstable`, `reverse`, `copyFrom`, views. `fill`, `resize`, `truncate` and `pop` are not available.
+- A singly linked list: the list keeps the number of items, the first node and the last node, and each node holds an item and points to the next node. There are no double links. The list owns its items (6.1): the nodes own the objects they hold.
+- Trait: `IndexCollection` (6.7.1). It has all the members of `Collection` and `IndexCollection`.
+- Specific to `list`: `fill(count, value)` (6.6). `fill(value)` of the trait sets every existing item.
+- It has no capacity: `.capacity`, `reserve`, `shrinkToFit`, `fillAtCapacity` and the `[n]` form do not apply. `resize`, `truncate` and `pop` are not available.
+- Default iterator: `IndexIterator` from the first node to the last; the cursor is a pointer to the node, one step is O(1).
+- Cost of the members:
 
-## 6.10 Maps `map`, `bmap`, `hmap`
+| Member | Cost | Note |
+|---|---|---|
+| `.len` | O(1) | stored count |
+| `c[i]`, `c[i] = v` | O(n) | walk to the position |
+| `add(v)` | O(1) | uses the last node |
+| `add(collection)` | O(m) | m = items added |
+| `insert(index, v)` | O(1) at 0 and at `.len`, otherwise O(n) | |
+| `removeAt(index)`, `->c[i]` | O(1) at 0, otherwise O(n) | removing the last node needs the previous one |
+| `remove(v)`, `removeAll(v)`, `has(v)`, `indexOf(v)` | O(n) | |
+| `swap(position, new)`, `swap(i, j)` | O(n) | walk to the positions |
+| `clear()` | O(n) | drops every item |
+| `sort`, `sortUnstable` | O(n log n) | merge sort by relinking the nodes, no item copies |
+| `reverse()` | O(n) | relinks the nodes |
+| `copyFrom` | O(n + m) | |
+| `c[a..b]` view | O(a) to reach the start | read-only, then O(1) per step |
+
+### 6.8.4 Maps `map` (`bmap`)
 
 ```
 map ages = { one: 1, two: 2 }
-hmap<string, i32> scores = {}
 bool isNew = ages.add("three", 3)       // false if the value of an existing key was replaced
 ages["four"] = 4                        // adds the key and the value
 i32 age = ages["one"]
 ```
 
-- `map` (alias `bmap`) is sorted by key (B-tree); `hmap` is a hash map. Key rules: 6.2.
-- Default iterator: (key, value) tuples, sorted by key for `map`, unspecified order for `hmap`. `.keys` iterates the keys and `.values` the values.
-- `c[k]` read, `c[k] = v` (replaces or adds), `add(k, v)`, `add(map)` (merge, new value wins), `hasKey`, `has(v)`, `keyOf`, `tryGet`, `remove(v)`, `removeAll(v)`, `removeAt(k)`, `clear`.
+- `map` (alias `bmap`) is sorted by key (B-tree). Key rules: 6.2.
+- Trait: `MapCollection` (6.7.2). It has all the members of `Collection` and `MapCollection`; `add(map)` merges (the new value wins).
+- Default iterator: (key, value) tuples sorted by key. `.keys` iterates the keys and `.values` the values.
 - A missing key on read gives the null or zero value of the value type; no exception (`hasKey` and `tryGet` tell whether the key exists). A null key is not allowed (6.2).
-- `hmap` also has `.capacity`, `reserve`, `shrinkToFit` and the `[n]` capacity form; `map` has none of them.
+- No `.capacity`, `reserve`, `shrinkToFit` or `[n]` capacity form.
 
-## 6.11 Sets `set`, `bset`, `hset`
+### 6.8.5 Hash maps `hmap`
+
+```
+hmap<string, i32> scores = {}
+hmap<string, i32>[100] bigScores         // empty, capacity 100
+```
+
+- `hmap` is a hash map. Key rules: 6.2.
+- Default iterator: (key, value) tuples in an unspecified order. `.keys` iterates the keys and `.values` the values.
+- Trait: `MapCollection` (6.7.2). The members are the same as `map` (6.8.4).
+- Specific to `hmap`: `.capacity`, `reserve`, `shrinkToFit` and the `[n]` capacity form.
+
+### 6.8.6 Sets `set` (`bset`)
 
 ```
 set<string> tags = []
@@ -665,31 +745,43 @@ tags |= otherTags
 tags -= "red"
 ```
 
-- `set` (alias `bset`) is sorted (B-tree); `hset` is a hash set. A value is held once; adding a duplicate is ignored. Key rules: 6.2.
-- `add(val)` → `bool` (true if added); `add(collection)` → number actually added; `has(val)` → `bool`; `remove(val)` → `bool`; `clear()`; `.len`. `hset` also has `.capacity`, `reserve`, `shrinkToFit` and the `[n]` capacity form; `set` has none of them.
+- Trait: `SetCollection` (6.7.3). The sets are defined later; what follows is the first design.
+- `set` (alias `bset`) is sorted (B-tree). A value is held once; adding a duplicate is ignored. Key rules: 6.2.
+- `add(val)` → `bool` (true if added); `add(collection)` → number actually added; `has(val)` → `bool`; `remove(val)` → `bool`; `clear()`; `.len`. No `.capacity`, `reserve`, `shrinkToFit` or `[n]` capacity form.
 - Operations take two sets of the same kind: `set` with `set` and `hset` with `hset`; mixing them is a compile error.
 - New sets: `union(other)`, `intersection(other)`, `difference(other)` (items of this set not in `other`), `symmetricDifference(other)` (items in one set only).
 - In place: `|=` (union), `&=` (intersection), `-=` (difference), `^=` (symmetric difference); `+=` is the same as `|=`. With a single value, `|=` / `+=` add it and `-=` removes it. No operators that return a new set (`set1 | set2` is not defined).
 - Tests: `isSubsetOf(other)` (every item of this set is in `other`), `isSupersetOf(other)`, `isDisjointFrom(other)` → `bool`.
-- Iteration (`for T item in tags`): sorted for `set`, unspecified order for `hset`.
+- Iteration (`for T item in tags`): sorted.
 
-## 6.12 Custom collections (partial)
+### 6.8.7 Hash sets `hset`
 
-Users can write their own collection classes in Dflat. The compiler imposes the signatures with traits, so that `.len`, `for in`, `c[k]` and the literals can be mapped to the members of the class. Everything in this section is a first design: the open points are in 99.
+- Trait: `SetCollection` (6.7.3). `hset` is a hash set. The members and the operations are the same as `set` (6.8.6).
+- Specific to `hset`: `.capacity`, `reserve`, `shrinkToFit` and the `[n]` capacity form.
+- Iteration (`for T item in tags`): in an unspecified order.
 
-- Traits (mandatory members, only the signatures): `Collection` (all seven), `IndexCollection` (`arr`, `vec`, `list`), `MapCollection` (`map`, `hmap`), `SetCollection` (`set`, `hset`).
+## 6.9 Custom collections (partial)
+
+Users can write their own collection classes in Dflat. A custom collection either implements the traits of 6.7 (`Collection` and one of its three sub-traits), or is a subclass of one of the default collections. This section stays vague for now: everything in it is a first design.
+
 - A collection trait takes the item type as a generic argument, and the class that implements it passes its own type parameter: `class MyCollection<Item> : IndexCollection<Item> { }`. There is no reserved type name; a generic parameter is always declared in the header (11.3).
-- `Collection` requires a read-only `len` (11.1.4) and `fun Iterator getIterator()`.
-- Iteration is done by an iterator: an object that implements the trait `Iterator` and holds the cursor. `Iterator` has two or three sub-traits, depending on how many kinds of cursor are needed (open, 99).
-- `next()` returns a tuple whose last item is the bool `isValid`: `(Item value, bool isValid)` for sequences, `(Key key, Value value, bool isValid)` for maps (the shape for sets is open, 99). When `isValid` is `false` the other items of the tuple are not valid (the iteration is over), so null keys, values and items are not a problem for the iteration.
+- A class that implements `Collection` gives a read-only `len` (11.1.4) and a `getIterator()` that returns an iterator. Only the iterator of the index collections is defined in this version (6.7); the iterators of maps and sets come later.
+- `next()` returns a tuple whose last item is the bool `isValid`: `(Item value, bool isValid)`; `writableNext()` returns the item as a writable borrow.
 
-Sketch (the cursor types are open, 99):
+Sketch:
 
 ```
 trait IndexIterator<Item> {
   uns cursor
+  *Collection collection
   fun (Item value, bool isValid) next()
+  fun ((&)Item value, bool isValid) writableNext()
 }
+```
+
+First idea for maps (not yet defined: the sub-traits and the cursor types are open):
+
+```
 trait MapIterator<Key, Value> {
   Key cursor
   fun (Key key, Value value, bool isValid) next()
@@ -698,6 +790,8 @@ trait MapIterator<Key, Value> {
 
 - `for x in c` on a custom collection asks `getIterator()` once and calls `next()` until `isValid` is `false`. For the collections of the compiler no iterator object is built: the `for` is a direct loop in C.
 - While the iterator exists the collection cannot be changed (6.4).
+- Open point for classes: whether the default collections (`vec`, `list`, `map`, `hmap`, `set`, `hset`) can be subclassed, and how the overridden methods are dispatched. `arr` is a primitive and cannot be subclassed.
+- For a later version: how a custom class provides the indexer `c[k]` and the literals, subclassing of the default collections, and lists of pointers and references (with the pointers work).
 
 ---
 
@@ -1010,6 +1104,10 @@ public i32 level { R: { field } private W: { field = 0 } }    // private writer
 - Static properties work in the same way, but their accessors can use only static functions and other static fields or properties (11.1.2).
 - Moving a property out with `->`: 12.4.
 
+## 11.1.5 Structs (to be defined)
+
+Dflat will have structs: generic value types that do not live on the heap, like the Rust structs. They are not defined yet and need a section of their own. They are different from `dfoot` (5). Two points to settle: a struct may not be allowed to hold objects or, if it can, the objects it holds are owned by the struct.
+
 ## 11.2 Traits
 They are similar to C# interfaces and Rust traits
 
@@ -1073,6 +1171,23 @@ trait Container<Item> {
   fun Add(->Item value)
 }
 
+trait Indexed<Item> : Container<Item> {         // a generic parent trait: the child passes its parameter to the parent
+  fun Item First()
+}
+
+trait HashCollection<Item> {
+  fun bool has(Item value)
+}
+trait ABCCollection<Item> : HashCollection<Item> {      // the same list of arguments
+  fun Item first()
+}
+trait ABCMap<Key, Value> : HashCollection<Value> {      // a part of the parameters (the pairs are searched by value)
+  fun Value lookup(Key key)
+}
+trait Names<Item> : Container<string> {                 // a concrete type
+  fun string joined()
+}
+
 class Names : Container<string> { ... }
 class Cache<Key, Value> { hmap<Key, Value> entries }
 class Registry<Item : Named> { list<Item> items }
@@ -1082,6 +1197,11 @@ Stack<i32> numbers = Stack<i32>()
 
 - Several parameters are comma-separated; types and value parameters can be mixed.
 - A generic trait can be implemented several times by one class with different types.
+- A generic trait can extend one generic trait (the parent trait): `trait ABCCollection<Item> : HashCollection<Item>`.
+  - The arguments of the parent are types built from the parameters of the child: the same list (`ABCCollection<Item> : HashCollection<Item>`), a part of them (`ABCMap<Key, Value> : HashCollection<Value>`) or a concrete type (`Names<Item> : Container<string>`).
+  - The parent can itself have a parent: the chain goes up one level at a time, and each level is a copy made for its own arguments (11.3.12 counts them).
+  - A class that implements the child implements the whole chain and must provide the members of every trait of it, with the arguments of the child: `class Words : ABCCollection<string>` is also a `HashCollection<string>`. A value of the child trait is accepted where the parent is expected.
+  - A trait has one parent: a second parent trait is an error. A parent that has placeholders (11.3.4) is not supported yet.
 - `Stack<i32>` and `Stack<string>` are two different classes made from the same code: they have nothing in common as types, and a function that takes one does not accept the other.
 
 ### 11.3.3 Value parameters
@@ -1376,6 +1496,7 @@ function(->a.c)                    // a.c is null afterwards, a stays usable
 - The owner of `a`, or a writable borrow `(&)A a`, can move a field out; a read-only borrow cannot (compile error).
 - `->` on a variable or field of a basic type is ignored and behaves like a plain copy; it is a level 1 warning (`i32 a; call(->a)` is the same as `call(a)`).
 - Moving out of a stored field or property: a value is copied; an object is passed with its ownership and the field becomes null. If the property is computed (its `R` returns a new object that is not stored), `->` gives away that new object, which needs no owner here; the property value is nullified in every case (11.1.4). Collections: `->c[k]` (6.6).
+- Moving an object into a collection that owns its items needs `->` when the object already exists (`list[3] = ->task`, `list.add(->task)`, `insert`, `swap`); the plain form with an existing object is a compile error. An object created in the same statement needs no marker. Basic values are copied and need no marker (6.1).
 - Finalizer: `f is atEnd.` is a statement only, never an expression. The final dot is mandatory, and only a line break or `;` may follow it (`f is atEnd.close()` is a compile error).
 - `f is atEnd.` releases the ownership held by the variable `f`: a single owner is destroyed running its full destructor (11.4); a reference counted object drops the counter by one and is destroyed when it reaches zero. In every case `f` becomes null; on a null `f` it does nothing.
 - When the object is destroyed, weak references to it see null (through `enforce`).
@@ -1612,6 +1733,7 @@ class Exception {
 | 43 | `GenericIOErrorException` | |
 | 44 | `FileRemovedWhileOpenException` | |
 | 45 | `StreamCloseFailureException` | |
+| 46 | `ModifyingIteratedCollectionException` | |
 
 - The list grows during development; each new standard exception takes the next ID.
 - IDs are 64 bits. 0–255 are reserved for `Root`; every other exception has as ID a hash of its full name.
@@ -1851,19 +1973,19 @@ Print("macOS")
 | `cpu` | `x86`, `x64`, `arm` |
 | `arch` | `<os>_<cpu>`, for example `linux_x64`; test `arch` for the combination, `os` or `cpu` alone for one of them |
 | `bits` | 8, 16, 32 or 64: from the target (64 for `win-x64` and `linux-x64`) or from a custom architecture |
-| `int`, `uns`, `real` | the native size in bits of the type (`--native-int`, `--native-real`; `uns` has the size of `int`) |
+| `int`, `uns`, `real` | the native size in bits of the type: the size of the cpu (64 on x64, 32 on x86), or the size forced by `--native-int` and `--native-real`; `uns` has the size of `int` |
 | `endian` | `little`, `big`: derived from the cpu (`x86`, `x64` and `arm` are little endian; a custom architecture can be big endian) |
 | `build` | `debug` (the default), `release` (`--release`) |
 | `exceptions` | `on`, `off` (`off` when the target has no exceptions, 15.6) |
 | `ram` | a number of bytes; written as `<number>[kb\|mb\|gb]` (`ram >= 64kb`). 4gb unless a custom architecture says otherwise |
-| `version` | the language version: the version of this specification that the compiler was built for (`0.0.12`); `version.major`, `version.minor` and `version.build` are numbers |
+| `version` | the language version: the version of this specification that the compiler was built for; `version.major`, `version.minor` and `version.build` are numbers |
 | `coptlev`, `coptmode` | the values of the options `--COptLev` (a number) and `--COptMode` (`size` or `speed`) |
 
 
 ## 19.2 Toolchain
 
-- **dfcompiler** (build 0.0.12alpha): the only compiler, written in .NET 10. It runs the preprocessor (19.1), parses, type checks, emits C and calls clang. Its options are listed in `Compiler/Compiler_Options.md`. A minimal or zero libc, calling the OS directly, is planned (`--libc none`).
-- **dfparser** `[--tokens] file.df`: the parser alone (hand-written lexer and recursive-descent parser, shared with dfcompiler); it prints the syntax tree. It has no preprocessor and no version of its own yet.
+- **dfcompiler**: the only compiler, written in .NET 10. It runs the preprocessor (19.1), parses, type checks, emits C and calls clang. Its options are listed in `Compiler/Compiler_Options.md`. A minimal or zero libc, calling the OS directly, is planned (`--libc none`).
+- **dfparser** `[--tokens] file.df`: the parser alone (hand-written lexer and recursive-descent parser, shared with dfcompiler); it prints the syntax tree. It has no version of its own yet.
 - **Native-size option**: forces the native size of integers and reals [Ref: Number literals].
 
 ### 19.3 Compiler Warnings
@@ -1876,7 +1998,7 @@ Level 1 = most important, level 3 = least.
 | 1 | Unlisted local `const` auto-copied into a lambda | 13.3 |
 | 1 | Jump loop between switch cases | 10.5 |
 | 1 | Variable read before assignment | 1.5 |
-| 1 | Array element read before fill or assignment | 6.7 |
+| 1 | Array element read before fill or assignment | 6.8.1 |
 | 1 | `Root.Class` written in a class header | 11.1 |
 | 1 | Equality without hash on a key of a hash collection | 11.1.3 |
 | 1 | `->` on a variable or field of a basic type | 12.4 |
@@ -1923,12 +2045,14 @@ Level 1 = most important, level 3 = least.
 - `.sizeof` for all types (whether it counts the items of a collection)
 - Functional collection members (`filter`, `map`, `reduce`)
 - Order of enum keys in sorted collections (declaration order or value)
-- Collections: the number of `Iterator` sub-traits (2 or 3) and the cursor types of the tree `map` / `set` and of `hmap` / `hset`; how `next()` returns a read-only or a writable borrow of the item (`for` and `for (&)`); how an iterator refers to its collection without a borrow stored in a field (6.12)
-- Collections: how a custom class provides `c[k]` (read and write), `.len` for `for`, and literals (`[...]`, `{ ... }`); which other members the collection traits require and which they supply by default
-- Collections: what the runtime check raises when a collection is changed during an iteration (6.4); `swap` and `->c[k]` on sets (`c[k]` read does not exist on sets); the shape of `next()` for sets
+- Collections: the iterators of `map` / `hmap` / `set` / `hset`: the number of `Iterator` sub-traits (2 or 3), the cursor types of the tree `map` / `set` and of `hmap` / `hset`, and the shape of `next()` for sets (the index iterator is defined, 6.7.1)
+- Collections: how a custom class provides `c[k]` (read and write) and literals (`[...]`, `{ ... }`)
+- Collections: the sets (members, operations, `swap` and `->c[k]` on sets; `c[k]` read does not exist on sets)
+- Collections: lists of pointers and references, with the pointers work
+- Structs: the definition (11.1.5)
 - Collections: views are read-only and live only in locals and parameters; revisit with tasks (6.5), the full Rust borrow model stays an option
 - Collections: hash table and B-tree implementations (several implementations chosen by target or compiler option, node size, hash function), shared C helpers against one copy per type (code size, 11.3.12), literal typing and lowering (6.3, briefing 9)
-- Collections: whether the rule for the index out of range also covers `arr` indexing and the other non-silent operation exceptions; cost of `c[i]` as a failing operation (error part)
+- Collections: the other non-silent exceptions of the collection operations, to be formalized during the implementation
 - Strings: how a `string` is stored in the generated C (hash tables, empty and null strings); to be decided in a session on strings
 - Properties: position of `readonly` / `readwrite` / `writeonly` next to `public` and `static`, and their use together with a body (11.1.4); `override` of a property with only one half; access to a property through a trait-typed value (`any`), left to the compiler
 - Writing a character by index into a string (`text[3] = 'x'`)
@@ -2236,3 +2360,37 @@ Level 1 = most important, level 3 = least.
 - 19.1 Variables set by the compiler: `os` (`windows`, `linux`, `osx`), `cpu` (`x86`, `x64`, `arm`), `arch` (`<os>_<cpu>`), `bits` (8, 16, 32, 64), `int`, `uns`, `real`, `endian`, `build`, `exceptions`, `ram` (`<number>[kb|mb|gb]`), `version` (`.major`, `.minor`, `.build`), `coptlev` and `coptmode` (`--COptLev`, `--COptMode`)
 - 19.3 Warnings table: `##region` / `##endregion`
 - 99 Open items: the conditional compilation item is removed
+
+
+## Changes in 0.0.13
+
+- Header: version 0.0.13, 2026/10/22
+- 6 Collections reorganized: 6.7 Collection traits (6.7.1 `IndexCollection`, 6.7.2 `MapCollection`, 6.7.3 `SetCollection`), 6.8 Default collections (6.8.1 `arr`, 6.8.2 `vec`, 6.8.3 `list`, 6.8.4 `map`, 6.8.5 `hmap`, 6.8.6 `set`, 6.8.7 `hset`, the old 6.7 to 6.11 split by type), 6.9 Custom collections (the old 6.12)
+- 6.1 Lengths and default indexes are `uns` (were `u64`); every collection implements `Collection` and one of the three sub-traits
+- 6.1 `list` is a singly linked list (was a counted B-tree); the table and the sentence about hash against B-tree are updated
+- 6.7 `Collection` requires a read-only `len` and `getIterator()`; the sub-traits are implemented by `arr`/`vec`/`list`, `map`/`hmap` and `set`/`hset`; the shape of `next()` for sets is open
+- 6.8.3 `list`: singly linked, the list keeps the count, the first node and the last node, no double links, no capacity; default iterator with a node cursor; table with the cost of each member (`.len` O(1), `add` O(1), `insert` and `removeAt` O(1) at index 0 and otherwise O(n), `c[i]` O(n), `sort` O(n log n) by relinking, ...)
+- 6.8.4 to 6.8.7 `map`, `hmap`, `set` and `hset` have a section each (the text of the old 6.10 and 6.11 split by type)
+- 6.9 A custom collection either implements the traits or is a subclass of a default collection; the section stays vague; open point (kept in the section, not in 99): whether the default collections can be subclassed and how overridden methods are dispatched (`arr` cannot be subclassed)
+- References renumbered (6.1, 6.4, 19.3 and 99); the Changes blocks of the previous versions keep the old numbers
+- 6.7 Rule: what is shared stays in the trait, what is specific to one collection is defined by that collection class, every collection is in a trait; `arr` is a primitive, the traits do not really exist for it but its properties and members are accessible
+- 6.7 `Collection` has `.len`, `.sizeof`, `has(v)`, `->c[k]`, `clear()` and `getIterator()`
+- 6.7.1 `IndexCollection` has `c[i]` read and write, `c[a..b]` view, `indexOf`, `swap` (both forms), `sort`, `sortUnstable`, `reverse`, `copyFrom`, `fill(value)`, and (`vec` and `list` only, not `arr`) `add`, `add(collection)`, `insert`, `remove`, `removeAll`, `removeAt`
+- 6.7.2 `MapCollection` members listed (`.keys`, `.values`, `c[k]`, `add(k, v)`, `add(map)`, `hasKey`, `keyOf`, `tryGet`, `remove`, `removeAll`, `removeAt`, `swap` forms); the iterators of maps and sets are defined later
+- 6.7 The `Iterator` is an object that implements a trait, with a cursor and `*Collection collection` (read-only pointer, 12.1) for the end check; `next()` returns the read-only item and `writableNext()` the `(&)` item; only `IndexIterator` is defined (`uns cursor` for `arr` and `vec`, node pointer for `list`); the sets are defined later
+- 6.8.1 to 6.8.7 Each section names its trait and lists only the differences and the members specific to the class (`vec`: `pop`, `fillAtCapacity`, `resize`, `truncate`, capacity members; `list`: `fill(count, value)`; `hmap`, `hset`: capacity members); the `arr` special case is noted
+- 6.8.3 The nodes of a `list` own the objects they hold
+- 6.6 `fill`: the value can be any value (basic values, strings duplicated, dates, times, other non-class types) or `null`; a class instance is a compile error; `list` also has `fill(count, value)` (`myList.fill(256, 'c')`); `fill(value)` of the trait sets every existing item
+- 6.1, 12.4 `->` is mandatory when an object is moved into a collection that owns its items (`list[3] = ->task`, `list.add(->task)`, `insert`, `swap`); the plain form with an object is a compile error; basic values are copied and need no marker
+- 6.1 The index out of range rule is the same for `arr`, `vec` and `list`; the failing `c[i]` costs O(1) (the index is compared with `.len` first)
+- 6.4, 15.3 Changing a collection during an iteration raises `ModifyingIteratedCollectionException` (new ID 46, not silent): catchable in Debug builds; in Release builds a `Panic`, and a `catch` for it is ignored with a level 3 warning
+- 6.7.2, 6.7.3, 6.9, 99 Correction: the first ideas for the iterators of maps and sets (`next()` returns `(Key key, Value value, bool isValid)` for maps, the `MapIterator` sketch, the open shape of `next()` for sets, the open sub-traits and cursor types) are kept and marked "not yet defined"; only the index iterator is defined
+- 6.9 Sketch updated to `IndexIterator`; for a later version: indexer and literals of custom classes, subclassing of the default collections, lists of pointers and references
+- 11.1.5 New section: structs are generic non-heap value types (like Rust structs), to be defined; objects inside are not allowed or are owned by the struct
+- 99 Open items: iterator, runtime check and index-out-of-range items updated (the non-silent exceptions of the collections are formalized during the implementation); new items for the sets, lists of pointers and structs
+- 19.1 Restored after the merge: the rules of the variables (predefined ones cannot be redefined, a name equal to a value of a predefined variable is an error, a word on the right of a comparison, variables of the project file), the values of `bits`, `endian`, `build` (default `debug`), `ram` (4gb by default) and `version` (the language version); `dfcompile` and `dfparse` become `dfcompiler` and `dfparser`, `-forcelib` becomes `--force-lib`; 19.2 rewritten
+- 19.1 `int`, `uns` and `real` have the size of the cpu: 64 on x64, 32 on x86 (`--native-int` and `--native-real` can force another size)
+- 6.1, 12.4 `->` is needed only for an object that already exists; an object created in the same statement (`list.add(Task("a"))`) needs no marker
+- 6.6 `fill(null)`: the items become null and the objects they held end (their `atEnd` runs)
+- 6.7 `Collection<Item>` is generic: `IndexCollection<Item>` and `SetCollection<Item>` extend `Collection<Item>`, `MapCollection<Key, Value>` extends `Collection<Value>` (`has(v)` on a map searches the values); the key of `->c[k]` is given by each sub-trait
+- 11.3.2 A generic trait can extend one generic trait (new; needed by the collection traits): the arguments of the parent are types built from the parameters of the child (the same list, a part of them or a concrete type), the chain can have several levels, the class implements the whole chain, one parent only, a parent with placeholders is not supported yet; examples `ABCCollection<Item> : HashCollection<Item>` and `ABCMap<Key, Value> : HashCollection<Value>`

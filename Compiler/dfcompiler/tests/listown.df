@@ -1,0 +1,61 @@
+// A list owns its items (spec 12): adding moves in, removing moves out or ends the item, a plain read borrows.
+// A double drop would end the program with "Double free": this test must run clean.
+alias Root as r
+
+public class Dog(string name) {
+  public string name
+}
+
+list<Dog> kennel = []
+Dog rex = Dog("rex")
+kennel.add(->rex)
+kennel.add(Dog("fido"))
+kennel.insert(1, Dog("luna"))
+r.Console.log(kennel.len)
+r.Console.log(kennel[1].name)
+
+kennel[1] = Dog("max")             // the old item (luna) ends
+r.Console.log(kennel[1].name)
+Dog spare = Dog("spare")
+kennel[2] = ->spare                // fido ends
+r.Console.log(kennel[2].name)
+
+Dog taken = ->kennel[0]            // rex leaves the list
+r.Console.log($"{taken.name} {kennel.len} {kennel[0].name}")
+
+kennel.removeAt(0)                 // max ends
+r.Console.log($"{kennel.len} {kennel[0].name}")
+Dog old = kennel.swap(0, Dog("zed"))
+r.Console.log($"{old.name} {kennel[0].name}")
+kennel.fill(null)
+r.Console.log(kennel[0] == null)
+kennel.clear()
+r.Console.log(kennel.len)
+
+// a long list: the items end in a loop, not by recursion
+list<Dog> pack = []
+u64 i = 0
+while i < 200000 {
+  pack.add(Dog("dog"))
+  i += 1
+}
+r.Console.log(pack.len)
+pack.removeAt(0)
+pack.removeAt(pack.len - 1)
+r.Console.log(pack.len)
+list<i32> numbers = []
+i = 0
+while i < 200000 {
+  numbers.add((i32)(i % 100))
+  i += 1
+}
+r.Console.log(numbers.removeAll(7))
+r.Console.log(numbers.len)
+
+// a list kept in a field of an object
+public class Zoo {
+  public list<string> names = ["a", "b"]
+}
+Zoo zoo = Zoo()
+zoo.names.add("c")
+r.Console.log(zoo.names)

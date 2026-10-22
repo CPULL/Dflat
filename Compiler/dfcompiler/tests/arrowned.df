@@ -1,0 +1,46 @@
+// Arrays aligned with the spec 0.0.13: uns, the size on the declaration, swap, fill(null), and the items are owned (moved in with ->)
+alias Root as r
+
+public class Dog(string name) {
+  public string name
+}
+
+// uns is the native unsigned: the type of lengths and indexes
+arr<string> names = ["ann", "bob", "cy"]
+uns count = names.len
+uns last = count - 1
+r.Console.log($"{count} {last} {names[last]}")
+
+// the size on the declaration
+arr<i32>[3] zeros = []
+arr<i32>[4] filled = arr<i32>[4]
+arr<string>[2] pair
+arr<i32>[3] listed = [7, 8, 9]
+r.Console.log($"{zeros.len} {filled.len} {pair.len} {listed.len}")
+zeros.fill(5)
+r.Console.log(zeros)
+
+// swap: two positions, or a position and a new item (the old one is given back)
+names.swap(0, 2)
+r.Console.log(names)
+string before = names.swap(1, "zed")
+r.Console.log($"{before} {names}")
+arr<Dog> kennel = [Dog("rex"), Dog("fido")]
+Dog old = kennel.swap(0, Dog("max"))
+r.Console.log($"{old.name} {kennel[0].name}")
+Dog extra = Dog("luna")
+Dog gone = kennel.swap(1, ->extra)
+r.Console.log($"{gone.name} {kennel[1].name}")
+
+// the items are owned: an existing object moves in with ->, a new one needs no marker, the replaced one ends
+Dog rover = Dog("rover")
+kennel[0] = ->rover
+kennel[1] = Dog("spot")
+r.Console.log($"{kennel[0].name} {kennel[1].name}")
+Dog taken = ->kennel[0]
+r.Console.log($"{taken.name} {kennel[0] == null}")
+
+// fill(null) empties an array of objects
+kennel.fill(null)
+r.Console.log($"{kennel[0] == null} {kennel[1] == null}")
+r.Console.log(kennel.len)

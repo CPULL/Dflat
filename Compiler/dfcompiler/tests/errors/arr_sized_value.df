@@ -1,0 +1,7 @@
+alias Root as r
+
+public class Dog(string name) {
+  public string name
+}
+
+arr<i32>[3] a = 5

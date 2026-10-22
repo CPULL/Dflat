@@ -1,0 +1,1 @@
+arr_literal_existing.df(8): error: a collection owns its items: put a new object in the literal, or move one in with ->x

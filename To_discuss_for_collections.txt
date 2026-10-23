@@ -1,6 +1,8 @@
-# Collections: what is left to decide and to build (updated 2026/10/22, Specs0.0.13, compiler 0.0.15alpha)
+# Collections: what is left to decide and to build (updated 2026/10/24, Specs0.0.13, compiler 0.0.15alpha)
 
 You are helping me finish the design of the collections of Dflat. You have access to the approved specification: it is quoted as Specs<section> (for example Specs6.8.3 is section 6.8.3 of dflat-spec.md). The compiler is written in C# and generates C (clang). It builds `arr<T>`, `vec<T>` and `list<T>`; `map`, `hmap`, `set` and `hset` do not exist yet. Every point below is something not decided or not built, with its context. Please answer by point number.
+
+Points 1 to 31 were discussed on 2026/10/23 and 2026/10/24: their decisions are written in each point and still have to be integrated in the specification. The discussion continues from point 32.
 
 Tags (a point can have several):
 - DECIDED: stated as a decision (by me, in the spec). Listed because it is not implemented, or because it matters for another point. Do not reopen it unless you find a real contradiction.
@@ -16,125 +18,218 @@ How the compiler implements the collections today (so you can judge the proposal
 
 The traits are in Specs6.7 and Specs6.9, the iteration rules in Specs6.4. The compiler has `Iterator` (a marker trait), `IndexIterator<Item>` (a `uns cursor` and `next()`), `Collection<Item>` (`len`, `has`, `clear`) and `IndexCollection<Item>` (`getIterator()`), implemented by `vec` and `list`; `arr.getIterator()` also works.
 
-### 1. [TOBEDISCUSSED] The Iterator trait hierarchy
+### 1. [DECIDED] The Iterator trait hierarchy
 
-Context: Specs6.7 says an iterator is an object that implements the trait `Iterator`, with sub-traits whose number is open (2 or 3, Specs99). Only `IndexIterator` is defined. The map and set iterators have other shapes: `(Key key, Value value, bool isValid)` for maps, and the shape for sets is open.
-Question: what does `Iterator` itself contain (is it only a marker)? Which sub-traits exist (`IndexIterator`, `MapIterator`, `SetIterator`; or one for sequences and one for the rest)?
+Context: Specs6.7 says an iterator is an object that implements the trait `Iterator`, with sub-traits whose number is open (2 or 3, Specs99).
 COMPILERSTATE: `Iterator` is an empty marker trait, `IndexIterator<Item> : Iterator`.
-COMPILERPROPOSAL: three sub-traits (`IndexIterator<Item>`, `MapIterator<Key, Value>`, `SetIterator<Item>`), each with `next()` and `writableNext()` where it makes sense (see point 5); `Iterator` stays a marker.
 
-### 2. [TOBEDISCUSSED] getIterator() in Collection<Item>
+Decision:
+- `Iterator` is a non-generic marker trait with no members. It has three sub-traits:
 
-Context: Specs6.7 says `Collection` has `fun Iterator getIterator()`. The return type has to be the iterator of each family (`IndexIterator<Item>`, `MapIterator<Key, Value>`...), which is a more specific type than `Iterator`. An override that returns a subtype of the declared return type is not allowed by the compiler today.
-COMPILERSTATE: `getIterator()` is declared in `IndexCollection<Item>` only.
-Options: (a) allow a covariant return type in overrides (an override can return a sub-trait of the declared type); (b) keep `getIterator()` in each sub-trait; (c) make `Iterator` carry `next()` with a generic result.
-COMPILERPROPOSAL: (a), a small rule in the traits section (Specs11.2): an override may return a type that implements the declared return trait.
+| Iterator | Description |
+|---|---|
+| `IndexIterator<Item>` | Used for linear and sorted collections like arrays and lists |
+| `MapIterator<Key, Value>` | Used for key/value collections |
+| `SetIterator<Item>` | Used for sets of unique keys |
 
-### 3. [TOBEDISCUSSED] The cursor of the iterators
+```
+trait Iterator { }
+
+trait IndexIterator<Item> : Iterator {
+  public fun (Item value, bool isValid) next()
+  public fun ((&)Item value, bool isValid) writableNext()
+}
+```
+- Whether `{ }` is written for an empty trait follows the trait grammar of Specs11.2.
+
+### 2. [DECIDED] getIterator() in the Collection sub-traits
+
+Context: Specs6.7 says `Collection` has `fun Iterator getIterator()`. An override that returns a subtype of the declared return type is not allowed by the compiler today.
+
+Decision: `Collection<Item>` has no `getIterator()`. Each sub-trait declares its own, typed:
+```
+trait IndexCollection<Item> : Collection<Item> {
+  fun IndexIterator<Item> getIterator()
+}
+
+trait MapCollection<Key, Value> : Collection<Value> {
+  fun MapIterator<Key, Value> getIterator()
+}
+
+trait SetCollection<Item> : Collection<Item> {
+  fun SetIterator<Item> getIterator()
+}
+```
+
+### 3. [DECIDED] The cursor of the iterators
 
 Context: Specs6.7.1 gives `uns cursor` for `arr` and `vec` and a pointer to the node for `list`, under the same `IndexIterator`. A trait field has one type.
 COMPILERSTATE: `IndexIterator<Item>` has the field `uns cursor`; the `list` iterator is a snapshot copy of the items (an `arrIterator`) and uses the same cursor.
-Options: (a) the cursor is not part of the trait: each iterator class holds its own cursor of its own type; the trait fixes only `next()` and `writableNext()`; (b) sub-traits per cursor type.
-COMPILERPROPOSAL: (a).
 
-### 4. [TOBEDISCUSSED] How the iterator refers to its collection
+Decision:
+- The cursor is internal to each iterator and not accessible from outside, so the trait does not specify it; the trait fixes only the methods.
+- In the default collections the iterator of `arr` and `vec` keeps a `uns` position, the iterator of `list` a pointer to the node.
+- The iterators follow a contract written with the trait. First rule: an iterator returns each element of the collection once and only once.
+- Spec: 6.7.1 and 6.9 (the `uns cursor` field leaves the trait), 6.8.3.
 
-Context: Specs6.7 and Specs6.9 use a read-only pointer `*Collection collection` (Specs12.1) in the iterator, to check the end. A proposal in this file's previous version was a read-only reference `&Collection collection`. They are different things: a `&` parameter is a borrow of a variable, a pointer is a value that can be stored in a field.
-COMPILERSTATE: pointers are not built. The iterators of the compiler hold a snapshot: the items (or their pointers) and the count at the time the iterator was made. A field that holds an object it does not own is refused ("goes into a field which owns it").
-Question: pointer or reference? If it stays a pointer, the iterators wait for the pointers work (Specs12.1, Specs99 "Pointers").
-COMPILERPROPOSAL: keep the snapshot until pointers exist; then a read-only pointer, as in Specs6.7.
+### 4. [DECIDED] How the iterator refers to its collection
 
-### 5. [TOBEDISCUSSED] writableNext() and for (&)
+Context: Specs6.7 and Specs6.9 use a read-only pointer `*Collection collection` (Specs12.1) in the iterator, to check the end.
 
-Context: Specs6.7 defines `writableNext()` returning `((&)Item value, bool isValid)`, the item as a writable borrow, which is what `for (&)Item x in c` uses (Specs6.4). The marker `(&)Type variable` is written the same way on parameters.
+Decision:
+- Iterators are specific to a collection type, so the pointer to the collection lives in each concrete iterator class, not in the trait `Iterator`.
+- The compiler keeps the snapshot for now. It is marked "must change" to a read-only pointer to the collection when pointers are defined and implemented.
+
+### 5. [DECIDED] writableNext() and for (&)
+
+Context: Specs6.7 defines `writableNext()` returning `((&)Item value, bool isValid)`, the item as a writable borrow, which is what `for (&)Item x in c` uses (Specs6.4).
 COMPILERSTATE: neither `writableNext()` nor `for (&)Item x in c` is built. A borrow inside a tuple is not a type the compiler has.
-Question: is a `(&)` inside a tuple a real type (a tuple of borrows) or only a special case of the compiler for iterators? How long does the borrow live?
-COMPILERPROPOSAL: build `for (&)` first as a special form of the compiler (the loop variable aliases the item, no tuple); the type `((&)Item, bool)` stays a rule of the trait signatures only.
 
-### 6. [TOBEDISCUSSED] Detecting a change with an explicit iterator
+Decision:
+- `(&)` is a general writable reference type and can be used inside a tuple. The borrow lives as long as the tuple.
+- A tuple that holds a `(&)` can only be a local variable or a parameter (the same rule as the views, point 34), so it cannot outlive the iterator.
+- The compiler builds `for (&)` first, as a special form (the loop variable aliases the item).
 
-Context: Specs6.4 says a collection cannot be changed while it is iterated, with a runtime check that raises `ModifyingIteratedCollectionException` (ID 46). The `for` loop of the compiler checks a change counter at each pass.
-COMPILERSTATE: an iterator made with `getIterator()` is a snapshot and never notices a change.
-Question: must an explicit iterator also raise the exception? It would need the pointer to the collection (point 4) and the same counter. What about the iterator of a custom collection (the class provides its own check)?
-COMPILERPROPOSAL: yes, when point 4 is solved; the counter is a hidden field of the default collections.
+### 6. [DECIDED] The collection is read-only (in size) while it has open iterators or views
 
-### 7. [TOBEDISCUSSED] Which operations count as a change
+Context: Specs6.4 says a collection cannot be changed while it is iterated, with a runtime check that raises `ModifyingIteratedCollectionException`. The `for` loop of the compiler checks a change counter at each pass.
+
+Decision:
+- A collection has an internal counter of its open iterators and views. Creating an iterator or a view increments it; its default `atEnd` decrements it. It replaces the change counter of the `for` loop.
+- An explicit iterator (made with `getIterator()`) counts too; it needs the pointer to its collection (point 4) to decrement the counter.
+- While the counter is above zero the size of the collection cannot change; a changing operation raises `ModifyingIteratedCollectionException` (point 7).
+- In Debug builds the exception is catchable. In Release builds it is a `Panic`, and a `catch` for it is ignored with a level 3 warning (the same rule as `IndexOutOfRangeException`).
+- Spec: 6.4, 6.6, 15.3.
+
+### 7. [DECIDED] Which operations count as a change
 
 Context: Specs6.4 says a collection cannot be changed while it is iterated, without a list of operations.
-COMPILERSTATE: for `vec` and `list` the counter is raised by: add, insert, pop, remove, removeAll, removeAt, clear, reserve, shrinkToFit, fillAtCapacity, resize, truncate, `c[i] = v`, fill, reverse, sort, sortUnstable. Not by: reading, `swap`, writes through `for (&)` (not built).
-Question: is that the right set? C# raises for a replaced element too; Rust forbids any mutation of the borrowed collection. Is `swap` a change? Is a write through the loop variable of `for (&)` a change?
-COMPILERPROPOSAL: structural changes and anything that moves or replaces items, as now; `swap` too; writes through `for (&)` are not changes.
 
-### 8. [TOBEDISCUSSED] The compile-time proof of a change inside a loop
+Decision:
+- Forbidden while the counter is above zero: `add`, `add(collection)`, `insert`, `pop`, `remove`, `removeAll`, `removeAt`, `resize`, `truncate`, `fillAtCapacity`, `fill(count, value)`, `reserve`, `shrinkToFit`, `sort`, `sortUnstable`, `reverse`, and `->c[i]` on a `list` (the node is removed).
+- Allowed: reads, `swap`, `replace`, `c[i] = v` (objects included), `fill(value)`, `clear()`, `->c[i]` on `arr` and `vec`, and changes made in place to the value or to the fields of an item.
+- `clear()` "cleans up the values": on `arr`, `vec` and `list` it sets every item to the default value and keeps the size (objects dropped end, point 21). It replaces the line of Specs6.6 "removes all items". To remove all items, `truncate(0)`; `truncate(n)` is now available on `list` too (Specs6.8.3 and the table of 6.6 change).
+
+### 8. [DECIDED] The compile-time proof of a change inside a loop
 
 Context: Specs6.4: when the compiler can prove that the body of the loop changes the collection, it is a compile error (Rust style); otherwise the runtime check applies.
 COMPILERSTATE: only the runtime check is built.
-Question: what does "can prove" cover? The same variable named in the loop header and in a member call of the body is easy; a change through another reference (a parameter, a field, a function called from the body) needs analysis of the callee.
-COMPILERPROPOSAL: start with the direct case only: the body calls a changing member or assigns an element of the same variable, or of a field path, that the loop iterates. Everything else stays a runtime check.
 
-### 9. [TOBEDISCUSSED] Change detection in custom collections
+Decision:
+- Good for now, to be improved later. The compiler proves only the direct case: the body of the loop calls a changing member, or assigns an element, of the same variable (or field path) that the loop iterates. Everything else stays a runtime check.
+- Every changing method of a collection checks the counter at runtime and raises the exception.
 
-Context: Specs6.9 says "while the iterator exists the collection cannot be changed". A custom collection implements its own members, so the compiler cannot raise the exception for it.
-Question: does the language give custom classes a way to take part (a counter provided by the trait, a call the iterator makes), or is it up to the class?
-COMPILERPROPOSAL: up to the class in this version; document that custom collections should raise `ModifyingIteratedCollectionException` themselves.
+### 9. [DECIDED, TOBEDISCUSSED] Change detection in custom collections: executeAfter
 
-### 10. [TOBEDISCUSSED] .sizeof of a collection
+Context: Specs6.9 says "while the iterator exists the collection cannot be changed". A custom collection implements its own members.
 
-Context: Specs6.6: `.sizeof` is "bytes to store the object itself (for all types: to be discussed)", and Specs99 asks whether it counts the items of a collection. `Collection` has `.sizeof` (Specs6.7).
+Decision:
+- The counter and the checks are provided by the trait `Collection` (so maps, sets and views get them too), not by each class.
+- New rule for traits (Specs11.2): a trait method can carry a block `executeAfter { }`. The class must implement the method; the block runs after the class implementation and cannot be overridden or removed by the class.
+  - `executeAfter` is one contextual keyword, written like `atEnd`; it is a keyword only right after a trait method signature.
+  - The block runs only when the implementation succeeds (if `getIterator()` fails, the counter is not incremented). This is the difference with `atEnd` of a function (Specs10.9), which runs on every exit, exceptions included; the spec says it.
+  - The block reads the return value as `<method>.result` (for example `getIterator.result`), read-only. It cannot change it.
+  - The blocks are chained: every trait of the hierarchy that defines an `executeAfter` for the method runs its block, similar to `atEnd`.
+  - A method with a default body and a block is written `fun f() { default body } executeAfter { ... }`. A `executeBefore { }` can be added later with the same shape.
+- `releaseIterator()` is private and is called only by the default `atEnd` of the iterator or view. A release with the counter at zero raises `InvalidIteratorReleaseException` (non-silent; the IDs are set at 0.1.0).
+```
+trait Collection<Item> {
+  uns iteratorCounter      // not visible outside, see the open point below
+
+  private fun releaseIterator()
+    executeAfter {
+      if iteratorCounter == 0 throw InvalidIteratorReleaseException()
+      iteratorCounter--
+    }
+}
+
+trait IndexCollection<Item> : Collection<Item> {
+  fun IndexIterator<Item> getIterator()
+    executeAfter {
+      iteratorCounter++
+    }
+}
+```
+TOBEDISCUSSED:
+- The exact order of the chain. Proposal: like `atEnd`, from the most specific trait to the root (`IndexCollection`, then `Collection`), once per call; a `super` call inside the class implementation does not start the chain again (otherwise the counter is incremented twice). Not confirmed.
+- Private fields in a trait (`iteratorCounter`): a trait has properties (Specs11.1.4) but no private state. Undefined for now.
+
+### 10. [DECIDED] .sizeof of a collection
+
+Context: Specs6.6: `.sizeof` is "bytes to store the object itself (for all types: to be discussed)", and Specs99 asks whether it counts the items of a collection.
 COMPILERSTATE: not built for any type.
-Options: (a) the size of the object itself (the header: pointer, count, capacity), (b) header plus the block of items, (c) everything owned, items of items included.
-COMPILERPROPOSAL: (b) for `arr`, `vec`, `list` (items counted without what they own), documented with the type.
 
-### 11. [TOBEDISCUSSED] How a trait declares ->c[k], c[k] and .len
+Decision: option (b). `.sizeof` of a collection is the header plus the allocated block of items (the capacity, not the length), without what the items own. For a `list`: the header plus all the nodes.
+
+### 11. [DECIDED] The methods behind the properties and the operators
 
 Context: Specs6.7 lists `->c[k]` in `Collection` and `c[i]`, `c[a..b]` in `IndexCollection`, but a trait declares functions and properties, and these are operators. Properties of traits (Specs11.1.4, Specs11.2) are the way for `len`.
-COMPILERSTATE: trait properties are not built. `len` is a method `get_len()` in the trait (the compiler maps `c.len` to it). The operators are handled by the compiler for the default collections and do not exist for custom classes.
-Question: how are the indexer and the move-out written in the trait? A special function name (`get_item`, `set_item`, `takeItem`)? A new kind of member?
-COMPILERPROPOSAL: reserved member names for the indexer (see point 63), decided together with it.
 
-### 12. [FUTUREVERSION, TOBEDISCUSSED] Trait properties (Specs11.1.4, Specs11.2)
+Decision:
+- Each trait defines a set of private methods for its properties and its operators. They can be virtual; every class that implements the trait must implement them. They are internal, needed only to write custom collections.
+- Names, in camelCase like every method: `getLen()`, `getSizeof()`, `readPos(k)`, `setPos(k, Value)`, `moveOut(k)`, `getView(a, b)`, `getViewBegin(b)`, `getViewEnd(a)`. More will be added with maps and sets.
+- `len` stays a property, implemented by `getLen()`. `getIterator`, `next` and `writableNext` keep their names.
 
-Context: Specs6.7 says `Collection` has a read-only `len` property. Fields and properties are one concept in the spec (`R:` / `W:` blocks, `field`, `value`, defaults, visibility per accessor), and trait properties are access contracts with an optional default implementation.
-COMPILERSTATE: not built; library properties are methods called `get_name()`.
-Question: when? Everything about custom collections waits for it.
-COMPILERPROPOSAL: build it before the custom collections work (point 63); it also removes `get_len()`.
+### 12. REMOVED
 
-### 13. [TOBEDISCUSSED, COMPILERSTATE] uns on 32-bit targets
 
-Context: Specs6.1 says lengths and indexes are `uns` (the native unsigned size of the cpu: 64 bits on x64, 32 on x86).
-COMPILERSTATE: `uns` is a type (u64 on 64-bit targets, u32 on 32-bit ones), but the arrays and collections use `uint64_t` for lengths and indexes in the generated C whatever the target is, so 32-bit targets are not really supported.
-Question: do the collections use `uns`-sized fields in C (smaller headers on 32-bit and 8/16-bit targets)? This changes the layout of every collection.
-COMPILERPROPOSAL: yes, a C typedef `df_uns` used by the collections and the runtime; do it when the first 32-bit target is tested.
+### 13. [DECIDED] uns on 32-bit targets
 
-### 14. [TOBEDISCUSSED] .hash and .order on every type
+Context: Specs6.1 says lengths and indexes are `uns` (the native unsigned size of the cpu).
+COMPILERSTATE: `uns` is a type, but the arrays and collections use `uint64_t` for lengths and indexes in the generated C whatever the target is, so 32-bit targets are not really supported.
 
-Context: Specs6.2: `.hash` and `.order` exist on all types; the hash is sized to the architecture (`uns`); the default class hash is the class name and the address; the default class order compares the hashes, then the addresses; tuples order item by item; strings by bytes; numbers, `char`, `bool` (false first), `date`, `time` by value.
-COMPILERSTATE: neither member exists. `sort` works for numbers, bool, char, string, date, time and enums through C comparers; objects and tuples have none ("need a comparer"). Hashing does not exist.
-Question: are they real members (callable by the user, overridable in a class) or only compiler support for the collections? What do they return for `real` (the bits? `-0.0` and `0.0` are equal, so they must hash the same)? For collections used as items (a `vec` as a key)?
-COMPILERPROPOSAL: real members, defined by the compiler for every type and overridable for classes (`equals`, `hash`, `order`); reals hash by value after turning `-0.0` into `0.0`; a collection as a key is a compile error in this version.
+Decision:
+- Already in the spec: `uns` has the size of `int`, the cpu size by default, and `--native-int` forces another size (Specs3.1, Specs19.1).
+- The compiler typedefs `df_uns` to the C type of that size (`uint16_t`, `uint32_t`, `uint64_t`, ...) and uses it for lengths and indexes.
+- New warning in the spec: a `uns` smaller than the cpu size limits the length of the collections and the size of `.hash`.
+
+### 14. [DECIDED] .hash and compareTo on every type
+
+Context: Specs6.2: `.hash` and `.order` exist on all types; the default class hash is the class name and the address.
+
+Decision:
+- `.hash` is a mandatory property of every type, of size `uns`. The hash of native types cannot be overridden.
+- A native value whose size is at most `uns` uses its own value as the hash.
+- A value wider than `uns` (an `i256` with a 64-bit `uns`, a wide `real`) combines its parts in order: `h = (rotl(h, 5) ^ part) * K`, with `K = 0x517cc1b727220a95` for a 64-bit `uns` and `0x9e3779b9` for a 32-bit one (FxHash). Unlike a xor, the result depends on the order and `(x, x)` does not give 0.
+- `real`: transmute to bytes, then as above. A `-0.0` (or an unnormalized zero) is first turned into `+0.0`. All NaNs give the hash of the canonical NaN of the architecture.
+- Strings: rapidhash on the bytes (a 32-bit variant for a 32-bit `uns`).
+- Tuples: the same ordered combine over the hashes of the components.
+- Classes: the hash of the name plus the address. A collection hashes like any other class.
+- `Root.Class` offers `getHash()` and `equals(any?)`.
+- `.order` is removed. Ordering uses the trait `Comparable<T>` with the mandatory method `int compareTo(T value)`, which returns -1, 0 or 1 (`int` is the signed native integer). The default order of classes in 6.2 (compare the hashes, then the addresses) is the default implementation when a class provides nothing.
+- Only how the hashes are calculated is defined now. How the hash tables use them is for the hash collections.
+- Spec: 6.2, 11.1.3 and the basic traits section.
 
 ### 15. [TOBEDISCUSSED] Which types can be keys
 
 Context: Specs6.2 lists the rules but not the forbidden types. `Hashable` and `Orderable` were removed from the traits (Specs11.3.1), every type has `.hash` and `.order`.
 Question: can a nullable number (`i16?`) be a key (null is not allowed)? An enum, a bitfield, a tuple that contains an object, a class, a collection? What is the compile error for a type without ordering?
 COMPILERPROPOSAL: allowed: numbers, `bool`, `char`, `string`, `date`, `time`, enums, tuples of those, classes (by their hash and order). Not allowed: nullable numbers, collections, tuples with collections. A message names the type.
+Left for the work on maps and sets. Note: `.order` is replaced by `compareTo` (point 14).
+
 
 ### 16. [TOBEDISCUSSED] Order of enum keys
 
 Context: Specs99 asks whether enum keys in sorted collections follow the declaration order or the numeric value.
 COMPILERPROPOSAL: the numeric value (an enum can have explicit values), which is also what `sort` does today.
+Left for the work on maps and sets.
 
-### 17. [DECIDED, COMPILERSTATE] Equality without a hash on a key
+### 17. Equality without a hash on a key
 
 Context: Specs11.1.3 and Specs19.3 have a level 1 warning for a class that defines `equals` (or `==`) and not a hash, when used as the key of a hash collection.
 COMPILERSTATE: not built (there are no hash collections).
 
-### 18. [TOBEDISCUSSED] The other non-silent exceptions of the collections
+### 18. [DECIDED] Out of memory and the other exceptions of the collections
 
 Context: Specs6.1 and Specs99 say the other exceptions of collection operations are formalized during the implementation. Built: `IndexOutOfRangeException`, `ModifyingProtectedSourceException` (copyFrom on the same array), `ModifyingIteratedCollectionException`.
 COMPILERSTATE: an allocation that fails ends the program (a panic), not `OutOfMemoryException`; a huge `vec<T>[n]`, `arr<T>[n]` or `fill(count, value)` is not checked for overflow of `n * size`.
-Question: which operations raise `OutOfMemoryException` (growth of a `vec`, `list`, hash table)? Is it catchable? What is the check for a size that overflows `uns`?
-COMPILERPROPOSAL: allocation failures raise `OutOfMemoryException` (non-silent) in Debug and Release alike (it is a real runtime condition, unlike the index check); sizes that overflow `uns` raise `OverflowException` at the allocation.
+
+Decision:
+- Any allocation can run out of memory: a `vec` that grows, `reserve`, creating an `arr`, a `list` that adds a node.
+- In Debug builds it raises `OutOfMemoryException`, catchable and not silent. In Release builds it is a `Panic` that ends the program.
+- A size that does not fit (`n * size` overflowing `uns`) is reported the same way, with no separate `OverflowException`.
+- A literal above the maximum is a compile error.
+- Spec: 6.1 and 15.3.
 
 ### 19. [FUTUREVERSION] Debug and Release becoming dynamic
 
@@ -145,27 +240,32 @@ COMPILERSTATE: the choice is the compiler option; the runtime panics with `Panic
 
 Specs6.8.1. Built: literals, `arr<T>[n]`, the sized declaration `arr<T>[n] name`, `c[i]`, `.len`, `for`, `has`, `indexOf`, `fill`, `clear`, `reverse`, `sort`, `sortUnstable`, `copyFrom` (without objects), `swap` (both forms), `->a[i]`, `getIterator()`, the ownership rules of the items when they are moved in or replaced.
 
-### 20. [TOBEDISCUSSED] An arr does not own its block yet
+### 20. [DECIDED] arr is a class
 
 Context: Specs6.1 says collections own their items and the drop code is generated per item type. `arr` is a primitive.
 COMPILERSTATE: an `arr` is a value `{pointer, length}` that is copied freely (`b = a` shares the block). Its block is never freed and its items are not dropped when the array ends; only the items that are replaced end (`a[i] = x`, `fill(null)`, `swap`). Arrays held in objects or variables leak until the program ends.
-Question: who owns the block of an `arr`? A variable that declares it, with the rules of objects (move with `->`, returning moves, a parameter borrows)? What does `b = a` mean for arrays (a borrow, as for objects)? What does `a!` do (a copy of the block and, for objects, of the items)?
-COMPILERPROPOSAL: arrays follow the ownership rules of objects: the variable that declares the array owns it and drops the items and the block at the end of its scope; `b = a` is a borrow; `->a` moves; fields of class type that are arrays are dropped by the class.
 
-### 21. [TOBEDISCUSSED] clear() and fill() on arrays of objects
+Decision:
+- `arr` is a class like any other, even if the code generated for it is direct: it has ownership, a hash, methods and properties, and it can be an item (`list<arr<i32>> myZip` is valid). It cannot be subclassed (note for point 64).
+- Ownership: the variable that declares the array owns it and drops the items and the block at the end of its scope; `b = a` is a borrow; `->a` moves; fields that are arrays are dropped by their class. The objects inside are owned by the array (true for all collections).
+- Spec: 6.8.1 and 12.
+
+### 21. [DECIDED] clear() and fill() on arrays of objects
 
 Context: Specs6.6: `clear()` on an `arr` sets every item to the default value; `fill(null)` makes every item null and the objects they held end.
-COMPILERSTATE: `fill(null)` ends the objects; `clear()` writes null in the slots without ending the objects.
-COMPILERPROPOSAL: `clear()` also ends the objects (a one-line change once decided); mention it in Specs6.6.
 
-### 22. [TOBEDISCUSSED] swap(i, j) against swap(position, new) for arrays of integers
+Decision: an owned object that loses its owner is destroyed and its `atEnd` runs. This covers `clear()` and `fill(...)` on every collection, `c[i] = v`, and any other operation that drops an owned object.
 
-Context: Specs6.6 has `swap(i, j)` and `Item old = swap(position, Item new)`. With two integer arguments both forms are possible for an array of integers. DECIDED in the next spec: `swap(posA, posB)` is the exchange.
-Question: how is the replace-and-give-back written for an array of integers? A different member name (`replaceAt(position, new)`), or `swap(position, ->new)`, or a named argument?
-COMPILERSTATE: two integer arguments are the exchange; the replace form works for objects (with `->`) and for non-integer items.
-COMPILERPROPOSAL: a named argument: `a.swap(1, new: 99)`; it also reads well for maps (`map.swap(key, new: value)`).
+### 22. [DECIDED] swap(i, j) and replace(pos, value)
 
-### 23. [DECIDED, COMPILERSTATE] Reading an element before it is filled
+Context: Specs6.6 has `swap(i, j)` and `Item old = swap(position, Item new)`. With two integer arguments both forms are possible for an array of integers.
+
+Decision:
+- `swap(posA, posB)` only exchanges two items. The form `swap(position, new)` is removed.
+- New method of the index collections: `var old = c.replace(pos, value)` puts the new item and returns the old one. A new object that already exists needs `->`. If the result is not assigned, the old item ends at the end of the statement.
+- Spec: 6.6 (rows and bullets of `swap`), 6.1 (ownership bullet). The `swap` forms of maps are left for the maps.
+
+### 23. Reading an element before it is filled
 
 Context: Specs6.8.1 and Specs19.3: reading an `arr` element before it is filled or assigned is a level 1 warning; arrays of objects start as null.
 COMPILERSTATE: the warning is not built (arrays start as zeros).
@@ -174,68 +274,93 @@ COMPILERSTATE: the warning is not built (arrays start as zeros).
 
 Specs6.8.2. Built: literals, `vec<T>[n]`, `c[i]`, `.len`, `.capacity`, `for` (with the change check), `add(->v)`, `insert`, `pop((&)x)`, `remove`, `removeAll`, `removeAt(index)`, `clear`, `reserve`, `shrinkToFit`, `fillAtCapacity`, `resize`, `truncate`, `swap`, `has`, `indexOf`, `fill`, `reverse`, `sort`, `sortUnstable`, `->v[i]`, `getIterator()`, ownership of the items.
 
-### 24. [TOBEDISCUSSED] add(collection) on vec (and list)
+### 24. [DECIDED] add(collection) on vec (and list)
 
 Context: Specs6.6: `add(collection)` appends the items of another collection to `vec` and `list`.
 COMPILERSTATE: not built (`vec` has `add(->T)` only).
-Question: which collections can be the source (`arr`, `vec`, `list`, any `IndexCollection<T>`)? Are the items copied (objects cloned, point 35) or moved (the source is emptied, needs `->`)? What if the source is the same vec (`ModifyingProtectedSourceException`, as in `copyFrom`)?
-COMPILERPROPOSAL: items of basic types are copied; objects are moved with `v.add(->other)` (the other collection is left empty), and a plain `v.add(other)` with objects is a compile error until cloning exists; the same collection as source and target raises `ModifyingProtectedSourceException`.
 
-### 25. [TOBEDISCUSSED] copyFrom on vec and list
+Decision:
+- Items of basic types are copied.
+- Objects are moved with `v.add(->other)`, and the other collection is left empty. A plain `v.add(other)` with objects is a compile error until cloning exists.
+- The same collection as source and target raises `ModifyingProtectedSourceException`.
+
+### 25. [DECIDED] copyFrom and transformTo
 
 Context: Specs6.6: `copyFrom(dstIndex, src, srcIndex, count)` and `copyFrom(dstIndex, src, range)`; objects are cloned; on `vec` and `list`, `dstIndex` can be `.len` (the items past the end are appended).
 COMPILERSTATE: built for `arr` without objects, not for `vec` and `list`; objects need point 35.
-Question: between different collection types (an `arr` into a `vec`, a `list` into an `arr`)? Overlapping ranges inside the same collection?
-COMPILERPROPOSAL: any `IndexCollection<T>` as the source for basic types; the same collection is an exception as written.
 
-### 26. [DECIDED, COMPILERSTATE] removeAt(range)
+Decision:
+- `copyFrom` works between any index collections (`arr`, `vec`, `list`). It copies for real (objects are cloned), it is not a move. The index out of bounds is the one error that must always be there. The same collection as source and destination is an error.
+- New method `transformTo<Kind>()` converts a whole collection into another one: `vec<i32> v = myArr.transformTo<vec>()`.
+  - It is a moving method: the original ends, the items go to the new collection without being cloned (no cloning problem, point 35). Using `myArr` after the call is a compile error, as after `->myArr`.
+  - The item type is taken from the original (`arr<i32>` gives `vec<i32>`). `transformTo<vec<i32>>()` is accepted too; a different item type is a compile error.
+  - Between `arr`, `vec` and `list`. `vec` to `arr` can reuse the block with no copy, after shrinking it to the length.
+
+### 26. [DECIDED] removeAt(range)
 
 Context: Specs6.6: `removeAt(k / range)` removes by index or range on `vec` and `list`.
 COMPILERSTATE: only the index form is built. The range forms are those of Specs6.5 (`a..b`, `a..=b`, `..b`, `a..`); the items removed end.
-Open detail: a range outside the collection raises `IndexOutOfRangeException` (as `copyFrom`).
 
-### 27. [DECIDED, COMPILERSTATE] Sized declarations vec<T>[n] name
+Decision: a range outside the collection raises `IndexOutOfRangeException` (as `copyFrom`).
+
+### 27. Sized declarations vec<T>[n] name
 
 Context: Specs6.3: `vec<T>[n] name` (and `hmap<K, V>[n]`, `hset<T>[n]`) is the capacity on the declaration; `arr<T>[n] name` is the size.
 COMPILERSTATE: built for `arr`; for `vec` only the expression `vec<T>[n]` exists, the declaration `vec<T>[n] name` says "not built". `hmap` and `hset` do not exist yet.
 
-### 28. [TOBEDISCUSSED] Growth policy and capacity
+### 28. [DECIDED] Growth policy and capacity
 
 Context: Specs6.8.2: contiguous and growable, Rust `Vec` rules; `vec<T>[n]` is empty with capacity `n`; `reserve(n)` makes room for at least `n` more; `shrinkToFit()` lowers the capacity to the length.
 COMPILERSTATE: the capacity doubles from a minimum of 4; `reserve(n)` allocates exactly `count + n`.
-Question: is the growth factor part of the specification (observable through `.capacity`)? Should `.capacity` after `reserve` be exact?
-COMPILERPROPOSAL: unspecified except `.capacity >= .len`; `reserve(n)` gives at least `n` more.
+
+Decision:
+- Growing: the capacity is at least what was requested; it does not have to be exact. Shrinking is exact: after `shrinkToFit()` the capacity equals the length.
+- The capacity doubles until the block reaches `double-grow-limit` (default 4mb), then grows by the factor `further-grow-factor` (default 1.5) each time. A fixed increment would lose the amortized O(1) of `add` on large blocks. Both are compiler parameters.
+- A fixed-increment option is kept only for small targets (point 74).
+- The first allocation is 16 items (16 times the size of the item), made on the first `add`, unless a capacity is given (`vec<T>[n]`).
+- Spec: 6.8.2, 6.3 and the compiler options file.
 
 ## PART D - What is missing on list
 
-Specs6.8.3 (a singly linked list: count, first and last node, no double links). Built: literals, `c[i]` read and write (walk), `.len`, `for`, `add(->v)`, `insert`, `removeAt(index)`, `->l[i]`, `remove`, `removeAll`, `clear`, `has`, `indexOf`, `fill(value)`, `fill(count, value)`, `reverse`, `sort`, `sortUnstable`, `swap`, `getIterator()`, ownership of the items. Not available by the spec: capacity, `resize`, `truncate`, `pop`.
+Specs6.8.3 (a singly linked list: count, first and last node, no double links). Built: literals, `c[i]` read and write (walk), `.len`, `for`, `add(->v)`, `insert`, `removeAt(index)`, `->l[i]`, `remove`, `removeAll`, `clear`, `has`, `indexOf`, `fill(value)`, `fill(count, value)`, `reverse`, `sort`, `sortUnstable`, `swap`, `getIterator()`, ownership of the items. Not available by the spec: capacity, `resize`, `pop`. `truncate` is now available (point 7).
 
-### 29. [TOBEDISCUSSED, COMPILERSTATE] Nodes as slots of arrays
+### 29. [DECIDED] Nodes are NOT slots of arrays
 
 Context: Specs6.8.3 describes nodes that hold an item and point to the next node, and the cost table (O(1) `add`, O(1) `insert` and `removeAt` at 0, O(n) `c[i]`).
 COMPILERSTATE: the nodes are slots of two arrays (items and links) with a chain of free slots; growing doubles the arrays, so `add` is O(1) amortized and a node has no stable address.
-Question: does the specification require separate nodes (stable addresses, so a view or an iterator can hold a node while the list grows)? If the iterators and views use positions, a slot design is invisible.
-COMPILERPROPOSAL: slots stay until the planned comparison with a hand-written C version (point 71).
 
-### 30. [TOBEDISCUSSED] sort by relinking the nodes
+Decision:
+- The list follows the specification: every node is allocated separately. The list header has pointers to the first and the last node.
+- Two kinds of nodes: pointer to the next node plus the value (basic types), or pointer to the next node plus the pointer to the object. No pointer to the list (iterators and views hold it). Natural size, no padding.
+- Spec: nothing to change in 6.8.3; the compiler must follow it.
+
+### 30. [DECIDED] Sorting
 
 Context: Specs6.8.3: `sort` and `sortUnstable` are O(n log n) by merge sort relinking the nodes, with no item copies.
 COMPILERSTATE: the items are copied into a temporary array, sorted by the arrays' sort and written back to the same nodes (O(n) extra memory; the result is the same).
-Question: is the relinking required (it matters for objects held by borrowed references)?
-COMPILERPROPOSAL: not required; document the temporary array.
 
-### 31. [TOBEDISCUSSED] Views over a list
+Decision:
+- `arr` and `vec`: `sort` (stable) is a merge sort with run detection (TimSort style); `sortUnstable` is pdqsort (as Rust and Go).
+- `list`: `sort` and `sortUnstable` are both a bottom-up merge sort that relinks the nodes directly, with no temporary array; only the pointers move.
+- The comparison goes through `compareTo` (point 14), or the function given to `sort`.
+
+### 31. [DECIDED] Views over a list
 
 Context: Specs6.5 and Specs6.8.3: `l[a..b]` is a read-only view, O(a) to reach the start and O(1) per step. See point 34 for the rules shared with `arr` and `vec`.
-COMPILERSTATE: not built.
-Question: what is a view of a list (a start node and a count)? What happens to it when the list changes? (Specs6.5 forbids changing the collection while a view exists.)
+
+Decision:
+- A view increments the same counter as the iterators (point 6), so the collection keeps its size while the view is used.
+- A `list` view holds a start node pointer, an end node pointer and a count. It is read-only (no `add`).
+- The view classes of the collections are similar but are not the same class.
+- Spec: 6.5 and 6.8.3.
 
 ### 32. [TOBEDISCUSSED] The iterator of a list
 
 Context: Specs6.7.1: the cursor of a list iterator is a pointer to the node; one step is O(1). See point 3 and point 4.
 COMPILERSTATE: `getIterator()` copies the items into an array (O(n) once) and the iterator walks the copy; the `for` loop of the compiler walks the links directly with no copy.
+PROPOSAL (design side, 2026/10/24, not discussed): points 3, 4 and 6 fix the behavior. The `list` iterator is written in Dflat and cannot hold a node pointer or the pointer to its collection until pointers exist, so explicit iterators cannot decrement the counter of point 6 either. Proposal: the iterators of `arr`, `vec` and `list` are emitted as C by the compiler (like the `for` loop), with raw pointers to the collection and the node. The snapshot goes away now and the counter works for explicit iterators; the "must change" of point 4 then applies only to custom iterators. It is safe because the counter forbids any change of size while the iterator exists.
 
-### 33. [DECIDED] Removing the last node
+### 33. Removing the last node
 
 Context: Specs6.8.3: removing the last node needs the previous one, so it is O(n); `removeAt(0)` is O(1). Nothing to decide, listed for completeness.
 
@@ -332,11 +457,8 @@ Context: Specs6.1 and Specs99: open addressing, robin hood or chaining is not ch
 Question: the table design, the load factor, the growth, how deletion works (tombstones or backward shift), whether the order is reproducible between runs (it helps tests), and what the capacity form `[n]` guarantees.
 COMPILERPROPOSAL: open addressing with robin hood probing and backward-shift deletion, a power-of-two table, a maximum load of 7/8; a fixed seed so the order is reproducible; a small-table variant for architectures with little memory (point 74).
 
-### 47. [FUTUREVERSION, TOBEDISCUSSED] The hash functions
+### 47. REMOVED
 
-Context: Specs6.2: the hash is sized to the architecture (`uns`); strings by their bytes; classes by the name and the address by default.
-Question: the function for numbers, strings, tuples (combining), reals (point 14); protection against collisions made on purpose.
-COMPILERPROPOSAL: a fast multiplicative mix for integers, a modern non-cryptographic hash (wyhash-like) for strings and bytes, a combiner for tuples; no seeding by default.
 
 ### 48. [TOBEDISCUSSED] Objects as keys
 

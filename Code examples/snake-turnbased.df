@@ -1,0 +1,190 @@
+// Snake for Dflat — spec 0.0.13 / stdlib 0.0.9
+//
+// The standard library has only blocking console input (Console.read / readLine)
+// and no sleep or key polling, so the game is turn-based:
+//   w a s d   turn and move one step
+//   Enter     move one step in the current direction
+//   q         quit
+
+namespace snake
+
+alias Root.Console as console
+
+enum Direction { Up, Down, Left, Right }
+
+class SnakeGame(i32 width, i32 height) {
+  list<i32> body = []                  // cells, tail at index 0, head at the end
+  arr<bool> occupied                   // flat grid: y * width + x
+  i32 head = -1
+  i32 food = -1
+  Direction direction = Direction.Right
+  bool alive = true
+  bool won = false
+
+  u32 score = 0
+
+  public fun u32 getScore() { score }
+  public fun bool isRunning() { alive && !won }
+  public fun bool hasWon() { won }
+  public fun u64 getLength() { body.len }
+
+  // Sets up the board; called once after construction
+  public fun start() {
+    occupied = arr<bool>[(uns)(width * height)]
+    occupied.fill(false)
+
+    // Snake of length 3 in the middle, moving right
+    i32 startRow = height / 2
+    for i32 i = 0..3 {
+      i32 cell = startRow * width + width / 2 - 1 + i
+      body.add(cell)
+      occupied[(uns)cell] = true
+      head = cell
+    }
+    placeFood()
+  }
+
+  public fun turn(char key) {
+    Direction wanted = key ? {
+      'w': Direction.Up,
+      'a': Direction.Left,
+      's': Direction.Down,
+      'd': Direction.Right,
+      default: direction
+    }
+    // The snake cannot reverse into its own neck
+    if wanted != opposite(direction) then direction = wanted
+  }
+
+  public fun advance() {
+    if !isRunning() then return
+
+    i32 dx = direction ? { Left: -1, Right: 1, default: 0 }
+    i32 dy = direction ? { Up: -1, Down: 1, default: 0 }
+    i32 x = head % width + dx
+    i32 y = head / width + dy
+
+    if x < 0 || x >= width || y < 0 || y >= height {
+      alive = false                    // hit the wall
+      return
+    }
+
+    i32 next = y * width + x
+    bool eating = next == food
+    i32 tail = body[0]
+
+    // Moving into the tail cell is fine: the tail leaves it this turn (unless growing)
+    bool freeTail = !eating && next == tail
+    if occupied[(uns)next] && !freeTail {
+      alive = false                    // bit itself
+      return
+    }
+
+    if !eating {
+      body.removeAt(0)
+      occupied[(uns)tail] = false
+    }
+
+    body.add(next)
+    occupied[(uns)next] = true
+    head = next
+
+    if eating {
+      score += 10
+      placeFood()
+    }
+  }
+
+  public fun render() {
+    string screen = "\u{1B}[2J\u{1B}[H"          // ANSI: clear screen, cursor home
+
+    string border = "+"
+    for i32 i = 0..width { border += "-" }
+    border += "+\n"
+
+    screen += border
+    for i32 y = 0..height {
+      screen += "|"
+      for i32 x = 0..width {
+        screen += glyph(y * width + x)
+      }
+      screen += "|\n"
+    }
+    screen += border
+    screen += $"Score: {score}   Length: {body.len}\n"
+    screen += "w/a/s/d + Enter to move, Enter = straight, q = quit\n"
+    console.print(screen)
+  }
+
+  fun char glyph(i32 cell) {
+    if cell == head then return '@'
+    if cell == food then return '*'
+    if occupied[(uns)cell] then return 'o'
+    return ' '
+  }
+
+  // Picks a random free cell without retries: the k-th free cell of the grid
+  fun placeFood() {
+    i32 free = width * height - (i32)body.len
+    if free <= 0 {
+      food = -1
+      won = true                       // the snake fills the board
+      return
+    }
+
+    i64 pick = Root.Random.int(0, free - 1)
+    for i32 cell = 0..width * height {
+      if occupied[(uns)cell] then continue
+      if pick == 0 {
+        food = cell
+        return
+      }
+      pick--
+    }
+  }
+
+  static fun Direction opposite(Direction d) {
+    d ? {
+      Up: Direction.Down,
+      Down: Direction.Up,
+      Left: Direction.Right,
+      Right: Direction.Left
+    }
+  }
+}
+
+fun int main() {
+  SnakeGame game = SnakeGame(20, 12)
+  game.start()
+
+  while game.isRunning() {
+    game.render()
+
+    string line = console.readLine()
+    if line == "" then break           // end of input (an Enter alone gives "\n")
+
+    string command = line.trim().toLower()
+    if command == "q" then break
+
+    // Each key on the line is one move; an empty line moves straight once
+    if command.len == 0 {
+      game.advance()
+    } else {
+      for char key in command {
+        if !game.isRunning() then break
+        game.turn(key)
+        game.advance()
+      }
+    }
+  }
+
+  game.render()
+  if game.hasWon() {
+    console.log($"You win! Final score: {game.getScore()}")
+  } else if !game.isRunning() {
+    console.log($"Game over. Final score: {game.getScore()}, length {game.getLength()}")
+  } else {
+    console.log($"Bye. Score: {game.getScore()}")
+  }
+  return 0
+}

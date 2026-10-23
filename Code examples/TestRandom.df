@@ -1,0 +1,1 @@
+Root.Console.log(Root.Random.int(0, 10))

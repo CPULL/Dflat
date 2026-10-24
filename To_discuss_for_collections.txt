@@ -163,12 +163,27 @@ Decision: option (b). `.sizeof` of a collection is the header plus the allocated
 
 ### 11. [DECIDED] The methods behind the properties and the operators
 
-Context: Specs6.7 lists `->c[k]` in `Collection` and `c[i]`, `c[a..b]` in `IndexCollection`, but a trait declares functions and properties, and these are operators. Properties of traits (Specs11.1.4, Specs11.2) are the way for `len`.
+Context: Specs6.7 lists `->c[k]` in `Collection`, and `c[i]` and `c[a..b]` in `IndexCollection`. A trait declares functions and properties, though, and these are operators. Trait properties (Specs11.1.4, Specs11.2) are how `len` is declared.
 
 Decision:
-- Each trait defines a set of private methods for its properties and its operators. They can be virtual; every class that implements the trait must implement them. They are internal, needed only to write custom collections.
-- Names, in camelCase like every method: `getLen()`, `getSizeof()`, `readPos(k)`, `setPos(k, Value)`, `moveOut(k)`, `getView(a, b)`, `getViewBegin(b)`, `getViewEnd(a)`. More will be added with maps and sets.
-- `len` stays a property, implemented by `getLen()`. `getIterator`, `next` and `writableNext` keep their names.
+- Each trait defines a set of non-public methods that implement its properties and operators. They can be virtual, and every class that implements the trait must implement them. They are internal: only someone writing a custom collection needs them.
+- Naming: these methods are snake_case, to keep them apart from regular methods, which are camelCase. This is provisional.
+- `len` stays a property. `getIterator`, `next` and `writableNext` are regular methods and keep their names.
+- `.sizeof` applies to every type, natives included, so its method lives in `Root.Class`, the top class.
+- When the argument type of an operator is not given (`->c[k]`), it is the generic form valid for all collections. Each kind of collection fixes the argument type: `uns` for `IndexCollection`, `Key` for `MapCollection`, and the same for sets.
+- More methods will be added with maps and sets.
+
+| Written as | Method | Defined in |
+|---|---|---|
+| `x.sizeof` | `get_sizeof()` | `Root.Class` |
+| `c.len` | `get_len()` | `Collection` |
+| `->c[k]` | `move_out(k)` (generic form) | `Collection` |
+| `->c[uns k]` | `move_out(uns k)` | `IndexCollection` |
+| `->c[Key k]` | `move_out(Key k)` | `MapCollection` (future) |
+| `c[k]` (read) | `read_pos(uns k)` | `IndexCollection` |
+| `c[k] = value` | `set_pos(uns k, value)` | `IndexCollection` |
+| `c[a..b]`, `c[..b]`, `c[a..]` | `get_view(uns? a, uns? b)`, returns `View<C>`; a missing bound is null | `IndexCollection` |
+
 
 ### 12. REMOVED
 
@@ -354,13 +369,22 @@ Decision:
 - The view classes of the collections are similar but are not the same class.
 - Spec: 6.5 and 6.8.3.
 
-### 32. [TOBEDISCUSSED] The iterator of a list
+### 32. [DECIDED] The iterator of a list
 
-Context: Specs6.7.1: the cursor of a list iterator is a pointer to the node; one step is O(1). See point 3 and point 4.
-COMPILERSTATE: `getIterator()` copies the items into an array (O(n) once) and the iterator walks the copy; the `for` loop of the compiler walks the links directly with no copy.
-PROPOSAL (design side, 2026/10/24, not discussed): points 3, 4 and 6 fix the behavior. The `list` iterator is written in Dflat and cannot hold a node pointer or the pointer to its collection until pointers exist, so explicit iterators cannot decrement the counter of point 6 either. Proposal: the iterators of `arr`, `vec` and `list` are emitted as C by the compiler (like the `for` loop), with raw pointers to the collection and the node. The snapshot goes away now and the counter works for explicit iterators; the "must change" of point 4 then applies only to custom iterators. It is safe because the counter forbids any change of size while the iterator exists.
+Context: Specs6.7.1: the cursor of a list iterator is a pointer to the node; one step is O(1). Points 3, 4 and 6 fix the behavior.
 
-### 33. Removing the last node
+Decision:
+- The `list` iterator holds two pointers: one to its list (used to release the counter of point 6 when the iterator ends) and one to the current node.
+- One step follows the node's link to the next node: O(1).
+- The end of the list is marked by a null next pointer, so the node pointer is nullable. The list's pointer to its last node is only a fast way to add items at the end; iterators do not use it.
+- `writableNext` is syntactic sugar: it marks that the iterator changes the content of the node in place, through the node pointer. It does not change the structure of the list.
+- The pointer kind (owning, borrowed, raw) is decided with pointers.
+- Until pointers exist, `getIterator()` keeps the snapshot copy described below.
+
+COMPILERSTATE: `getIterator()` copies the items into an array (O(n) once) and the iterator walks the copy; the `for` loop of the compiler walks the links directly with no copy. The iterator is rewritten as above once pointers are built.
+
+
+### 33. [DECIDED] Removing the last node
 
 Context: Specs6.8.3: removing the last node needs the previous one, so it is O(n); `removeAt(0)` is O(1). Nothing to decide, listed for completeness.
 
@@ -368,12 +392,19 @@ Context: Specs6.8.3: removing the last node needs the previous one, so it is O(n
 
 These features are used by several collections and need decisions of the language, not of one collection.
 
-### 34. [TOBEDISCUSSED] Views c[a..b]
+### 34. [DECIDED] Views c[a..b]
 
-Context: Specs6.5: `c[a..b]`, `c[..b]`, `c[a..]` give a read-only view of a part of the collection, with no copy; `c[a..b]!` is a copy; views exist on `arr`, `vec` and `list`; a view can only be a local variable or a parameter (not a field, an item or a result); while a view exists the collection cannot be changed (PROPOSAL of the first design, preliminary).
-COMPILERSTATE: not built (no view type exists).
-Question: the representation (pointer and length for `arr` and `vec`; a node and a count for `list`); the type name of a view (is `arr<i32> head = scores[..3]` a view or an array?); how "cannot be changed while a view exists" is checked (the borrow rules of the compiler are partial); whether an iterator and a `for` can run over a view.
-COMPILERPROPOSAL: a view is a value of the collection's type that the compiler knows is borrowed (the existing `arr<i32> head = scores[..3]` form); the checks reuse the loop rules of point 8.
+Context: Specs6.5: c[a..b], c[..b], c[a..] give a read-only view of a part of the collection, with no copy; c[a..b]! is a copy; views exist on arr, vec and list.
+
+Decision:
+- A view is a dedicated class, View<C>, where C is the type of the collection it comes from: a vec<string> can only produce a View<vec<string>>. Each view class holds what its collection needs for the view to exist (for example a start and a length for arr and vec, and a start node and a count for list). For trees and maps we will probably need dedicated views (IndexView, MapView); that is decided when those collections are designed.
+- On an IndexCollection, the [a..b] operator calls a non-public method: get_view(uns? start, uns? end), which returns View<C>. A missing bound ([..b], [a..]) is passed as null.
+- list is an IndexCollection. Creating a view of a list is O(n), because the a-th node has to be found.
+- Lock check: the same rules as iterators. While a view exists, the collection cannot be changed. The view can live wherever an iterator can (this replaces the Specs6.5 "local variable or parameter only" rule).
+- Iterators and for can run over a view: it has a begin and an end.
+- c[a..b]! copies the items into a new collection of type C and leaves the original unchanged. It needs .clone() to be fully implemented.
+
+COMPILERSTATE: not built (no View type exists; [a..b]! also waits for .clone()).
 
 ### 35. [TOBEDISCUSSED] Cloning: .clone() and c!
 

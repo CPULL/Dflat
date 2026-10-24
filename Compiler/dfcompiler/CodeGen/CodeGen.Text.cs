@@ -319,7 +319,9 @@ public sealed partial class CodeGen {
     // vec<T> (spec 6.8) is a generic class written in Dflat, with the collection traits (CodeGen.Vec.cs)
     if (!userTypes.Contains("vec") && !userTypes.Contains("list") && Mentions(program, node => node.Text is "vec" or "list" or "getIterator" or "IndexIterator" or "IndexCollection" or "Iterator")) {
       // its lines are numbered from LibraryLine so that no warning of this code is shown (Warn) and the errors can be told apart
-      var vecLibrary = new Parser(new Lexer(VecPrelude, LibraryLine).Tokenize()).ParseProgram();
+      // UNS_NONE is the largest uns of the target ("not found")
+      string prelude = VecPrelude.Replace("UNS_NONE", NativeUns == "u32" ? "4294967295" : "18446744073709551615");
+      var vecLibrary = new Parser(new Lexer(prelude, LibraryLine).Tokenize()).ParseProgram();
       program.Children.InsertRange(0, vecLibrary.Children);
       vecPrelude = true;
     }

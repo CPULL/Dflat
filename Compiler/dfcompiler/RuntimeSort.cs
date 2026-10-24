@@ -53,12 +53,12 @@ static int df_sort_order(df_cmp_fn cmp, bool desc, const void* a, const void* b)
   return desc ? -c : c;
 }
 
-static void df_sort_merge(char* base, char* tmp, uint64_t n, uint64_t size, df_cmp_fn cmp, bool desc) {
+static void df_sort_merge(char* base, char* tmp, df_uns n, df_uns size, df_cmp_fn cmp, bool desc) {
   if (n < 2) return;
-  uint64_t mid = n / 2;
+  df_uns mid = n / 2;
   df_sort_merge(base, tmp, mid, size, cmp, desc);
   df_sort_merge(base + mid * size, tmp, n - mid, size, cmp, desc);
-  uint64_t i = 0, j = mid, k = 0;
+  df_uns i = 0, j = mid, k = 0;
   while (i < mid && j < n) {
     /* the right item goes first only when it is strictly before the left one: equal items keep their order */
     if (df_sort_order(cmp, desc, base + j * size, base + i * size) < 0) {
@@ -75,10 +75,10 @@ static void df_sort_merge(char* base, char* tmp, uint64_t n, uint64_t size, df_c
   memcpy(base, tmp, n * size);
 }
 
-static void df_sort_swap(char* a, char* b, uint64_t size) {
+static void df_sort_swap(char* a, char* b, df_uns size) {
   char chunk[64];
   while (size > 0) {
-    uint64_t part = size < sizeof chunk ? size : sizeof chunk;
+    df_uns part = size < sizeof chunk ? size : sizeof chunk;
     memcpy(chunk, a, part);
     memcpy(a, b, part);
     memcpy(b, chunk, part);
@@ -88,9 +88,9 @@ static void df_sort_swap(char* a, char* b, uint64_t size) {
   }
 }
 
-static void df_sort_sift(char* base, uint64_t root, uint64_t n, uint64_t size, df_cmp_fn cmp, bool desc) {
+static void df_sort_sift(char* base, df_uns root, df_uns n, df_uns size, df_cmp_fn cmp, bool desc) {
   for (;;) {
-    uint64_t child = 2 * root + 1;
+    df_uns child = 2 * root + 1;
     if (child >= n) return;
     if (child + 1 < n && df_sort_order(cmp, desc, base + child * size, base + (child + 1) * size) < 0) child++;
     if (df_sort_order(cmp, desc, base + root * size, base + child * size) >= 0) return;
@@ -99,7 +99,7 @@ static void df_sort_sift(char* base, uint64_t root, uint64_t n, uint64_t size, d
   }
 }
 
-static void df_sort(void* items, uint64_t n, uint64_t size, df_cmp_fn cmp, bool stable, bool desc) {
+static void df_sort(void* items, df_uns n, df_uns size, df_cmp_fn cmp, bool stable, bool desc) {
   char* base = (char*)items;
   if (n < 2 || !base) return;
   if (stable) {
@@ -108,16 +108,11 @@ static void df_sort(void* items, uint64_t n, uint64_t size, df_cmp_fn cmp, bool 
     free(tmp);
     return;
   }
-  for (uint64_t start = n / 2; start > 0; start--) df_sort_sift(base, start - 1, n, size, cmp, desc);
-  for (uint64_t end = n - 1; end > 0; end--) {
+  for (df_uns start = n / 2; start > 0; start--) df_sort_sift(base, start - 1, n, size, cmp, desc);
+  for (df_uns end = n - 1; end > 0; end--) {
     df_sort_swap(base, base + end * size, size);
     df_sort_sift(base, 0, end, size, cmp, desc);
   }
-}
-
-/* an index given as a signed number: a negative one becomes a value no array has */
-static uint64_t df_idx_arg(int64_t v) {
-  return v < 0 ? UINT64_MAX : (uint64_t)v;
 }
 
 """;

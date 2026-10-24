@@ -23,9 +23,9 @@ public sealed partial class CodeGen {
     string result = NewTemp();
     string node = NewTemp();
     string step = NewTemp();
-    string code = WithTemp(new Expr(NullChecked(obj.Code, obj.Type), obj.Type), list => WithTemp(new Expr(IndexValue(index, n), "u64"), position =>
+    string code = WithTemp(new Expr(NullChecked(obj.Code, obj.Type), obj.Type), list => WithTemp(new Expr(IndexValue(index, n), NativeUns), position =>
       CheckRaise($"({{ {CType(elem)} {result} = {ZeroValue(elem)}; if (df_idx_ok({list}->{count}, {position}, {fn!.NameConst})) {{ uint64_t {node} = {list}->{first}; "
-        + $"for (uint64_t {step} = 0; {step} < {position}; {step}++) {{ {node} = {list}->{links}.p[{node}]; }} {result} = {list}->{items}.p[{node}]; }} {result}; }})", elem)));
+        + $"for (df_uns {step} = 0; {step} < {position}; {step}++) {{ {node} = {list}->{links}.p[{node}]; }} {result} = {list}->{items}.p[{node}]; }} {result}; }})", elem)));
     return new Expr(code, elem);
   }
 
@@ -50,8 +50,8 @@ public sealed partial class CodeGen {
     if (op == "??=") {
       throw Error("'??=' on a list item is not supported yet", s);
     }
-    string walk = $"uint64_t {node} = {list}->{first}; for (uint64_t {step} = 0; {step} < {position}; {step}++) {{ {node} = {list}->{links}.p[{node}]; }} ";
-    string head = $"({{ {CType(obj.Type)} {list} = {NullChecked(obj.Code, obj.Type)}; uint64_t {position} = {IndexValue(index, target)}; ";
+    string walk = $"uint64_t {node} = {list}->{first}; for (df_uns {step} = 0; {step} < {position}; {step}++) {{ {node} = {list}->{links}.p[{node}]; }} ";
+    string head = $"({{ {CType(obj.Type)} {list} = {NullChecked(obj.Code, obj.Type)}; df_uns {position} = {IndexValue(index, target)}; ";
     string check = $"if (!df_idx_ok({list}->{count}, {position}, {fn!.NameConst})) {RaiseJump} ";
     if (op == "=") {
       var assigned = ExprOf(s.Children[1], scope, elem);
@@ -160,7 +160,7 @@ public sealed partial class CodeGen {
       }
       string count = $"{held}->{VecField(list.Type, "count")}";
       string code = $"({{ {CType(list.Type)} {held} = {NullChecked(list.Code, list.Type)}; {ArrCType(elem)} {temp} = {{ ({CType(elem)}*)df_calloc({count}, sizeof({CType(elem)})), {count} }}; "
-        + $"uint64_t {position} = 0; for (uint64_t {node} = {held}->{first}; {node} != {ListEnd}; {node} = {held}->{links}.p[{node}]) {{ {temp}.p[{position}++] = {held}->{items}.p[{node}]; }} "
+        + $"df_uns {position} = 0; for (uint64_t {node} = {held}->{first}; {node} != {ListEnd}; {node} = {held}->{links}.p[{node}]) {{ {temp}.p[{position}++] = {held}->{items}.p[{node}]; }} "
         + $"{sorted.Value.Code}; {position} = 0; for (uint64_t {node} = {held}->{first}; {node} != {ListEnd}; {node} = {held}->{links}.p[{node}]) {{ {held}->{items}.p[{node}] = {temp}.p[{position}++]; }} "
         + $"{held}->{VecField(list.Type, "version")} += 1; free({temp}.p); }})";
       return new Expr(code, "void");

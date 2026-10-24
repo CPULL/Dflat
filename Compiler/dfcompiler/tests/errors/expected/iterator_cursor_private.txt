@@ -1,0 +1,1 @@
+iterator_cursor_private.df(4): error: 'cursor' is private in arrIterator__i32

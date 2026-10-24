@@ -1,6 +1,8 @@
-Compiler version 0.0.15 alpha for version 0.0.13 of the specs 2026/10/22
+Compiler version 0.0.16 alpha for version 0.0.13 of the specs 2026/10/24
 
 Changes from the previous version -----------------------
+- uns: the lengths and indexes of arr, vec and list use the native unsigned size of the target (df_uns in C), so 32-bit targets get 32-bit lengths
+- IndexIterator<Item>: the cursor is no longer part of the trait; each iterator keeps its own (private)
 
 Done -----------------------
 
@@ -175,7 +177,7 @@ Phase 7  Generics (spec 11.3)                                     IN PROGRESS
  7c  list DONE 2026-10-22 (singly linked list: tests list, listown, errors/list_*; same approach as vec, see CompilerImplementation.txt); vec DONE 2026-10-20 (first slice: tests vec, vecown, customcollection, errors/vec_*); list, map, hmap, set, hset TODO
      vec: literals, vec<T>[n], c[i] read/write, .len, .capacity, for, add (->), insert, pop((&)x), remove, removeAll, removeAt, clear, reserve, shrinkToFit,
      fillAtCapacity, resize, truncate, swap(i, j), has, indexOf, fill, reverse, sort, sortUnstable, getIterator(); the items are owned (moved in, moved out, dropped)
-     traits Iterator, IndexIterator<Item> (u64 cursor + next()), IndexCollection<Item> (get_len + getIterator); arr.getIterator(); for-in over a class that implements IndexCollection
+     traits Iterator, IndexIterator<Item> (next(); the cursor is private to each iterator), IndexCollection<Item> (get_len + getIterator); arr.getIterator(); for-in over a class that implements IndexCollection
      aligned with the spec 0.0.13 (2026-10-22): Collection<Item> as the generic parent of IndexCollection<Item>, ->, fill(null), swap, uns, ModifyingIteratedCollectionException (runtime check of the for loop), Debug / Release
      NOT yet: add(collection), copyFrom, views v[a..b], v!, sort(lambda), removeAt(range), .sizeof, sized declaration vec<T>[n] name, (&)Item in for, writableNext / *Collection collection (pointers), the compile-time proof of a change in a loop, getIterator in Collection<Item>
 

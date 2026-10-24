@@ -1,0 +1,4 @@
+// the cursor is internal to the iterator (spec 6.7.1): it cannot be read from outside
+arr<i32> values = [1, 2]
+var iterator = values.getIterator()
+var position = iterator.cursor

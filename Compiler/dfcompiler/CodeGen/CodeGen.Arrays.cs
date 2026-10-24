@@ -20,7 +20,7 @@ public sealed partial class CodeGen {
     string name = "df_arr_" + Regex.Replace(Mangle(elem), @"[^A-Za-z0-9_]", "_");
     string elemC = CType(elem);
     if (definedTypes.Add(name)) {
-      typeDefs.Append($"typedef struct {{\n  {elemC}* p;\n  uint64_t len;\n}} {name};\n\n");
+      typeDefs.Append($"typedef struct {{\n  {elemC}* p;\n  df_uns len;\n}} {name};\n\n");
     }
     return name;
   }
@@ -32,7 +32,7 @@ public sealed partial class CodeGen {
       string item = StrOf(new Expr("a.p[i]", elem), at);
       arrayCode.Append($"static df_string {name}({ArrCType(elem)} a) {{\n");
       arrayCode.Append("  df_string r = df_str_lit(\"[\", 1);\n");
-      arrayCode.Append("  for (uint64_t i = 0; i < a.len; i++) {\n");
+      arrayCode.Append("  for (df_uns i = 0; i < a.len; i++) {\n");
       arrayCode.Append("    if (i > 0) {\n      r = df_str_concat(r, df_str_lit(\", \", 2));\n    }\n");
       arrayCode.Append($"    r = df_str_concat(r, {item});\n  }}\n");
       arrayCode.Append("  return df_str_concat(r, df_str_lit(\"]\", 1));\n}\n\n");
@@ -40,12 +40,16 @@ public sealed partial class CodeGen {
     return name;
   }
 
-  // a C expression for an index of any integer type; a negative value becomes huge and fails the bounds check
+  // a C expression (df_uns) for an index of any integer type; a negative value, or one past the range of uns, becomes huge and fails the bounds check
   string IndexValue(Expr index, Node at) {
     if (!IsInt(index.Type)) {
       throw Error($"an index must be an integer, not {index.Type}", at);
     }
-    return SignedTypes.Contains(index.Type) ? $"((uint64_t)(int64_t)({index.Code}))" : $"((uint64_t)({index.Code}))";
+    bool wide = Bits(index.Type) > Bits(NativeUns);
+    if (SignedTypes.Contains(index.Type)) {
+      return wide ? $"df_idx_arg((int64_t)({index.Code}))" : $"((df_uns)(int64_t)({index.Code}))";
+    }
+    return wide ? $"df_idx_wide((uint64_t)({index.Code}))" : $"((df_uns)({index.Code}))";
   }
 
   string RaiseJump => $"{{ df_err = df_pending; df_pending = NULL; df_err_thrown = false; goto {Handler}; }}";
@@ -69,7 +73,7 @@ public sealed partial class CodeGen {
     string elem = ArrElem(type);
     var size = ExprOf(sizeNode, scope, "u64");
     string count = NewTemp();
-    string code = $"({{ uint64_t {count} = {IndexValue(size, sizeNode)}; ({CType(type)}){{ ({CType(elem)}*)df_calloc({count}, sizeof({CType(elem)})), {count} }}; }})";
+    string code = $"({{ df_uns {count} = {IndexValue(size, sizeNode)}; ({CType(type)}){{ ({CType(elem)}*)df_calloc({count}, sizeof({CType(elem)})), {count} }}; }})";
     return new Expr(code, type);
   }
 
@@ -151,7 +155,7 @@ public sealed partial class CodeGen {
       throw NotSupported("Collections", n);
     }
     string elem = ArrElem(obj.Type);
-    string code = WithTemp(obj, array => WithTemp(new Expr(IndexValue(index, n), "u64"), position =>
+    string code = WithTemp(obj, array => WithTemp(new Expr(IndexValue(index, n), NativeUns), position =>
       CheckRaise($"(df_idx_ok({array}.len, {position}, {fn!.NameConst}) ? {array}.p[{position}] : {ZeroValue(elem)})", elem)));
     return new Expr(code, elem);
   }
@@ -199,11 +203,11 @@ public sealed partial class CodeGen {
       // the collection owns its items: the one that is replaced ends (unless it is the same object)
       string replaced = NewTemp();
       string incoming = NewTemp();
-      return $"({{ {CType(obj.Type)} {array} = {holder}; uint64_t {position} = {IndexValue(index, target)}; {CType(elem)} {incoming} = {value}; "
+      return $"({{ {CType(obj.Type)} {array} = {holder}; df_uns {position} = {IndexValue(index, target)}; {CType(elem)} {incoming} = {value}; "
         + $"if (!df_idx_ok({length}, {position}, {fn!.NameConst})) {RaiseJump} {CType(elem)} {replaced} = {slot}; {slot} = {incoming}; {bump}"
         + $"if ({replaced} != {incoming}) {{ df_drop((void*){replaced}); }} }})";
     }
-    return $"({{ {CType(obj.Type)} {array} = {holder}; uint64_t {position} = {IndexValue(index, target)}; "
+    return $"({{ {CType(obj.Type)} {array} = {holder}; df_uns {position} = {IndexValue(index, target)}; "
       + $"if (!df_idx_ok({length}, {position}, {fn!.NameConst})) {RaiseJump} {slot} = {value}; {bump}}})";
   }
 
@@ -233,10 +237,10 @@ public sealed partial class CodeGen {
         string code = WithTemp(array, a => WithTemp(value, v => {
           string same = EqualsCode(new Expr(Elem(a, i), elem), new Expr(v, elem), at);
           return name == "has"
-            ? $"({{ bool {found} = false; for (uint64_t {i} = 0; {i} < {a}.len; {i}++) {{ if ({same}) {{ {found} = true; break; }} }} {found}; }})"
-            : $"({{ uint64_t {found} = UINT64_MAX; for (uint64_t {i} = 0; {i} < {a}.len; {i}++) {{ if ({same}) {{ {found} = {i}; break; }} }} {found}; }})";
+            ? $"({{ bool {found} = false; for (df_uns {i} = 0; {i} < {a}.len; {i}++) {{ if ({same}) {{ {found} = true; break; }} }} {found}; }})"
+            : $"({{ df_uns {found} = DF_UNS_MAX; for (df_uns {i} = 0; {i} < {a}.len; {i}++) {{ if ({same}) {{ {found} = {i}; break; }} }} {found}; }})";
         }));
-        return new Expr(code, name == "has" ? "bool" : "u64");
+        return new Expr(code, name == "has" ? "bool" : NativeUns);
       }
       case "fill": {
         Arity(1);
@@ -248,15 +252,15 @@ public sealed partial class CodeGen {
         string replacedItem = NewTemp();
         string code = WithTemp(array, a => WithTemp(value, v => IsClass(elem)
           // the objects the items held end (fill(null))
-          ? $"({{ for (uint64_t {i} = 0; {i} < {a}.len; {i}++) {{ {CType(elem)} {replacedItem} = {Elem(a, i)}; {Elem(a, i)} = {v}; if ({replacedItem} != {v}) {{ df_drop((void*){replacedItem}); }} }} }})"
-          : $"({{ for (uint64_t {i} = 0; {i} < {a}.len; {i}++) {{ {Elem(a, i)} = {v}; }} }})"));
+          ? $"({{ for (df_uns {i} = 0; {i} < {a}.len; {i}++) {{ {CType(elem)} {replacedItem} = {Elem(a, i)}; {Elem(a, i)} = {v}; if ({replacedItem} != {v}) {{ df_drop((void*){replacedItem}); }} }} }})"
+          : $"({{ for (df_uns {i} = 0; {i} < {a}.len; {i}++) {{ {Elem(a, i)} = {v}; }} }})"));
         return new Expr(code, "void");
       }
       case "clear": {
         Arity(0);
         string i = NewTemp();
         string code = WithTemp(array, a =>
-          $"({{ for (uint64_t {i} = 0; {i} < {a}.len; {i}++) {{ {Elem(a, i)} = {ZeroValue(elem)}; }} }})");
+          $"({{ for (df_uns {i} = 0; {i} < {a}.len; {i}++) {{ {Elem(a, i)} = {ZeroValue(elem)}; }} }})");
         return new Expr(code, "void");
       }
       case "reverse": {
@@ -264,7 +268,7 @@ public sealed partial class CodeGen {
         string i = NewTemp();
         string swap = NewTemp();
         string code = WithTemp(array, a =>
-          $"({{ for (uint64_t {i} = 0; {i} < {a}.len / 2; {i}++) {{ {CType(elem)} {swap} = {Elem(a, i)}; {Elem(a, i)} = {a}.p[{a}.len - 1 - {i}]; {a}.p[{a}.len - 1 - {i}] = {swap}; }} }})");
+          $"({{ for (df_uns {i} = 0; {i} < {a}.len / 2; {i}++) {{ {CType(elem)} {swap} = {Elem(a, i)}; {Elem(a, i)} = {a}.p[{a}.len - 1 - {i}]; {a}.p[{a}.len - 1 - {i}] = {swap}; }} }})");
         return new Expr(code, "void");
       }
       case "sort":
@@ -320,7 +324,7 @@ public sealed partial class CodeGen {
       var other = ExprOf(args[1], scope, "u64");
       string j = NewTemp();
       string swapped = NewTemp();
-      string code = $"({{ {CType(array.Type)} {a} = {array.Code}; uint64_t {i} = {IndexValue(first, args[0])}; uint64_t {j} = {IndexValue(other, args[1])}; "
+      string code = $"({{ {CType(array.Type)} {a} = {array.Code}; df_uns {i} = {IndexValue(first, args[0])}; df_uns {j} = {IndexValue(other, args[1])}; "
         + $"if (!df_idx_ok({a}.len, {i}, {fn!.NameConst})) {RaiseJump} if (!df_idx_ok({a}.len, {j}, {fn!.NameConst})) {RaiseJump} "
         + $"{CType(elem)} {swapped} = {a}.p[{i}]; {a}.p[{i}] = {a}.p[{j}]; {a}.p[{j}] = {swapped}; }})";
       return new Expr(code, "void");
@@ -331,7 +335,7 @@ public sealed partial class CodeGen {
     }
     string incoming = NewTemp();
     string old = NewTemp();
-    string replaced = $"({{ {CType(array.Type)} {a} = {array.Code}; uint64_t {i} = {IndexValue(first, args[0])}; {CType(elem)} {incoming} = {Convert(replacement, elem, args[1])}; "
+    string replaced = $"({{ {CType(array.Type)} {a} = {array.Code}; df_uns {i} = {IndexValue(first, args[0])}; {CType(elem)} {incoming} = {Convert(replacement, elem, args[1])}; "
       + $"if (!df_idx_ok({a}.len, {i}, {fn!.NameConst})) {RaiseJump} {CType(elem)} {old} = {a}.p[{i}]; {a}.p[{i}] = {incoming}; {old}; }})";
     return new Expr(replaced, elem, IsClass(elem));
   }
@@ -484,7 +488,7 @@ public sealed partial class CodeGen {
       if (!IsInt(value.Type)) {
         throw Error($"an index must be an integer, not {value.Type}", node);
       }
-      return SignedTypes.Contains(value.Type) ? $"df_idx_arg((int64_t)({value.Code}))" : $"((uint64_t)({value.Code}))";
+      return SignedTypes.Contains(value.Type) ? $"df_idx_arg((int64_t)({value.Code}))" : IndexValue(value, node);
     }
     CheckCopyFromRanges(args, scope, at);
     NeedChunk("sort");
@@ -502,11 +506,11 @@ public sealed partial class CodeGen {
       }
       srcIndex = range.Children[0].Kind == "Open" ? "0" : Index(range.Children[0]);
       if (range.Children[1].Kind == "Open") {
-        count = $"({source0}.len < ({srcIndex}) ? UINT64_MAX : {source0}.len - ({srcIndex}))";
+        count = $"({source0}.len < ({srcIndex}) ? DF_UNS_MAX : {source0}.len - ({srcIndex}))";
       } else {
         string end = Index(range.Children[1]);
         string last = range.Text == "..=" ? $"({end}) + 1" : $"({end})";
-        count = $"(({last}) < ({srcIndex}) ? UINT64_MAX : ({last}) - ({srcIndex}))";
+        count = $"(({last}) < ({srcIndex}) ? DF_UNS_MAX : ({last}) - ({srcIndex}))";
       }
     }
     string d = NewTemp();
@@ -514,7 +518,7 @@ public sealed partial class CodeGen {
     string si = NewTemp();
     string n = NewTemp();
     string code = $"({{ {CType(destination.Type)} {d} = {destination.Code}; {CType(source.Type)} {source0} = {source.Code}; "
-      + $"uint64_t {di} = {dstIndex}; uint64_t {si} = {srcIndex}; uint64_t {n} = {count}; "
+      + $"df_uns {di} = {dstIndex}; df_uns {si} = {srcIndex}; df_uns {n} = {count}; "
       + $"if ({d}.p != NULL && {d}.p == {source0}.p) {{ df_raise(&df_desc_ModifyingProtectedSourceException, {fn!.NameConst}); {RaiseJump} }} "
       + $"if ({di} > {d}.len || {n} > {d}.len - {di} || {si} > {source0}.len || {n} > {source0}.len - {si}) {{ df_raise(&df_desc_IndexOutOfRangeException, {fn!.NameConst}); {RaiseJump} }} "
       + $"if ({n} > 0) {{ memcpy({d}.p + {di}, {source0}.p + {si}, {n} * sizeof(*{d}.p)); }} }})";
@@ -634,10 +638,10 @@ public sealed partial class CodeGen {
       loop = $"for (uint64_t {position} = {whole}->{VecField(collection.Type, "first")}; {position} != {ListEnd}; {position} = {whole}->{VecField(collection.Type, "links")}.p[{position}])";
       itemCode = $"{whole}->{VecField(collection.Type, "items")}.p[{position}]";
     } else if (overVec) {
-      loop = $"for (uint64_t {position} = 0; {position} < {whole}->{VecField(collection.Type, "count")}; {position}++)";
+      loop = $"for (df_uns {position} = 0; {position} < {whole}->{VecField(collection.Type, "count")}; {position}++)";
       itemCode = $"{whole}->{VecField(collection.Type, "items")}.p[{position}]";
     } else {
-      loop = $"for (uint64_t {position} = 0; {position} < {whole}.len; {position}++)";
+      loop = $"for (df_uns {position} = 0; {position} < {whole}.len; {position}++)";
       itemCode = $"{whole}.p[{position}]";
     }
     sb.Append($"{innerPad}{loop} {{\n");

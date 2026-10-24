@@ -4,7 +4,7 @@ using dfparser;
 namespace dfcompiler;
 
 public static class Program {
-  public const string Version = "0.0.15alpha";
+  public const string Version = "0.0.16alpha";
 
   // the version of the specification this compiler was built for: the variable `version` of the preprocessor (spec 19.1)
   public const string LanguageVersion = "0.0.13";

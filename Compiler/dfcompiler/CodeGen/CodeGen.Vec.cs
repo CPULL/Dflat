@@ -8,7 +8,7 @@ namespace dfcompiler;
 // program mentions vec (AddPrelude) and makes the copy for each element type like for any generic class. The hot paths are not calls: c[i], c[i] = v,
 // .len and the for loop are emitted as C that reads the fields of the object directly (VecIndex, VecIndexAssign, EmitForEach), and the members that
 // exist on arr (has, indexOf, fill, reverse, sort, sortUnstable) work on a view of the live items (VecView) with the code of the arrays.
-// Traits: Iterator (a marker), IndexIterator<Item> (a cursor and next()) and IndexCollection<Item> (the length and getIterator()).
+// Traits: Iterator (a marker), IndexIterator<Item> (next(); each iterator keeps its own cursor) and IndexCollection<Item> (the length and getIterator()).
 // Not built yet: Collection<Item> (needs a generic parent trait), the other collections, views, ownership of the items (the items are not dropped).
 public sealed partial class CodeGen {
   bool vecPrelude;
@@ -17,8 +17,8 @@ public sealed partial class CodeGen {
   const string VecPrelude = """
 trait Iterator { }
 
+// the cursor is internal to each iterator, the trait fixes only the methods (spec 6.7.1)
 trait IndexIterator<Item> : Iterator {
-  uns cursor
   fun (Item value, bool isValid) next()
 }
 
@@ -33,7 +33,9 @@ trait IndexCollection<Item> : Collection<Item> {
 }
 
 // the iterator holds the items and the count as they were when it was made (the vector cannot change while it is iterated, spec 6.4)
-public class vecIterator<T>(arr<T> items, u64 count) : IndexIterator<T> {
+public class vecIterator<T>(arr<T> items, uns count) : IndexIterator<T> {
+  uns cursor = 0
+
   override fun (T value, bool isValid) next() {
     T none
     if cursor >= count {
@@ -47,6 +49,8 @@ public class vecIterator<T>(arr<T> items, u64 count) : IndexIterator<T> {
 
 // the iterator of an arr<T>
 public class arrIterator<T>(arr<T> items) : IndexIterator<T> {
+  uns cursor = 0
+
   override fun (T value, bool isValid) next() {
     T none
     if cursor >= items.len {
@@ -60,13 +64,13 @@ public class arrIterator<T>(arr<T> items) : IndexIterator<T> {
 
 public class vec<T> : IndexCollection<T> {
   arr<T> items = arr<T>[0]
-  u64 count = 0
+  uns count = 0
   u64 version = 0
 
   override fun uns get_len() { count }
 
   override fun bool has(T value) {
-    u64 i = 0
+    uns i = 0
     while i < count {
       if items[i] == value {
         return true
@@ -75,14 +79,14 @@ public class vec<T> : IndexCollection<T> {
     }
     return false
   }
-  public fun u64 get_capacity() { items.len }
+  public fun uns get_capacity() { items.len }
 
   override fun IndexIterator<T> getIterator() {
     return vecIterator<T>(items, count)
   }
 
-  fun grow(u64 needed) {
-    u64 newCapacity = items.len * 2
+  fun grow(uns needed) {
+    uns newCapacity = items.len * 2
     if newCapacity < 4 {
       newCapacity = 4
     }
@@ -92,9 +96,9 @@ public class vec<T> : IndexCollection<T> {
     resizeStorage(newCapacity)
   }
 
-  fun resizeStorage(u64 newCapacity) {
+  fun resizeStorage(uns newCapacity) {
     arr<T> bigger = arr<T>[newCapacity]
-    u64 i = 0
+    uns i = 0
     while i < count {
       bigger[i] = ->items[i]
       i += 1
@@ -111,7 +115,7 @@ public class vec<T> : IndexCollection<T> {
     count += 1
   }
 
-  public fun insert(u64 index, ->T value) {
+  public fun insert(uns index, ->T value) {
     version += 1
     if index > count {
       throw IndexOutOfRangeException("Index Out Of Range Exception")
@@ -119,7 +123,7 @@ public class vec<T> : IndexCollection<T> {
     if count == items.len {
       grow(count + 1)
     }
-    u64 i = count
+    uns i = count
     while i > index {
       items[i] = ->items[i - 1]
       i -= 1
@@ -128,13 +132,13 @@ public class vec<T> : IndexCollection<T> {
     count += 1
   }
 
-  public fun removeAt(u64 index) {
+  public fun removeAt(uns index) {
     version += 1
     if index >= count {
       throw IndexOutOfRangeException("Index Out Of Range Exception")
     }
     T gone = ->items[index]
-    u64 i = index
+    uns i = index
     while i + 1 < count {
       items[i] = ->items[i + 1]
       i += 1
@@ -143,7 +147,7 @@ public class vec<T> : IndexCollection<T> {
   }
 
   public fun bool remove(T value) {
-    u64 i = 0
+    uns i = 0
     while i < count {
       if items[i] == value {
         removeAt(i)
@@ -154,10 +158,10 @@ public class vec<T> : IndexCollection<T> {
     return false
   }
 
-  public fun u64 removeAll(T value) {
+  public fun uns removeAll(T value) {
     version += 1
-    u64 kept = 0
-    u64 i = 0
+    uns kept = 0
+    uns i = 0
     while i < count {
       if items[i] == value {
         T gone = ->items[i]
@@ -169,14 +173,14 @@ public class vec<T> : IndexCollection<T> {
       }
       i += 1
     }
-    u64 removed = count - kept
+    uns removed = count - kept
     count = kept
     return removed
   }
 
   override fun clear() {
     version += 1
-    u64 i = 0
+    uns i = 0
     while i < count {
       T gone = ->items[i]
       i += 1
@@ -184,7 +188,7 @@ public class vec<T> : IndexCollection<T> {
     count = 0
   }
 
-  public fun reserve(u64 extra) {
+  public fun reserve(uns extra) {
     version += 1
     if count + extra > items.len {
       resizeStorage(count + extra)
@@ -200,7 +204,7 @@ public class vec<T> : IndexCollection<T> {
 
   public fun fillAtCapacity(T value) {
     version += 1
-    u64 i = 0
+    uns i = 0
     while i < items.len {
       items[i] = value
       i += 1
@@ -208,12 +212,12 @@ public class vec<T> : IndexCollection<T> {
     count = items.len
   }
 
-  public fun resize(u64 newLength, T value) {
+  public fun resize(uns newLength, T value) {
     version += 1
     if newLength > items.len {
       resizeStorage(newLength)
     }
-    u64 i = count
+    uns i = count
     while i < newLength {
       items[i] = value
       i += 1
@@ -226,10 +230,10 @@ public class vec<T> : IndexCollection<T> {
     count = newLength
   }
 
-  public fun truncate(u64 length) {
+  public fun truncate(uns length) {
     version += 1
     if length < count {
-      u64 i = length
+      uns i = length
       while i < count {
         T gone = ->items[i]
         i += 1
@@ -248,7 +252,7 @@ public class list<T> : IndexCollection<T> {
   u64 last = 18446744073709551615
   u64 freeNode = 18446744073709551615
   u64 used = 0
-  u64 count = 0
+  uns count = 0
   u64 version = 0
 
   override fun uns get_len() { count }
@@ -284,9 +288,9 @@ public class list<T> : IndexCollection<T> {
     links = biggerLinks
   }
 
-  fun u64 nodeAt(u64 index) {
+  fun u64 nodeAt(uns index) {
     u64 node = first
-    u64 i = 0
+    uns i = 0
     while i < index {
       node = links[node]
       i += 1
@@ -314,7 +318,7 @@ public class list<T> : IndexCollection<T> {
     count += 1
   }
 
-  public fun insert(u64 index, ->T value) {
+  public fun insert(uns index, ->T value) {
     if index > count {
       throw IndexOutOfRangeException("Index Out Of Range Exception")
     }
@@ -336,7 +340,7 @@ public class list<T> : IndexCollection<T> {
     count += 1
   }
 
-  public fun T takeAt(u64 index) {
+  public fun T takeAt(uns index) {
     if index >= count {
       throw IndexOutOfRangeException("Index Out Of Range Exception")
     }
@@ -361,13 +365,13 @@ public class list<T> : IndexCollection<T> {
     return taken
   }
 
-  public fun removeAt(u64 index) {
+  public fun removeAt(uns index) {
     T gone = takeAt(index)
   }
 
-  public fun u64 indexOf(T value) {
+  public fun uns indexOf(T value) {
     u64 node = first
-    u64 index = 0
+    uns index = 0
     while node != 18446744073709551615 {
       if items[node] == value {
         return index
@@ -375,25 +379,25 @@ public class list<T> : IndexCollection<T> {
       node = links[node]
       index += 1
     }
-    return 18446744073709551615
+    return UNS_NONE
   }
 
   override fun bool has(T value) {
-    return indexOf(value) != 18446744073709551615
+    return indexOf(value) != UNS_NONE
   }
 
   public fun bool remove(T value) {
-    u64 index = indexOf(value)
-    if index == 18446744073709551615 {
+    uns index = indexOf(value)
+    if index == UNS_NONE {
       return false
     }
     removeAt(index)
     return true
   }
 
-  public fun u64 removeAll(T value) {
+  public fun uns removeAll(T value) {
     version += 1
-    u64 removed = 0
+    uns removed = 0
     u64 before = 18446744073709551615
     u64 node = first
     while node != 18446744073709551615 {
@@ -441,9 +445,9 @@ public class list<T> : IndexCollection<T> {
     }
   }
 
-  public fun fill(u64 amount, T value) {
+  public fun fill(uns amount, T value) {
     version += 1
-    u64 i = 0
+    uns i = 0
     while i < amount {
       u64 node = newNode()
       items[node] = value
@@ -473,7 +477,7 @@ public class list<T> : IndexCollection<T> {
     first = previous
   }
 
-  public fun exchange(u64 a, u64 b) {
+  public fun exchange(uns a, uns b) {
     if a >= count || b >= count {
       throw IndexOutOfRangeException("Index Out Of Range Exception")
     }
@@ -484,7 +488,7 @@ public class list<T> : IndexCollection<T> {
     items[nodeB] = ->held
   }
 
-  public fun T replace(u64 position, ->T value) {
+  public fun T replace(uns position, ->T value) {
     if position >= count {
       throw IndexOutOfRangeException("Index Out Of Range Exception")
     }
@@ -497,7 +501,7 @@ public class list<T> : IndexCollection<T> {
   override fun IndexIterator<T> getIterator() {
     arr<T> snapshot = arr<T>[count]
     u64 node = first
-    u64 i = 0
+    uns i = 0
     while node != 18446744073709551615 {
       snapshot[i] = items[node]
       node = links[node]
@@ -544,7 +548,7 @@ public class list<T> : IndexCollection<T> {
     string elem = VecElem(obj.Type);
     string items = VecField(obj.Type, "items");
     string count = VecField(obj.Type, "count");
-    string code = WithTemp(new Expr(NullChecked(obj.Code, obj.Type), obj.Type), vec => WithTemp(new Expr(IndexValue(index, n), "u64"), position =>
+    string code = WithTemp(new Expr(NullChecked(obj.Code, obj.Type), obj.Type), vec => WithTemp(new Expr(IndexValue(index, n), NativeUns), position =>
       CheckRaise($"(df_idx_ok({vec}->{count}, {position}, {fn!.NameConst}) ? {vec}->{items}.p[{position}] : {ZeroValue(elem)})", elem)));
     return new Expr(code, elem);
   }
@@ -565,7 +569,7 @@ public class list<T> : IndexCollection<T> {
     var size = ExprOf(sizeNode, scope, "u64");
     string held = NewTemp();
     string count = NewTemp();
-    string code = $"({{ uint64_t {count} = {IndexValue(size, sizeNode)}; {CType(type)} {held} = {VecNewEmpty(type)}; "
+    string code = $"({{ df_uns {count} = {IndexValue(size, sizeNode)}; {CType(type)} {held} = {VecNewEmpty(type)}; "
       + $"{held}->{VecField(type, "items")} = ({ArrCType(elem)}){{ ({CType(elem)}*)df_calloc({count}, sizeof({CType(elem)})), {count} }}; {held}; }})";
     return new Expr(code, type, true);
   }
@@ -648,7 +652,7 @@ public class list<T> : IndexCollection<T> {
     string items = isVec ? $"{holder}->{VecField(obj.Type, "items")}" : holder;
     string length = isVec ? $"{holder}->{VecField(obj.Type, "count")}" : $"{holder}.len";
     string source = isVec ? NullChecked(obj.Code, obj.Type) : obj.Code;
-    string code = CheckRaise($"({{ {CType(obj.Type)} {holder} = {source}; uint64_t {position} = {IndexValue(index, gift)}; "
+    string code = CheckRaise($"({{ {CType(obj.Type)} {holder} = {source}; df_uns {position} = {IndexValue(index, gift)}; "
       + $"{CType(elem)} {taken} = NULL; if (df_idx_ok({length}, {position}, {fn!.NameConst})) {{ {taken} = {items}.p[{position}]; {items}.p[{position}] = NULL; }} {taken}; }})", elem);
     return new Expr(code, elem, true);
   }
@@ -658,7 +662,7 @@ public class list<T> : IndexCollection<T> {
     string items = VecField(cls.Name, "items");
     string count = VecField(cls.Name, "count");
     if (IsClass(VecElem(cls.Name))) {
-      sb.Append($"  for (uint64_t i = 0; i < self->{count}; i++) {{ if (self->{items}.p[i] != NULL) {{ void* o = (void*)self->{items}.p[i]; self->{items}.p[i] = NULL; df_drop(o); }} }}\n");
+      sb.Append($"  for (df_uns i = 0; i < self->{count}; i++) {{ if (self->{items}.p[i] != NULL) {{ void* o = (void*)self->{items}.p[i]; self->{items}.p[i] = NULL; df_drop(o); }} }}\n");
     }
     sb.Append($"  free(self->{items}.p);\n  self->{items}.p = NULL;\n  self->{items}.len = 0;\n  self->{count} = 0;\n");
   }

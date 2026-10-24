@@ -797,7 +797,7 @@ public sealed partial class CodeGen {
       var index = ExprOf(target.Children[1], scope, "u64");
       string array = NewTemp();
       string position = NewTemp();
-      return $"({{ {CType(obj.Type)} {array} = {obj.Code}; uint64_t {position} = {IndexValue(index, target)}; "
+      return $"({{ {CType(obj.Type)} {array} = {obj.Code}; df_uns {position} = {IndexValue(index, target)}; "
         + $"if (!df_idx_ok({array}.len, {position}, {fn!.NameConst})) {RaiseJump} &{array}.p[{position}]; }})";
     }
     var lvalue = LValue(target, scope);

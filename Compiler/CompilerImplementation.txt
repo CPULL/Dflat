@@ -357,8 +357,8 @@ VECTORS vec<T> AND THE COLLECTION TRAITS (built 2026-10-20, spec 6.8, 6.12; Code
 - Ownership: add / insert take ->T (the vector owns the items); ->v[i] and ->arr[i] move an item out and zero the slot (GiftIndex); removal members end the item through
   a local `T gone = ->items[i]`; v[i] = x ends the old item (not the same object); the drop glue of a vec ends its items and frees its block (EmitVecDropGlue); a literal
   of objects needs new objects or ->x. fill / fillAtCapacity / resize of objects are errors (cloning is not built). Arrays (arr) still do not own their items.
-- Traits (prelude): Iterator (marker), IndexIterator<Item> : Iterator { u64 cursor; next() returns (Item value, bool isValid) }, IndexCollection<Item> { get_len(), getIterator() }.
-  The spec's `uns cursor` is u64 (uns is not built); `len` is the method get_len() because properties of traits (11.1.4) are not built. vecIterator<T> and arrIterator<T> hold
+- Traits (prelude): Iterator (marker), IndexIterator<Item> : Iterator { next() returns (Item value, bool isValid) }, IndexCollection<Item> { get_len(), getIterator() }.
+  The cursor is a private field of each iterator class (uns cursor = 0), not of the trait (2026-10-24, point 3 of the collections discussion); `len` is the method get_len() because properties of traits (11.1.4) are not built. vecIterator<T> and arrIterator<T> hold
   the items and the count as they were when the iterator was made (the spec forbids changing the collection while it is iterated; the iterator cannot hold a borrow in a field).
   `for x in c` over a class of the program that implements IndexCollection<T> calls getIterator() once and next() until isValid is false (CustomCollectionElem).
 - Index checks: IndexOutOfRangeException in every build (the Debug / Release rule of 6.1 needs the --debug / --release options, not built).
@@ -832,7 +832,7 @@ VEC ALIGNED WITH THE SPEC 0.0.13 (built 2026-10-22, compiler 0.0.14alpha)
 ARRAYS ALIGNED WITH THE SPEC 0.0.13 (built 2026-10-22, compiler 0.0.13alpha)
 ==========================================================================
 - `uns` is a type: Normalize maps it to CodeGen.NativeUns (u64, or u32 when the target is 32 bits; Program passes the bits of the target to CodeGen.Compile). The arrays
-  still use uint64_t lengths in C, so a 32-bit target is not really supported yet. `int` and `real` are still not types (the default signed integer stays i32 although the
+  used uint64_t lengths in C until 0.0.16alpha (see UNS LENGTHS AND INDEXES below). `int` and `real` are still not types (the default signed integer stays i32 although the
   spec 1.3 says the native size).
 - Release builds (--release): CodeGen.ReleaseBuild and the C flag -DDF_RELEASE. df_raise (Runtime.cs) turns IndexOutOfRangeException into a panic (message, then Panic -1000);
   an explicit `throw IndexOutOfRangeException` does the same; a catch for it gives a level 3 warning ("ignored in a release build"). Debug (the default) is unchanged.
@@ -909,3 +909,16 @@ Small items of 2026-10-18
   that is not a variable, a field or an array item says "(&) needs a variable, a field or an array item" (WritableAddress).
 - Code examples: Hello.df, ConsoleCalculator.df and Code examples.df compile. sample.df does not: line 56 writes the copy marker in the parameter list (Item copied!), which spec 13.1 puts in
   the call (the parser refuses it on purpose). The sample is out of date, not the compiler.
+
+UNS LENGTHS AND INDEXES (built 2026-10-24, compiler 0.0.16alpha, spec 3.1 and 6.1; point 13 of the collections discussion)
+==========================================================================
+- The generated C starts with #define DF_UNS_BITS <bits of NativeUns>; the runtime typedefs df_uns (uint32_t or uint64_t) and DF_UNS_MAX from it.
+- df_uns is the C type of the length of every arr (df_arr_* structs), of the count of vec and list, of the indexes and of the loop counters over them, of df_calloc,
+  df_idx_ok and df_sort. At the Dflat level .len, indexOf and the counts and positions of the vec and list prelude are uns (NativeUns).
+- IndexValue turns an index of any integer type into df_uns: a negative one, or one wider than uns that does not fit (df_idx_arg, df_idx_wide), becomes DF_UNS_MAX and
+  fails the bounds check instead of wrapping. A literal index keeps the u64 hint.
+- The list prelude writes "not found" as UNS_NONE, replaced by the largest uns of the target when the prelude is parsed. The slot numbers of the list nodes stay u64
+  (UINT64_MAX ends a chain) until the nodes become separate allocations (point 29).
+- Not changed: string lengths (uint64_t, the string layout is temporary) and the version counter of vec and list.
+- Checked by building arrays, vec, list and sorting for win-x32 and running them: the same output as x64, except arrays.df line 32, which compares indexOf with the
+  64-bit maximum (on 32 bits "not found" is the 32-bit maximum).

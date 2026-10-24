@@ -12,6 +12,8 @@ public class Evens(u64 limit) : IndexCollection<u64> {
   }
 }
 public class EvenIterator(u64 limit) : IndexIterator<u64> {
+  u64 cursor = 0   // the cursor belongs to the iterator, not to the trait
+
   override fun (u64 value, bool isValid) next() {
     if cursor >= limit {
       return (0, false)

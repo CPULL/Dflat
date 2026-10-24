@@ -6,4 +6,4 @@ public class Dog(string name) {
 
 arr<Dog> kennel = [Dog("a"), Dog("b")]
 Dog rex = Dog("rex")
-Dog old = kennel.swap(0, rex)
+Dog old = kennel.replace(0, rex)

@@ -1,0 +1,1 @@
+asparent_outside.df(10): error: 'open' is asparent: only a Library itself and its children (through their parent reference) call it

@@ -1,0 +1,1 @@
+view_assign.df(5): error: a view is read-only: its items cannot be assigned (spec 6.5)

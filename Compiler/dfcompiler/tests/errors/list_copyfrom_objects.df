@@ -1,0 +1,9 @@
+alias Root as r
+
+public class Dog(string name) {
+  public string name
+}
+
+list<Dog> kennel = [Dog("a")]
+arr<Dog> pups = [Dog("b")]
+kennel.copyFrom(0, pups, 0, 1)

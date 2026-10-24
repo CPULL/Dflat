@@ -816,6 +816,7 @@ LISTS list<T> (built 2026-10-22, compiler 0.0.15alpha, spec 6.8.3; CodeGen.List.
 - The ownership rules and the ModifyingIteratedCollectionException check are those of vec. getIterator() copies the items into an array first (a snapshot, O(n)) and gives an
   arrIterator; the node pointer cursor of the spec needs pointers.
 - Not done yet: add(collection), copyFrom, views l[a..b], l!, sort by relinking nodes, the iterator with a node cursor, .sizeof.
+- Replaced on 2026-10-24 (compiler 0.0.17alpha): the nodes are separate allocations and the version is a counter of open iterators, see LISTS WITH NODES below.
 
 VEC ALIGNED WITH THE SPEC 0.0.13 (built 2026-10-22, compiler 0.0.14alpha)
 =======================================================================
@@ -827,6 +828,7 @@ VEC ALIGNED WITH THE SPEC 0.0.13 (built 2026-10-22, compiler 0.0.14alpha)
 - ModifyingIteratedCollectionException (ID 46, not silent): vec has a private `version` that every change adds one to (add, insert, pop, remove*, clear, reserve, shrinkToFit,
   fillAtCapacity, resize, truncate, v[i] = x, fill, reverse, sort, sortUnstable); the `for` loop over a vec remembers it and checks it at each pass (EmitForEach) and raises the exception
   (Debug: catchable; Release: Panic -1000, the catch gets the level 3 warning). The explicit iterator (getIterator) holds a snapshot and does not check. The compile-time proof is not built.
+  Replaced on 2026-10-24 by the counter of open iterators (LISTS WITH NODES below).
 - Not done yet: `.sizeof`, `add(collection)`, copyFrom / views / v! on vec, `writableNext()` and `*Collection collection` (pointers), the compile-time detection of a change inside a loop.
 
 ARRAYS ALIGNED WITH THE SPEC 0.0.13 (built 2026-10-22, compiler 0.0.13alpha)
@@ -922,3 +924,114 @@ UNS LENGTHS AND INDEXES (built 2026-10-24, compiler 0.0.16alpha, spec 3.1 and 6.
 - Not changed: string lengths (uint64_t, the string layout is temporary) and the version counter of vec and list.
 - Checked by building arrays, vec, list and sorting for win-x32 and running them: the same output as x64, except arrays.df line 32, which compares indexOf with the
   64-bit maximum (on 32 bits "not found" is the 32-bit maximum).
+
+LISTS WITH NODES AND THE COUNTER OF OPEN ITERATORS (built 2026-10-24, compiler 0.0.17alpha, spec 0.0.14: 6.4, 6.6, 6.8.3; points 29 and 4 of the collections discussion)
+=================================================================================================================================================================
+- A list node is a C struct per list type, struct df_ln_<type> { next; value; } (ListNode, emitted after the types of the program: listNodeTypes in Assemble), allocated with
+  df_alloc one by one. The list keeps first, last, count and iterators; a null next ends the list. In VecPrelude the fields first and last are declared u64, and EmitStruct gives
+  them the C type of a node pointer: no Dflat code reads them.
+- The class list<T> of VecPrelude keeps the rules (checkUnlocked, the index checks with their exceptions, the ->T parameters, the overloads) and calls node_ members on this:
+  node_append, node_insert, node_take, node_indexOf, node_removeAll, node_clear, node_fill, node_fillCount, node_reverse, node_exchange, node_replace, node_truncate.
+  ListMember answers them with C (ListNodeMember) only for the lines of the prelude (from LibraryLine); a program that writes them gets "has no function". CallMoves knows that
+  node_take and node_replace give the item to the caller, so takeAt and replace return moved objects.
+- C at the call site (ListMember): sort and sortUnstable (df_list_sort in RuntimeSort.cs: a bottom-up merge sort that relinks the nodes, stable, no temporary array; it also
+  sets the last node), swap (exchange or replace as before), add(collection) (AddedCollectionType: a variable or a field that is an arr, a vec or a list of the same items and not
+  an item itself; a copy for basic items; ->other moves the objects, the nodes of a list are linked at the end, and the collection given ends; the same list raises
+  ModifyingProtectedSourceException; objects without -> are a compile error until cloning), removeAt(range) (a..b, a..=b, ..b, a..; outside: IndexOutOfRangeException),
+  copyFrom (sources arr, vec, list; the items are read into a buffer first; past the end they are added; objects are a compile error until cloning).
+- transformTo<Kind>() (TransformTo, called from Call for a GenericRef on the member transformTo): arr, vec and list to any of the three, the item type is kept (a different one
+  is an error). The receiver is moved (a variable or field is left null; an arr is left empty), the items move without copying the objects, the original ends. arr to vec
+  reuses the block; vec to arr shrinks the block to the length (realloc); the others copy the items into the new storage. The arr block is not freed by arr to list
+  (arrays are not owned yet, another arr value may share the block). CallMoves counts it as a new collection.
+- .sizeof on arr, vec and list (CollectionSizeof): the header plus the allocated block (arr: the length, vec: the capacity) or plus the nodes (count * size of a node), as uns.
+- The counter of open iterators (spec 6.4) on vec and list: a field `uns iterators`. A for loop over a vec or a list is wrapped (EmitForEach, countedLoops) in a block that
+  holds a pointer to the counter (df_open<N>, NULL until the loop starts) and has a hidden atEnd ("drop" kind, a RawC statement) that gives it back: so every way out
+  (the end, break, return, an exception, a jump) runs it, through the atEnd machinery of the frames. The loop adds one after it has the collection. The changing members check
+  it: in the prelude checkUnlocked() (vec: add, insert, removeAt, remove, removeAll, reserve, shrinkToFit, fillAtCapacity, resize, truncate; list: add, insert, takeAt (also
+  ->l[i]), removeAt, remove, removeAll, fill(count, value), reverse, truncate), in C LockCheck (pop, sort, sortUnstable, reverse of a vec, sort of a list, add(collection),
+  removeAt(range), copyFrom, transformTo). Allowed while iterated: c[i] = v, swap, replace, fill(value), clear(). Debug: catchable; Release: panic (df_raise).
+- clear() (spec 6.6): every item gets its default value and the size is kept, on arr, vec and list; the objects held end (the arr clear now drops them too).
+- Program.LanguageVersion is 0.0.14 (the spec this build follows; --version and the preprocessor variable version).
+- The parser no longer warns "read as a generic call" for transformTo<arr>() (arr counts as a type in that check only).
+- Tests: listnodes (new), errors/list_add_objects_copy, list_copyfrom_objects, list_transform_item_type, list_node_member; list, listown, vec, vecown and vecspec changed for
+  clear() and for c[i] = v allowed in a loop. Checked with --release (the panics) and on win-x32 (same output).
+- Not done: the explicit iterator of a list (getIterator still copies the items into an arr: the node reference needs `as parent`, spec 12.5), views, the counter on arr (an arr
+  is a value without a header) and on custom collections (executeAfter), OutOfMemoryException in Debug (df_alloc still panics), nodes without padding (the C struct keeps the alignment).
+
+THE INDEX COLLECTIONS CLEANUP (built 2026-10-24, compiler 0.0.18alpha, spec 0.0.14: 6.6)
+=========================================================================================
+- vec (VecMember, called from TryReceiverCall before pop and the members shared with the arrays): add(collection) (VecAddCollection: the same rules as the list,
+  AddedCollectionType decides when the argument is a collection; the vec grows with VecReserve, the C of grow: double, at least 4, at least what is needed; ->other with
+  objects takes the items, nulls them in the source and drops the source), removeAt(range) (VecRemoveRange: the items of the range end, memmove of the rest, the freed
+  slots are zeroed), copyFrom (CollectionCopyFrom). The size changes check the counter of open iterators (LockCheck).
+- CollectionCopyFrom (CodeGen.List.cs, was ListCopyFrom) writes into a list, a vec (past the end the items are added, VecReserve) or an arr (the items must fit). CopyFrom of
+  the arrays hands a vec or a list source to it; an arr source keeps the arrays' own code and its compile-time checks.
+- replace(position, value) on arr (ArrayReplace) and vec (on the live items, VecArrayMembers); list already had it. The old item is given back (Fresh for objects), an
+  existing object needs ->x. swap(i, j) only exchanges: CheckSwapArguments refuses a second argument that is not an integer, or a ->x, with "swap exchanges two items:
+  swap(i, j); to put a new item at a position use replace(position, value)". The list's swap calls exchange.
+- Tests: collections (new), errors/swap_new_item (new); arrowned, list, listown, vecspec and errors/arr_swap_existing use replace (same outputs). Checked on win-x32.
+
+PARENT AND CHILD OBJECTS (built 2026-10-24, compiler 0.0.19alpha, spec 12.5)
+=============================================================================
+- Parser: `as parent` after a parameter (node AsParent), only when the word after `as` is `parent`; asparent and unrestricted are keywords and modifiers.
+- RegisterParentParam (CodeGen.Classes.cs): the parameter must be & or (&) (a reference) to a class (a trait: not supported), no default, one per class. It becomes a
+  field (FromParam, IsParentRef, ReadOnlyRef for &) that the class does not own (OwnedObjectFields skips it) and that only the constructor sets (an assignment or a move
+  elsewhere: "is the reference to the parent: only the constructor sets it"). The child gets the hidden field df_slot (uns: its position + 1 in the list of its parent,
+  0 when not adopted, DF_UNS_MAX when it found its parent gone); the parent class gets the hidden field df_children (a df_kids*, C type set in EmitStruct). Hidden
+  fields are not printed by the default toStr. as parent on a plain function is an error.
+- asparent and unrestricted (FunSig.IsAsParent / IsUnrestricted, ReadMods: unrestricted is public): CheckParentAccess (MethodCall). An asparent function is called
+  only by the object itself (receiver self, in the class or a subclass) and through the parent reference of the class being compiled (ParentReceiver: self->m_x or (self)->m_x); through a read-only parent (&) only asparent, unrestricted and
+  static functions; a field assignment through it is an error (ClassLValue). One visibility per function; asparent and unrestricted on fields are errors.
+- Adopted children: a child that changes owner is registered with its parent by Adopted (CodeGen.Classes.cs), called for a new or moved object in GiftExpr (->),
+  CheckReturnOwnership (a return that moves: a return always moves, as in Rust), OwnedAssign of a field, and the items of the collections (literals of arr, vec and
+  list, c[i] = x, replace; add and insert of vec and list go through the -> of the prelude). Registration (df_kids_add, Runtime.cs: a list of (address of the parent reference, address
+  of the slot)), adds the class to adoptedClasses and gives a level 2 warning. The drop of a parent calls df_kids_release (it nulls the references of its adopted children
+  and frees the list); the drop of an adopted child takes it out of the list (df_kids_remove: the last entry moves into its place, its slot is updated) and does not run
+  the atEnd again when the slot is DF_UNS_MAX.
+- AddParentChecks: every instance function of a child class starts with `if (DF_ADOPTED_<class>) { ... }`: when the parent reference is null the child runs its own
+  atEnd once (slot DF_UNS_MAX) and throws UsageOfDestroyedObjectException (a parsed Dflat if / throw between RawC lines). Assemble defines DF_ADOPTED_<class> as 1
+  only for the classes moved with -> somewhere, so the checks of the other classes compile to nothing (the functions still return their exception, because the throw
+  is in the tree). A body of one expression gets its return written first.
+- UsageOfDestroyedObjectException: ID 48 (spec 15.3), not silent, catchable in Debug and Release.
+- Tests: parents (a read-only and a writable parent, a child never moved, an orphan adopted child, adopted children that end before their parent), errors/parent_twice,
+  parent_not_reference, parent_on_function, parent_readonly_call, parent_readonly_assign, parent_reassigned, asparent_outside. Checked with --release, on win-x32 and
+  with a generic parent class (Box<i32>).
+- Not done: a trait as the parent type, asparent / unrestricted functions in traits (releaseIterator of Collection), the read-only rule for & object references that
+  are not a parent and for plain borrows (to discuss; measured on 2026-10-24: 86 calls in the tests would break, 71 of them through borrowed parameters, mostly add and
+  removeAt on a collection given to a function; none in the preludes), a child constructed with a null parent (it is an orphan at once only if adopted), the iterators
+  and views of the collections as children (next step).
+
+READ-ONLY REFERENCES (built 2026-10-24, compiler 0.0.19alpha, spec 1.6.2)
+==========================================================================
+- VarInfo.ReadOnlyRef: a &Item o parameter (an object, a vec or a list: by value, the pointer of the object) or a &arr<T> a parameter (by pointer). ReadOnlyVariable finds it
+  from the receiver of a call or of an assignment (a bare name).
+- CheckReadOnlyCall (called from Call before TryReceiverCall): for a class of the program only the functions that are all unrestricted or static; for the collections of the
+  compiler and the classes and traits of the preludes the members in ReadOnlyCollectionMembers (has, indexOf, getIterator). Properties (.len, x.field), c[i] and for-in read
+  and are allowed. ClassLValue refuses a field assignment, IndexAssign an item assignment (arr, vec, list), GiftIndex ->c[i], ArgCode (&)o for an object parameter
+  ((&) of a &arr was already refused: the variable is const).
+- The parent references of 12.5 keep their own check (ParentReceiver / CheckParentAccess), with the same rule.
+- Tests: readonlyrefs, errors/readonly_public_call, readonly_field_assign, readonly_to_writable, readonly_collection_change, readonly_collection_item. No older test changed.
+- Not done: plain borrows f(Item o) and borrowed variables T x = y (to discuss), & fields other than the parent, a read-only reference stored in another variable (the rule
+  follows the name of the parameter only).
+
+ITERATORS AND VIEWS AS CHILDREN (built 2026-10-24, compiler 0.0.20alpha, spec 6.4, 6.5, 6.7, 12.5)
+====================================================================================================
+- VecPrelude: vecIterator<T>(&vec<T> collection as parent) reads collection[cursor] and collection.len; listIterator<T>(&list<T> collection as parent) keeps the current
+  node in a field declared u64 that EmitStruct turns into a node pointer, and next() uses node_more / node_value / node_advance (ListIteratorMember, C; it starts at
+  the first node of the list the first time). Their atEnd calls the asparent releaseIterator() of the collection when the collection still exists.
+- vec.getIterator() and list.getIterator() add one to the counter of open iterators and return ->iterator: the iterator is an adopted child (registered with its
+  collection, checked on every call). releaseIterator() raises InvalidIteratorReleaseException (47, Runtime.cs descriptor) when the counter is already zero.
+- Views (spec 6.5): vecView<T>, listView<T> (children of their collection: the parent and the counter) and arrView<T> (it keeps the array value: an arr cannot change
+  its size); header fields start and count; get_len, read_pos (v[i]), indexOf, has (the list view uses list.indexOfFrom, asparent, node_indexOfFrom in C). ViewExpr
+  (CodeGen.List.cs) answers c[a..b] (IndexExpr, a Range as the index): it checks the range (IndexOutOfRangeException), adds one to the counter of a vec or a list and
+  calls the constructor of the view. View<vec<T>> in a type is ViewTypeOf. The for loop over a view is a direct C loop (ViewLoop; a view whose collection ended raises
+  UsageOfDestroyedObjectException); a view prints as [a, b] (ViewStrFunction). v[i] = x and ->v[i] are errors. get_view of the spec is not a method: the compiler makes
+  the views directly (custom collections have no views yet).
+- Ownership: GuessOwner counts c[a..b] as a new object; ObjectTypeOf counts var x = c[a..b] and var x = obj.method() (when the call moves) as object declarations, so
+  they end with their scope (the views and iterators then give the counter back). Classify keeps the answer of a trait function without a body (it was worked out
+  again as "borrowed" and var it = c.getIterator() was never dropped).
+- CheckParentAccess lets a read-only parent read properties (get_ functions).
+- Tests: iterviews (new), errors/view_assign, view_on_string; vec and list moved their iterator made by hand into a function (it now keeps the collection locked
+  until it ends). Checked with --release and on win-x32.
+- Not done: c[a..b]! (needs .clone()), the views and the get_view / read_pos methods of custom collections, writableNext and for (&)Item, the iterator of an arr as a child,
+  a view of a view, the display name of a view type in the messages (vecView<i32>, not View<vec<i32>>).

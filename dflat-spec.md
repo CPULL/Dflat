@@ -98,7 +98,6 @@ i32 onlyCount, _, bool onlyActive = record       // partial, _ skips an item
 - Tuple destructuring: the items of a tuple can be unpacked into separate variables in one statement; `_` skips an item.
 
 ## 1.6 Accessibility rules
-## 1.6 Accessibility rules
 
 A few keywords are used to define who can call and use part of the code. Mostly classes, properties, and methods.
 It is important to note that 2 special cases are used to decide who is allowed to see it (visibility), and what kind of reference the caller holds (owned, writable `(&)` or read-only `&`).
@@ -108,13 +107,13 @@ It is important to note that 2 special cases are used to decide who is allowed t
 | Keyword | Who can use the member |
 |---|---|
 | (none) | private: only the class itself (default) |
-| `asparent` | only the children of the object, through the parent reference (12.5) |
+| `asparent` | the object itself and its children, through their parent reference (12.5) |
 | `internal` | the namespace and its sub-namespaces |
 | `public` | everyone |
 | `unrestricted` | everyone, and it includes `public` |
 
 - The visibility keyword goes before `static`, `fun` or the field type. Only one visibility keyword can be used on a member.
-- `asparent` is not public. It can change the parent, because only its own children can call it.
+- `asparent` is not public. It can change the parent, because only the object itself and its own children can call it.
 - An overriding function takes the visibility of the original: none is written on it (11.1.2).
 - A subclass sees everything when the source of the parent is available, public only for compiled libraries (11.1.2).
 - Constructors have a visibility; a private constructor can be called only by the class body (11.1.1).
@@ -127,8 +126,8 @@ It is important to note that 2 special cases are used to decide who is allowed t
   - properties can be read; assigning to them is a compile error;
   - a `public` method cannot be called;
   - an `unrestricted` method can be called;
-  - an `asparent` method can be called by the children of the object (12.5).
-- `unrestricted` is meant for methods that do not change the object; the compiler does not check it (open item, 99).
+  - an `asparent` method can be called by the object itself and by its children (12.5).
+- `unrestricted` is meant for methods that do not change the object or where the developer takes responsibility. The compiler does not perform checks.
 
 
 # 2. Built-in types
@@ -563,9 +562,9 @@ for i32 index = 1..=10 { }                       // a range is a virtual collect
 - The items of a `set` / `hset` and the keys of a `map` / `hmap` are always read-only: `(&)` is a compile error on them.
 - On a basic value type without `(&)`, `x` is a copy: assigning to it (`x += 1`) changes only the copy and gives a level 3 warning. With `(&)` the item in the collection is changed in place.
 - A collection is read-only in size while it has open iterators or views:
-  - A collection has an internal counter of its open iterators and views. Creating an iterator or a view increments it; the default `atEnd` of the iterator or of the view decrements it, through the `asparent` method `releaseIterator()` of the collection. An explicit iterator (made with `getIterator()`) counts too: it holds a reference to its collection, declared with `as parent` (6.7), to decrement the counter. The collection is the parent of its iterators and views: when it ends, it destroys them. The counter and its checks are provided by the trait `Collection` (11.2), so maps, sets, views and custom collections get them too.
+  - A collection has an internal counter of its open iterators and views. Creating an iterator or a view increments it; the default `atEnd` of the iterator or of the view decrements it, through the `asparent` method `releaseIterator()` of the collection. An explicit iterator (made with `getIterator()`) counts too: it holds a reference to its collection, declared with `as parent` (6.7), to decrement the counter. The collection is the parent of its iterators and views: when it ends, it nulls their reference to it (12.5). The counter and its checks are provided by the trait `Collection` (11.2), so maps, sets, views and custom collections get them too.
   - While the counter is above zero the size of the collection cannot change: a changing operation raises `ModifyingIteratedCollectionException` (15.3, not silent). In Debug builds it is catchable; in Release builds it is a `Panic`, and a `catch` for it is ignored with a level 3 warning (the same rule as `IndexOutOfRangeException`, 6.1). Every changing method of a collection checks the counter at runtime.
-  - Forbidden while the counter is above zero: `add`, `add(collection)`, `insert`, `pop`, `remove`, `removeAll`, `removeAt`, `resize`, `truncate`, `fillAtCapacity`, `fill(count, value)`, `reserve`, `shrinkToFit`, `sort`, `sortUnstable`, `reverse`, and `->c[i]` on a `list` (the node is removed).
+  - Forbidden while the counter is above zero: `add`, `add(collection)`, `insert`, `pop`, `remove`, `removeAll`, `removeAt`, `resize`, `truncate`, `fillAtCapacity`, `fill(count, value)`, `reserve`, `shrinkToFit`, `sort`, `sortUnstable`, `reverse`, `copyFrom`, and `->c[i]` on a `list` (the node is removed).
   - Allowed: reads, `swap`, `replace`, `c[i] = v` (objects included), `fill(value)`, `clear()`, `->c[i]` on `arr` and `vec`, and changes made in place to the value or to the fields of an item.
   - Compile-time proof: the compiler proves only the direct case, when the body of the loop calls a changing member, or assigns an element, of the same variable (or field path) that the loop iterates; it is a compile error (Rust style, no cost at runtime). Everything else stays a runtime check (C# style). The proof will be improved later.
 - Iterating custom collections: 6.9. For the collections of the compiler the `for` is emitted as a direct loop in C.
@@ -583,7 +582,7 @@ arr<i32> middle = scores[2..5]!       // copy
 - Views exist only on `arr`, `vec` and `list`. There are no ranges on keys (`map`, `hmap`, `set`, `hset`). Creating a view of a `list` is O(n), because the start node has to be found.
 - Iterators and `for` can run over a view: it has a begin and an end.
 - Lock: the same rules as the iterators (6.4). A view is a child of its collection, declared with `as parent` like an iterator, and increments the counter of open iterators and views of its collection, so the collection keeps its size while the view is used.
-- Where iterators and views live: an iterator or a view is a child of its collection (`as parent`, 6.7). If not given away, it lives only inside the scope that created it (the call to `getIterator()` or `c[a..b]`) and ends before its collection. If it is moved with `->`, the checks of 6.7 apply; when the collection ends first, it destroys the iterator or view, and using it raises `UsageOfDestroyedObjectException`. The collection becomes changeable again only when the last holder ends.
+- Where iterators and views live: an iterator or a view is a child of its collection (`as parent`, 6.7). If not given away, it lives only inside the scope that created it (the call to `getIterator()` or `c[a..b]`) and ends before its collection. If it is moved with `->`, it is an adopted child (12.5): when the collection ends first, it nulls the reference of the iterator or view, and using it raises `UsageOfDestroyedObjectException`. The collection becomes changeable again only when the last holder ends.
 - `c[a..b]!` copies the items into a new collection of type `C` and leaves the original unchanged. It needs `.clone()` (12) to be fully implemented.
 
 ## 6.6 Members
@@ -632,7 +631,7 @@ A member marked `–` is a compile error on that collection (for example `hasKey
 - Reading a missing map key gives the null or zero value of the value type; no exception. Use `hasKey` or `tryGet` to know whether the key exists.
 - `add(v)`: appends to `vec` and `list`. `add(k, v)`: adds the pair to a map, or replaces the value of an existing key; returns `false` when it replaced, `true` when the key is new. On sets it returns `true` if the value was added.
 - `add(collection)`: appends the items of another collection to `vec` and `list`; on maps it merges another map (the new value wins, no return value); on sets it returns the number of items actually added.
-  - On `vec` and `list`: items of basic types are copied. Objects are moved with `v.add(->other)`, and the other collection is left empty; a plain `v.add(other)` with objects is a compile error until cloning exists (12). The same collection as source and target raises `ModifyingProtectedSourceException`.
+  - On `vec` and `list`: items of basic types are copied. Objects are moved with `v.add(->other)`: the items move, the other collection ends and its variable becomes null (12); a plain `v.add(other)` with objects is a compile error until cloning exists (12). The same collection as source and target raises `ModifyingProtectedSourceException`.
 - `insert(index, value)`: `index` goes from `0` to `.len` (`.len` appends); a larger index raises `IndexOutOfRangeException`.
 - `pop((&)out)`: removes the last item of a `vec` and moves it into `out` (the ownership passes to `out`); it returns `true` (the `isValid` of the result). On an empty `vec` it returns `false` and `out` gets the default value of its type (null for objects, `0` for numbers, `""` for `string`). There is no other form of `pop` and no `tryPop`; no exception is raised. The previous value of `out` is dropped.
 - `has(v)`: true if the value is present (on maps, searches the values). `hasKey(k)`: true if the key exists.
@@ -719,13 +718,13 @@ trait IndexIterator<Item> : Iterator {
 ```
 
 - Whether `{ }` is written for an empty trait follows the trait grammar (11.2).
-- The cursor is internal to each iterator and cannot be reached from outside, so the trait does not specify it: the trait fixes only the methods. Iterators are specific to a collection type, so the reference to the collection (used to check the end and to release the counter of 6.4) lives in each concrete iterator class, not in the trait. The collection is the parent of its iterators: the class declares it with `as parent` on a reference parameter (at most one per class). When the collection ends, it destroys its iterators and nulls their reference to it.
+- The cursor is internal to each iterator and cannot be reached from outside, so the trait does not specify it: the trait fixes only the methods. Iterators are specific to a collection type, so the reference to the collection (used to check the end and to release the counter of 6.4) lives in each concrete iterator class, not in the trait. The collection is the parent of its iterators: the class declares it with `as parent` on a reference parameter (at most one per class). When the collection ends, it nulls their reference to it (12.5).
 - `next()` returns a tuple whose last item is the bool `isValid`; `writableNext()` returns the same tuple with the item as a writable borrow `(&)` (3.2; the one `for (&)` uses). When `isValid` is `false` the other items of the tuple are not valid (the iteration is over), so null values and items are not a problem for the iteration.
 - The iterators follow a contract written with the trait. First rule: an iterator returns each element of the collection once and only once.
 - Only the iterator of the index collections is defined in this version; the members of `MapIterator` and `SetIterator` come later.
 - The collections of the compiler do not build an iterator object: the `for` is emitted as a direct loop in C (6.4).
 - The methods behind the properties and the operators: each trait defines a set of non-public methods for its properties and its operators. They can be virtual, and every class that implements the trait must implement them. They are internal: only someone writing a custom collection needs them. They are snake_case (1.1, provisional). When the argument type of an operator is not given (`->c[k]`), it is the generic form valid for all collections; each kind of collection fixes the argument type (`uns` for `IndexCollection`, `Key` for `MapCollection`, and the same for the sets). More methods will be added with the maps and the sets.
-- The cursor is internal to each iterator and cannot be reached from outside, so the trait does not specify it: the trait fixes only the methods. Iterators are specific to a collection type, so the reference to the collection (used to check the end and to release the counter of 6.4) lives in each concrete iterator class, not in the trait. The collection is the parent of its iterators: the class declares it with `as parent` on a reference parameter (at most one per class). When the collection ends, it destroys its iterators and nulls their reference to it.
+- The cursor is internal to each iterator and cannot be reached from outside, so the trait does not specify it: the trait fixes only the methods. Iterators are specific to a collection type, so the reference to the collection (used to check the end and to release the counter of 6.4) lives in each concrete iterator class, not in the trait. The collection is the parent of its iterators: the class declares it with `as parent` on a reference parameter (at most one per class). When the collection ends, it nulls their reference to it (12.5).
 
 | Written as | Method | Defined in |
 |---|---|---|
@@ -743,12 +742,12 @@ trait IndexIterator<Item> : Iterator {
 ```
 asparent fun releaseIterator() // In the Collection definition
 
-class ListIterator<Item>(&List<Item> list as parent) : IndexIterator<Item> {
-  Node<Item> cursor = list.first
+class ListIterator<Item>(&list<Item> collection as parent) : IndexIterator<Item> {
+  Node<Item> cursor = collection.first
   override fun (Item value, bool isValid) next() { ... }
   override fun ((&)Item value, bool isValid) writableNext() { ... }
   } atEnd {
-  list.releaseIterator()
+  collection.releaseIterator()
 }
 ```
 
@@ -824,7 +823,7 @@ bool isValid = numbers.pop((&)last)     // false (and last = 0) when the vec is 
 - It has no capacity: `.capacity`, `reserve`, `shrinkToFit`, `fillAtCapacity` and the `[n]` form do not apply. `resize` and `pop` are not available.
 - Default iterator: `IndexIterator` from the first node to the last; one step follows the link of the node to the next node, O(1).
   - The iterator holds two references: one to its list, declared with `as parent` (6.7), used to release the counter of 6.4 when the iterator ends, and one to the current node.
-  - The end of the list is marked by a null next pointer, so the node reference is nullable. The pointer of the list to its last node is only a fast way to add items at the end; the iterators do not use it. When the list ends, it destroys its iterators, so the node reference of an iterator is never used after its nodes are gone: the check of 6.7 raises `UsageOfDestroyedObjectException` first.
+  - The end of the list is marked by a null next pointer, so the node reference is nullable. The pointer of the list to its last node is only a fast way to add items at the end; the iterators do not use it. When the list ends, it nulls the reference of its iterators, so the node reference of an iterator is never used after its nodes are gone: the check of an adopted child (12.5) raises `UsageOfDestroyedObjectException` first.
   - `writableNext()` is syntactic sugar: it marks that the iterator changes the content of the node in place, through the node pointer. It does not change the structure of the list.
   - The iterator needs no explicit pointers: its references to the list and to the node are compiler-guaranteed (12.1, 6.7).
 - Views (6.5): `l[a..b]` reaches the start in O(a), then O(1) per step. A `list` view holds a start node pointer, an end node pointer and a count; it is read-only (no `add`) and it increments the counter of 6.4 like the iterators.
@@ -1690,19 +1689,18 @@ function(->a.c)                    // a.c is null afterwards, a stays usable
 ## 12.5 Parent and child objects
 
 ```
-class ListIterator<Item>(&List<Item> list as parent) : IndexIterator<Item> {
-  Node<Item> cursor = list.first
+class ListIterator<Item>(&list<Item> collection as parent) : IndexIterator<Item> {
+  Node<Item> cursor = collection.first
 }
 ```
 
-- An object can have one parent: the object that guarantees its existence (an iterator or a view and its collection, a DataSet and its DB connection). When the parent ends, it destroys its children and nulls their reference to it.
+- An object can have one parent: the object that guarantees its existence (an iterator or a view and its collection, a DataSet and its DB connection). The parent knows its children: when it ends, it nulls their reference to it. It does not destroy them: a child keeps its own owner.
 - The parent is declared in the parameter list of the class with `as parent` after a reference parameter (`&` or `(&)`). A class has at most one `as parent`; a second one is a compile error, and so is `as parent` on a parameter that is not a reference. In the body the parent is used by its parameter name. `parent` is a keyword only right after `as`.
 - A class with no `as parent` has no parent.
-- On every method call, a child checks its reference to the parent. If it is null, the child runs its own `atEnd` (without calling the parent) and raises `UsageOfDestroyedObjectException` (15.3).
-- If the ownership of the child is never transferred away (no `->` on it), the child always ends before its parent, so the compiler removes the checks. If `->` is used on it, the compiler emits the checks and gives a level 2 warning (19.3).
-- A method marked `asparent` can be called only by the children of the object, through the parent reference, even when it is read-only. It is not public. It can change the parent.
+- If the ownership of the child never changes, the child always ends before its parent, so it needs no checks.
+- A child item whose ownership changes (moved with `->`, returned by a function, or put into a field or a collection) is an adopted child: it can outlive its parent, which can end at any moment: on every method call it checks its reference to the parent. If it is null, the child runs its own `atEnd` (without calling the parent) and raises `UsageOfDestroyedObjectException` (15.3). The compiler emits these checks only for adopted children and gives a level 2 warning (19.3).
+- A method marked `asparent` can be called only by the object itself and by its children, through their parent reference, even when it is read-only. It is not public. It can change the parent.
 - `unrestricted` replaces `public` in the visibility slot and includes it: the method can also be called through a read-only reference (`&`). A plain `public` method needs an owned or writable reference. Properties can be read through `&`; assigning to them is a compile error.
-- Who holds the link to a child after `->` is an open item (99).
 
 ---
 
@@ -2270,8 +2268,6 @@ Level 1 = most important, level 3 = least.
 - Function pointers (objects); C function tables (COM vtables, Vulkan dispatch tables)
 - C interop: declaring external functions, struct layout, calling conventions, callbacks, strings (UTF-8 / UTF-16), ownership across the boundary, errors, unions, bit flags, varargs
 - Deferred: async/await, locks/atomics, tasks, SIMD, EF syntax, Vulkan, shaders
-- Parent and child objects: who holds the link to a child after `->` (existence hierarchy against scope ownership), and how this fits the double free rule of 11.4 ("whichever ends first wins")
-- Parent and child objects: how the collection tracks its live children (iterators, views, and other kinds of child) so it can destroy them and null their reference
 - Pointers: the exact way to convert `*T` to `(*)T` in unsafe code, the syntax of the `unsafe` block and what it allows, handling of null pointers in safe code, which cases the compiler can prove valid, pointer equality, `.hash` and `toStr()`, and pointers in generics
 
 ---
@@ -2620,12 +2616,12 @@ Level 1 = most important, level 3 = least.
 - 6.2, 11.1.3 `Root.Class` offers `getHash()` and `equals(any?)`
 - 6.2, 6.6, 11.2.1, 11.3.1 `.order` is removed: ordering is the trait `Comparable<T>` with the mandatory `int compareTo(T value)` (-1, 0, 1); the default class order (hashes, then addresses) is its default implementation
 - 6.4 The collection is read-only in size while it has open iterators or views: the internal counter (created by an iterator or a view, released by their default `atEnd`; explicit iterators count too), provided by the trait `Collection`; a changing operation raises `ModifyingIteratedCollectionException`; every changing method checks the counter
-- 6.4 The list of the forbidden operations (`add`, `add(collection)`, `insert`, `pop`, `remove`, `removeAll`, `removeAt`, `resize`, `truncate`, `fillAtCapacity`, `fill(count, value)`, `reserve`, `shrinkToFit`, `sort`, `sortUnstable`, `reverse`, `->c[i]` on a `list`) and of the allowed ones (reads, `swap`, `replace`, `c[i] = v`, `fill(value)`, `clear()`, `->c[i]` on `arr` and `vec`, changes in place)
+- 6.4 The list of the forbidden operations (`add`, `add(collection)`, `insert`, `pop`, `remove`, `removeAll`, `removeAt`, `resize`, `truncate`, `fillAtCapacity`, `fill(count, value)`, `reserve`, `shrinkToFit`, `sort`, `sortUnstable`, `reverse`, `copyFrom`, `->c[i]` on a `list`) and of the allowed ones (reads, `swap`, `replace`, `c[i] = v`, `fill(value)`, `clear()`, `->c[i]` on `arr` and `vec`, changes in place)
 - 6.4 The compile-time proof covers only the direct case (a changing member or an element assignment on the same variable or field path); everything else is a runtime check
 - 6.5 Views are the class `View<C>` (`C` is the type of the collection: `View<vec<string>>`); each view class holds what its collection needs; trees and maps will probably need dedicated views; `[a..b]` calls `get_view(uns? start, uns? end)`, a missing bound is null; a `list` view is created in O(n); iterators and `for` run over a view; the lock is the one of the iterators; `c[a..b]!` copies into a new collection of type `C` (needs `.clone()`)
 - 6.5, 12 Where iterators and views live: if not given away, only inside the scope that created them; moved or borrowed, they follow the ownership rules; the collection is changeable again when the last holder ends (replaces "a view can only be a local variable or a parameter")
 - 6.6 `.sizeof`: on every type; for a collection, the header plus the allocated block (the capacity), without what the items own; for a `list`, the header plus all the nodes
-- 6.6 `add(collection)` on `vec` and `list`: basic items copied, objects moved with `add(->other)` (the other is left empty), the plain form with objects is a compile error until cloning, the same collection raises `ModifyingProtectedSourceException`
+- 6.6 `add(collection)` on `vec` and `list`: basic items copied, objects moved with `add(->other)` (the other collection ends and its variable becomes null), the plain form with objects is a compile error until cloning, the same collection raises `ModifyingProtectedSourceException`
 - 6.6 `indexOf` returns the maximum `uns` when not found (was `u64`)
 - 6.6 `removeAt(range)`: the ranges of 6.5; a range outside the collection raises `IndexOutOfRangeException`
 - 6.6, 6.7.1, 6.8.3 `swap(position, new)` is removed; `swap(posA, posB)` only exchanges; new `var old = c.replace(pos, value)` (the old item is returned, or ends at the end of the statement when not assigned); the `swap` forms of maps are left for the maps
@@ -2654,16 +2650,19 @@ Level 1 = most important, level 3 = least.
 - 12.1 `(*)T` converts to `*T` implicitly; `*T` to `(*)T` is a compile error, with a way that is allowed only in unsafe code; transmute-only now refers to conversions between pointers and numbers or `addr`
 - 12.1 Writability of a pointer is always explicit where it is created or passed
 - 12.1 `unsafe` can mark a scope, a function or a class; an unsafe class is usable only from unsafe code
-- 6.4 The counter of open iterators and views is released through the `asparent` method `releaseIterator()`; the collection is the parent of its iterators and views and destroys them when it ends
+- 6.4 The counter of open iterators and views is released through the `asparent` method `releaseIterator()`; the collection is the parent of its iterators and views and nulls their reference to it when it ends
 - 6.5 Iterators and views are children of their collection (`as parent`); if moved with `->` and the collection ends first, using them raises `UsageOfDestroyedObjectException`
 - 6.7 The iterator holds a reference to its collection (not a pointer), declared with `as parent`; every method call checks it; checks removed when the iterator is never moved with `->`, otherwise a level 2 warning; `asparent` methods and the `ListIterator` example
 - 6.8.3 The `list` iterator holds two references (the list as parent, and the current node); no explicit pointers needed
 - 6.9 The custom iterator sketch uses `&MyCollection<Item> collection as parent` instead of `*MyCollection<Item>`
 - 11.2 `releaseIterator()` is `asparent` (only children can call it, even through a read-only reference)
 - 12.4 Use of a variable after `->` or `is atEnd.` raises `UsageOfDestroyedObjectException`, or is a compile error when detectable (replaces "normal null access")
-- 12.5 Parent and child objects (new): `as parent` on one reference parameter of a class (at most one); the parent destroys its children and nulls their reference when it ends; every method call of a child checks the reference; the checks are removed when the child is never moved with `->`, otherwise a level 2 warning
+- 12.5 Parent and child objects (new): `as parent` on one reference parameter of a class (at most one); the parent nulls the reference of its children when it ends; an adopted child (moved with `->`) checks the reference on every method call, with a level 2 warning; a child never moved needs no checks
 - 12.5 `asparent` visibility: methods callable only by the children of the object, even through a read-only reference, not public
 - 12.5 `unrestricted` visibility: replaces `public` and includes it; callable also through a read-only reference (`&`); a plain `public` method needs an owned or writable reference; properties are readable through `&`, assigning to them is a compile error
 - 15.3 New exception `UsageOfDestroyedObjectException` (48): not silent, catchable in Debug and Release
 - 19.3 Warning level 2: extra checks emitted for a child object moved with `->`
 - 99 Open items: who holds the link to a child after `->`; how the collection tracks its live children; pointer details (conversion in unsafe code, `unsafe` block syntax, null handling in safe code, provable validity, equality, `.hash`, `toStr()`, generics); removed "lists of pointers and references" only if you decide it is resolved
+- 12.5, 6.4, 6.5, 6.7, 6.8.3 The parent knows its children and, when it ends, nulls their reference to it; it does not destroy them. A child item moved with `->` (adopted child) checks its parent reference on every method call; a child never moved needs no checks. The two open items on parent and child objects are removed from 99 (the parent holds the links)
+- 12.5 An adopted child is a child whose ownership changes: moved with `->`, returned by a function (a return always moves, as in Rust), or put into a field or a collection; an `asparent` method can also be called by the object itself
+- 1.6 The duplicated heading is removed; `asparent` in 1.6.1 and 1.6.2: the object itself and its children can call it (as in 12.5)

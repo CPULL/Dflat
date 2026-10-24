@@ -50,7 +50,9 @@ work.add(2)
 work.removeAt(1)
 work.add(3)
 r.Console.log(work)
-work.clear()
+work.clear()                       // every item gets its default value, the size is kept
+r.Console.log($"{work.len} {work}")
+work.truncate(0)
 r.Console.log($"{work.len} {work}")
 
 // fill: every item, or count new items
@@ -59,11 +61,11 @@ filled.fill(0)
 filled.fill(2, 7)
 r.Console.log(filled)
 
-// swap: two positions, or a position and a new item
+// swap exchanges two positions; replace puts a new item and gives back the old one
 list<string> letters = ["x", "y", "z"]
 letters.swap(0, 2)
 r.Console.log(letters)
-string was = letters.swap(1, "Y")
+string was = letters.replace(1, "Y")
 r.Console.log($"{was} {letters}")
 
 // ->list[i] takes the item out of the list
@@ -82,11 +84,14 @@ for Dog dog in kennel {
 r.Console.log("")
 r.Console.log(kennel[1].name)
 
-// the iterator by hand
-var iterator = numbers.getIterator()
-var first = iterator.next()
-var second = iterator.next()
-r.Console.log($"{first.value} {first.isValid} {second.value} {second.isValid}")
+// the iterator by hand: it keeps the list from changing its size until it ends (spec 6.4), here at the end of the function
+fun byHand(list<i32> source) {
+  var iterator = source.getIterator()
+  var first = iterator.next()
+  var second = iterator.next()
+  r.Console.log($"{first.value} {first.isValid} {second.value} {second.isValid}")
+}
+byHand(numbers)
 
 // an index outside the list
 fun i32 outside(list<i32> source, u64 index) {

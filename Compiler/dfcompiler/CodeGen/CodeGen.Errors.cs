@@ -126,7 +126,9 @@ public sealed partial class CodeGen {
     ["GenericIOErrorException"] = 43,
     ["FileRemovedWhileOpenException"] = 44,
     ["StreamCloseFailureException"] = 45,
-    ["ModifyingIteratedCollectionException"] = 46
+    ["ModifyingIteratedCollectionException"] = 46,
+    ["InvalidIteratorReleaseException"] = 47,   // spec 6.4: a release of the counter of open iterators when it is zero
+    ["UsageOfDestroyedObjectException"] = 48   // spec 12.5: an adopted child whose parent ended
   };
 
   readonly Stack<Frame> frames = new();

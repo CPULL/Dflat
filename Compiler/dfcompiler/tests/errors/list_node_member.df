@@ -1,0 +1,4 @@
+alias Root as r
+
+list<i32> numbers = [1, 2]
+numbers.node_append(3)

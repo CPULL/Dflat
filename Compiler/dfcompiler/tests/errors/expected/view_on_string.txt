@@ -1,0 +1,1 @@
+view_on_string.df(4): error: views exist on arr, vec and list, not on string (spec 6.5)

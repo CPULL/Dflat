@@ -1,10 +1,10 @@
-Compiler: implement classes
 Compiler: implement block strings
-StdLib: Files and Streams, ability to run executables
-Date class: methods
-All types: Parse and TryParse
-Collections: finalize specs
-Docs: make the specs easier to read (they are a work in progress)
+StdLib: Ability to run executables
+Collections: finalize maps, trees and sets
+Fully define ownership and lifecycle of objects
+Network library
+Debug mode
+Docs: make the specs easier to read
 WIKI: keep it fully aligned with specs
 
 AFTER: Compiler written in DFlat

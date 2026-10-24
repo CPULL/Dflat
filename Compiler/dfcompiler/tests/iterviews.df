@@ -1,0 +1,98 @@
+// Iterators and views as children of their collection (spec 6.4, 6.5, 6.7, 12.5): while one exists the collection keeps its size; its atEnd gives the
+// counter back; one that outlives its collection raises UsageOfDestroyedObjectException
+alias Root as r
+
+fun string tryAdd(vec<i32> values) {
+  values.add(0)
+  return "added"
+  catch ModifyingIteratedCollectionException { return "locked" }
+}
+fun string tryAddList(list<i32> values) {
+  values.add(0)
+  return "added"
+  catch ModifyingIteratedCollectionException { return "locked" }
+}
+
+// an iterator made by hand: the vec is locked while the iterator exists
+vec<i32> numbers = [1, 2, 3]
+fun walk(vec<i32> source) {
+  var iterator = source.getIterator()
+  var got = iterator.next()
+  r.Console.log($"{got.value} {tryAdd(source)}")
+  got = iterator.next()
+  r.Console.log($"{got.value} {got.isValid}")
+}
+walk(numbers)
+r.Console.log(tryAdd(numbers))
+var it = numbers.getIterator()
+r.Console.log(tryAdd(numbers))
+it is atEnd.
+r.Console.log($"{tryAdd(numbers)} {numbers.len}")
+
+// the iterator of a list follows the nodes
+list<string> words = ["a", "b", "c"]
+var wordIt = words.getIterator()
+var w = wordIt.next()
+while w.isValid {
+  r.Console.print(w.value + ";")
+  w = wordIt.next()
+}
+r.Console.log("")
+wordIt is atEnd.
+words.add("d")
+r.Console.log(words)
+
+// an iterator that outlives its collection
+fun IndexIterator<i32> orphan() {
+  vec<i32> local = [7, 8]
+  var iterator = local.getIterator()
+  return ->iterator
+}
+var lost = orphan()
+fun string tryNext(IndexIterator<i32> iterator) {
+  var got = iterator.next()
+  return $"{got.value}"
+  catch UsageOfDestroyedObjectException { return "the vec is gone" }
+}
+r.Console.log(tryNext(lost))
+
+// views: a read-only part of the collection, no copy
+vec<i32> scores = [10, 20, 30, 40, 50]
+fun show(vec<i32> source) {
+  var middle = source[1..3]
+  View<vec<i32>> head = source[..2]
+  var tail = source[3..]
+  var closed = source[1..=3]
+  r.Console.log($"{middle} {head} {tail} {closed} {middle.len} {middle[1]} {closed.has(40)} {closed.indexOf(30)}")
+  i32 total = 0
+  for i32 s in tail {
+    total += s
+  }
+  r.Console.log($"{total} {tryAdd(source)}")
+  source[1] = 21                       // an item can still be replaced: the view sees it
+  r.Console.log(middle)
+}
+show(scores)
+r.Console.log(tryAdd(scores))
+fun string badView(vec<i32> source) {
+  var outside = source[2..9]
+  return "made"
+  catch IndexOutOfRangeException { return "outside" }
+}
+r.Console.log(badView(scores))
+
+list<i32> chain = [1, 2, 3, 4]
+fun showList(list<i32> source) {
+  var part = source[1..3]
+  i32 sum = 0
+  for i32 n in part {
+    sum += n
+  }
+  r.Console.log($"{part} {sum} {part[0]} {part.indexOf(3)} {tryAddList(source)}")
+}
+showList(chain)
+r.Console.log(tryAddList(chain))
+
+arr<string> letters = ["x", "y", "z"]
+var some = letters[1..]
+r.Console.log($"{some} {some.len} {some.has("z")}")

@@ -1,0 +1,1 @@
+list_node_member.df(4): error: list<i32> has no function 'node_append'

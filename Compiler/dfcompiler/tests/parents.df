@@ -1,0 +1,106 @@
+// Parent and child objects (spec 12.5): a child declares its parent with `as parent`; asparent and unrestricted functions; a child moved with -> is an
+// adopted child: its parent knows it and nulls its reference when it ends, and the next call of the child runs its atEnd and raises
+// UsageOfDestroyedObjectException
+alias Root as r
+
+public class Library(string name) {
+  public string name
+  public u64 opened = 0
+  asparent fun open() { opened += 1 }
+  asparent fun close() { opened -= 1 }
+  public fun string title() { name }
+  unrestricted fun string label() { "library " + name }
+  public fun reopen() { open() }       // the object itself uses its asparent function too
+} atEnd {
+  r.Console.log($"{name} ends")
+}
+
+// a read-only parent (&): only asparent and unrestricted functions are called through it
+public class Reader(&Library library as parent, string who) {
+  public string who
+  public fun string read() { return who + " reads in the " + library.label() }
+  public fun start() { library.open() }
+  public fun stop() { library.close() }
+} atEnd {
+  r.Console.log($"reader {who} ends")
+}
+
+// a writable parent ((&)): its public functions and fields too
+public class Keeper((&)Library library as parent) {
+  public fun rename(string newName) { library.name = newName }
+  public fun string shown() { library.title() }
+}
+
+fun string tryRead(Reader reader) {
+  return reader.read()
+  catch UsageOfDestroyedObjectException { return "the library is gone" }
+}
+
+// a child that is never moved ends before its parent: no checks
+Library city = Library("city")
+Reader ann = Reader(city, "ann")
+ann.start()
+r.Console.log($"{ann.read()} {city.opened}")
+ann.stop()
+r.Console.log(city.opened)
+Keeper keeper = Keeper((&)city)
+keeper.rename("town")
+r.Console.log(keeper.shown())
+r.Console.log(ann)
+city.reopen()
+r.Console.log(city.opened)
+
+// an adopted child that outlives its parent
+fun Reader adoptOne() {
+  Library local = Library("tmp")
+  Reader reader = Reader(local, "bob")
+  reader.start()
+  return ->reader
+}
+Reader orphan = adoptOne()
+r.Console.log(tryRead(orphan))
+r.Console.log(tryRead(orphan))
+
+// adopted children that end before their parent leave its list; the parent nulls the ones still there
+Library hall = Library("hall")
+Reader first = Reader(hall, "cy")
+Reader second = Reader(hall, "di")
+Reader third = Reader(hall, "ed")
+Reader movedFirst = ->first
+Reader movedSecond = ->second
+Reader movedThird = ->third
+movedFirst.start()
+movedFirst is atEnd.
+r.Console.log(tryRead(movedThird))
+hall is atEnd.
+r.Console.log(tryRead(movedSecond))
+r.Console.log(tryRead(movedThird))
+
+// a child changes owner also when it is returned (a return always moves), put into a field or put into a collection
+fun Reader plainReturn() {
+  Library local = Library("plain")
+  Reader reader = Reader(local, "fay")
+  return reader
+}
+Reader returned = plainReturn()
+r.Console.log(tryRead(returned))
+public class Shelf {
+  public Reader kept
+}
+fun Shelf shelved() {
+  Library local = Library("shelf")
+  Shelf shelf = Shelf()
+  shelf.kept = Reader(local, "gus")
+  return shelf
+}
+Shelf shelf = shelved()
+r.Console.log(tryRead(shelf.kept))
+fun vec<Reader> stacked() {
+  Library local = Library("stack")
+  vec<Reader> all = []
+  all.add(Reader(local, "hal"))
+  return all
+}
+vec<Reader> stack = stacked()
+r.Console.log(tryRead(stack[0]))
+r.Console.log("end")

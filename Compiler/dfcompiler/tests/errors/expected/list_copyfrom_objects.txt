@@ -1,0 +1,1 @@
+list_copyfrom_objects.df(9): error: copyFrom clones object items, which needs cloning (not built yet)

@@ -1,0 +1,10 @@
+alias Root as r
+
+public class Counter(string name) {
+  public string name
+  public fun add(i32 amount) { }
+}
+
+fun look(&Counter counter) {
+  counter.name = "x"
+}

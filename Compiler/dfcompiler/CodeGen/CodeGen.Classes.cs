@@ -25,6 +25,9 @@ sealed class FieldInfo {
   public bool IsStatic { get; set; }
   public bool IsConst { get; set; }
   public bool FromParam { get; set; }
+  public bool IsParentRef { get; set; }      // &Parent name as parent (spec 12.5): a reference, not owned
+  public bool ReadOnlyRef { get; set; }      // declared with & (not (&)): only unrestricted and asparent functions are called through it
+  public bool Hidden { get; set; }           // a field of the compiler (the children of a parent, the slot of a child)
   public Node? Init { get; set; }
   public FunSig? StaticInit { get; set; }
   public string CName => IsStatic ? $"s_{Owner.Name}_{Name}" : Owner.IsTrait ? $"t_{Owner.Name}_{Name}" : $"m_{Name}";
@@ -57,6 +60,8 @@ sealed class ClassInfo {
   public List<ImplInfo> Impls { get; } = new();
   public List<FunSig> TraitMethods { get; } = new();          // the methods of a trait, in slot order
   public Node? CtorBlock { get; set; }                        // the body of the constructor of a trait
+  public FieldInfo? ParentField { get; set; }                 // a child class: its reference to the parent (spec 12.5)
+  public bool HasChildren { get; set; }                       // a parent class: it keeps the list of its adopted children
   public string Descriptor => $"df_cls_{Name}";
   public string StructName => $"c_{Name}";
 }
@@ -124,8 +129,8 @@ public sealed partial class CodeGen {
 
   static (Vis Visibility, bool Explicit, bool IsStatic, bool IsConst, bool IsOverride) ReadMods(Node member) {
     var mods = member.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ') ?? Array.Empty<string>();
-    Vis visibility = mods.Contains("public") ? Vis.Public : mods.Contains("internal") ? Vis.Internal : Vis.Private;
-    bool explicitVisibility = mods.Contains("public") || mods.Contains("internal") || mods.Contains("private");
+    Vis visibility = mods.Contains("public") || mods.Contains("unrestricted") ? Vis.Public : mods.Contains("internal") ? Vis.Internal : Vis.Private;
+    bool explicitVisibility = mods.Contains("public") || mods.Contains("internal") || mods.Contains("private") || mods.Contains("unrestricted") || mods.Contains("asparent");
     return (visibility, explicitVisibility, mods.Contains("static"), mods.Contains("const"), mods.Contains("override"));
   }
 
@@ -240,6 +245,7 @@ public sealed partial class CodeGen {
       WarnEqualityTwice(cls);
       BuildImpls(cls);
       BuildConstructor(cls);
+      AddParentChecks(cls);
     }
     foreach (var cls in classOrder) {
       EmitStruct(cls);
@@ -269,6 +275,10 @@ public sealed partial class CodeGen {
         if (cls.PrimaryParams.Any(existing => existing.Name == p.Text)) {
           throw Error($"duplicate parameter '{p.Text}'", p);
         }
+        if (p.Children.Any(child => child.Kind == "AsParent")) {
+          RegisterParentParam(cls, p, type, def);
+          continue;
+        }
         if (p.Kind is "RefParam" or "WritableRefParam") {
           throw NotSupported("Reference parameters on constructors", p);
         }
@@ -288,6 +298,9 @@ public sealed partial class CodeGen {
           var (visibility, _, isStatic, isConst, isOverride) = ReadMods(member);
           if (isOverride) {
             throw Error("'override' applies to functions", member);
+          }
+          if (ModsOf(member).Any(mod => mod is "asparent" or "unrestricted")) {
+            throw Error("'asparent' and 'unrestricted' apply to functions", member);
           }
           if (member.Children.Any(child => child.Kind == "Size")) {
             throw NotSupported("Sized declarations (arr<T>[n] name)", member);
@@ -363,6 +376,78 @@ public sealed partial class CodeGen {
 
   static List<string> ParamTypes(FunSig f) => f.Params.Select(param => param.Type).ToList();
 
+  // a new or moved object that changes owner (->, a return, a field, a collection): when it is a child it becomes an adopted child (spec 12.5), its parent
+  // keeps it in its list and every call of its class checks the parent
+  Expr Adopted(Expr value, Node at) {
+    if (!value.Fresh || !classes.TryGetValue(value.Type, out var child) || child.ParentField is not FieldInfo parentField) {
+      return value;
+    }
+    adoptedClasses.Add(child.Name);
+    Warn($"a {DisplayName(child.Name)} that changes owner is an adopted child of its {DisplayName(parentField.Type)}: every call of a {DisplayName(child.Name)} checks that the parent still exists", at, 2);
+    string taken = NewTemp();
+    string parent = $"{taken}->{parentField.CName}";
+    return new Expr($"({{ {CType(value.Type)} {taken} = {value.Code}; if ({taken} != NULL && {parent} != NULL && {taken}->m_df_slot == 0) {{ "
+      + $"df_kids_add(&{parent}->m_df_children, (void**)&{parent}, &{taken}->m_df_slot); }} {taken}; }})", value.Type, true);
+  }
+
+  // the child classes that change owner somewhere (adopted children): only their functions check the parent (DF_ADOPTED_<class>, Assemble)
+  readonly HashSet<string> adoptedClasses = new();
+
+  // every function of a child class starts with the check of an adopted child (spec 12.5): when the parent is gone the child runs its own atEnd
+  // (once) and raises UsageOfDestroyedObjectException. The check is compiled only for the classes that are adopted somewhere
+  void AddParentChecks(ClassInfo cls) {
+    if (cls.ParentField is not FieldInfo parent) {
+      return;
+    }
+    var body = cls.Node.Children.First(child => child.Kind == "Block");
+    foreach (var member in body.Children.Where(member => member.Kind == "Fun" && member.Text != "==" && !IsGenericEquals(member))) {
+      if (ReadMods(member).IsStatic || member.Children.FirstOrDefault(child => child.Kind == "Block") is not Node block) {
+        continue;
+      }
+      // a body of one expression returns its value: with the check in front it needs the return written
+      var sig = funs.TryGetValue(cls.Name + "." + member.Text, out var overloads) ? overloads.FirstOrDefault(f => f.Node == member) : null;
+      if (sig != null && sig.Ret != "void" && !IsMulti(sig.Ret) && block.Children.Count == 1 && block.Children[0].Kind == "ExprStmt") {
+        block.Children[0] = Synthetic("Return", block.Children[0]).Add(block.Children[0].Children[0]);
+      }
+      string atEnd = cls.Dtor != null ? $"{cls.Dtor.CName}(self); " : "";
+      string snippet = $"if this.{parent.Name} == null {{\n  throw UsageOfDestroyedObjectException(\"Usage Of Destroyed Object Exception\")\n}}\n";
+      var check = new Parser(new Lexer(snippet, member.Line).Tokenize()).ParseProgram().Children[0];
+      block.Children.InsertRange(0, new[] {
+        Synthetic("RawC", member, $"if (DF_ADOPTED_{cls.Name}) {{"),
+        Synthetic("RawC", member, $"if (self->{parent.CName} == NULL && self->m_df_slot != DF_UNS_MAX) {{ self->m_df_slot = DF_UNS_MAX; {atEnd}}}"),
+        check,
+        Synthetic("RawC", member, "}")
+      });
+    }
+  }
+
+  // &Parent name as parent: the object that guarantees the existence of this one (spec 12.5). The field is a reference: the child does not own its
+  // parent. The parent class gets the list of its adopted children (a hidden field) and the child its slot in that list
+  void RegisterParentParam(ClassInfo cls, Node p, string type, Node? def) {
+    if (cls.ParentField != null) {
+      throw Error($"a class has one parent: '{cls.ParentField.Name}' is already 'as parent'", p);
+    }
+    if (p.Kind is not ("RefParam" or "WritableRefParam")) {
+      throw Error($"'as parent' goes on a reference parameter: &{p.Children[0].Text} {p.Text} as parent", p);
+    }
+    if (def != null) {
+      throw Error("the parent cannot have a default value", p);
+    }
+    if (!classes.TryGetValue(type, out var parentClass)) {
+      throw traits.ContainsKey(type) ? NotSupported("A trait as the type of the parent", p) : Error($"the parent must be an object, not {type}", p);
+    }
+    CheckFieldName(cls, p.Text!, p);
+    cls.PrimaryParams.Add(new ParamSig(p.Text!, type, null) { Ref = p.Kind == "RefParam" ? 1 : 2 });
+    var field = new FieldInfo(p.Text!, type, cls, p) { FromParam = true, IsParentRef = true, ReadOnlyRef = p.Kind == "RefParam" };
+    cls.Fields.Add(field);
+    cls.ParentField = field;
+    cls.Fields.Add(new FieldInfo("df_slot", NativeUns, cls, p) { Hidden = true });
+    if (!parentClass.HasChildren) {
+      parentClass.HasChildren = true;
+      parentClass.Fields.Add(new FieldInfo("df_children", "u64", parentClass, p) { Hidden = true });
+    }
+  }
+
   void RegisterMethods(ClassInfo cls) {
     if (cls.Parent != null) {
       cls.Vtable.AddRange(cls.Parent.Vtable);
@@ -397,6 +482,15 @@ public sealed partial class CodeGen {
       f.IsStatic = isStatic;
       f.IsOverride = isOverride;
       f.Visibility = visibility;
+      var mods = ModsOf(member);
+      f.IsAsParent = mods.Contains("asparent");
+      f.IsUnrestricted = mods.Contains("unrestricted");
+      if (mods.Count(mod => mod is "public" or "internal" or "private" or "asparent" or "unrestricted") > 1) {
+        throw Error("a function has one visibility: public, internal, private, asparent or unrestricted", member);
+      }
+      if (f.IsAsParent && isStatic) {
+        throw Error("an asparent function is called through the parent reference: it cannot be static", member);
+      }
       if (member.Text == "==") {
         CheckOperatorEquals(f, member);
       }
@@ -537,7 +631,11 @@ public sealed partial class CodeGen {
   void EmitStruct(ClassInfo cls) {
     var fields = new StringBuilder();
     foreach (var field in AllInstanceFields(cls)) {
-      fields.Append($"  {CType(field.Type)} {field.CName};\n");
+      // the first and the last node of a list are node pointers in C (CodeGen.List.cs)
+      string fieldType = IsList(cls.Name) && field.Name is "first" or "last" ? ListNode(cls.Name) + "*"
+        : IsListIterator(cls.Name) && field.Name == "node" ? ListNode(cls.ParentField!.Type) + "*"
+        : field.Hidden && field.Name == "df_children" ? "df_kids*" : CType(field.Type);
+      fields.Append($"  {fieldType} {field.CName};\n");
     }
     typeDefs.Append($"struct {cls.StructName} {{\n  const df_class* cls;\n{(cls.IsException ? ExceptionFields : "")}{fields}}};\n\n");
     foreach (var field in cls.Fields.Where(field => field.IsStatic)) {
@@ -624,6 +722,68 @@ public sealed partial class CodeGen {
 
   // ---------------------------------------------------------------- access rules
 
+  static string[] ModsOf(Node member) =>
+    member.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ') ?? Array.Empty<string>();
+
+  // the C of the parent reference of the class being compiled, written as the bare name or as this.name, or null
+  FieldInfo? ParentReceiver(string code) {
+    if (currentClass?.ParentField is not FieldInfo parent) {
+      return null;
+    }
+    return code == $"self->{parent.CName}" || code == $"(self)->{parent.CName}" ? parent : null;
+  }
+
+  // the parent reference when it is read-only (&), or null
+  FieldInfo? ReadOnlyParent(string code) => ParentReceiver(code) is { ReadOnlyRef: true } parent ? parent : null;
+
+  // the variable a receiver names when it is a read-only reference (&Item o, &arr<T> a), or null
+  VarInfo? ReadOnlyVariable(Node receiverNode, Scope scope) =>
+    receiverNode.Kind == "Name" && scope.Find(receiverNode.Text!) is { ReadOnlyRef: true } variable ? variable : null;
+
+  // the members of the collections of the compiler that do not change them: the only ones a read-only reference can call (spec 1.6.2)
+  static readonly HashSet<string> ReadOnlyCollectionMembers = new() { "has", "indexOf", "getIterator" };
+
+  // spec 1.6.2: through a read-only reference (&) only the unrestricted functions (and static ones) can be called; for the collections of the compiler
+  // the members that do not change them
+  void CheckReadOnlyCall(Node receiverNode, Expr receiver, string name, Scope scope, Node at) {
+    if (ReadOnlyVariable(receiverNode, scope) is null) {
+      return;
+    }
+    string what = receiverNode.Text!;
+    bool library = IsArr(receiver.Type) || IsVec(receiver.Type) || IsList(receiver.Type)
+      || (classes.TryGetValue(receiver.Type, out var libraryClass) && libraryClass.Node.Line >= LibraryLine)
+      || (traits.TryGetValue(receiver.Type, out var libraryTrait) && libraryTrait.Node.Line >= LibraryLine);
+    bool allowed;
+    if (library) {
+      allowed = ReadOnlyCollectionMembers.Contains(name);
+    } else {
+      var methods = IsClass(receiver.Type) ? LookupMethods(ObjInfo(receiver.Type), name) : new List<FunSig>();
+      allowed = methods.Count == 0 || methods.All(f => f.IsUnrestricted || f.IsStatic);
+    }
+    if (!allowed) {
+      throw Error(library
+        ? $"'{what}' is a read-only reference (&): '{name}' can change it, so it needs an owned or writable reference (take (&){what})"
+        : $"'{what}' is a read-only reference (&): '{name}' needs an owned or writable reference (mark it unrestricted, or take (&){what})", at);
+    }
+  }
+
+  // spec 12.5: an asparent function is called only by a child, through its parent reference; through a read-only reference (&) only the
+  // unrestricted and asparent functions can be called
+  void CheckParentAccess(FunSig chosen, string? receiver, string name, Node at) {
+    var parent = receiver == null ? null : ParentReceiver(receiver);
+    if (chosen.IsAsParent) {
+      bool itself = receiver == "self" && currentClass != null && (currentClass == chosen.Class || IsSubclass(currentClass.Name, chosen.Class!.Name));
+      if (parent == null && !itself) {
+        throw Error($"'{name}' is asparent: only a {DisplayName(chosen.Class!.Name)} itself and its children (through their parent reference) call it", at);
+      }
+      return;
+    }
+    if (parent is { ReadOnlyRef: true } && !chosen.IsUnrestricted && !chosen.IsStatic && !name.StartsWith("get_")) {   // properties can be read
+      throw Error($"'{parent.Name}' is a read-only reference (&): '{name}' needs an owned or writable reference (mark it unrestricted, or declare (&){parent.Name})", at);
+    }
+    CheckAccess(chosen.Visibility, chosen.Class!, name, at);
+  }
+
   void CheckAccess(Vis visibility, ClassInfo owner, string what, Node at) {
     if (visibility != Vis.Private) {
       return;                                   // internal is as open as public until namespaces exist
@@ -704,8 +864,18 @@ public sealed partial class CodeGen {
     if (!IsClass(owner.Type)) {
       return null;
     }
+    if (ReadOnlyParent(owner.Code) is FieldInfo readOnly) {
+      throw Error($"'{readOnly.Name}' is a read-only reference (&): its fields cannot be assigned", target);
+    }
+    if (ReadOnlyVariable(target.Children[0], scope) is not null) {
+      throw Error($"'{target.Children[0].Text}' is a read-only reference (&): its fields cannot be assigned", target);
+    }
     var instance = ObjectField(owner, target.Text!, target);
     var info = FindField(ObjInfo(owner.Type), target.Text!)!;
+    if (info.IsParentRef) {
+      // the reference to the parent: set once, by the constructor
+      return initializing ? new LValueInfo(instance.Code, instance.Type, false) : throw Error($"'{target.Text}' is the reference to the parent: only the constructor sets it", target);
+    }
     return new LValueInfo(instance.Code, instance.Type, info.IsConst && !initializing, null, true);
   }
 
@@ -822,6 +992,9 @@ public sealed partial class CodeGen {
         throw Error($"'{param.Name}' is a writable borrow: pass it as (&)object", arg);
       }
       arg = arg.Children[0];
+      if (ReadOnlyVariable(arg, scope) is not null) {
+        throw Error($"'{arg.Text}' is a read-only reference (&): it cannot be passed as (&)", arg);
+      }
     } else if (arg.Kind == "WritableAddressOf") {
       throw Error($"'{param.Name}' is not a (&) parameter: remove the (&)", arg);
     }
@@ -851,7 +1024,7 @@ public sealed partial class CodeGen {
         : $"'{name}' is static: write {cls.Name}.{name}(...)", at);
     }
     var chosen = ResolveOverload(candidates, args, scope, at);
-    CheckAccess(chosen.Visibility, chosen.Class!, name, at);
+    CheckParentAccess(chosen, receiver, name, at);
     var codes = ArgCodes(chosen, args, scope, at);
     string call;
     if (receiver == null) {
@@ -999,7 +1172,7 @@ public sealed partial class CodeGen {
     EmitExceptionDescriptors();
     EmitEqualsTables();
     foreach (var cls in classOrder) {
-      var all = AllInstanceFields(cls);
+      var all = AllInstanceFields(cls).Where(field => !field.Hidden).ToList();
       var sb = classCode;
       sb.Append($"static df_string df_str_{cls.Name}(const {cls.StructName}* o) {{\n");
       sb.Append("  if (o == NULL) {\n    return df_str_lit(\"null\", 4);\n  }\n");

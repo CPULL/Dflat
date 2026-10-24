@@ -16,7 +16,7 @@ public sealed class Parser {
   };
 
   static readonly HashSet<string> Modifiers = new() {
-    "public", "internal", "private", "const", "override", "static"
+    "public", "internal", "private", "const", "override", "static", "asparent", "unrestricted"
   };
 
   // Rust-style precedence, lowest first. "..", "??" and "? { }" sit below these.
@@ -1118,6 +1118,12 @@ public sealed class Parser {
         if (isVolatile) {
           p.Add(new Node("Volatile", name));
         }
+        // &Collection collection as parent (spec 12.5): parent is a keyword only right after as
+        if (IsKw("as") && PeekAt(1).Kind == TokenKind.Ident && PeekAt(1).Text == "parent") {
+          var asWord = Next();
+          Next();
+          p.Add(new Node("AsParent", asWord));
+        }
         if (IsOp("=")) {
           var eq = Next();
           p.Add(new Node("Default", eq).Add(ParseExpr()));
@@ -1676,9 +1682,9 @@ public sealed class Parser {
       }
       if (IsOp(">") && PeekAt(1).Is("(")) {
         Next();
-        // a<b>(c) also reads as two comparisons: warn when every argument could be a value
+        // a<b>(c) also reads as two comparisons: warn when every argument could be a value (arr is a type too: c.transformTo<arr>())
         bool ambiguous = generic.Children.Skip(1).All(arg =>
-          (arg.Kind == "Type" && arg.Children.Count == 0 && !BuiltinTypes.Contains(arg.Text!)) || arg.Kind == "Count");
+          (arg.Kind == "Type" && arg.Children.Count == 0 && !BuiltinTypes.Contains(arg.Text!) && arg.Text != "arr") || arg.Kind == "Count");
         if (ambiguous) {
           Warnings.Add($"({open.Line}): warning L3: read as a generic call; use parentheses for comparisons");
         }

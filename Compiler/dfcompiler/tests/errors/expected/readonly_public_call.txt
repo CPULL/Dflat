@@ -1,0 +1,1 @@
+readonly_public_call.df(9): error: 'counter' is a read-only reference (&): 'add' needs an owned or writable reference (mark it unrestricted, or take (&)counter)

@@ -1,0 +1,1 @@
+readonly_field_assign.df(9): error: 'counter' is a read-only reference (&): its fields cannot be assigned

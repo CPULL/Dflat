@@ -35,8 +35,9 @@ r.Console.log($"{had} {last.name}")
 
 kennel.removeAt(0)                 // the empty slot goes away
 r.Console.log(kennel.len)
-kennel.clear()
+kennel.clear()                     // the items become null: the size is kept
 r.Console.log(kennel.len)
+kennel.truncate(0)
 
 fill(kennel, 1000)
 r.Console.log(kennel.len)

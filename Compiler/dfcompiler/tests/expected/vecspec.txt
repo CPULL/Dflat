@@ -2,12 +2,12 @@
 true
 false
 3
-0
+[0, 0, 0]
 sum 6
 changed while iterated
-item replaced while iterated
+an item can be replaced while iterated
 reordered: Modifying Iterated Collection Exception
-sum 15
+sum 14
 [z, y, x]
 y [z, Y, x]
 max spare luna

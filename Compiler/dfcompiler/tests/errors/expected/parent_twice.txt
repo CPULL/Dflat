@@ -1,0 +1,1 @@
+parent_twice.df(9): error: a class has one parent: 'library' is already 'as parent'

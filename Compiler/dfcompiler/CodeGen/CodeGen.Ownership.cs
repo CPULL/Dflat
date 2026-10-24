@@ -61,6 +61,9 @@ public sealed partial class CodeGen {
     if (state.TryGetValue(f, out int s)) {
       return s == 1 || f.ReturnsOwned;                       // busy: assume it moves
     }
+    if (f.ReturnsOwnedSet && f.IsAbstract) {
+      return f.ReturnsOwned;   // a trait function without a body takes the answer of its implementations (ClassifyReturns): it is not worked out again
+    }
     state[f] = 1;
     bool? result = null;
     if (f.IsCtor) {
@@ -137,6 +140,9 @@ public sealed partial class CodeGen {
   bool CallMoves(Node call, Dictionary<FunSig, int>? state = null) {
     state ??= new Dictionary<FunSig, int>();
     var callee = call.Children[0];
+    if (callee.Kind == "GenericRef" && callee.Children[0] is { Kind: "Member", Text: "transformTo" }) {
+      return true;   // c.transformTo<vec>(): a new collection (CodeGen.List.cs)
+    }
     if (callee.Kind == "GenericRef" && callee.Children[0] is { Kind: "Name" } genericName) {
       return genericClasses.ContainsKey(genericName.Text!)
         || (genericFuns.TryGetValue(genericName.Text!, out var explicitFun) && TemplateReturnsMoves(explicitFun));
@@ -144,6 +150,9 @@ public sealed partial class CodeGen {
     string? simple = callee.Kind is "Name" or "Member" ? callee.Text : null;
     if (simple == null) {
       return false;
+    }
+    if (callee.Kind == "Member" && simple is "node_take" or "node_replace" && call.Line >= LibraryLine) {
+      return true;   // the item that leaves a list node moves to the caller (CodeGen.List.cs)
     }
     if (callee.Kind == "Name" && genericFuns.TryGetValue(simple, out var inferredFun)) {
       return TemplateReturnsMoves(inferredFun);
@@ -178,7 +187,7 @@ public sealed partial class CodeGen {
     return e.Kind switch {
       "Null" or "Gift" => true,
       "List" => true,   // a literal: a new collection (it only matters when the variable is an object)
-      "Index" => e.Children[0].Kind == "GenericRef",   // vec<T>[n]: a new collection
+      "Index" => e.Children[0].Kind == "GenericRef" || (e.Children.Count > 1 && e.Children[1].Kind == "Range"),   // vec<T>[n]: a new collection; c[a..b]: a new view
       "Paren" => GuessOwner(e.Children[0], state),
       "Call" => CallMoves(e, state),
       _ => false
@@ -205,6 +214,13 @@ public sealed partial class CodeGen {
       if (typeNode.Text == "var" && init?.Children[0] is { Kind: "Call" } genericCall && genericCall.Children[0].Kind == "GenericRef") {
         // var s = Stack<i32>(); with a set as type argument (Box<Num>(x)) the copy is known only when the call is compiled: any class will do here
         return HasSetArg(genericCall.Children[0]) ? ((Node)genericCall.Children[0].Children[0]).Text : GenericRefClass(genericCall.Children[0]);
+      }
+      if (typeNode.Text == "var" && init?.Children[0] is { Kind: "Index" } ranged && ranged.Children.Count > 1 && ranged.Children[1].Kind == "Range") {
+        return "var";   // var part = c[a..b]: a view (spec 6.5)
+      }
+      if (typeNode.Text == "var" && init?.Children[0] is { Kind: "Call" } memberCall && memberCall.Children[0].Kind == "Member" && CallMoves(memberCall)) {
+        // var it = numbers.getIterator(): a function that gives a new or moved object (the exact class is known when the call is compiled)
+        return "var";
       }
       return null;
     }
@@ -285,7 +301,7 @@ public sealed partial class CodeGen {
     string slot = NewTemp();
     string taken = NewTemp();
     string code = $"({{ {CType(value.Type)}* {slot} = &({target.Code}); {CType(value.Type)} {taken} = *{slot}; *{slot} = NULL; {taken}; }})";
-    return new Expr(code, value.Type, true);
+    return Adopted(new Expr(code, value.Type, true), n);
   }
 
   // only an owner moves its object, and a field only out of an object the code may write
@@ -354,6 +370,9 @@ public sealed partial class CodeGen {
     if (!owns && value.Fresh) {
       throw Error($"'{targetNode.Text}' only borrows: a new object needs an owner (declare the variable with the new object, or assign a field)", at);
     }
+    if (target.IsField) {
+      value = Adopted(value, at);   // a child put into a field changes owner (spec 12.5)
+    }
     string converted = Convert(value, target.Type, at);
     MarkAssigned(variable);
     if (!owns) {
@@ -404,21 +423,30 @@ public sealed partial class CodeGen {
         ? $"'{currentFun.Name}' returns new or moved objects; this return gives a borrowed one (write ->x, or return a new object)"
         : $"'{currentFun.Name}' returns borrowed objects; this return gives a new or moved one", at);
     }
-    return value;
+    return moves == true ? Adopted(value, at) : value;   // a child returned to the caller changes owner (spec 12.5)
   }
 
   // ---------------------------------------------------------------- the destruction code of the classes
 
   List<FieldInfo> OwnedObjectFields(ClassInfo cls) {
     return IntroducedTraits(cls).SelectMany(trait => trait.Fields).Concat(cls.Fields)
-      .Where(field => !field.IsStatic && IsClass(field.Type)).ToList();
+      .Where(field => !field.IsStatic && IsClass(field.Type) && !field.IsParentRef).ToList();
   }
 
   void EmitDropGlue(ClassInfo cls) {
     var sb = classCode;
     sb.Append($"static void df_dropc_{cls.Name}({cls.StructName}* self) {{\n");
     if (cls.Dtor != null) {
-      sb.Append($"  {cls.Dtor.CName}(self);\n");
+      // an orphan adopted child already ran its atEnd when it found its parent gone (slot DF_UNS_MAX, spec 12.5)
+      string orphanDone = cls.ParentField != null ? "if (self->m_df_slot != DF_UNS_MAX) " : "";
+      sb.Append($"  {orphanDone}{cls.Dtor.CName}(self);\n");
+    }
+    if (cls.HasChildren) {
+      sb.Append("  df_kids_release(&self->m_df_children);   /* the adopted children lose their reference to this parent (spec 12.5) */\n");
+    }
+    if (cls.ParentField is FieldInfo parentField) {
+      // an adopted child that ends before its parent leaves the list of the parent
+      sb.Append($"  if (self->m_df_slot != 0 && self->m_df_slot != DF_UNS_MAX && self->{parentField.CName} != NULL) {{ df_kids_remove(self->{parentField.CName}->m_df_children, self->m_df_slot); }}\n");
     }
     foreach (var field in OwnedObjectFields(cls)) {
       sb.Append($"  if (self->{field.CName} != NULL) {{ void* o = (void*)self->{field.CName}; self->{field.CName} = NULL; df_drop(o); }}\n");

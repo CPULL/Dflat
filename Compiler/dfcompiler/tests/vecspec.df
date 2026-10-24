@@ -16,9 +16,10 @@ r.Console.log(contains(words, "z"))
 IndexCollection<i32> indexed = numbers
 r.Console.log(indexed.len)
 indexed.clear()
-r.Console.log(numbers.len)
+r.Console.log(numbers)             // clear keeps the size (spec 6.6)
 
-// changing a vec while it is iterated raises ModifyingIteratedCollectionException (a Panic in a release build)
+// changing the size or the order of a vec while it is iterated raises ModifyingIteratedCollectionException (a Panic in a release build);
+// replacing an item is allowed (spec 6.4)
 fun string addWhileLooping(vec<i32> source) {
   for i32 n in source {
     source.add(n)
@@ -30,8 +31,8 @@ fun string replaceWhileLooping(vec<i32> source) {
   for i32 n in source {
     source[0] = 9
   }
-  return "no exception"
-  catch ModifyingIteratedCollectionException { return "item replaced while iterated" }
+  return "an item can be replaced while iterated"
+  catch ModifyingIteratedCollectionException { return "never" }
 }
 fun string sortWhileLooping(vec<i32> source) {
   for i32 n in source {
@@ -55,11 +56,11 @@ r.Console.log(replaceWhileLooping(values))
 r.Console.log(sortWhileLooping(values))
 r.Console.log(readOnly(values))
 
-// swap: two positions, or a position and a new item
+// swap exchanges two positions; replace puts a new item and gives back the old one
 vec<string> letters = ["x", "y", "z"]
 letters.swap(0, 2)
 r.Console.log(letters)
-string was = letters.swap(1, "Y")
+string was = letters.replace(1, "Y")
 r.Console.log($"{was} {letters}")
 
 // objects: ->, fill(null) and resize with null end the objects the items held

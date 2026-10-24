@@ -48,7 +48,9 @@ r.Console.log(work.removeAll(5))
 r.Console.log(work)
 work.removeAt(0)
 r.Console.log(work)
-work.clear()
+work.clear()                       // every item gets its default value, the size is kept
+r.Console.log($"{work.len} {work}")
+work.truncate(0)
 r.Console.log($"{work.len} {work}")
 
 // capacity
@@ -78,16 +80,19 @@ for Dog dog in kennel {
 }
 r.Console.log(kennel[1].name)
 
-// the iterator by hand
-var iterator = numbers.getIterator()
-var first = iterator.next()
-var second = iterator.next()
-r.Console.log($"{first.value} {first.isValid} {second.value} {second.isValid}")
-var more = iterator.next()
-more = iterator.next()
-more = iterator.next()
-more = iterator.next()
-r.Console.log(more.isValid)
+// the iterator by hand: it keeps the vec from changing its size until it ends (spec 6.4), here at the end of the function
+fun byHand(vec<i32> source) {
+  var iterator = source.getIterator()
+  var first = iterator.next()
+  var second = iterator.next()
+  r.Console.log($"{first.value} {first.isValid} {second.value} {second.isValid}")
+  var more = iterator.next()
+  more = iterator.next()
+  more = iterator.next()
+  more = iterator.next()
+  r.Console.log(more.isValid)
+}
+byHand(numbers)
 
 // an index outside the vector
 fun i32 outside(vec<i32> source, u64 index) {

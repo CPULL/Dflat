@@ -1,0 +1,9 @@
+alias Root as r
+
+public class Library(string name) {
+  public string name
+  asparent fun open() { }
+  public fun string title() { name }
+}
+
+public class Reader(&Library library as parent, &Library other as parent) { }

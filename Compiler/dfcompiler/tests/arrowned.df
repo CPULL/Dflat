@@ -20,16 +20,16 @@ r.Console.log($"{zeros.len} {filled.len} {pair.len} {listed.len}")
 zeros.fill(5)
 r.Console.log(zeros)
 
-// swap: two positions, or a position and a new item (the old one is given back)
+// swap exchanges two positions; replace puts a new item and gives back the old one
 names.swap(0, 2)
 r.Console.log(names)
-string before = names.swap(1, "zed")
+string before = names.replace(1, "zed")
 r.Console.log($"{before} {names}")
 arr<Dog> kennel = [Dog("rex"), Dog("fido")]
-Dog old = kennel.swap(0, Dog("max"))
+Dog old = kennel.replace(0, Dog("max"))
 r.Console.log($"{old.name} {kennel[0].name}")
 Dog extra = Dog("luna")
-Dog gone = kennel.swap(1, ->extra)
+Dog gone = kennel.replace(1, ->extra)
 r.Console.log($"{gone.name} {kennel[1].name}")
 
 // the items are owned: an existing object moves in with ->, a new one needs no marker, the replaced one ends

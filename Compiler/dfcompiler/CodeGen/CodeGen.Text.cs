@@ -212,8 +212,14 @@ public sealed partial class CodeGen {
     if (IsVec(receiver.Type) && IsClass(VecElem(receiver.Type)) && name is "fillAtCapacity" or "resize" && args.Count > 0 && args[^1].Kind != "Null") {
       throw Error($"{name} puts the same object in many items: a class instance is not allowed, null is", at);
     }
+    if (IsListIterator(receiver.Type) && name.StartsWith("node_") && at.Line >= LibraryLine) {
+      return ListIteratorMember(receiver, name, at);
+    }
     if (IsList(receiver.Type) && ListMember(receiver, name, args, scope, at) is Expr listCall) {
       return listCall;
+    }
+    if (IsVec(receiver.Type) && VecMember(receiver, name, args, scope, at) is Expr vecCall) {
+      return vecCall;
     }
     if (IsVec(receiver.Type) && name == "pop") {
       return VecPop(receiver, args, scope, at);
@@ -317,7 +323,8 @@ public sealed partial class CodeGen {
       source.AppendLine(IoStreamPrelude);
     }
     // vec<T> (spec 6.8) is a generic class written in Dflat, with the collection traits (CodeGen.Vec.cs)
-    if (!userTypes.Contains("vec") && !userTypes.Contains("list") && Mentions(program, node => node.Text is "vec" or "list" or "getIterator" or "IndexIterator" or "IndexCollection" or "Iterator")) {
+    if (!userTypes.Contains("vec") && !userTypes.Contains("list") && Mentions(program, node => node.Text is "vec" or "list" or "View" or "getIterator" or "IndexIterator" or "IndexCollection" or "Iterator"
+          || (node.Kind == "Index" && node.Children.Count > 1 && node.Children[1].Kind == "Range"))) {
       // its lines are numbered from LibraryLine so that no warning of this code is shown (Warn) and the errors can be told apart
       // UNS_NONE is the largest uns of the target ("not found")
       string prelude = VecPrelude.Replace("UNS_NONE", NativeUns == "u32" ? "4294967295" : "18446744073709551615");

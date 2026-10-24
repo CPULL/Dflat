@@ -1,0 +1,29 @@
+ann reads in the library city 1
+0
+town
+Reader { library: Library{}, who: ann }
+1
+tmp ends
+reader bob ends
+the library is gone
+the library is gone
+reader cy ends
+ed reads in the library hall
+hall ends
+reader di ends
+the library is gone
+reader ed ends
+the library is gone
+plain ends
+reader fay ends
+the library is gone
+shelf ends
+reader gus ends
+the library is gone
+stack ends
+reader hal ends
+the library is gone
+end
+reader ann ends
+town ends
+---- exit code 0 ----

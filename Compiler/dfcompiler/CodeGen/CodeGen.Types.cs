@@ -313,6 +313,9 @@ public sealed partial class CodeGen {
         return n.Text!;   // a type parameter replaced by its type argument (generics)
       case "Type": {
         string t = StripLibraryQualifier(n.Text!);
+        if (t == "View" && vecPrelude) {
+          return ViewTypeOf(n);   // View<vec<i32>>: the view class of that collection (spec 6.5)
+        }
         if (t == "T" && n.Children.Count == 0 && currentGenericT != null) {
           return currentGenericT;   // inside a copy of equals(T other)
         }
@@ -607,6 +610,9 @@ public sealed partial class CodeGen {
     }
     if (IsList(e.Type)) {
       return $"{ListStrFunction(e.Type, at)}({e.Code})";
+    }
+    if (IsView(e.Type)) {
+      return $"{ViewStrFunction(e.Type, at)}({e.Code})";   // the items of the view, as [a, b]
     }
     if (IsClass(e.Type)) {
       return $"df_str_obj({e.Code})";

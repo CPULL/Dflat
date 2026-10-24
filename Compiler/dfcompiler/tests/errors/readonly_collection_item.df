@@ -1,0 +1,5 @@
+alias Root as r
+
+fun fill(&list<i32> values) {
+  values[0] = 3
+}

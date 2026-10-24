@@ -85,7 +85,7 @@ public sealed partial class CodeGen {
     sb.Append($"({{ {CType(type)} {array} = {{ ({CType(elem)}*)df_calloc({list.Children.Count}, sizeof({CType(elem)})), {list.Children.Count} }}; ");
     for (int index = 0; index < list.Children.Count; index++) {
       var item = list.Children[index];
-      var itemValue = ExprOf(item, scope, elem);
+      var itemValue = Adopted(ExprOf(item, scope, elem), item);
       if (IsClass(elem) && !itemValue.Fresh && itemValue.Type != "null") {
         throw Error("a collection owns its items: put a new object in the literal, or move one in with ->x", item);
       }
@@ -139,7 +139,13 @@ public sealed partial class CodeGen {
     if (n.Children[0].Kind == "GenericRef") {
       return ArrayNew(n.Children[0], n.Children[1], scope);
     }
+    if (n.Children[1].Kind == "Range") {
+      return ViewExpr(n, scope);
+    }
     var obj = ExprOf(n.Children[0], scope);
+    if (IsView(obj.Type)) {
+      return ObjectCall(obj, "read_pos", new List<Node> { n.Children[1] }, scope, n) ?? throw Error("no read_pos", n);
+    }
     var index = ExprOf(n.Children[1], scope, "u64");
     if (obj.Type == "string") {
       string call = $"df_str_char_at({obj.Code}, {IndexValue(index, n)}, {fn!.NameConst})";
@@ -163,9 +169,15 @@ public sealed partial class CodeGen {
   // a[i] = v, a[i] += v ...
   string IndexAssign(Node s, Scope scope) {
     var target = s.Children[0];
+    if (ReadOnlyVariable(target.Children[0], scope) is not null) {
+      throw Error($"'{target.Children[0].Text}' is a read-only reference (&): its items cannot be assigned", s);
+    }
     var obj = ExprOf(target.Children[0], scope);
     if (obj.Type == "string") {
       throw Error("writing a character by index is not decided yet (spec 4)", s);
+    }
+    if (IsView(obj.Type)) {
+      throw Error("a view is read-only: its items cannot be assigned (spec 6.5)", s);
     }
     if (IsList(obj.Type) && target.Children[0].Kind != "GenericRef") {
       return ListIndexAssign(s, scope, obj, target);
@@ -181,7 +193,6 @@ public sealed partial class CodeGen {
     string slot = isVec ? $"{array}->{VecField(obj.Type, "items")}.p[{position}]" : $"{array}.p[{position}]";
     string length = isVec ? $"{array}->{VecField(obj.Type, "count")}" : $"{array}.len";
     string holder = isVec ? NullChecked(obj.Code, obj.Type) : obj.Code;
-    string bump = isVec ? $"{array}->{VecField(obj.Type, "version")} += 1; " : "";   // a vec counts its changes (6.4)
     string op = s.Text!;
     if (op == "_=") {
       throw NotSupported("Ownership", s);
@@ -191,7 +202,7 @@ public sealed partial class CodeGen {
     }
     string value;
     if (op == "=") {
-      var assigned = ExprOf(s.Children[1], scope, elem);
+      var assigned = Adopted(ExprOf(s.Children[1], scope, elem), s);
       if (IsClass(elem) && !assigned.Fresh && assigned.Type != "null" && s.Line < LibraryLine) {
         throw Error("a collection owns its items: move an existing object in with ->x, or put a new one", s);
       }
@@ -204,11 +215,11 @@ public sealed partial class CodeGen {
       string replaced = NewTemp();
       string incoming = NewTemp();
       return $"({{ {CType(obj.Type)} {array} = {holder}; df_uns {position} = {IndexValue(index, target)}; {CType(elem)} {incoming} = {value}; "
-        + $"if (!df_idx_ok({length}, {position}, {fn!.NameConst})) {RaiseJump} {CType(elem)} {replaced} = {slot}; {slot} = {incoming}; {bump}"
+        + $"if (!df_idx_ok({length}, {position}, {fn!.NameConst})) {RaiseJump} {CType(elem)} {replaced} = {slot}; {slot} = {incoming}; "
         + $"if ({replaced} != {incoming}) {{ df_drop((void*){replaced}); }} }})";
     }
     return $"({{ {CType(obj.Type)} {array} = {holder}; df_uns {position} = {IndexValue(index, target)}; "
-      + $"if (!df_idx_ok({length}, {position}, {fn!.NameConst})) {RaiseJump} {slot} = {value}; {bump}}})";
+      + $"if (!df_idx_ok({length}, {position}, {fn!.NameConst})) {RaiseJump} {slot} = {value}; }})";
   }
 
   // members of an array
@@ -259,8 +270,13 @@ public sealed partial class CodeGen {
       case "clear": {
         Arity(0);
         string i = NewTemp();
+        string gone = NewTemp();
+        // every item gets its default value; the objects the items held end (spec 6.1)
+        string reset = IsClass(elem)
+          ? $"if ({{0}} != NULL) {{{{ void* {gone} = (void*){{0}}; {{0}} = NULL; df_drop({gone}); }}}}"
+          : $"{{0}} = {ZeroValue(elem)};";
         string code = WithTemp(array, a =>
-          $"({{ for (df_uns {i} = 0; {i} < {a}.len; {i}++) {{ {Elem(a, i)} = {ZeroValue(elem)}; }} }})");
+          $"({{ for (df_uns {i} = 0; {i} < {a}.len; {i}++) {{ {string.Format(reset, Elem(a, i))} }} }})");
         return new Expr(code, "void");
       }
       case "reverse": {
@@ -280,17 +296,7 @@ public sealed partial class CodeGen {
         if (compare == null) {
           throw Error($"{name} cannot order {elem} yet (objects and tuples need a comparer)", at);
         }
-        string descending = "false";
-        if (args.Count == 1) {
-          if (args[0].Kind is "Lambda" or "Fun" or "Closure") {
-            throw NotSupported("Lambdas", args[0]);
-          }
-          var direction = ExprOf(args[0], scope);
-          if (direction.Type != "SortDirection") {
-            throw Error($"{name} takes SortDirection.ASC or SortDirection.DESC, not {direction.Type}", args[0]);
-          }
-          descending = $"(({direction.Code}) == {enums["SortDirection"].Find("DESC")})";
-        }
+        string descending = SortDescending(name, args, scope, at);
         NeedChunk("sort");
         string code = WithTemp(array, a =>
           $"df_sort({a}.p, {a}.len, sizeof(*{a}.p), {compare}, {(name == "sort" ? "true" : "false")}, {descending})");
@@ -303,41 +309,75 @@ public sealed partial class CodeGen {
         return ArrayIterator(array, at);
       case "swap":
         return ArraySwap(array, args, scope, at);
+      case "replace":
+        return ArrayReplace(array, args, scope, at);
       default:
         return null;
     }
   }
 
-  // sequence.swap(i, j) exchanges two items; Item old = sequence.swap(position, new) replaces one and gives the old (spec 6.6).
-  // With two integer arguments the call is the exchange: for an array of integers the replacement is written with a variable of the item type
+  // the C of the direction of sort(SortDirection.DESC): true when descending; sort() is ascending
+  string SortDescending(string name, List<Node> args, Scope scope, Node at) {
+    if (args.Count > 1) {
+      throw Error($"{name} takes no argument or a SortDirection", at);
+    }
+    if (args.Count == 0) {
+      return "false";
+    }
+    if (args[0].Kind is "Lambda" or "Fun" or "Closure") {
+      throw NotSupported("Lambdas", args[0]);
+    }
+    var direction = ExprOf(args[0], scope);
+    if (direction.Type != "SortDirection") {
+      throw Error($"{name} takes SortDirection.ASC or SortDirection.DESC, not {direction.Type}", args[0]);
+    }
+    return $"(({direction.Code}) == {enums["SortDirection"].Find("DESC")})";
+  }
+
+  // sequence.swap(i, j) exchanges two items, with no change of ownership (spec 6.6); a new item goes in with replace(position, value)
   Expr ArraySwap(Expr array, List<Node> args, Scope scope, Node at) {
+    CheckSwapArguments(args, scope, at);
+    string elem = ArrElem(array.Type);
+    var first = ExprOf(args[0], scope, "u64");
+    var other = ExprOf(args[1], scope, "u64");
+    string a = NewTemp();
+    string i = NewTemp();
+    string j = NewTemp();
+    string swapped = NewTemp();
+    string code = $"({{ {CType(array.Type)} {a} = {array.Code}; df_uns {i} = {IndexValue(first, args[0])}; df_uns {j} = {IndexValue(other, args[1])}; "
+      + $"if (!df_idx_ok({a}.len, {i}, {fn!.NameConst})) {RaiseJump} if (!df_idx_ok({a}.len, {j}, {fn!.NameConst})) {RaiseJump} "
+      + $"{CType(elem)} {swapped} = {a}.p[{i}]; {a}.p[{i}] = {a}.p[{j}]; {a}.p[{j}] = {swapped}; }})";
+    return new Expr(code, "void");
+  }
+
+  // swap takes two positions: there is no swap(position, new) (spec 6.6)
+  void CheckSwapArguments(List<Node> args, Scope scope, Node at) {
     if (args.Count != 2 || args.Any(arg => arg.Kind == "Named")) {
-      throw Error("swap takes two positions, or a position and a new item", at);
+      throw Error("swap takes two positions: swap(i, j)", at);
+    }
+    if (args[1].Kind == "Gift" || !IsInt(ExprOf(args[1], scope).Type)) {
+      throw Error("swap exchanges two items: swap(i, j); to put a new item at a position use replace(position, value)", args[1]);
+    }
+  }
+
+  // Item old = sequence.replace(position, value): the new item goes in, the old one is given back and its ownership moves to the caller (spec 6.6)
+  Expr ArrayReplace(Expr array, List<Node> args, Scope scope, Node at) {
+    if (args.Count != 2 || args.Any(arg => arg.Kind == "Named")) {
+      throw Error("replace takes a position and the new item: replace(position, value)", at);
     }
     string elem = ArrElem(array.Type);
     var first = ExprOf(args[0], scope, "u64");
-    var second = ExprOf(args[1], scope);
-    bool exchange = !IsClass(elem) && args[1].Kind != "Gift" && IsInt(second.Type) && (IsInt(elem) || !Assignable(elem, second.Type));
-    string a = NewTemp();
-    string i = NewTemp();
-    if (exchange) {
-      var other = ExprOf(args[1], scope, "u64");
-      string j = NewTemp();
-      string swapped = NewTemp();
-      string code = $"({{ {CType(array.Type)} {a} = {array.Code}; df_uns {i} = {IndexValue(first, args[0])}; df_uns {j} = {IndexValue(other, args[1])}; "
-        + $"if (!df_idx_ok({a}.len, {i}, {fn!.NameConst})) {RaiseJump} if (!df_idx_ok({a}.len, {j}, {fn!.NameConst})) {RaiseJump} "
-        + $"{CType(elem)} {swapped} = {a}.p[{i}]; {a}.p[{i}] = {a}.p[{j}]; {a}.p[{j}] = {swapped}; }})";
-      return new Expr(code, "void");
-    }
-    var replacement = ExprOf(args[1], scope, elem);
+    var replacement = Adopted(ExprOf(args[1], scope, elem), args[1]);
     if (IsClass(elem) && !replacement.Fresh && replacement.Type != "null") {
       throw Error("a collection owns its items: move an existing object in with ->x, or put a new one", args[1]);
     }
+    string a = NewTemp();
+    string i = NewTemp();
     string incoming = NewTemp();
     string old = NewTemp();
-    string replaced = $"({{ {CType(array.Type)} {a} = {array.Code}; df_uns {i} = {IndexValue(first, args[0])}; {CType(elem)} {incoming} = {Convert(replacement, elem, args[1])}; "
+    string code = $"({{ {CType(array.Type)} {a} = {array.Code}; df_uns {i} = {IndexValue(first, args[0])}; {CType(elem)} {incoming} = {Convert(replacement, elem, args[1])}; "
       + $"if (!df_idx_ok({a}.len, {i}, {fn!.NameConst})) {RaiseJump} {CType(elem)} {old} = {a}.p[{i}]; {a}.p[{i}] = {incoming}; {old}; }})";
-    return new Expr(replaced, elem, IsClass(elem));
+    return new Expr(code, elem, IsClass(elem));
   }
 
   // arr<T>[n] name = [] / = [items] / = arr<T>[n]: the size on the declaration (spec 6.8.1); the declaration is rewritten before the compilation
@@ -477,6 +517,9 @@ public sealed partial class CodeGen {
       throw Error("copyFrom clones object items, which needs cloning (not built yet)", at);
     }
     var source = ExprOf(args[1], scope);
+    if ((IsVec(source.Type) || IsList(source.Type)) && IndexCollectionElem(source.Type) == elem) {
+      return CollectionCopyFrom(destination, args, scope, at);   // from a vec or a list (spec 6.6)
+    }
     if (!IsArr(source.Type) || ArrElem(source.Type) != elem) {
       throw Error($"copyFrom needs an {destination.Type} as the source, not {source.Type}", args[1]);
     }
@@ -550,18 +593,38 @@ public sealed partial class CodeGen {
     throw Error($"shuffle works on arrays and strings, not {value.Type}", at);
   }
 
+  // the for loops over a vec or a list being compiled: the C variable that points to the counter of open iterators, and the collection
+  readonly Dictionary<Node, (string? Counter, Expr Collection)> countedLoops = new();
+
   // for T item in collection { }: arrays by position, strings by character
   void EmitForEach(Node s, StringBuilder sb, Scope scope, int indent) {
     string pad = Pad(indent);
     var varNode = s.Children[0];
     var source = s.Children[1].Children[0];
     var block = s.Children.Last();
-    var collection = ExprOf(source, scope);
+    var collection = countedLoops.TryGetValue(s, out var counted) ? counted.Collection : ExprOf(source, scope);
     string elem;
     bool overList = IsList(collection.Type);
-    bool overVec = IsVec(collection.Type) || overList;   // the list is walked through its links: its own loop below
-    string? customElem = overVec ? null : CustomCollectionElem(collection.Type);
-    if (overList) {
+    bool overView = IsView(collection.Type);
+    bool overVec = IsVec(collection.Type) || overList;   // the list is walked through its nodes: its own loop below
+    if (overVec && counted.Counter == null) {
+      // the loop holds the counter of open iterators of the collection (spec 6.4): it is wrapped in a block whose atEnd gives it back on every
+      // way out (the end, break, return, an exception)
+      tempCounter++;
+      string counter = $"df_open{tempCounter}";
+      countedLoops[s] = (counter, collection);
+      var release = Synthetic("RawC", s, $"if ({counter}) {{ *{counter} -= 1; }}");
+      var wrapper = Synthetic("Block", s).Add(s).Add(Synthetic("AtEnd", s, "drop").Add(Synthetic("Block", s).Add(release)));
+      sb.Append($"{pad}{{\n{pad}  df_uns* {counter} = NULL;\n");
+      EmitBlock(wrapper, sb, scope, indent + 1);
+      sb.Append($"{pad}}}\n");
+      countedLoops.Remove(s);
+      return;
+    }
+    string? customElem = overVec || overView ? null : CustomCollectionElem(collection.Type);
+    if (overView) {
+      elem = ViewElem(collection.Type);
+    } else if (overList) {
       elem = ListElem(collection.Type);
     } else if (overVec) {
       elem = VecElem(collection.Type);
@@ -601,18 +664,9 @@ public sealed partial class CodeGen {
     if (cleanup) {
       EmitHoists(body, sb, innerPad);
     }
-    sb.Append($"{innerPad}{wholeType} {whole} = {(overVec ? NullChecked(collection.Code, collection.Type) : collection.Code)};\n");
-    string versionAtStart = $"df_ver{tempCounter}";
-    string versionCheck = "";
+    sb.Append($"{innerPad}{wholeType} {whole} = {(overVec || overView ? NullChecked(collection.Code, collection.Type) : collection.Code)};\n");
     if (overVec) {
-      // a vec changed while it is iterated raises ModifyingIteratedCollectionException (spec 6.4); a change is counted in its version
-      string? savedOverride = handlerOverride;
-      if (cleanup) {
-        handlerOverride = body.LoopExcLabel;
-      }
-      versionCheck = $"if ({whole}->{VecField(collection.Type, "version")} != {versionAtStart}) {{ df_raise(&df_desc_ModifyingIteratedCollectionException, {fn!.NameConst}); {RaiseJump} }} ";
-      handlerOverride = savedOverride;
-      sb.Append($"{innerPad}uint64_t {versionAtStart} = {whole}->{VecField(collection.Type, "version")};\n");
+      sb.Append($"{innerPad}{counted.Counter} = &{whole}->{VecField(collection.Type, "iterators")};\n{innerPad}*{counted.Counter} += 1;\n");
     }
     string iteration = "";
     if (customElem != null) {
@@ -634,9 +688,11 @@ public sealed partial class CodeGen {
     } else if (customElem != null) {
       loop = "for (;;)";
       itemCode = iteration;
+    } else if (overView) {
+      (loop, itemCode) = ViewLoop(collection.Type, whole, position, sb, innerPad);
     } else if (overList) {
-      loop = $"for (uint64_t {position} = {whole}->{VecField(collection.Type, "first")}; {position} != {ListEnd}; {position} = {whole}->{VecField(collection.Type, "links")}.p[{position}])";
-      itemCode = $"{whole}->{VecField(collection.Type, "items")}.p[{position}]";
+      loop = $"for ({ListNode(collection.Type)}* {position} = {whole}->{VecField(collection.Type, "first")}; {position} != NULL; {position} = {position}->next)";
+      itemCode = $"{position}->value";
     } else if (overVec) {
       loop = $"for (df_uns {position} = 0; {position} < {whole}->{VecField(collection.Type, "count")}; {position}++)";
       itemCode = $"{whole}->{VecField(collection.Type, "items")}.p[{position}]";
@@ -647,9 +703,6 @@ public sealed partial class CodeGen {
     sb.Append($"{innerPad}{loop} {{\n");
     if (cleanup) {
       sb.Append($"{innerPad}  {body.RanFlag} = true;\n");
-    }
-    if (versionCheck.Length > 0) {
-      sb.Append($"{innerPad}  {versionCheck}\n");
     }
     sb.Append($"{innerPad}  {CType(type)} {cname} = {Convert(new Expr(itemCode, elem), type, s)};\n");
     var before = assign.Clone();

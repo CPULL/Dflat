@@ -1,0 +1,1 @@
+parent_not_reference.df(9): error: 'as parent' goes on a reference parameter: &Library library as parent

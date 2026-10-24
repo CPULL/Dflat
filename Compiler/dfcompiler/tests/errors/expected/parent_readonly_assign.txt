@@ -1,0 +1,1 @@
+parent_readonly_assign.df(10): error: 'library' is a read-only reference (&): its fields cannot be assigned

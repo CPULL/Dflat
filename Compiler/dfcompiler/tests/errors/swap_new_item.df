@@ -1,0 +1,4 @@
+alias Root as r
+
+arr<string> names = ["a", "b"]
+string old = names.swap(1, "c")

@@ -114,6 +114,8 @@ static const df_descriptor df_desc_GenericIOErrorException = { 43, "GenericIOErr
 static const df_descriptor df_desc_FileRemovedWhileOpenException = { 44, "FileRemovedWhileOpenException", &df_desc_Exception, false };
 static const df_descriptor df_desc_StreamCloseFailureException = { 45, "StreamCloseFailureException", &df_desc_Exception, false };
 static const df_descriptor df_desc_ModifyingIteratedCollectionException = { 46, "ModifyingIteratedCollectionException", &df_desc_Exception, false };
+static const df_descriptor df_desc_InvalidIteratorReleaseException = { 47, "InvalidIteratorReleaseException", &df_desc_Exception, false };
+static const df_descriptor df_desc_UsageOfDestroyedObjectException = { 48, "UsageOfDestroyedObjectException", &df_desc_Exception, false };
 
 /* The exception of a function is a local of that function (df_err in the generated code) and travels back to the caller as the second
    value it returns. The runtime functions written in C cannot return it that way: they leave it here, and the code generated around
@@ -322,6 +324,63 @@ static void df_drop(void* obj) {
   if (c != NULL && c->drop != NULL) {
     c->drop(obj);
   }
+}
+
+/* the adopted children of a parent object (spec 12.5): a child moved with -> is registered with its parent, which nulls the child's reference to it
+   when it ends. Each entry holds the address of the parent reference of the child and of its slot (the position + 1, 0 = not registered); a child
+   that ends first takes itself out (the last entry moves into its place) */
+typedef struct df_kid { void** parentRef; df_uns* slotRef; } df_kid;
+typedef struct df_kids { df_kid* items; df_uns len; df_uns cap; } df_kids;
+
+static void df_kids_add(df_kids** owner, void** parentRef, df_uns* slotRef) {
+  df_kids* kids = *owner;
+  if (kids == NULL) {
+    kids = (df_kids*)df_alloc(sizeof(df_kids));
+    kids->items = NULL;
+    kids->len = 0;
+    kids->cap = 0;
+    *owner = kids;
+  }
+  if (kids->len == kids->cap) {
+    df_uns cap = kids->cap < 4 ? 4 : kids->cap * 2;
+    df_kid* bigger = (df_kid*)df_alloc(cap * sizeof(df_kid));
+    if (kids->len > 0) {
+      memcpy(bigger, kids->items, kids->len * sizeof(df_kid));
+    }
+    free(kids->items);
+    kids->items = bigger;
+    kids->cap = cap;
+  }
+  kids->items[kids->len].parentRef = parentRef;
+  kids->items[kids->len].slotRef = slotRef;
+  kids->len++;
+  *slotRef = kids->len;
+}
+
+static void df_kids_remove(df_kids* kids, df_uns slot) {
+  if (kids == NULL || slot == 0 || slot > kids->len) {
+    return;
+  }
+  df_uns index = slot - 1;
+  kids->len--;
+  if (index != kids->len) {
+    kids->items[index] = kids->items[kids->len];
+    *kids->items[index].slotRef = index + 1;
+  }
+}
+
+/* the parent ends: its adopted children lose their reference to it */
+static void df_kids_release(df_kids** owner) {
+  df_kids* kids = *owner;
+  if (kids == NULL) {
+    return;
+  }
+  for (df_uns i = 0; i < kids->len; i++) {
+    *kids->items[i].parentRef = NULL;
+  }
+  free(kids->items);
+  free(kids);
+  *owner = NULL;
 }
 
 /* the owner of an exception record is done with it (a catch ended, a silent exception was ignored): its buffers and the record are freed */

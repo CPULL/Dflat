@@ -25,11 +25,13 @@ r.Console.log($"{taken.name} {kennel.len} {kennel[0].name}")
 
 kennel.removeAt(0)                 // max ends
 r.Console.log($"{kennel.len} {kennel[0].name}")
-Dog old = kennel.swap(0, Dog("zed"))
+Dog old = kennel.replace(0, Dog("zed"))
 r.Console.log($"{old.name} {kennel[0].name}")
 kennel.fill(null)
 r.Console.log(kennel[0] == null)
-kennel.clear()
+kennel.clear()                     // the items become null (spec 6.6): the size is kept
+r.Console.log(kennel.len)
+kennel.truncate(0)
 r.Console.log(kennel.len)
 
 // a long list: the items end in a loop, not by recursion

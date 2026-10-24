@@ -1,0 +1,1 @@
+parent_on_function.df(9): error: 'as parent' goes on a parameter in the header of a class (spec 12.5)

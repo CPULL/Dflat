@@ -1,0 +1,17 @@
+1 locked
+2 true
+added
+locked
+added 5
+a;b;c;
+[a, b, c, d]
+the vec is gone
+[20, 30] [10, 20] [40, 50] [20, 30, 40] 2 30 true 1
+90 locked
+[21, 30]
+added
+outside
+[2, 3] 5 2 1 locked
+added
+[y, z] 2 true
+---- exit code 0 ----

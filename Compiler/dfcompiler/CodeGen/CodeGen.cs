@@ -47,6 +47,8 @@ sealed class FunSig {
   // a silent exception (spec 15.7.6): there it is seen only by a catch of the same function and otherwise does nothing
   public bool CanEmitSilent => !IsCtor && !IsInit && !IsStaticInit && !IsDtor && !IsAbstract && GenericT == null && !Name.EndsWith(".==") && Name != "main";
   public bool IsAbstract { get; set; }   // a trait function without a body
+  public bool IsAsParent { get; set; }   // asparent: called only by the children of the object, through their parent reference (spec 12.5)
+  public bool IsUnrestricted { get; set; }   // unrestricted: public, and also callable through a read-only reference (spec 12.5)
   public int TSlot { get; set; } = -1;   // position among the functions of its trait
   public string? GenericT { get; set; } // a copy of equals(T other) made for this T
   public FunSig Root { get; set; }
@@ -82,6 +84,7 @@ sealed class VarInfo {
   public bool IsConst { get; }
   public bool Own { get; set; }       // the variable owns its object: it is destroyed when the scope ends
   public bool IsWeak { get; set; }    // a weak reference: used only through enforce
+  public bool ReadOnlyRef { get; set; }   // &Item o: a read-only reference to an object or a collection (spec 1.6.2)
   public long? KnownLength { get; set; }   // an array that starts from a literal or arr<T>[n] and is never assigned again: its length is known
 }
 
@@ -263,6 +266,10 @@ public sealed partial class CodeGen {
     output.Append(OptionalRuntime());
     output.Append("/* ---- program ---- */\n\n");
     output.Append(typeDefs);
+    output.Append(listNodeTypes);
+    foreach (var cls in classOrder.Where(cls => cls.ParentField != null)) {
+      output.Append($"#define DF_ADOPTED_{cls.Name} {(adoptedClasses.Contains(cls.Name) ? 1 : 0)}\n");
+    }
     output.Append(ObservedBitTable());
     output.Append(functionNames).Append('\n');
     output.Append(enumCode);
@@ -360,6 +367,9 @@ public sealed partial class CodeGen {
       if (p.Children.Any(child => child.Kind == "Volatile")) {
         throw NotSupported("Pointers", p);
       }
+      if (p.Children.Any(child => child.Kind == "AsParent")) {
+        throw Error("'as parent' goes on a parameter in the header of a class (spec 12.5)", p);
+      }
       if (ps.Any(existing => existing.Name == p.Text)) {
         throw Error($"duplicate parameter '{p.Text}'", p);
       }
@@ -423,8 +433,8 @@ public sealed partial class CodeGen {
     foreach (var p in f.Params) {
       // a reference parameter is a pointer in C; the body reads and writes through it, a read-only one cannot be assigned
       scope.Vars[p.Name] = IsByPointer(p)
-        ? new VarInfo(p.Type, $"(*{ParamName(p)})", p.Ref == 1)
-        : new VarInfo(p.Type, "v_" + p.Name, false) { Own = p.IsGift };
+        ? new VarInfo(p.Type, $"(*{ParamName(p)})", p.Ref == 1) { ReadOnlyRef = p.Ref == 1 && IsArr(p.Type) }
+        : new VarInfo(p.Type, "v_" + p.Name, false) { Own = p.IsGift, ReadOnlyRef = p.Ref == 1 && IsClass(p.Type) };
     }
     var block = f.Node.Children.First(c => c.Kind == "Block");
     // the atEnd after the function body is its final cleanup; a parameter taken with -> ends with the function
@@ -507,6 +517,10 @@ public sealed partial class CodeGen {
 
       case "Decl":
         EmitDecl(s, sb, scope, pad);
+        return;
+
+      case "RawC":
+        sb.Append(pad).Append(s.Text).Append('\n');   // C made by the compiler (the release of a loop's counter, EmitForEach)
         return;
 
       case "Assign":
@@ -940,6 +954,10 @@ public sealed partial class CodeGen {
       var variable = scope.Find(target.Text!);
       if (variable == null && currentClass != null && FindField(currentClass, target.Text!) is FieldInfo ownField) {
         var bare = BareField(target.Text!, scope, target)!.Value;
+        if (ownField.IsParentRef) {
+          // the reference to the parent: set once, by the constructor
+          return initializing ? new LValueInfo(bare.Code, bare.Type, false) : throw Error($"'{target.Text}' is the reference to the parent: only the constructor sets it", target);
+        }
         return new LValueInfo(bare.Code, bare.Type, ownField.IsConst && !initializing, null, !ownField.IsStatic);
       }
       if (variable == null) {
@@ -1634,6 +1652,9 @@ public sealed partial class CodeGen {
     var callee = n.Children[0];
     var args = n.Children[1].Children;
     if (callee.Kind == "GenericRef") {
+      if (callee.Children[0] is { Kind: "Member", Text: "transformTo" } transform) {
+        return TransformTo(transform.Children[0], callee.Children.Skip(1).ToList(), args, scope, n);
+      }
       if (callee.Children[0] is not { Kind: "Name" } genericName) {
         throw NotSupported("Generics", callee);
       }
@@ -1670,6 +1691,7 @@ public sealed partial class CodeGen {
     // a function of a value: "text".Trim(), c.IsDigit(), d.addDays(1), numbers.has(3)
     if (callee.Kind == "Member" && IsValueReceiver(callee.Children[0], scope)) {
       var receiver = ExprOf(callee.Children[0], scope);
+      CheckReadOnlyCall(callee.Children[0], receiver, callee.Text!, scope, n);
       return TryReceiverCall(receiver, callee.Text!, args, scope, n)
         ?? throw Error($"{receiver.Type} has no function '{callee.Text}'", n);
     }
@@ -1756,6 +1778,9 @@ public sealed partial class CodeGen {
     if (obj.Type == "Exception") {
       return ExceptionMember(obj, n.Text!, n);
     }
+    if ((IsVec(obj.Type) || IsList(obj.Type)) && n.Text == "sizeof") {
+      return CollectionSizeof(obj);
+    }
     if (IsClass(obj.Type)) {
       // a read-only property of a library class: x.size calls its get_size()
       var owner = ObjInfo(obj.Type);
@@ -1779,6 +1804,9 @@ public sealed partial class CodeGen {
     }
     if (obj.Type == "string" && n.Text == "sizeof") {
       return new Expr($"(({obj.Code}).len)", "u64");
+    }
+    if (IsArr(obj.Type) && n.Text == "sizeof") {
+      return CollectionSizeof(obj);
     }
     throw Error($"member '{n.Text}' of {obj.Type} is not supported yet", n);
   }

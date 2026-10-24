@@ -1,0 +1,1 @@
+parent_readonly_call.df(10): error: 'library' is a read-only reference (&): 'title' needs an owned or writable reference (mark it unrestricted, or declare (&)library)

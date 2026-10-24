@@ -1,0 +1,4 @@
+alias Root as r
+
+string text = "abc"
+var part = text[0..2]

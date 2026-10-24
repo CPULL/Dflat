@@ -115,5 +115,40 @@ static void df_sort(void* items, df_uns n, df_uns size, df_cmp_fn cmp, bool stab
   }
 }
 
+/* sort and sortUnstable of a list: a bottom-up merge sort that relinks the nodes, with no temporary array (only the links move). Every node
+   starts with the pointer to the next one; the item is at valueOffset. Equal items keep their order. Returns the new first node and sets the last */
+typedef struct df_lnode { struct df_lnode* next; } df_lnode;
+
+static df_lnode* df_list_sort(df_lnode* head, df_uns n, size_t valueOffset, df_cmp_fn cmp, bool desc, df_lnode** last) {
+  for (df_uns width = 1; width < n; width *= 2) {
+    df_lnode* rest = head;
+    df_lnode* sorted = NULL;
+    df_lnode* tail = NULL;
+    while (rest != NULL) {
+      df_lnode* left = rest;
+      df_uns leftLen = 0;
+      while (rest != NULL && leftLen < width) { rest = rest->next; leftLen++; }
+      df_lnode* right = rest;
+      df_uns rightLen = 0;
+      while (rest != NULL && rightLen < width) { rest = rest->next; rightLen++; }
+      while (leftLen > 0 || rightLen > 0) {
+        df_lnode* take;
+        /* the right node goes first only when its item is strictly before the left one */
+        if (leftLen == 0 || (rightLen > 0 && df_sort_order(cmp, desc, (char*)right + valueOffset, (char*)left + valueOffset) < 0)) {
+          take = right; right = right->next; rightLen--;
+        } else {
+          take = left; left = left->next; leftLen--;
+        }
+        if (tail == NULL) { sorted = take; } else { tail->next = take; }
+        tail = take;
+      }
+    }
+    tail->next = NULL;
+    head = sorted;
+    *last = tail;
+  }
+  return head;
+}
+
 """;
 }

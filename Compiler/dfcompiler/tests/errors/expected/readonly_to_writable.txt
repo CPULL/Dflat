@@ -1,0 +1,1 @@
+readonly_to_writable.df(10): error: 'counter' is a read-only reference (&): it cannot be passed as (&)

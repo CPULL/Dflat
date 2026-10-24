@@ -296,7 +296,7 @@ COMPILERSTATE: not built (`vec` has `add(->T)` only).
 
 Decision:
 - Items of basic types are copied.
-- Objects are moved with `v.add(->other)`, and the other collection is left empty. A plain `v.add(other)` with objects is a compile error until cloning exists.
+- Objects are moved with `v.add(->other)`, and the other collection is left empty. A plain `v.add(other)` with objects clones the items with the rules of point 35 (Specs12.6) and leaves `other` unchanged (2026/10/24).
 - The same collection as source and target raises `ModifyingProtectedSourceException`.
 
 ### 25. [DECIDED] copyFrom and transformTo
@@ -406,12 +406,22 @@ Decision:
 
 COMPILERSTATE: not built (no View type exists; [a..b]! also waits for .clone()).
 
-### 35. [TOBEDISCUSSED] Cloning: .clone() and c!
+### 35. [DECIDED] Cloning: .clone() and c!
 
 Context: Specs12 (table): `a!` is a copy and `.clone()` is a method: owned parts duplicated, counted parts get one more owner, other references become weak; overridable. Collections of objects need it for `copyFrom`, `add(collection)` and `c!`.
 COMPILERSTATE: not built for objects or collections (ownership step 4c in the notes); `fill` of an object is a compile error because it would need a clone.
 Question: the exact rules for `.clone()` of a class (deep or shallow for owned fields), what is a weak reference after a clone, how a class overrides it, and the clone of a collection (`vec<Dog>` clones every item).
 COMPILERPROPOSAL: build a default clone for classes (fields owned: cloned; weak or borrowed: copied as weak) and for collections, then use it in point 25 and point 24.
+
+Decision (2026/10/24, written in Specs12.6):
+- `a!` is a shortcut for `.clone()`. Classes are clonable by default; `clone()` can be overridden and an override can do anything.
+- Default clone, by kind of field: native (strings and structs included) duplicated; owned deep cloned; owned child null (a child is never duplicated, a new one comes from its parent); reference counted another reference (one more owner); borrowed null; weak another reference.
+- Anything that cannot be duplicated, for any reason, becomes null (an owned field of a not clonable class included).
+- A weak reference into the object's own parts is remapped to the copy (a table from originals to copies, only during the clone and only for classes with weak fields).
+- A clone has none of the children of the original: cloning a list with two iterators gives a copy of the items and no iterators.
+- Not clonable, compile error on `clone()` and `a!`: a class marked `notclonable` (`public notclonable class File`), an object that has a parent, an `unsafe` class, a class with pointer fields (no opt-in).
+- `T cloned = x.tryClone()` returns the clone or raises the non-silent `ObjectNotClonableException` (the result is null). Through a trait type (class not known at compile time) `clone()` is a compile error and `tryClone()` must be used.
+- Later: lifetime checks of borrows.
 
 ### 36. [TOBEDISCUSSED, COMPILERSTATE] sort(lambda) and lambdas
 
@@ -420,12 +430,18 @@ COMPILERSTATE: lambdas and function types are not built, so `sort(lambda)` and e
 Question: the order of the lambda work against the collections work.
 COMPILERPROPOSAL: lambdas before `sort(lambda)`; the default comparer for objects with point 14.
 
-### 37. [TOBEDISCUSSED] Conversion of collections of related types
+### 37. [DECIDED] Conversion of collections of related types
 
 Context: Specs11.3.10 converts `Box<Dog>` to `Box<Animal>` automatically (the box moves); Specs99 leaves open the conversion of borrowed generic values and of collections (`vec<Dog>` to `vec<Animal>`).
 COMPILERSTATE: not built for any generic class.
 Question: can an owned `vec<Dog>` become a `vec<Animal>` (the vector moves, the items keep their class)? A borrowed one (read-only)?
 COMPILERPROPOSAL: only the moving form, as for boxes.
+
+Decision (2026/10/24, written in Specs11.3.10):
+- An owned `vec<Dog>` moves into a `vec<Animal>`; the items keep their class.
+- A read-only borrow (`&vec<Animal>`) of a `vec<Dog>` is allowed: through it the items are only read.
+- A writable borrow (`(&)vec<Animal>`) is a compile error: it could put a `Cat` into the `vec<Dog>`.
+- Related (Specs11.3.7): the type switch works on objects at run time, `obj is ? { Dog x: x.woof(), Cat x: x.meow(), Animal: ... }`; `x` is a borrow; a case after a parent that already matches is a level 2 warning.
 
 ## PART F - map (bmap): the sorted map
 
@@ -616,11 +632,7 @@ Context: Specs6.9 and Specs99: lists of pointers and references wait for the poi
 
 Context: Specs99: functional members (`filter`, `map`, `reduce`) and extras such as queue and stack. They need lambdas (point 36).
 
-### 70. [TOBEDISCUSSED] The default integer type
-
-Context: Specs1.3 and Specs6.3: unsuffixed integers and `vec values = [1, 2, 3]` take the native size (`vec<native integer>`), 64 bits on x64.
-COMPILERSTATE: the compiler still types unsuffixed integer literals as `i32`, so `[1, 2, 3]` is a vec of `i32` and not of the native size; `uns` follows the cpu.
-Question: when does the compiler switch to the native size? It changes the type of every literal collection.
+### 70. REMOVED
 
 ## PART K - Memory and implementation
 

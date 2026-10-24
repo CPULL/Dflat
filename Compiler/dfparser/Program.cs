@@ -29,9 +29,9 @@ public static class Program {
 
     string src = File.ReadAllText(path);
     try {
-      // the preprocessor of spec 19.1, with the defaults of this machine (dfcompiler gives it the variables of its options)
-      string host = OperatingSystem.IsWindows() ? "win-x64" : OperatingSystem.IsMacOS() ? "osx-x64" : "linux-x64";
-      var preprocessor = new Preprocessor(PpVariables.Build(host, "debug", 2, "speed", "0.0.12"));
+      // the preprocessor of spec 19.1, with an x64 machine of this system (dfcompiler gives it the variables of its options)
+      string os = OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "osx" : "linux";
+      var preprocessor = new Preprocessor(PpVariables.Build(os, "x64", 64, "debug", 2, "speed", "0.0.12"));
       src = preprocessor.Process(src);
       var lexer = new Lexer(src);
       var tokens = lexer.Tokenize();

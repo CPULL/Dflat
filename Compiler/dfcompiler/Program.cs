@@ -4,24 +4,30 @@ using dfparser;
 namespace dfcompiler;
 
 public static class Program {
-  public const string Version = "0.0.20alpha";
+  public const string Version = "0.0.21alpha";
 
   // the version of the specification this compiler was built for: the variable `version` of the preprocessor (spec 19.1)
   public const string LanguageVersion = "0.0.14";
 
-  // the targets of --target and the clang triple of each (a target equal to this machine passes none: clang's own default)
-  static readonly Dictionary<string, string> Targets = new() {
-    ["win-x64"] = "x86_64-pc-windows-msvc",
-    ["win-x32"] = "i686-pc-windows-msvc",
-    ["linux-x64"] = "x86_64-unknown-linux-gnu",
-    ["linux-arm64"] = "aarch64-unknown-linux-gnu",
-    ["osx-x64"] = "x86_64-apple-darwin",
-    ["osx-arm64"] = "arm64-apple-darwin"
+  // the os and cpu pairs the compiler builds for, and the clang triple of each (a target equal to this machine passes none: clang's own default)
+  static readonly Dictionary<string, string> Triples = new() {
+    ["windows_x64"] = "x86_64-pc-windows-msvc",
+    ["windows_x86"] = "i686-pc-windows-msvc",
+    ["linux_x64"] = "x86_64-unknown-linux-gnu",
+    ["linux_arm64"] = "aarch64-unknown-linux-gnu",
+    ["osx_x64"] = "x86_64-apple-darwin",
+    ["osx_arm64"] = "arm64-apple-darwin"
   };
 
-  const string Usage = "usage: dfcompiler <file.df | project.dsprj | folder> [--output <file>] [--target <target>] [--emit-c] [--cc <path-to-clang>] "
-    + "[--coptlev <0-3>] [--coptmode <size|speed>] [--debug | --release] [--run [-- program arguments]] | --version\n"
+  // the native sizes of int and uns that --native-int accepts (Compiler_Options.md), and the ones the compiler builds
+  static readonly int[] NativeSizes = { 8, 16, 32, 64, 128, 256 };
+  static readonly int[] BuiltNativeSizes = { 32, 64 };
+
+  const string Usage = "usage: dfcompiler <file.df | project.dsprj | folder> [--output <file>] [--target <target>] [--os <os>] [--cpu <cpu>] "
+    + "[--native-int <bits>] [--emit-c] [--cc <path-to-clang>] [--coptlev <0-3>] [--coptmode <size|speed>] [--debug | --release] "
+    + "[--run [-- program arguments]] | --version\n"
     + "  target: win-x64 win-x32 linux-x64 linux-arm64 osx-x64 osx-arm64, or CL:<options passed as they are to clang>\n"
+    + "  os: windows linux osx; cpu: x86 x64 arm64 (the other cpus of the specification are not supported yet)\n"
     + "  option names are not case sensitive; --run must be the last option, the program arguments follow --";
 
   // the options of a build, from the command line or from a project file (a value that is null was not given)
@@ -29,6 +35,9 @@ public static class Program {
     public string? Source { get; set; }
     public string? Output { get; set; }
     public string? Target { get; set; }
+    public string? Os { get; set; }
+    public string? Cpu { get; set; }
+    public int? NativeInt { get; set; }
     public string? Cc { get; set; }
     public bool? EmitC { get; set; }
     public int? OptLevel { get; set; }
@@ -114,16 +123,48 @@ public static class Program {
       return 2;
     }
 
-    // the target: this machine unless --target says otherwise; CL:<text> is passed to clang as it is
-    string host = HostTarget();
+    // the os and the cpu: --os / --cpu, then --target, then os= / cpu= of the project, then its target, then this machine;
+    // CL:<text> is passed to clang as it is (the os and the cpu then only set the preprocessor and the sizes)
+    var (hostOs, hostCpu) = HostOsCpu();
     bool custom = target != null && target.StartsWith("CL:");
-    if (target != null && !custom && !Targets.ContainsKey(target)) {
-      Console.Error.WriteLine($"unknown target '{target}': use {string.Join(", ", Targets.Keys)}, or CL:<options for clang>");
+    (string? Os, string? Cpu) cliTarget, projectTarget;
+    try {
+      cliTarget = SplitTarget(cli.Target);
+      projectTarget = SplitTarget(project.Target);
+    } catch (UsageException ex) {
+      Console.Error.WriteLine(ex.Message);
       return 2;
     }
-    string effective = custom ? "custom" : target ?? host;
-    bool forHost = !custom && effective == host;
-    bool forWindows = !custom && effective.StartsWith("win-");
+    string os = cli.Os ?? cliTarget.Os ?? project.Os ?? projectTarget.Os ?? hostOs;
+    string cpu = cli.Cpu ?? cliTarget.Cpu ?? project.Cpu ?? projectTarget.Cpu ?? hostCpu;
+    var cpuInfo = PpVariables.FindCpu(cpu);
+    if (!PpVariables.Os.Contains(os)) {
+      Console.Error.WriteLine($"unknown os '{os}': use {string.Join(", ", PpVariables.Os)}");
+      return 2;
+    }
+    if (cpuInfo == null) {
+      Console.Error.WriteLine($"unknown cpu '{cpu}': use {string.Join(", ", PpVariables.Cpus.Select(c => c.Name))}");
+      return 2;
+    }
+    if (!cpuInfo.Built) {
+      Console.Error.WriteLine($"error: <{cpu}> is not yet a supported cpu");
+      return 2;
+    }
+    if (!custom && !Triples.ContainsKey(os + "_" + cpu)) {
+      Console.Error.WriteLine($"error: {os} on <{cpu}> is not yet supported");
+      return 2;
+    }
+
+    // the native size of int and uns: --native-int, then native-int= of the project, then the size of the cpu
+    int nativeInt = cli.NativeInt ?? project.NativeInt ?? cpuInfo.Bits;
+    if (!BuiltNativeSizes.Contains(nativeInt)) {
+      Console.Error.WriteLine($"error: a native int of {nativeInt} bits is not yet supported (use {string.Join(" or ", BuiltNativeSizes)})");
+      return 2;
+    }
+
+    string effective = custom ? "custom" : TargetName(os, cpu);
+    bool forHost = !custom && os == hostOs && cpu == hostCpu;
+    bool forWindows = !custom && os == "windows";
 
     // the generated C goes to .compilation and the executable to build.<target>, both next to the source file
     string sourceDir = Path.GetDirectoryName(Path.GetFullPath(path))!;
@@ -133,7 +174,7 @@ public static class Program {
 
     try {
       // the preprocessor (spec 19.1) builds the code that is compiled; its variables come from the options
-      var variables = PpVariables.Build(custom || !Targets.ContainsKey(effective) ? host : effective, build, optLevel, optMode, LanguageVersion);
+      var variables = PpVariables.Build(os, cpu, nativeInt, build, optLevel, optMode, LanguageVersion);
       Preprocessor preprocessor;
       try {
         preprocessor = new Preprocessor(variables, projectVariables);
@@ -146,8 +187,7 @@ public static class Program {
       var tokens = lexer.Tokenize();
       var parser = new Parser(tokens);
       var tree = parser.ParseProgram();
-      string typeTarget = custom || !Targets.ContainsKey(effective) ? host : effective;
-      var (c, genWarnings) = CodeGen.Compile(tree, build == "release", typeTarget.EndsWith("x64") || typeTarget.EndsWith("arm64") ? 64 : 32);
+      var (c, genWarnings) = CodeGen.Compile(tree, build == "release", nativeInt);
       foreach (var warning in preprocessor.Warnings.Concat(lexer.Warnings).Concat(parser.Warnings).Concat(genWarnings)) {
         Console.Error.WriteLine(path + warning);
       }
@@ -186,7 +226,7 @@ public static class Program {
       ccArgs.AddRange(target!["CL:".Length..].Split(' ', StringSplitOptions.RemoveEmptyEntries));
     } else {
       if (!forHost) {
-        ccArgs.Insert(0, "--target=" + Targets[effective]);
+        ccArgs.Insert(0, "--target=" + Triples[os + "_" + cpu]);
       }
       if (forWindows) {
         ccArgs.Insert(0, "-D_CRT_SECURE_NO_WARNINGS");
@@ -203,7 +243,7 @@ public static class Program {
 
     if (run) {
       if (!forHost) {
-        Console.Error.WriteLine($"not run: the program is built for {effective} and this machine is {host}");
+        Console.Error.WriteLine($"not run: the program is built for {effective} and this machine is {TargetName(hostOs, hostCpu)}");
         return 0;
       }
       Console.WriteLine("---- run ----");
@@ -257,6 +297,15 @@ public static class Program {
         case "--target":
           settings.Target = Value(ref i, "--target");
           break;
+        case "--os":
+          settings.Os = Value(ref i, "--os").ToLowerInvariant();
+          break;
+        case "--cpu":
+          settings.Cpu = Value(ref i, "--cpu").ToLowerInvariant();
+          break;
+        case "--native-int":
+          settings.NativeInt = ParseNativeSize(Value(ref i, "--native-int"), "--native-int");
+          break;
         case "--cc":
           settings.Cc = Value(ref i, "--cc");
           break;
@@ -288,6 +337,13 @@ public static class Program {
       throw new UsageException($"--COptLev takes a number from 0 to 3, not '{text}'");
     }
     return level;
+  }
+
+  static int ParseNativeSize(string text, string option) {
+    if (!int.TryParse(text, out int bits) || !NativeSizes.Contains(bits)) {
+      throw new UsageException($"{option} takes {string.Join(", ", NativeSizes)} bits, not '{text}'");
+    }
+    return bits;
   }
 
   static string ParseOptMode(string text) {
@@ -327,6 +383,15 @@ public static class Program {
             break;
           case "target":
             settings.Target = value;
+            break;
+          case "os":
+            settings.Os = value.ToLowerInvariant();
+            break;
+          case "cpu":
+            settings.Cpu = value.ToLowerInvariant();
+            break;
+          case "native-int":
+            settings.NativeInt = ParseNativeSize(value, key);
             break;
           case "cc":
             settings.Cc = value;
@@ -388,17 +453,39 @@ public static class Program {
     };
   }
 
-  // win-x64, win-x32, linux-x64, linux-arm64, osx-x64, osx-arm64...: the system and the processor of this machine
-  static string HostTarget() {
-    string system = OperatingSystem.IsWindows() ? "win" : OperatingSystem.IsMacOS() ? "osx" : "linux";
-    string arch = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture switch {
+  // the os and the cpu of this machine, with the names of spec 19.1
+  static (string Os, string Cpu) HostOsCpu() {
+    string os = OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "osx" : "linux";
+    string cpu = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture switch {
       System.Runtime.InteropServices.Architecture.X64 => "x64",
       System.Runtime.InteropServices.Architecture.Arm64 => "arm64",
-      System.Runtime.InteropServices.Architecture.X86 => "x32",
-      System.Runtime.InteropServices.Architecture.Arm => "arm",
+      System.Runtime.InteropServices.Architecture.X86 => "x86",
+      System.Runtime.InteropServices.Architecture.Arm => "arm32",
+      System.Runtime.InteropServices.Architecture.Ppc64le => "ppc64le",
       var other => other.ToString().ToLowerInvariant()
     };
-    return $"{system}-{arch}";
+    return (os, cpu);
+  }
+
+  // a target <os>-<cpu> (win-x64, linux-arm64, ...) split into the os and the cpu of spec 19.1; x32 is the x86 cpu; null and CL:<text> give nothing
+  static (string? Os, string? Cpu) SplitTarget(string? target) {
+    if (target == null || target.StartsWith("CL:")) {
+      return (null, null);
+    }
+    int dash = target.IndexOf('-');
+    string os = dash < 0 ? "" : target[..dash].ToLowerInvariant() switch { "win" => "windows", "linux" => "linux", "osx" => "osx", _ => "" };
+    string cpu = dash < 0 ? "" : target[(dash + 1)..].ToLowerInvariant();
+    cpu = cpu == "x32" ? "x86" : cpu;
+    if (os == "" || PpVariables.FindCpu(cpu) == null) {
+      throw new UsageException($"unknown target '{target}': use <win|linux|osx>-<cpu> (win-x64, win-x32, linux-x64, linux-arm64, osx-x64, osx-arm64), or CL:<options for clang>");
+    }
+    return (os, cpu);
+  }
+
+  // the name of a target, as in the folder build.<target>: win-x64, win-x32, linux-arm64, ...
+  static string TargetName(string os, string cpu) {
+    string system = os == "windows" ? "win" : os;
+    return $"{system}-{(cpu == "x86" ? "x32" : cpu)}";
   }
 
   static int RunProcess(string file, List<string> args) {

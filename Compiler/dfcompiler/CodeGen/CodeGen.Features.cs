@@ -64,7 +64,6 @@ public sealed partial class CodeGen {
     ["r128"] = "r128",
     ["dec"] = "dec",
     ["addr"] = "addr",
-    ["int"] = "int",
     ["real"] = "real"
   };
 
@@ -168,8 +167,8 @@ public sealed partial class CodeGen {
     if (IsUntypedLiteral(valueNode)) {
       bool isInteger = (valueNode.Kind == "Neg" ? valueNode.Children[0] : valueNode).Kind == "Int";
       if (isInteger) {
-        // the native-size signed type wins, even over an exact i32
-        if (target == "i64") {
+        // the native-size signed type wins, even over an exact smaller type
+        if (target == NativeInt) {
           return 0;
         }
         if (IsInt(target)) {
@@ -177,9 +176,9 @@ public sealed partial class CodeGen {
           var (min, max) = IntRange(target);
           return value >= min && value <= max ? 1 : null;
         }
-        return RealTypes.Contains(target) ? 2 : null;
+        return RealTypes.Contains(target) ? 2 : target == "lapse" ? 3 : null;
       }
-      return target == "r64" ? 0 : target == "r32" ? 1 : null;
+      return target == "r64" ? 0 : target == "r32" ? 1 : target == "lapse" ? 3 : null;
     }
     if (valueNode.Kind == "WritableAddressOf") {
       valueNode = valueNode.Children[0];   // (&)x: the type of x

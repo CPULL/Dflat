@@ -55,6 +55,9 @@ public sealed partial class CodeGen {
     if (needs.Contains("io")) {
       sb.Append(RuntimeIO.Source);
     }
+    if (needs.Contains("exec")) {
+      sb.Append(RuntimeExec.Source);
+    }
     return sb.ToString();
   }
 
@@ -298,7 +301,7 @@ public sealed partial class CodeGen {
     bool usesStreams = !userTypes.Contains("FileStream")
       && Mentions(program, node => node.Text is "FileStream" or "Stream" or "open");
     bool usesFile = !userTypes.Contains("File")
-      && (usesStreams || Mentions(program, node => node.Text == "File" || (node.Kind == "Member" && node.Text == "File")));
+      && (usesStreams || Mentions(program, node => node.Text == "File" || (node.Kind == "Member" && node.Text is string member && (member == "File" || IoPathFunctions.Contains(member)))));
     var fileEnums = new HashSet<string> { "DeleteOptions", "OverwriteOptions", "FileSystemObjectsType", "FileWriteMode" };
     if (usesStreams) {
       fileEnums.UnionWith(new[] { "StreamReadWriteAccessMode", "StreamOpenMode", "StreamSeekOrigin" });
@@ -321,6 +324,11 @@ public sealed partial class CodeGen {
     }
     if (usesStreams) {
       source.AppendLine(IoStreamPrelude);
+    }
+    // Root.ExecProcess (stdlib 7): RunResult and the run and exec functions are a class written in Dflat (ExecPrelude)
+    if (!userTypes.Contains("ExecProcess") && !userTypes.Contains("RunResult")
+        && Mentions(program, node => node.Text is "ExecProcess" or "RunResult" || node.Text?.Contains("ExecProcess.") == true || node.Text?.EndsWith(".RunResult") == true)) {
+      source.AppendLine(ExecPrelude);
     }
     // vec<T> (spec 6.8) is a generic class written in Dflat, with the collection traits (CodeGen.Vec.cs)
     if (!userTypes.Contains("vec") && !userTypes.Contains("list") && Mentions(program, node => node.Text is "vec" or "list" or "View" or "getIterator" or "IndexIterator" or "IndexCollection" or "Iterator"

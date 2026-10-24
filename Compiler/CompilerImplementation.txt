@@ -39,9 +39,9 @@ Where a decision came from the spec the section is named; where I (Claude) chose
 --------------------
 - A type is a string in the compiler: "i32", "string", "arr<i32>", "Status" (enum), "Circle" (class), "i32?" (nullable),
   "(i32 id,string name)" (tuple), "*(...)" (several returned values).
-- Unsuffixed integer literals are i32 (the spec says native size: not done; there is no native int/uns/real yet).
-  `int` is accepted only as the return type of main, and means i32.
-- Not available: i128/i256/u128/u256, r16/r128, dec, int/uns/real, pointers, addr, vec/list/map/hmap/set/hset/dfoot, lambdas,
+- Unsuffixed integer literals have the native size CodeGen.NativeInt (i64, or i32 with a 32-bit cpu or --native-int 32); a literal that does not fit an i32
+  takes i64 (spec 1.3). `int` is a type: Normalize maps it to NativeInt, as `uns` to NativeUns. The return type `int` of main gives an i32 exit code.
+- Not available: i128/i256/u128/u256, r16/r128, dec, real, pointers, addr, vec/list/map/hmap/set/hset/dfoot, lambdas,
   imports, multiple files.
 - Casts: out of range saturates; a float to integer cast truncates. (spec 3.5)
 - `var`: for variables and for-loop items only; the type is the type of the value. Not allowed for fields.
@@ -834,8 +834,8 @@ VEC ALIGNED WITH THE SPEC 0.0.13 (built 2026-10-22, compiler 0.0.14alpha)
 ARRAYS ALIGNED WITH THE SPEC 0.0.13 (built 2026-10-22, compiler 0.0.13alpha)
 ==========================================================================
 - `uns` is a type: Normalize maps it to CodeGen.NativeUns (u64, or u32 when the target is 32 bits; Program passes the bits of the target to CodeGen.Compile). The arrays
-  used uint64_t lengths in C until 0.0.16alpha (see UNS LENGTHS AND INDEXES below). `int` and `real` are still not types (the default signed integer stays i32 although the
-  spec 1.3 says the native size).
+  used uint64_t lengths in C until 0.0.16alpha (see UNS LENGTHS AND INDEXES below). `int` is a type too since the native size cleanup (see NATIVE SIZE AND CPU below);
+  `real` is not.
 - Release builds (--release): CodeGen.ReleaseBuild and the C flag -DDF_RELEASE. df_raise (Runtime.cs) turns IndexOutOfRangeException into a panic (message, then Panic -1000);
   an explicit `throw IndexOutOfRangeException` does the same; a catch for it gives a level 3 warning ("ignored in a release build"). Debug (the default) is unchanged.
   ModifyingIteratedCollectionException (ID 46) is not built yet (vec).
@@ -859,8 +859,8 @@ THE PREPROCESSOR AND THE OPTIONS (built 2026-10-21, compiler 0.0.12alpha, spec 1
   ##endif, a name that is predefined or equals a value of a predefined variable or true / false, a redefinition of a project variable.
   A variable defined in the source can be defined again; the ones of the project file (CompilerVar) and the predefined ones cannot.
   ##region / ##endregion only fold (unmatched: level 3 warning). The Lexer does not know #region any more.
-- PpVariables.cs: the predefined variables from the target (os, cpu, arch, bits from the name of the target; endian little for x86 x64 arm; int=32 uns=32 real=64
-  until --native-int / --native-real are built; ram 4gb; exceptions on; build debug by default; coptlev, coptmode; version = LanguageVersion of Program.cs and
+- PpVariables.cs: the predefined variables from the os, the cpu and the native size that Program.cs resolves (see NATIVE SIZE AND CPU below; real=64
+  until --native-real is built; ram 4gb; exceptions on; build debug by default; coptlev, coptmode; version = LanguageVersion of Program.cs and
   version.major / minor / build). A custom CL: target uses the variables of this machine.
 - Program.cs: Version 0.0.12alpha and LanguageVersion 0.0.12 (the version of the spec it was built for; --version prints both). Options added: --coptlev 0-3
   (-O<n>), --coptmode size|speed (size = -Os), --debug / --release (only the variable `build` for now). The input can be a .df file, a .dsprj file or a folder with one
@@ -1035,3 +1035,44 @@ ITERATORS AND VIEWS AS CHILDREN (built 2026-10-24, compiler 0.0.20alpha, spec 6.
   until it ends). Checked with --release and on win-x32.
 - Not done: c[a..b]! (needs .clone()), the views and the get_view / read_pos methods of custom collections, writableNext and for (&)Item, the iterator of an arr as a child,
   a view of a view, the display name of a view type in the messages (vecView<i32>, not View<vec<i32>>).
+
+NATIVE SIZE AND CPU (2026-10-25)
+================================
+- Program.cs resolves the os and the cpu: --os / --cpu, then --target (<win|linux|osx>-<cpu>, x32 = x86), then os= / cpu= of the .dsprj, then its target=, then this
+  machine (HostOsCpu). The cpus are the table PpVariables.Cpus (names of spec 19.1, bits, endian, Built); a cpu not built is "<sparc> is not yet a supported cpu";
+  an os / cpu pair without a clang triple (Triples, e.g. osx with x86) is "not yet supported". A CL: target keeps the os and cpu only for the preprocessor and the sizes.
+- The native size: --native-int, then native-int= of the project, then the bits of the cpu. Accepted 8 16 32 64 128 256, built 32 and 64. The same value goes to
+  CodeGen.Compile (NativeInt i32/i64, NativeUns u32/u64, DF_UNS_BITS) and to PpVariables.Build (int, uns). bits and endian come from the cpu.
+- Unsuffixed integer literals: NativeInt when nothing is expected; ArgCost prefers NativeInt for a literal argument. Enums stay i32 (spec 3.1).
+- Tests: equality.df uses T is int (a literal is an int now), preprocessor.df tests cpu == arm64 and int == bits. Options tested by hand (sparc, foo, --native-int 16,
+  osx-x32, cpu= in a project, --cpu over the project).
+
+STDLIB 0.0.10: PROCESSES, SLEEP, CONSOLE, PATHS (built 2026-10-25, compiler 0.0.21alpha)
+=========================================================================================
+- Root.exit, Root.Console.read / clear, Root.Time.sleep are rows of the Stdlib table (CodeGen.Stdlib.cs); their C is in the base runtime (Runtime.cs):
+  df_exit (exit(), so atexit runs; atEnd and destructors do not), df_console_read, df_console_clear, df_time_sleep.
+- A nullable result of a library function: the C function returns an int64_t, negative for null, and StdCall wraps it in the df_opt_ struct (char? read()).
+- Console.read: Windows _kbhit / _getwch (two-code keys give null, Enter '\r' becomes '\n'). Unix: the first read() puts the terminal in raw mode (no ICANON,
+  no ECHO, VMIN 0) and leaves it so; readLine, atexit, df_panic (df_panic_hook) and SIGINT / SIGTERM / SIGHUP / SIGQUIT give it back. An escape sequence is
+  skipped (null), Esc alone is 0x1B. Not a terminal: getc, -1 at the end.
+- Console.clear: Windows console API on the whole buffer (nothing when the output is not a console); Unix ESC[H ESC[2J only when isatty.
+- sleep: the lapse becomes nanoseconds (date 1 ms, clock 0.1 ns rounded up, years and overflow about 146 years). Windows: a high resolution waitable timer
+  (CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, Windows 10 1803), else Sleep rounded up; Unix nanosleep, again after EINTR.
+- Number to lapse (spec 3.4): Assignable(lapse, any number) is true and Convert calls df_lapse_from_ms (integers) or df_lapse_from_ms_real (reals); ArgCost
+  gives a literal for a lapse parameter the cost 3.
+- Root.IO.getCurrentDir / setCurrentDir / getFullPath / getRelativePath: static functions of the File prelude class (IoPrelude); Call sends Root.IO.<name> to
+  File.<name> (LibraryStaticPath, also for Root.ExecProcess.run / exec). Mentioning one of the names adds the File prelude. C side in RuntimeIO.cs
+  (df_io_current_dir, df_io_set_current_dir, df_io_full_path, df_io_relative_path); segments compared without case on Windows; different drives give the full "to".
+  A side effect: File.getFullPath etc. also work.
+- Root.ExecProcess: RunResult and ExecProcess are Dflat classes (CodeGen.Exec.cs, ExecPrelude), added when the program mentions ExecProcess or RunResult;
+  Root.ExecProcess.RunResult as a type is stripped to RunResult (StripLibraryQualifier). getEnv is a Stdlib row. The natives Root.ExecProcess.Native.* use the
+  runtime part "exec" (RuntimeExec.cs): df_exec_run keeps output, errors and timedOut in statics read just after; a failure id (25, 26, 31, 43) goes to
+  df_exec_err; run turns it into the error field (df_exec_failure builds a df_exception, never released), exec throws it.
+- run on Windows: three pipes, CreateProcessW with STARTF_USESTDHANDLES, one thread for each pipe (stdout, stderr, stdin), WaitForSingleObject with the timeout,
+  TerminateProcess when it runs out; the threads get 2 s after the end, then CancelSynchronousIo (a grandchild may keep a pipe). Arguments quoted the way
+  CommandLineToArgvW reads them. exec: CreateProcessW with inherited handles. A program or workDir in the Dflat form "/c:/x" is given as "c:/x".
+- run on Unix: fork + execvp, a close-on-exec pipe reports a failure of chdir or execvp (stage, errno); poll over stdout, stderr and stdin; SIGKILL at the
+  timeout; SIGPIPE ignored while it runs; a signal gives 128 + the signal. NOT COMPILED YET: there are no Linux headers on this machine (the C of the Unix
+  branches was only written).
+- Tests: process.df (Windows commands under ##if os == windows, sh / cat / sleep / echo / pwd otherwise), features.df uses char? read(),
+  errors/read_not_nullable, errors/lapse_from_string. Code examples/snake.df replaces snake-turnbased.df (real time: read, clear, sleep(250)).

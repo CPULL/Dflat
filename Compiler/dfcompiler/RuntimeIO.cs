@@ -796,6 +796,173 @@ static df_string df_io_temp_dir(void) {
 #endif
 }
 
+/* ---- current directory and full paths (stdlib 6.2) ---- */
+
+static df_string df_io_current_dir(void) {
+#ifdef _WIN32
+  DWORD n = GetCurrentDirectoryW(0, NULL);
+  wchar_t* buffer = (wchar_t*)malloc((size_t)(n ? n : 1) * sizeof(wchar_t));
+  if (!buffer) df_out_of_memory();
+  if (n == 0 || GetCurrentDirectoryW(n, buffer) == 0) { free(buffer); df_io_fail(df_io_os_code()); return df_str_lit("/", 1); }
+  df_string raw = df_io_from_os(buffer);
+  free(buffer);
+#else
+  char* buffer = getcwd(NULL, 0);
+  if (!buffer) { df_io_fail(df_io_os_code()); return df_str_lit("/", 1); }
+  df_string raw = df_io_str(buffer, strlen(buffer));
+  free(buffer);
+#endif
+  return df_io_normalize(raw);
+}
+
+/* missing: FileNotFoundException, a file: InvalidPathException, no access: InvalidFileAccessException */
+static bool df_io_set_current_dir(df_string path) {
+  df_ochar* p = df_io_os(path);
+  df_io_info info = df_io_stat(p);
+  bool done = false;
+  if (info.kind == 0) {
+    df_io_fail(info.denied ? DF_IO_INVALID_ACCESS : DF_IO_NOT_FOUND);
+  } else if (info.kind == 1) {
+    df_io_fail(DF_IO_INVALID_PATH);
+  } else {
+#ifdef _WIN32
+    done = SetCurrentDirectoryW(p) != 0;
+#else
+    done = chdir(p) == 0;
+#endif
+    if (!done) {
+      uint64_t code = df_io_os_code();
+      df_io_fail(code == DF_IO_GENERIC ? DF_IO_INVALID_ACCESS : code);
+    }
+  }
+  free(p);
+  return done;
+}
+
+/* the folders of a normalized path ("/d:/a/b" is "d:", "a", "b"); the array is malloc'd */
+static df_string* df_io_segments(df_string path, uint64_t* count) {
+  df_string* parts = (df_string*)malloc((size_t)(path.len / 2 + 2) * sizeof(df_string));
+  if (!parts) df_out_of_memory();
+  uint64_t n = 0;
+  uint64_t start = 0;
+  for (uint64_t i = 0; i <= path.len; i++) {
+    if (i == path.len || path.p[i] == '/') {
+      if (i > start) {
+        parts[n].p = path.p + start;
+        parts[n].len = i - start;
+        n++;
+      }
+      start = i + 1;
+    }
+  }
+  *count = n;
+  return parts;
+}
+
+static df_string df_io_from_segments(df_string* parts, uint64_t count) {
+  uint64_t n = 0;
+  for (uint64_t i = 0; i < count; i++) n += parts[i].len + 1;
+  if (n == 0) return df_str_lit("/", 1);
+  char* p = (char*)df_alloc(n);
+  uint64_t m = 0;
+  for (uint64_t i = 0; i < count; i++) {
+    p[m++] = '/';
+    memcpy(p + m, parts[i].p, parts[i].len);
+    m += parts[i].len;
+  }
+  df_string s = { p, m };
+  return s;
+}
+
+static bool df_io_is_drive(df_string part) {
+  return part.len == 2 && part.p[1] == ':';
+}
+
+/* absolute, without "." and ".."; a relative path starts from the current directory (on Windows "/x" is on its drive) */
+static df_string df_io_full_path(df_string path) {
+  df_string full = path;
+  if (path.len == 0 || path.p[0] != '/') {
+    full = path.len == 0 ? df_io_current_dir() : df_io_join(df_io_current_dir(), path);
+  }
+#ifdef _WIN32
+  else if (!(path.len >= 3 && path.p[2] == ':')) {
+    df_string cwd = df_io_current_dir();
+    if (cwd.len >= 3 && cwd.p[2] == ':') {
+      char* p = (char*)df_alloc(path.len + 3);
+      memcpy(p, cwd.p, 3);
+      memcpy(p + 3, path.p, path.len);
+      full.p = p;
+      full.len = path.len + 3;
+    }
+  }
+#endif
+  uint64_t count;
+  df_string* parts = df_io_segments(full, &count);
+  uint64_t kept = 0;
+  for (uint64_t i = 0; i < count; i++) {
+    df_string part = parts[i];
+    if (part.len == 1 && part.p[0] == '.') continue;
+    if (part.len == 2 && part.p[0] == '.' && part.p[1] == '.') {
+      if (kept > 0 && !df_io_is_drive(parts[kept - 1])) kept--;   /* the root and a drive have no parent */
+      continue;
+    }
+    parts[kept++] = part;
+  }
+  df_string result = df_io_from_segments(parts, kept);
+  free(parts);
+  return result;
+}
+
+static bool df_io_same_part(df_string a, df_string b) {
+  if (a.len != b.len) return false;
+  for (uint64_t i = 0; i < a.len; i++) {
+    char x = a.p[i];
+    char y = b.p[i];
+#ifdef _WIN32
+    if (x >= 'A' && x <= 'Z') x = (char)(x + 32);
+    if (y >= 'A' && y <= 'Z') y = (char)(y + 32);
+#endif
+    if (x != y) return false;
+  }
+  return true;
+}
+
+/* from the directory "from" to "to": "../lib/x.df"; "." for the same place; the full "to" when the drives differ */
+static df_string df_io_relative_path(df_string from, df_string to) {
+  df_string fullFrom = df_io_full_path(from);
+  df_string fullTo = df_io_full_path(to);
+  uint64_t fromCount, toCount;
+  df_string* fromParts = df_io_segments(fullFrom, &fromCount);
+  df_string* toParts = df_io_segments(fullTo, &toCount);
+  uint64_t common = 0;
+  while (common < fromCount && common < toCount && df_io_same_part(fromParts[common], toParts[common])) common++;
+  df_string result;
+  if (common == 0 && fromCount > 0 && toCount > 0 && df_io_is_drive(fromParts[0]) && df_io_is_drive(toParts[0])) {
+    result = fullTo;
+  } else {
+    uint64_t up = fromCount - common;
+    uint64_t n = up * 3;
+    for (uint64_t i = common; i < toCount; i++) n += toParts[i].len + 1;
+    if (n == 0) {
+      result = df_str_lit(".", 1);
+    } else {
+      char* p = (char*)df_alloc(n);
+      uint64_t m = 0;
+      for (uint64_t i = 0; i < up; i++) { memcpy(p + m, "../", 3); m += 3; }
+      for (uint64_t i = common; i < toCount; i++) {
+        memcpy(p + m, toParts[i].p, toParts[i].len);
+        m += toParts[i].len;
+        p[m++] = '/';
+      }
+      result.p = p;
+      result.len = m - 1;     /* without the last separator */
+    }
+  }
+  free(fromParts);
+  free(toParts);
+  return result;
+}
+
 static uint64_t df_io_temp_counter = 0;
 
 static df_string df_io_temp_name(void) {

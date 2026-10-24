@@ -41,15 +41,20 @@ public sealed partial class CodeGen {
     StdFun Fixed(string ret, string cname, params string[] ps) => new(ps, ret, cname);
 
     Add("Root.getArgs", Fixed("arr<string>", "df_get_args"));
+    Add("Root.exit", Fixed("void", "df_exit", "i64"));
 
     Add("Root.Console.log", Fixed("void", "df_console_log", "any"));
     Add("Root.Console.logError", Fixed("void", "df_console_log_error", "any"));
     Add("Root.Console.print", Fixed("void", "df_console_print", "any"));
-    Add("Root.Console.read", Fixed("char", "df_console_get_char"));
+    Add("Root.Console.read", Fixed("char?", "df_console_read"));
     Add("Root.Console.readLine", Fixed("string", "df_console_get_input"));
+    Add("Root.Console.clear", Fixed("void", "df_console_clear"));
 
     Add("Root.Time.now", Fixed("date", "df_time_now"));
     Add("Root.Time.clock", Fixed("clock", "df_time_clock"));
+    Add("Root.Time.sleep", Fixed("void", "df_time_sleep", "lapse"));
+
+    Add("Root.ExecProcess.getEnv", new StdFun(new[] { "string" }, "string", "df_exec_get_env", Needs: new[] { "exec" }, Names: new[] { "name" }));
 
     Add("Root.Random.seed", Fixed("void", "df_rand_seed", "u64"));
     Add("Root.Random.int", Fixed("i64", "df_rand_int", "i64", "i64"));
@@ -94,7 +99,39 @@ public sealed partial class CodeGen {
     AddDateStdlib(Add);
     AddNumberStdlib(Add);
     AddIoStdlib(Add);
+    AddExecStdlib(Add);
     return table;
+  }
+
+  // Root.ExecProcess.Native: the C side of run and exec (RuntimeExec); the Dflat side is ExecPrelude (CodeGen.Exec)
+  static void AddExecStdlib(Action<string, StdFun> add) {
+    var exec = new[] { "exec" };
+    void Native(string name, string ret, string cname, params string[] ps) {
+      add("Root.ExecProcess.Native." + name, new StdFun(ps, ret, cname, false, 0, "", null, exec));
+    }
+    Native("Run", "i64", "df_exec_run", "string", "arr<string>", "string", "string", "lapse");
+    Native("Exec", "i64", "df_exec_exec", "string", "arr<string>", "string");
+    Native("Error", "u64", "df_exec_error");
+    Native("Output", "string", "df_exec_output");
+    Native("Errors", "string", "df_exec_errors");
+    Native("TimedOut", "bool", "df_exec_timedout");
+    Native("Failure", "Exception", "df_exec_failure", "string", "string");
+  }
+
+  // functions of a library namespace that are static functions of a library class written in Dflat: Root.IO.getFullPath is
+  // File.getFullPath (IoPrelude), Root.ExecProcess.run is ExecProcess.run (ExecPrelude)
+  static readonly HashSet<string> IoPathFunctions = new() { "getCurrentDir", "setCurrentDir", "getFullPath", "getRelativePath" };
+  static readonly HashSet<string> ExecFunctions = new() { "run", "exec" };
+
+  static string? LibraryStaticPath(string path) {
+    string name = path[(path.LastIndexOf('.') + 1)..];
+    if (path == "Root.IO." + name && IoPathFunctions.Contains(name)) {
+      return "File." + name;
+    }
+    if (path == "Root.ExecProcess." + name && ExecFunctions.Contains(name)) {
+      return "ExecProcess." + name;
+    }
+    return null;
   }
 
   // Root.IO.Native: the C side of the File class (RuntimeIO). The File class itself is Dflat code added by AddPrelude (IoPrelude);
@@ -122,6 +159,10 @@ public sealed partial class CodeGen {
     Native("Move", "bool", "df_io_move", "string", "string", "bool");
     Native("MakeDir", "i32", "df_io_mkdir", "string");
     Native("List", "arr<string>", "df_io_list", "string", "bool", "i32", "string");
+    Native("CurrentDir", "string", "df_io_current_dir");
+    Native("SetCurrentDir", "bool", "df_io_set_current_dir", "string");
+    Native("FullPath", "string", "df_io_full_path", "string");
+    Native("RelativePath", "string", "df_io_relative_path", "string", "string");
     Native("TempDir", "string", "df_io_temp_dir");
     Native("TempName", "string", "df_io_temp_name");
     Native("ReadAll", "arr<u8>", "df_io_read_all", "string");
@@ -229,6 +270,11 @@ public sealed partial class CodeGen {
     }
     if (chosen.Silent != null) {
       call = SilentCall(call, chosen.Ret, chosen.Silent, at);
+    }
+    if (IsNullable(chosen.Ret)) {
+      // a nullable result: the C function gives an int64_t, negative for null
+      string temp = NewTemp();
+      call = $"({{ int64_t {temp} = {call}; (({CType(chosen.Ret)}){{ {temp} >= 0, ({CType(BaseOf(chosen.Ret))}){temp} }}); }})";
     }
     return new Expr(call, chosen.Ret);
   }

@@ -1,9 +1,8 @@
-// Snake for Dflat — spec 0.0.13 / stdlib 0.0.9
+// Snake for Dflat — stdlib 0.0.10
 //
-// The standard library has only blocking console input (Console.read / readLine)
-// and no sleep or key polling, so the game is turn-based:
-//   w a s d   turn and move one step
-//   Enter     move one step in the current direction
+// Real time: the snake moves one cell every 250 ms. Console.read does not wait (it gives null
+// when no key is pressed), Console.clear redraws the screen and Time.sleep paces the moves.
+//   w a s d   turn
 //   q         quit
 
 namespace snake
@@ -17,7 +16,8 @@ class SnakeGame(i32 width, i32 height) {
   arr<bool> occupied                   // flat grid: y * width + x
   i32 head = -1
   i32 food = -1
-  Direction direction = Direction.Right
+  Direction direction = Direction.Right   // the direction of the last move
+  Direction next = Direction.Right        // the direction of the next move (the last key pressed)
   bool alive = true
   bool won = false
 
@@ -52,12 +52,14 @@ class SnakeGame(i32 width, i32 height) {
       'd': Direction.Right,
       default: direction
     }
-    // The snake cannot reverse into its own neck
-    if wanted != opposite(direction) then direction = wanted
+    // The snake cannot reverse into its own neck: checked against the last move, so two keys
+    // pressed between two moves cannot turn it back
+    if wanted != opposite(direction) then next = wanted
   }
 
   public fun advance() {
     if !isRunning() then return
+    direction = next
 
     i32 dx = direction ? { Left: -1, Right: 1, default: 0 }
     i32 dy = direction ? { Up: -1, Down: 1, default: 0 }
@@ -96,13 +98,11 @@ class SnakeGame(i32 width, i32 height) {
   }
 
   public fun render() {
-    string screen = "\u{1B}[2J\u{1B}[H"          // ANSI: clear screen, cursor home
-
     string border = "+"
     for i32 i = 0..width { border += "-" }
     border += "+\n"
 
-    screen += border
+    string screen = border
     for i32 y = 0..height {
       screen += "|"
       for i32 x = 0..width {
@@ -112,7 +112,8 @@ class SnakeGame(i32 width, i32 height) {
     }
     screen += border
     screen += $"Score: {score}   Length: {body.len}\n"
-    screen += "w/a/s/d + Enter to move, Enter = straight, q = quit\n"
+    screen += "w/a/s/d to turn, q to quit\n"
+    console.clear()
     console.print(screen)
   }
 
@@ -157,25 +158,26 @@ fun int main() {
   SnakeGame game = SnakeGame(20, 12)
   game.start()
 
-  while game.isRunning() {
-    game.render()
+  bool quit = false
+  game.render()
+  while game.isRunning() && !quit {
+    Root.Time.sleep(250)
 
-    string line = console.readLine()
-    if line == "" then break           // end of input (an Enter alone gives "\n")
-
-    string command = line.trim().toLower()
-    if command == "q" then break
-
-    // Each key on the line is one move; an empty line moves straight once
-    if command.len == 0 {
-      game.advance()
-    } else {
-      for char key in command {
-        if !game.isRunning() then break
-        game.turn(key)
-        game.advance()
+    // Every key pressed since the last move; read gives null when there are no more
+    char? key = console.read()
+    while key != null {
+      char pressed = (key ?? ' ').toLower()
+      if pressed == 'q' {
+        quit = true
+      } else {
+        game.turn(pressed)
       }
+      key = console.read()
     }
+    if quit then break
+
+    game.advance()
+    game.render()
   }
 
   game.render()

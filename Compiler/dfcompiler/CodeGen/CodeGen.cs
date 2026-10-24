@@ -348,7 +348,7 @@ public sealed partial class CodeGen {
     var rets = funNode.Children.FirstOrDefault(child => child.Kind == "Returns");
     if (rets != null) {
       if (rets.Children.Count == 1) {
-        // the exit code of main is an int (native size is not supported yet: i32)
+        // the exit code of main is an int, given to the system as an i32
         bool isMainInt = enumName == null && funNode.Text == "main" && rets.Children[0] is { Kind: "Type", Text: "int" };
         ret = isMainInt ? "i32" : ResolveType(rets.Children[0]);
       } else {
@@ -1253,7 +1253,11 @@ public sealed partial class CodeGen {
         string lit = value.ToString(CultureInfo.InvariantCulture) + ".0";
         return new Expr(expected == "r32" ? $"({lit}f)" : $"({lit})", expected);
       }
-      type = expected != null && IsInt(expected) ? expected : "i32";
+      // the native size (spec 1.3); a value that does not fit takes the smallest wider type that does
+      type = expected != null && IsInt(expected) ? expected : NativeInt;
+      if (type == "i32" && expected == null && (value < int.MinValue || value > int.MaxValue)) {
+        type = "i64";
+      }
     } else {
       type = suffix switch {
         "u" => "u32",
@@ -1706,6 +1710,9 @@ public sealed partial class CodeGen {
       }
       if (Stdlib.TryGetValue(path, out var stdOverloads)) {
         return StdCall(path, stdOverloads, args, scope, n);
+      }
+      if (callee.Kind == "Member" && LibraryStaticPath(path) is string library && StaticCall(library, args, scope, n) is Expr libraryCall) {
+        return libraryCall;
       }
       if (callee.Kind == "Name" && BareMethodCall(callee.Text!, args, scope, n) is Expr bare) {
         return bare;

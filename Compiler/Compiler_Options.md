@@ -2,7 +2,10 @@
 Option names are not case sensitive. The arguments after `CL:`, file names and paths follow the rules of the operating system.
 
 - `--output <file>` path of the executable. The default is: `build.<target>/<name>[.exe]` next to the source. It can be an actual file and it will become the executable, all folders that are missing will be created. Or a folder (it needs a trailing directory separator) then the folder will be used to output the executable (the name defined in the project, or the name of the project file, or the name of the source file)
-- `--target <target>` win-x64, win-x32, linux-x64, linux-arm64, osx-x64, osx-arm64, or `CL:<clang arguments>`: the arguments are passed, AS-IS, to CLang. The default is: use the architecture of the machine running the compiler
+- `--target <target>` win-x64, win-x32, linux-x64, linux-arm64, osx-x64, osx-arm64, or `CL:<clang arguments>`: the arguments are passed, AS-IS, to CLang. The default is: use the architecture of the machine running the compiler. A target is `<os>-<cpu>` (`win`, `linux`, `osx`; `x32` is the `x86` cpu): it is a shortcut for `--os` and `--cpu`.
+- `--os <os>` the operating system: `windows`, `linux`, `osx`. It overrides the os of the target.
+- `--cpu <cpu>` the processor, with the names of spec 19.1: `x86`, `x64`, `arm32`, `armeb`, `arm64`, `arm64be`, `arm64_32`, `riscv32`, `riscv64`, `ppc32`, `ppc64`, `ppc64le`, `mips`, `mipsel`, `mips64`, `mips64el`, `sparc`, `sparcel`, `sparcv9`, `avr`, `m68k`. It overrides the cpu of the target. Only `x86`, `x64` and `arm64` are built today; the others give the error `<sparc> is not yet a supported cpu`. The cpu gives the preprocessor variables `bits` and `endian` and the default native size of `int` and `uns`.
+- Which value wins: an option of the command line always beats the same option in the project file; `--os` / `--cpu` beat the target written in the same place. So the os and the cpu come from `--os` / `--cpu`, then `--target`, then `os=` / `cpu=` of the project, then `target=` of the project, then the machine running the compiler.
 - `--emit-c` generate only the C file (`.compilation/<name>.c`), no compilation of this file will occur.
 - `--run` run the program after the build. It must be the very last option; everything written after `--` is given to the program as its arguments: `dfcompiler source.df --target linux-x64 --run -- first second`. It can be used only in a direct compilation, not in a `.dsprj` file.
 - `--cc <path>` and environment variable `DFLAT_CC` the clang to use, by default is used the one specified on `PATH`
@@ -16,6 +19,8 @@ Option names are not case sensitive. The arguments after `CL:`, file names and p
 - `--chaindepth<type> <number>` limit the number of copies for a specific type of collections for different types of objects. They are defaulted to 16 and can be any number between 1 and 256. Arrays are by default limited to 64. Valid types are `arr, list, map, hmap, tree, htree, set` (see the proposal below)
 - Live silent exception classes: at most 64, because the observed mask is 64 bits (to be discussed, see the proposal below)
 - `--native-int <bits>`, `--native-real <bits>`, `--native-addr <bits>` force the native size of the integers, of the reals and of the addresses to the specified number of bits. There is no option for `uns`: it always has the same size as `int`. For example `--native-int 32` forces the native size of the integers to be 32 bits. Sizes supported are 8, 16, 32, 64, 128, 256 (some may not be possible on specific target architectures, and a type may accept only some of them, for example a real has no 8 bits).
+  - The native size of `int` and `uns` (and of the unsuffixed integer literals) comes from `--native-int`, then `native-int=` of the project, then the size of the cpu (`--cpu`, the target, or the machine running the compiler: 64 on `x64` and `arm64`, 32 on `x86`; `arm64_32` is a 64-bit cpu with 32-bit addresses, so `int` is 64 and `addr` is 32). `addr` has its own size (`--native-addr`) so that 8-bit cpus can be supported.
+  - Built today: `--native-int` with 32 and 64 (the other sizes give an error); `--native-real` and `--native-addr` are not built yet.
 - `--cachealign <number>` the alignment for cache lines, in bytes. The default is 64 bytes.
 
 ## Other options to be checked
@@ -32,12 +37,13 @@ Option names are not case sensitive. The arguments after `CL:`, file names and p
 - Root file and root namespace: which file starts the program, and the name of the root namespace (`namespace local` is built from the folder path).
 
 ## Preprocessor variables
-The variables of the preprocessor (spec 19.1) that are set by the compiler take their values from these options. `endian` comes from the cpu, `bits` from the target, and `ram` is 4gb until a custom architecture defines it (planned). The native sizes `int`, `uns` and `real` are the size of the cpu: 64 bits on x64 and 32 bits on x86 (`uns` has the size of `int`); the options `--native-int` and `--native-real` will force another size. `version` is the language version (the version of the specification the compiler was built for).
+The variables of the preprocessor (spec 19.1) that are set by the compiler take their values from these options. `endian` and `bits` come from the cpu, `arch` is `<os>_<cpu>`, and `ram` is 4gb until a custom architecture defines it (planned). The native sizes `int` and `uns` are the size of the cpu (64 bits on x64, 32 bits on x86; `uns` has the size of `int`) unless `--native-int` forces another size; `real` is 64 until `--native-real` is built. `version` is the language version (the version of the specification the compiler was built for).
 
 | Variable | Option |
 |---|---|
-| `os`, `cpu`, `arch` | `--target` (the default is the machine running the compiler) |
-| `int`, `uns`, `real` | `--native-int`, `--native-real` (`uns` has the size of `int`) |
+| `os`, `cpu`, `arch` | `--os`, `--cpu`, `--target` (the default is the machine running the compiler) |
+| `bits`, `endian` | the cpu |
+| `int`, `uns`, `real` | `--native-int` (or the cpu), `--native-real` (`uns` has the size of `int`) |
 | `build` | `--debug` or `--release` |
 | `exceptions` | `--no-exceptions` (or the target) |
 | `coptlev` | `--COptLev` |

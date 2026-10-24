@@ -9,7 +9,7 @@ public class Plain(i32 id) {
 public class Number {
   public i32 value = 0
   override fun bool equals(T other) {
-    if T is i32 then return value == other
+    if T is int then return value == other
     if T is string then return value == (i32)other.len
     if T is Number {
       return value == other.value

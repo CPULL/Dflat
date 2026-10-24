@@ -15,6 +15,7 @@ public static class Runtime {
 #include <string.h>
 #include <math.h>
 #include <time.h>
+#include <errno.h>
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -35,8 +36,14 @@ typedef struct {
 
 /* ---- panic ---- */
 
+/* set by the console when it changes the terminal mode (Console.read): gives the terminal back before a panic */
+static void (*df_panic_hook)(void) = NULL;
+
 /* critical exit: prints "Panic <code>" on stdout, no cleanup */
 static void df_panic(int64_t code) {
+  if (df_panic_hook) {
+    df_panic_hook();
+  }
   fflush(stdout);
   printf("Panic %lld\n", (long long)code);
   fflush(stdout);
@@ -562,9 +569,63 @@ static void df_console_print(df_string s) {
   fwrite(s.p, 1, (size_t)s.len, stdout);
 }
 
+#ifdef _WIN32
+#include <conio.h>
+#include <io.h>
+#else
+#include <termios.h>
+#include <unistd.h>
+#include <signal.h>
+
+/* Console.read puts the terminal in raw mode (no line buffer, no echo) and leaves it so between calls, so the keys pressed meanwhile
+   are neither echoed nor held until Enter; readLine, the end of the program, a panic and the signals that stop it give it back */
+static struct termios df_tty_saved;
+static bool df_tty_raw = false;
+static bool df_tty_hooked = false;
+
+static void df_tty_restore(void) {
+  if (df_tty_raw) {
+    tcsetattr(STDIN_FILENO, TCSANOW, &df_tty_saved);
+    df_tty_raw = false;
+  }
+}
+
+static void df_tty_signal(int sig) {
+  df_tty_restore();
+  signal(sig, SIG_DFL);
+  raise(sig);
+}
+
+static void df_tty_enter_raw(void) {
+  if (df_tty_raw || tcgetattr(STDIN_FILENO, &df_tty_saved) != 0) {
+    return;
+  }
+  struct termios raw = df_tty_saved;
+  raw.c_lflag &= (tcflag_t)~(ICANON | ECHO);
+  raw.c_cc[VMIN] = 0;
+  raw.c_cc[VTIME] = 0;
+  if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) != 0) {
+    return;
+  }
+  df_tty_raw = true;
+  if (!df_tty_hooked) {
+    df_tty_hooked = true;
+    atexit(df_tty_restore);
+    df_panic_hook = df_tty_restore;
+    signal(SIGINT, df_tty_signal);
+    signal(SIGTERM, df_tty_signal);
+    signal(SIGHUP, df_tty_signal);
+    signal(SIGQUIT, df_tty_signal);
+  }
+}
+#endif
+
 /* waits for Enter; the line keeps its newline when the input has one; "" at end of input */
 static df_string df_console_get_input(void) {
   fflush(stdout);
+#ifndef _WIN32
+  df_tty_restore();
+#endif
   uint64_t capacity = 128;
   uint64_t length = 0;
   char* buffer = (char*)df_alloc(capacity);
@@ -606,79 +667,98 @@ static int df_read_stdin_byte(void) {
   return getc(stdin);
 }
 
-#ifdef _WIN32
-#include <conio.h>
-#include <io.h>
-#else
-#include <termios.h>
-#include <unistd.h>
-#endif
-
-/* the first typable character, without waiting for Enter; '\0' at end of input */
-static uint32_t df_console_get_char(void) {
+/* Console.read (stdlib 2): the character of a key already pressed, without waiting, echo or Enter; -1 (null) when no key is
+   waiting or the key has no character (arrows, function keys). Enter is '\n' on every OS. Not a terminal: the next character
+   of the input, -1 at its end */
+static int64_t df_console_read(void) {
   fflush(stdout);
 #ifdef _WIN32
   if (_isatty(_fileno(stdin))) {
-    while (true) {
-      wint_t key = _getwch();
-      if (key == 0 || key == 0xE0) {
-        _getwch();              /* arrows and function keys: two codes */
-        continue;
-      }
-      if (key >= 0xD800 && key <= 0xDBFF) {
-        wint_t low = _getwch();
-        return 0x10000 + (((uint32_t)key - 0xD800) << 10) + ((uint32_t)low - 0xDC00);
-      }
-      if (key >= 0x20 && key != 0x7F) {
-        return (uint32_t)key;
-      }
+    if (!_kbhit()) {
+      return -1;
     }
+    wint_t key = _getwch();
+    if (key == 0 || key == 0xE0) {
+      _getwch();                /* arrows and function keys: two codes */
+      return -1;
+    }
+    if (key >= 0xD800 && key <= 0xDBFF) {
+      wint_t low = _getwch();
+      return 0x10000 + (((int64_t)key - 0xD800) << 10) + ((int64_t)low - 0xDC00);
+    }
+    return key == '\r' ? '\n' : (int64_t)key;
   }
 #else
   if (isatty(STDIN_FILENO)) {
-    struct termios saved;
-    tcgetattr(STDIN_FILENO, &saved);
-    struct termios raw = saved;
-    raw.c_lflag &= (tcflag_t)~(ICANON | ECHO);
-    raw.c_cc[VMIN] = 1;
-    raw.c_cc[VTIME] = 0;
-    tcsetattr(STDIN_FILENO, TCSANOW, &raw);
-    uint32_t result = 0;
-    while (true) {
-      int first = getc(stdin);
-      if (first == EOF) {
-        break;
-      }
-      if (first == 0x1B) {
-        /* escape sequence (arrows, function keys): skip it */
-        int second = getc(stdin);
-        if (second == '[' || second == 'O') {
-          int part;
-          while ((part = getc(stdin)) != EOF && !(part >= 0x40 && part <= 0x7E)) {
-          }
-        }
-        continue;
-      }
-      if (first < 0x20 || first == 0x7F) {
-        continue;
-      }
-      result = df_decode_utf8(first, df_read_stdin_byte);
-      break;
+    df_tty_enter_raw();
+    unsigned char first;
+    if (read(STDIN_FILENO, &first, 1) != 1) {
+      return -1;
     }
-    tcsetattr(STDIN_FILENO, TCSANOW, &saved);
-    return result;
+    if (first == 0x1B) {
+      /* an escape sequence (arrows, function keys) arrives in one piece: skip it; Esc alone is its character */
+      unsigned char next;
+      if (read(STDIN_FILENO, &next, 1) != 1) {
+        return 0x1B;
+      }
+      if (next == '[' || next == 'O') {
+        unsigned char part;
+        while (read(STDIN_FILENO, &part, 1) == 1 && !(part >= 0x40 && part <= 0x7E)) {
+        }
+      }
+      return -1;
+    }
+    if (first < 0x80) {
+      return first;
+    }
+    int extra = (first & 0xE0) == 0xC0 ? 1 : (first & 0xF0) == 0xE0 ? 2 : (first & 0xF8) == 0xF0 ? 3 : 0;
+    int64_t code = first & (0x3F >> extra);
+    for (int index = 0; index < extra; index++) {
+      unsigned char part;
+      if (read(STDIN_FILENO, &part, 1) != 1) {
+        return -1;
+      }
+      code = (code << 6) | (part & 0x3F);
+    }
+    return code;
   }
 #endif
-  /* not a terminal: the next typable character of the input */
-  while (true) {
-    int first = getc(stdin);
-    if (first == EOF) {
-      return 0;
-    }
-    if (first >= 0x20 && first != 0x7F) {
-      return df_decode_utf8(first, df_read_stdin_byte);
-    }
+  int first = getc(stdin);
+  if (first == EOF) {
+    return -1;
   }
+  return (int64_t)df_decode_utf8(first, df_read_stdin_byte);
+}
+
+/* Console.clear (stdlib 2): empties the console and puts the cursor at the top-left corner; nothing when the output is not a console */
+static void df_console_clear(void) {
+  fflush(stdout);
+#ifdef _WIN32
+  HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+  CONSOLE_SCREEN_BUFFER_INFO info;
+  if (!GetConsoleScreenBufferInfo(out, &info)) {
+    return;
+  }
+  DWORD cells = (DWORD)info.dwSize.X * (DWORD)info.dwSize.Y;
+  COORD home = { 0, 0 };
+  DWORD written;
+  FillConsoleOutputCharacterW(out, L' ', cells, home, &written);
+  FillConsoleOutputAttribute(out, info.wAttributes, cells, home, &written);
+  SetConsoleCursorPosition(out, home);
+#else
+  if (!isatty(STDOUT_FILENO)) {
+    return;
+  }
+  fputs("\x1b[H\x1b[2J", stdout);
+  fflush(stdout);
+#endif
+}
+
+/* Root.exit (stdlib 1): ends the program at once; the output is flushed, atEnd blocks and destructors do not run */
+static void df_exit(int64_t code) {
+  fflush(stdout);
+  fflush(stderr);
+  exit((int)code);
 }
 
 static void df_init(void) {
@@ -953,6 +1033,81 @@ static df_string df_str_from_lapse(int64_t l) {
     return df_str_lit("overflow", 8);
   }
   return df_str_from_i64(l >> 3);
+}
+
+/* a number as a lapse in milliseconds (spec 3.4): an integer is a date lapse (a year lapse beyond +-36 million years) */
+static int64_t df_lapse_from_ms(int64_t ms) {
+  const int64_t limit = (int64_t)1 << 60;
+  if (ms > -limit && ms < limit) {
+    return ms * 8 + 2;
+  }
+  return (ms / 31556952000LL) * 8 + 4;
+}
+
+/* a real is a clock lapse (0.1 ns), a date lapse beyond the clock range (rounding away from zero); NaN is null */
+static int64_t df_lapse_from_ms_real(double ms) {
+  if (isnan(ms)) {
+    return 0;
+  }
+  const double limit = 1152921504606846976.0;   /* 2^60 */
+  double units = ms * 1e7;
+  if (units > -limit && units < limit) {
+    return (int64_t)llround(units) * 8 + 3;
+  }
+  double whole = ms > 0 ? ceil(ms) : floor(ms);
+  if (whole > -limit && whole < limit) {
+    return (int64_t)whole * 8 + 2;
+  }
+  double years = trunc(ms / 31556952000.0);
+  return years >= limit ? (int64_t)(limit - 1) * 8 + 4 : years <= -limit ? -(int64_t)(limit - 1) * 8 + 4 : (int64_t)years * 8 + 4;
+}
+
+/* Time.sleep (stdlib 3): at least the lapse; zero, negative and null return at once */
+static void df_time_sleep(int64_t l) {
+  int64_t value = l >> 3;
+  int code = (int)(l & 7);
+  if (l == 0 || (code != 7 && value <= 0)) {
+    return;
+  }
+  const uint64_t most = (uint64_t)1 << 62;      /* about 146 years */
+  uint64_t ns;
+  if (code == 2) {
+    ns = (uint64_t)value >= most / 1000000 ? most : (uint64_t)value * 1000000;
+  } else if (code == 3) {
+    ns = ((uint64_t)value + 9) / 10;
+  } else {
+    ns = most;                                    /* years and the clock overflow */
+  }
+  fflush(stdout);
+#ifdef _WIN32
+  /* a high resolution timer when the OS has one (Windows 10 1803), else Sleep, rounded up to the millisecond */
+#ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
+#define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
+#endif
+  HANDLE timer = CreateWaitableTimerExW(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+  while (ns > 0) {
+    uint64_t part = ns > 3600000000000ULL ? 3600000000000ULL : ns;   /* at most one hour per wait */
+    bool waited = false;
+    if (timer) {
+      LARGE_INTEGER due;
+      due.QuadPart = -(LONGLONG)((part + 99) / 100);                   /* relative, in 100 ns units */
+      waited = SetWaitableTimer(timer, &due, 0, NULL, NULL, FALSE) && WaitForSingleObject(timer, INFINITE) == WAIT_OBJECT_0;
+    }
+    if (!waited) {
+      Sleep((DWORD)((part + 999999) / 1000000));
+    }
+    ns -= part;
+  }
+  if (timer) {
+    CloseHandle(timer);
+  }
+#else
+  struct timespec wait = { (time_t)(ns / 1000000000ULL), (long)(ns % 1000000000ULL) };
+  struct timespec left;
+  while (nanosleep(&wait, &left) != 0 && errno == EINTR) {
+    wait = left;
+  }
+#endif
 }
 
 /* ---- random: xoshiro256**, seeded through splitmix64 ---- */

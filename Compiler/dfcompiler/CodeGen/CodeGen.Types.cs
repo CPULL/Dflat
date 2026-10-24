@@ -30,8 +30,10 @@ public sealed partial class CodeGen {
     }
     string first = name[..dot];
     string full = (nameAliases.TryGetValue(first, out var target) ? target : first) + name[dot..];
-    if (full.StartsWith("Root.IO.") && full.IndexOf('.', "Root.IO.".Length) < 0) {
-      return full["Root.IO.".Length..];
+    foreach (string library in new[] { "Root.IO.", "Root.ExecProcess." }) {
+      if (full.StartsWith(library) && full.IndexOf('.', library.Length) < 0) {
+        return full[library.Length..];   // also Root.ExecProcess.RunResult
+      }
     }
     return full == "String.StringEncoding" ? "StringEncoding" : name;
   }
@@ -59,16 +61,18 @@ public sealed partial class CodeGen {
 
   bool IsKnownType(string t) {
     return SignedTypes.Contains(t) || UnsignedTypes.Contains(t) || RealTypes.Contains(t)
-      || t is "bool" or "char" or "string" or "byte" or "uns" or "date" or "time" or "clock" or "lapse" or "Exception" || IsEnum(t) || IsClass(t);
+      || t is "bool" or "char" or "string" or "byte" or "uns" or "int" or "date" or "time" or "clock" or "lapse" or "Exception" || IsEnum(t) || IsClass(t);
   }
 
-  // the native unsigned type (spec 3.1): the size of the cpu, set for each compilation (u64 on x64, u32 on x86)
+  // the native integer types (spec 2.1): int and uns, and the unsuffixed integer literals; the size of the cpu or of --native-int, set
+  // for each compilation (i64 / u64 on x64, i32 / u32 on x86)
+  public static string NativeInt { get; set; } = "i64";
   public static string NativeUns { get; set; } = "u64";
 
   // true in a release build: an index outside a collection is a panic (spec 6.1)
   public static bool ReleaseBuild { get; set; }
 
-  static string Normalize(string t) => t == "byte" ? "u8" : t == "uns" ? NativeUns : t;
+  static string Normalize(string t) => t switch { "byte" => "u8", "uns" => NativeUns, "int" => NativeInt, _ => t };
 
   static string Family(string t) {
     if (SignedTypes.Contains(t)) {
@@ -403,6 +407,9 @@ public sealed partial class CodeGen {
     if (IsNullable(from)) {
       return false;
     }
+    if (to == "lapse" && IsNumeric(from)) {
+      return true;     // a number is a lapse in milliseconds (spec 3.4)
+    }
     if (IsTuple(to) && IsTuple(from)) {
       var toElems = TupleElems(to);
       var fromElems = TupleElems(from);
@@ -482,6 +489,10 @@ public sealed partial class CodeGen {
           Convert(new Expr($"{temp}.e{index}", fromElems[index].Type), elem.Type, at));
         return $"(({CType(to)}){{ {string.Join(", ", fields)} }})";
       });
+    }
+    if (to == "lapse" && IsNumeric(e.Type)) {
+      // milliseconds: an integer gives a date lapse, a real a clock lapse (spec 3.4)
+      return RealTypes.Contains(e.Type) ? $"df_lapse_from_ms_real((double)({e.Code}))" : $"df_lapse_from_ms((int64_t)({e.Code}))";
     }
     if (!Assignable(to, e.Type)) {
       throw Error($"cannot convert {e.Type} to {to} implicitly; use a cast", at);

@@ -1,5 +1,5 @@
 **Standard library**
-Version 0.0.9 2026/10/17 by CPU
+Version 0.0.10 2026/10/25 by CPU
 - Type members live on the types: `d.year`, `d.addDays(3)`, `s.split(",")`, `c.isDigit`, `list.sort()`.
 
 # 1 Program
@@ -7,6 +7,7 @@ Version 0.0.9 2026/10/17 by CPU
 | Definition | Example | Description |
 |---|---|---|
 | `arr<string> getArgs()` | `arr<string> args = Root.getArgs()` | Returns the command-line arguments; index 0 is the program name (as in C and Rust). Returns an empty array when there are no arguments and no program name (e.g. micro-controllers). Same object as the `args` parameter of `main` [14.1](dflat-spec.md#141-entry-point) |
+| `exit(int code)` | `Root.exit(2)` | Ends the program at once with the exit code. The console output is flushed; the `atEnd` blocks and the destructors of the objects still alive do not run (as C `exit` and Rust `process::exit`) |
 
 # 2 Console
 Access to stdinput and stdoutput and stderror
@@ -16,8 +17,18 @@ Access to stdinput and stdoutput and stderror
 | `log(any value)` | `Root.Console.log("Hello")` | Converts the object to string if needed, prints on stdout appending a newline |
 | `logError(any value)` | `Root.Console.logError("Hello")` | Converts the object to string if needed, prints on stderr appending a newline |
 | `print(any value)` | `Root.Console.print("Hello")` | Converts the object to string if needed, prints on stdout |
-| `char read()` | `char c = Root.Console.read()` | Reads a character from stdin and returns it, returns '\0' at end of input |
+| `char? read()` | `char? c = Root.Console.read()` | Does not wait: returns the character of a key already pressed, or `null` when no key is waiting. No echo and no Enter needed. Details below |
 | `string readLine()` | `string line = Root.Console.readLine()` | Reads a line from stdin and returns it, the line is not stripped of the newline character, if any. Returns "" at end of input |
+| `clear()` | `Root.Console.clear()` | Clears the console and puts the cursor at the top-left corner, so the program can write a full "screen" again. Details below |
+
+- `read()`:
+  - Keys without a character (arrows, function keys) give `null`. Enter gives `'\n'` on every OS. A full input system (all the keys, key up and down) is a separate library, later.
+  - When the input is not a console (redirected from a file or a pipe), `read()` returns the next character of the input, and `null` at the end of the input.
+  - `readLine()` waits for Enter and echoes the text as usual, also after calls of `read()`.
+- `clear()`:
+  - Works the same on every OS: the runtime uses the method of the OS (ANSI sequences on Linux and macOS, the console API on Windows), so the program needs no `##if`.
+  - Does nothing when the output is not a console (redirected to a file or a pipe) or on a target without a console.
+  - Clears what is on the screen; whether the scrollback of the terminal is also cleared depends on the OS.
 
 # 3 Date and Time
 Mostly used to get current date and time and to measure elapsed at nanosecond scale
@@ -26,6 +37,7 @@ Mostly used to get current date and time and to measure elapsed at nanosecond sc
 |---|---|---|
 | `date now()` | `date d = Root.Time.now()` | Gets the current time in UTC. A `date` prints as ISO 8601, UTC, to the millisecond: `2026-10-11T14:03:22.123Z` |
 | `clock clock()` | `Root.Time.clock()` | Returns a u64 monotonic counter with a resolution of 0.1 ns; `clock()` never returns 0 |
+| `sleep(lapse duration)` | `Root.Time.sleep(250)` | Stops the program for at least `duration`. The OS decides the precision: the pause can be a little longer, never shorter. A zero, negative or null lapse returns at once. A number is a lapse in milliseconds [3.4](dflat-spec.md#34-lapse): `sleep(250)` is 250 ms, `sleep(0.5)` is half a millisecond |
 
 - `date`, `time`, `clock` and `lapse` are already nullable (`type?` is a compile error on them) and a variable of these types without a value starts as null. A `clock` prints as its number, a `lapse` as its number in its own unit, and null as `null`.
 - `time` [3.3](dflat-spec.md#33-date-and-time) is the time of day, millisecond resolution; parsing in section 9.
@@ -112,6 +124,15 @@ The `File` manager class and the `Stream` base class with `FileStream` are speci
 - A path with illegal characters raises `InvalidPathException` (not silent) when the `File` is created.
 - `File.combinePaths(path1, path2)` joins exactly two paths and returns a `string`.
 - Drive letters on other OS and network paths: later.
+
+Functions of `Root.IO` for paths and the current directory:
+
+| Definition | Description |
+|---|---|
+| `File getCurrentDir()` | The current directory of the program, as a `File` |
+| `setCurrentDir(File directory)`, `setCurrentDir(string path)` | Changes the current directory of the program; relative paths are resolved from it. A missing directory raises `FileNotFoundException`, a path that is a file raises `InvalidPathException`, a directory that cannot be entered raises `InvalidFileAccessException` |
+| `string getFullPath(string path)` | The absolute normalized path: a relative path is resolved from the current directory, `.` and `..` are removed. The item does not need to exist |
+| `string getRelativePath(string from, string to)` | The path that goes from the directory `from` to `to` (`../lib/x.df`), both made absolute first; `.` when they are the same; the absolute `to` when the two are on different drives |
 
 ## 6.3 The `File` class
 
@@ -360,5 +381,41 @@ Status: the base class and `FileStream` are defined. Memory, console and text st
 - Before 0.1.0: regular expressions in `match`
 - Normalization details: drive letters on other OS, network paths
 - The full list of exceptions of the File manager and their final names
+
+# 7 Running programs
+
+`Root.ExecProcess` runs other programs (executables) and reads the environment of the program.
+
+| Definition | Description |
+|---|---|
+| `RunResult run(string program, arr<string> args = [], string workDir = "", string input = "", lapse timeout = null)` | Starts the program, writes `input` to its standard input, waits for it to end and captures its standard output and standard error |
+| `int exec(string program, arr<string> args = [], string workDir = "")` | Starts the program on the same console (its input and output are the ones of this program, nothing is captured), waits for it to end and returns its exit code |
+| `string getEnv(string name)` | The value of an environment variable; `""` when it does not exist. On Windows the name is not case sensitive |
+
+`RunResult` (a class, `Root.ExecProcess.RunResult`), read-only fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `exitCode` | `int` | The exit code of the program; `-1` when it did not start or was stopped by the timeout |
+| `output` | `string` | What the program wrote on its standard output |
+| `errors` | `string` | What the program wrote on its standard error |
+| `timedOut` | `bool` | True when the timeout stopped the program |
+| `error` | `Exception` | Why the program could not start; `null` when it started |
+
+- `program` is a name or a path. A name without a folder is searched in the folders of the `PATH` environment variable; on Windows `.exe` is added when the name has no extension.
+- The arguments are passed one by one, exactly as written: there is no shell, so spaces, quotes, `*` and `$` in an argument are not interpreted. A program that needs a shell runs it: `run("sh", ["-c", "ls *.df"])`, `run("cmd", ["/c", "dir"])`.
+- `workDir` is the current directory of the program; `""` is the current directory of this program.
+- `output`, `errors` and `input` are UTF-8 text. Text in other encodings is taken as it comes: invalid UTF-8 is not an error, it can only show wrong characters. Most of the outputs are ASCII.
+- A non-zero exit code is not an error: it is only `exitCode`. On Linux and macOS a program ended by a signal gives `128 +` the signal number (as the shells do).
+- `timeout`: `null` waits without limit. When the time is over the program is killed, `timedOut` is true, and `output` and `errors` keep what was written until then. A number is a lapse in milliseconds: `timeout: 5000`.
+- Failures to start: `run` never raises; it puts the exception in `error` (`FileNotFoundException` when the program is not found, `InvalidFileAccessException` when it cannot be run, `FullPathNotFoundException` when `workDir` does not exist, `GenericIOErrorException` for the rest). `exec` raises the same exceptions, not silent.
+- Both functions wait for the end of the program, so it never outlives the call.
+
+## 7.1 Later
+
+- A `Process` object that starts a program and goes on without waiting, with `stdin`, `stdout` and `stderr` as streams (it needs the console and pipe streams, 6.8), `isRunning`, `exitCode`, `wait(timeout)`, `kill()`.
+- When a `Process` object ends while its program still runs, the named parameter `endBehavior` of its constructor decides what happens: `enum Root.ExecProcess.ProcessEndBehavior { Wait, Kill, Detach }`, `Kill` by default. `Wait` waits for the program to end, `Kill` stops it, `Detach` leaves it running on its own.
+- An environment for the started program (a parameter of `run` and `exec`); it needs `map`.
+- `tryGetVar(name)`, if a program needs to tell a missing variable from an empty one.
 
 ---

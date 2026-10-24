@@ -1,0 +1,1 @@
+lapse_from_string.df(1): error: cannot convert string to lapse implicitly; use a cast

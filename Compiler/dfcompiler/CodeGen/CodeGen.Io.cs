@@ -136,6 +136,31 @@ public class File(string path) {
     Root.IO.Native.Combine(File.fixPath(path1), File.fixPath(path2))
   }
 
+  // Root.IO.getCurrentDir, setCurrentDir, getFullPath, getRelativePath (stdlib 6.2): the calls are sent here (LibraryStaticPath)
+  public static fun File getCurrentDir() {
+    string path = Root.IO.Native.CurrentDir()
+    File.check(path)
+    return File(path)
+  }
+  public static fun setCurrentDir(string path) {
+    string p = File.fixPath(path)
+    Root.IO.Native.SetCurrentDir(p)
+    File.check(p)
+  }
+  public static fun setCurrentDir(File directory) {
+    File.setCurrentDir(directory.path)
+  }
+  public static fun string getFullPath(string path) {
+    string result = Root.IO.Native.FullPath(File.fixPath(path))
+    File.check(path)
+    return result
+  }
+  public static fun string getRelativePath(string from, string to) {
+    string result = Root.IO.Native.RelativePath(File.fixPath(from), File.fixPath(to))
+    File.check(to)
+    return result
+  }
+
   //OPEN-STATIC
 
   // object methods

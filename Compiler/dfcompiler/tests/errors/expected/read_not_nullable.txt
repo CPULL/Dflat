@@ -1,0 +1,1 @@
+read_not_nullable.df(1): error: this char? value may be null; unwrap it with '??' or 'enforce'

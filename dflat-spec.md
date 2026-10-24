@@ -384,6 +384,9 @@ Signed 64-bit; raw value = `value × 8 + code`.
 - `date − date` → date lapse; `clock − clock` → clock lapse; `date − clock` → date lapse. `date + time` → date. `date − time` → date. `time − time` → date lapse.
 - Mixed units convert to date lapse, rounding away from zero. Null propagates.
 - Lapses format as numbers in their own unit.
+- There is no `lapse` literal: a number converts implicitly to a `lapse`, in milliseconds, wherever a `lapse` is expected (`lapse l = 1500`, `Root.Time.sleep(250)`, `timeout: 5000`).
+  - An integer gives a date lapse (ms); beyond ±36 million years, a year lapse.
+  - A real gives a clock lapse (0.1 ns), so the fraction keeps the precision below the millisecond: `0.5` is half a millisecond. Beyond the clock range (±3.6 years) it gives a date lapse, rounding away from zero. NaN gives null.
 
 ## 3.5 Conversions
 - **Cast `(type)`**: keeps the value; out of range saturates (level 2 warning), or raises `OutOfRangeCastException` if a specific catch exists. From `r`: truncates toward zero (Rust rules), +∞ → max, −∞ → min (0 for unsigned), NaN → 0.
@@ -631,7 +634,7 @@ A member marked `–` is a compile error on that collection (for example `hasKey
 - Reading a missing map key gives the null or zero value of the value type; no exception. Use `hasKey` or `tryGet` to know whether the key exists.
 - `add(v)`: appends to `vec` and `list`. `add(k, v)`: adds the pair to a map, or replaces the value of an existing key; returns `false` when it replaced, `true` when the key is new. On sets it returns `true` if the value was added.
 - `add(collection)`: appends the items of another collection to `vec` and `list`; on maps it merges another map (the new value wins, no return value); on sets it returns the number of items actually added.
-  - On `vec` and `list`: items of basic types are copied. Objects are moved with `v.add(->other)`: the items move, the other collection ends and its variable becomes null (12); a plain `v.add(other)` with objects is a compile error until cloning exists (12). The same collection as source and target raises `ModifyingProtectedSourceException`.
+  - On `vec` and `list`: items of basic types are copied. Objects are moved with `v.add(->other)`: the items move, the other collection ends and its variable becomes null (12); a plain `v.add(other)` clones the items, with the rules of `other!` (12.6), and leaves `other` unchanged. The same collection as source and target raises `ModifyingProtectedSourceException`.
 - `insert(index, value)`: `index` goes from `0` to `.len` (`.len` appends); a larger index raises `IndexOutOfRangeException`.
 - `pop((&)out)`: removes the last item of a `vec` and moves it into `out` (the ownership passes to `out`); it returns `true` (the `isValid` of the result). On an empty `vec` it returns `false` and `out` gets the default value of its type (null for objects, `0` for numbers, `""` for `string`). There is no other form of `pop` and no `tryPop`; no exception is raised. The previous value of `out` is dropped.
 - `has(v)`: true if the value is present (on maps, searches the values). `hasKey(k)`: true if the key exists.
@@ -1150,6 +1153,7 @@ public class Circle(r64 radius) : Shape {
 - Header: `class Name(params) : [parent class], [traits]`. `Root.Class` is the implicit base of every class and is never written; writing it in a header is a level 1 warning.
 - The parent class, if any, goes before all traits; a class listed after a trait is a compile error. Names are resolved from the context; when a name is ambiguous the namespace qualifies it.
 - A class and a trait with the same name in the same namespace is a compile error.
+- `notclonable` before `class` (after the visibility: `public notclonable class File`) makes the class not clonable: `clone()` and `a!` on it are a compile error (12.6).
 - `atEnd` is a reserved word: it cannot be the name of a type, trait, variable, parameter or field.
 - No `new`: `Circle c = Circle(2.0)`.
 - `this` is the current object. It is optional (members are reachable by name) and needed only to disambiguate (`this.name = name`). It can be passed as an argument (`registry.Add(this)`), following the normal parameter rules; `->this` is a compile error (an object cannot give away its own ownership).
@@ -1468,6 +1472,18 @@ fun r64 toReal(Convertible item) {
 - Coverage is checked at the definition: a type that can reach the switch and has no matching case and no `default` is a compile error.
 - The first matching case wins, so the order matters. A case that can never match because the earlier ones already cover all its types is a level 2 warning (dead code).
 - `T is type` (11.1.3) stays the form for one check; `value is ? { }` is the form for many.
+- Cases are separated by commas.
+- On an object the switch is chosen at run time by the class of the object (`if v is Circle c`, 11.1, is the form for one check). A case can bind a variable: `x` is the object seen as the case type; it is a borrow (`->x` is a compile error, `->obj` still works). Each case is its own scope, so the cases can use the same name.
+
+```
+obj is ? {
+  Dog x: x.woof(),
+  Cat x: x.meow(),
+  Animal: print("Not supported")
+}
+```
+
+- The more specific classes go first: a case after a parent class that already matches is never reached (level 2 warning).
 
 ### 11.3.8 Null in generic code
 
@@ -1498,7 +1514,9 @@ The value on the right is evaluated first. If it converts implicitly (section 6)
 ### 11.3.10 Classes inside generics
 
 - A `Box<Animal>` holds `Dog` and `Cat` objects as `Animal`: only the `Animal` members are visible, an `override` still runs the `Dog` version, and `v is Dog d` (11.1) gets the `Dog` back.
-- A `Box<Dog>` is converted to `Box<Animal>` automatically, with the Rust model: the conversion moves the box and the original can no longer be used, so no one sees one box as two types. Conversion of borrowed values and of collections: open item (99).
+- A `Box<Dog>` is converted to `Box<Animal>` automatically, with the Rust model: the conversion moves the box and the original can no longer be used, so no one sees one box as two types.
+- The same holds for the collections: an owned `vec<Dog>` moves into a `vec<Animal>` (`vec<Animal> animals = ->dogs`); the items keep their class.
+- A read-only borrow converts too: a `vec<Dog>` (or a `Box<Dog>`) can be passed as `&vec<Animal>`, because through it the items are only read. A writable borrow `(&)vec<Animal>` of a `vec<Dog>` is a compile error: it could put a `Cat` into it.
 
 ### 11.3.11 Ownership in generic code
 
@@ -1571,8 +1589,9 @@ Rust model, Dflat syntax.
 | `b = a` | same object, no ownership change (compiler checks lifetimes) |
 | `->a` | ownership moves: `Item b = ->a`, `f(->a)`, `list.add(->a)` |
 | `b _= a` | weak reference |
-| `a!` | copy |
-| `.clone()` | method: owned parts duplicated, counted parts +1 owner, other references become weak; overridable |
+| `a!` | copy: a shortcut for `a.clone()` (12.6) |
+| `.clone()` | method: a deep copy that follows the kind of each field (12.6); overridable |
+| `.tryClone()` | method: like `.clone()`, raises `ObjectNotClonableException` when the object cannot be cloned (12.6) |
 | `.asRefCount` | object becomes reference counted; `=` then adds an owner; repeated calls ignored |
 | `.asSharedRefCount` | thread-safe counting |
 | `.isRC` | true for both kinds |
@@ -1701,6 +1720,38 @@ class ListIterator<Item>(&list<Item> collection as parent) : IndexIterator<Item>
 - A child item whose ownership changes (moved with `->`, returned by a function, or put into a field or a collection) is an adopted child: it can outlive its parent, which can end at any moment: on every method call it checks its reference to the parent. If it is null, the child runs its own `atEnd` (without calling the parent) and raises `UsageOfDestroyedObjectException` (15.3). The compiler emits these checks only for adopted children and gives a level 2 warning (19.3).
 - A method marked `asparent` can be called only by the object itself and by its children, through their parent reference, even when it is read-only. It is not public. It can change the parent.
 - `unrestricted` replaces `public` in the visibility slot and includes it: the method can also be called through a read-only reference (`&`). A plain `public` method needs an owned or writable reference. Properties can be read through `&`; assigning to them is a compile error.
+
+## 12.6 Cloning
+
+```
+Dog copy = dog!                               // same as dog.clone()
+Dog? other = dog.tryClone()                   // ObjectNotClonableException when it cannot be cloned
+any Shape s2 = shape.tryClone()               // a trait type needs tryClone
+
+public notclonable class File { }
+```
+
+- `a!` is a shortcut for `a.clone()`. Every class is clonable by default; a class changes the behavior by overriding `clone()`, and an override can do anything.
+- The default `clone()` builds a new object and fills each field by its kind:
+
+| Field | In the clone |
+|---|---|
+| native (numbers, `bool`, `char`, `string`, enums, bitfields, structs) | duplicated, it is a value |
+| owned object | deep cloned with the same rules; null when it cannot be cloned |
+| owned child (an object that has a parent, 12.5) | null: a child is never duplicated, a new one comes from the functions of its parent |
+| reference counted object | another reference: the object gets one more owner |
+| borrowed (`&`, `(&)`) | null |
+| weak reference | another reference to the same object; remapped when it points into the object's own parts |
+
+- Any field that cannot be duplicated, for any reason, becomes null in the clone.
+- Remapping: a weak reference that points to an object owned by the clone tree (the object itself or something it owns) points to the copy of that object in the clone, not to the original. The clone keeps a table from originals to copies only while `clone()` runs, and only for classes that have weak fields; the other classes are a plain recursive copy.
+- A clone never inherits the children of the original: a cloned collection has copies of its items and no iterators or views.
+- Collections: the items follow the rules of the fields (owned items are cloned, children become null). `c!` and `c[a..b]!` (6.5) clone the items.
+- Objects that cannot be cloned; calling `clone()` or `a!` on them is a compile error:
+  - a class marked `notclonable`, written before `class` (`public notclonable class File`); it is meant for classes that hold a resource (files, sockets, connections);
+  - an object that has a parent (`as parent`, 12.5): a new child comes from the functions of its parent;
+  - an `unsafe` class (12.1) and a class with pointer fields (`*T`, `(*)T`); there is no opt-in, a class that needs it writes its own `clone()`.
+- `tryClone()` returns the clone or raises the non-silent `ObjectNotClonableException` (15.3) when the object cannot be cloned; the result is then null. It is needed when the class is not known at compile time (a value of a trait type, `any Shape`): there `clone()` and `a!` are a compile error.
 
 ---
 
@@ -1934,6 +1985,7 @@ class Exception {
 | 46 | `ModifyingIteratedCollectionException` | |
 | 47 | `InvalidIteratorReleaseException` (6.4, 11.2) | |
 | 48 | `UsageOfDestroyedObjectException` (12.4, 12.5) | |
+| | `ObjectNotClonableException` (12.6) | |
 
 - The list grows during development; each new standard exception takes the next ID.
 - `UsageOfDestroyedObjectException`: raised when an object that is gone is used: a child whose parent ended (12.5), or a variable released with `->` or `is atEnd.` (12.4). It is not silent and is catchable in Debug and Release builds (no `Panic` in Release).
@@ -2172,11 +2224,39 @@ Print("macOS")
 | Variable | Values |
 |---|---|
 | `os` | `windows`, `linux`, `osx` |
-| `cpu` | `x86`, `x64`, `arm` |
+| `cpu` | one of the cpus of the table below |
 | `arch` | `<os>_<cpu>`, for example `linux_x64`; test `arch` for the combination, `os` or `cpu` alone for one of them |
-| `bits` | 8, 16, 32 or 64: from the target (64 for `win-x64` and `linux-x64`) or from a custom architecture |
+| `bits` | 8, 16, 32 or 64: the size of the cpu (table below) or of a custom architecture |
 | `int`, `uns`, `real` | the native size in bits of the type: the size of the cpu (64 on x64, 32 on x86), or the size forced by `--native-int` and `--native-real`; `uns` has the size of `int` |
-| `endian` | `little`, `big`: derived from the cpu (`x86`, `x64` and `arm` are little endian; a custom architecture can be big endian) |
+| `endian` | `little`, `big`: from the cpu (table below; a custom architecture can say otherwise) |
+
+The cpus (the names are Dflat names, not the names of clang):
+
+| `cpu` | Bits | Endian |
+|---|---|---|
+| `x86` | 32 | little |
+| `x64` | 64 | little |
+| `arm32` | 32 | little |
+| `armeb` | 32 | big |
+| `arm64` | 64 | little |
+| `arm64be` | 64 | big |
+| `arm64_32` | 64 (32-bit addresses) | little |
+| `riscv32` | 32 | little |
+| `riscv64` | 64 | little |
+| `ppc32` | 32 | big |
+| `ppc64` | 64 | big |
+| `ppc64le` | 64 | little |
+| `mips` | 32 | big |
+| `mipsel` | 32 | little |
+| `mips64` | 64 | big |
+| `mips64el` | 64 | little |
+| `sparc` | 32 | big |
+| `sparcel` | 32 | little |
+| `sparcv9` | 64 | big |
+| `avr` | 8 | little |
+| `m68k` | 32 | big |
+
+- A cpu the compiler does not build for yet is a compile error: `<sparc> is not yet a supported cpu`.
 | `build` | `debug` (the default), `release` (`--release`) |
 | `exceptions` | `on`, `off` (`off` when the target has no exceptions, 15.6) |
 | `ram` | a number of bytes; written as `<number>[kb\|mb\|gb]` (`ram >= 64kb`). 4gb unless a custom architecture says otherwise |
@@ -2238,7 +2318,6 @@ Level 1 = most important, level 3 = least.
 - Binding in generic checks (`T is i32`: type of `other` inside the branch)
 - Generics: `Generic` sets declared inside a class (for now namespace level only)
 - Generics: a variable declared with a set as type argument (`Box<Num> b`) and the type it takes
-- Generics: conversion of borrowed generic values and of collections (`vec<Dog>` to `vec<Animal>`)
 - Generics: `where` on class and trait headers
 - Generics: whether `clock`, `lapse`, `addr` and pointers (nullable by default, 7.1) count as real nullables in a set, like `date`, `time` and objects (11.3.8)
 - Generics: whether the level 1 warning of `->` on a basic type (12.4) fires inside generic code
@@ -2666,3 +2745,20 @@ Level 1 = most important, level 3 = least.
 - 12.5, 6.4, 6.5, 6.7, 6.8.3 The parent knows its children and, when it ends, nulls their reference to it; it does not destroy them. A child item moved with `->` (adopted child) checks its parent reference on every method call; a child never moved needs no checks. The two open items on parent and child objects are removed from 99 (the parent holds the links)
 - 12.5 An adopted child is a child whose ownership changes: moved with `->`, returned by a function (a return always moves, as in Rust), or put into a field or a collection; an `asparent` method can also be called by the object itself
 - 1.6 The duplicated heading is removed; `asparent` in 1.6.1 and 1.6.2: the object itself and its children can call it (as in 12.5)
+
+## Changes in the next version (version and date set when merging)
+
+- 12, 12.6 Cloning (new section): `a!` is a shortcut for `.clone()`; classes are clonable by default and `clone()` can be overridden freely; the default clone fills each field by its kind (native duplicated, owned deep cloned, owned child null, reference counted one more owner, borrowed null, weak another reference); anything that cannot be duplicated becomes null; weak references into the object's own parts are remapped to the copies; a clone has none of the children of the original
+- 12.6 Not clonable (compile error): a `notclonable` class, an object that has a parent, an `unsafe` class, a class with pointer fields; through a trait type `clone()` is a compile error and `tryClone()` is used
+- 12.6 New `tryClone()`: returns the clone or raises `ObjectNotClonableException`, not silent
+- 11.1 New class modifier `notclonable`, written before `class`
+- 12 Table: `a!`, `.clone()` rewritten (was: "other references become weak"), `.tryClone()` added
+- 15.3 New exception `ObjectNotClonableException` (not silent; its ID is set at 0.1.0)
+- 6.6 `add(collection)` on `vec` and `list`: the plain form with objects clones the items with the rules of 12.6 and leaves the source unchanged (was: a compile error until cloning)
+- 11.3.10 Conversion of collections: an owned `vec<Dog>` moves into a `vec<Animal>`; a read-only borrow `&vec<Animal>` (and `&Box<Animal>`) of a `vec<Dog>` is allowed; a writable borrow `(&)` is a compile error
+- 11.3.7 Type switch on objects: chosen at run time by the class, cases separated by commas, a case can bind a borrowed variable (`Dog x: x.woof()`, the same name in several cases is allowed), a case after a parent that already matches is a level 2 warning
+- 99 Open items: conversion of borrowed generic values and of collections removed (decided, 11.3.10)
+- 19.1 `cpu` values: `x86`, `x64`, `arm32`, `armeb`, `arm64`, `arm64be`, `arm64_32`, `riscv32`, `riscv64`, `ppc32`, `ppc64`, `ppc64le`, `mips`, `mipsel`, `mips64`, `mips64el`, `sparc`, `sparcel`, `sparcv9`, `avr`, `m68k`, with their size and endianness (Dflat names, not the names of clang; was `x86`, `x64`, `arm`); `bits` and `endian` come from the cpu; a cpu not built yet is a compile error
+- 3.4 A number converts implicitly to a `lapse`, in milliseconds (there is no `lapse` literal): an integer gives a date lapse, a real gives a clock lapse (a date lapse beyond ±3.6 years, rounding away from zero; NaN gives null)
+- 17 Standard library 0.0.10: `Root.exit(int code)`; `Root.Console.read()` returns a `char?` and does not wait (null when no key is pressed, no echo, no Enter); `Root.Console.clear()`; `Root.Time.sleep(lapse duration)`; `Root.IO.getCurrentDir()`, `setCurrentDir(File | string)`, `getFullPath`, `getRelativePath`
+- 17 Standard library 0.0.10, section 7 Running programs (new): `Root.ExecProcess.run` (gives a `RunResult`: `exitCode`, `output`, `errors`, `timedOut`, `error`), `exec` (same console, returns the exit code, raises `FileNotFoundException` when the program is not found), `getEnv` (`""` when missing); arguments as an array, no shell; the `Process` object and `ProcessEndBehavior { Wait, Kill, Detach }` are for later

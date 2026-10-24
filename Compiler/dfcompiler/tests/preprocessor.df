@@ -4,7 +4,7 @@ alias Root as r
 ##define mode = fast
 ##define amount = 40
 ##define flag = true
-##define good = (os == windows && cpu == x64) || (os == linux && (cpu == x64 || cpu == arm))
+##define good = (os == windows && cpu == x64) || (os == linux && (cpu == x64 || cpu == arm64))
 
 ##if good
 r.Console.log("supported")
@@ -55,7 +55,7 @@ r.Console.log("ram 4gb")
 ##if coptlev == 2 && coptmode == speed
 r.Console.log("optimization 2 for speed")
 ##endif
-##if int == 32 && real == 64 && uns == int
+##if int == bits && real == 64 && uns == int
 r.Console.log("native sizes")
 ##endif
 ##if endian == little && exceptions == on && bits >= 32

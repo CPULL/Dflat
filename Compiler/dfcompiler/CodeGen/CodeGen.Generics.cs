@@ -94,6 +94,7 @@ public sealed partial class CodeGen {
   // a type) is added to the seeds and the whole compilation starts again from a fresh copy of the tree.
   public static (string C, IReadOnlyList<string> Warnings) Compile(Node tree, bool release = false, int nativeBits = 64) {
     ReleaseBuild = release;
+    NativeInt = nativeBits >= 64 ? "i64" : "i32";
     NativeUns = nativeBits >= 64 ? "u64" : "u32";
     var seeds = new GenericSeeds();
     for (int attempt = 0; ; attempt++) {

@@ -1,6 +1,13 @@
-Compiler version 0.0.20 alpha for version 0.0.14 of the specs 2026/10/24
+Compiler version 0.0.21 alpha for version 0.0.14 of the specs 2026/10/25
 
 Changes from the previous version -----------------------
+- stdlib 0.0.10: Root.exit(code); Root.Console.read() gives a char? and does not wait (null when no key is pressed, no echo); Root.Console.clear(); Root.Time.sleep(lapse)
+- a number converts to a lapse in milliseconds (spec 3.4): integer = date lapse, real = clock lapse
+- Root.IO.getCurrentDir, setCurrentDir (File or string), getFullPath, getRelativePath
+- Root.ExecProcess: run (RunResult: exitCode, output, errors, timedOut, error), exec (same console, throws when the program cannot start), getEnv; Unix side not compiled yet
+- native size: unsuffixed integer literals and the new type int have the native size (i64 on x64), like uns; a literal that does not fit takes i64
+- options --os, --cpu, --native-int (also os=, cpu=, native-int= in the .dsprj); the cpu names of spec 19.1; a cpu not built gives "<sparc> is not yet a supported cpu"
+- preprocessor: int, uns, bits and endian come from the same native size and cpu as the code (int and uns were 32)
 - list: every node is allocated on its own (a pointer to the next node and the item); sort and reverse relink the nodes
 - list: truncate, removeAt(range), add(collection), copyFrom, transformTo<Kind>() (also on arr and vec), .sizeof (also on arr and vec)
 - vec and list: a for loop holds a counter of open iterators; while it is above zero the size and the order cannot change (ModifyingIteratedCollectionException); c[i] = v, swap, replace, fill(value) and clear() are allowed
@@ -43,14 +50,17 @@ Stream and FileStream (stdlib 6.8): read, write, readByte, writeByte, seek, flus
 String formats (8.3): w / wc width in characters / columns, f fill, a< a^ a>, t<'marker' / t>'marker' (needs a width), cU cL cS cT, q, s sl sr; a width never cuts; wc uses an approximate table of wide East Asian and emoji ranges
 Reference parameters (13.1): &T x (read-only, no marker in the call) and (&)T x (writable, the call writes (&)x) for variables, fields, tuple fields and array items; also through another reference parameter; with overloads, named arguments and defaults (read-only only). tryParse still has its own library form
 A catch always names an exception type (catch Exception { } is the sinkhole of the non silent exceptions); the old shorthand catch ex { } is an error
-Preprocessor (spec 19.1, 2026/10/21): ##define ##if ##elseif ##else ##endif ##region ##endregion ##emiterror ##emitwarning, with the variables os cpu arch bits int uns real endian build exceptions ram version coptlev coptmode and the variables of the project file (CompilerVar). Project file .dsprj: source/root output target cc emit-c coptlev coptmode build CompilerVar (the other options give "not built yet")
-Options of the compiler: the built ones (--output, --target, --emit-c, --run, --cc, --version, --coptlev, --coptmode, --debug, --release) follow Compiler_Options.md: names not case sensitive, --run last, program arguments after --. The rest of the options and the .dsprj project file are defined in Compiler_Options.md and not built yet
+Preprocessor (spec 19.1, 2026/10/21): ##define ##if ##elseif ##else ##endif ##region ##endregion ##emiterror ##emitwarning, with the variables os cpu arch bits int uns real endian build exceptions ram version coptlev coptmode and the variables of the project file (CompilerVar). Project file .dsprj: source/root output target os cpu native-int cc emit-c coptlev coptmode build CompilerVar (the other options give "not built yet")
+Options of the compiler: the built ones (--output, --target, --os, --cpu, --native-int (32 and 64), --emit-c, --run, --cc, --version, --coptlev, --coptmode, --debug, --release) follow Compiler_Options.md: names not case sensitive, --run last, program arguments after --. The rest of the options and the .dsprj project file are defined in Compiler_Options.md and not built yet
 Test runner: tests\run-tests.ps1 compares the output of every test program with tests\expected\<name>.txt, and the compiler errors of the programs in tests\errors (60 cases that must not compile) with tests\errors\expected (see CompilerImplementation.txt, THE TEST RUNNER)
 Naming: the standard library functions are camelCase (Root.Console.log, Root.getArgs, Root.Time.now, Root.Random.int, Math.sqrt, string.trim, char.isDigit ...); namespaces and types stay PascalCase, constants UPPERCASE. aSin, aCos, aTan, aTan2 are accepted next to asin, acos, atan, atan2; Math.PI2 added
 Scope atEnd
 Entry point: top-level code, or main(), main(arr<string> args), main(string args...) with an int exit code
 Program arguments: Root.GetArgs(), --run -- args (UTF-8 on every target)
-Standard library: Console, Time (Now, Clock), Math, Math32 (PI, PI_HALF, E, SQRT2, R2D, D2R), Random (Seed, Int, Real, RealRange, Shuffle)
+Standard library: Console (log, logError, print, read without waiting, readLine, clear), Time (now, clock, sleep), Math, Math32 (PI, PI_HALF, E, SQRT2, R2D, D2R), Random (Seed, Int, Real, RealRange, Shuffle), Root.exit
+Root.ExecProcess (stdlib 7, 2026-10-25): run with RunResult, exec, getEnv; the Unix side is written but not compiled yet (no Linux headers here). Not yet: the Process object, ProcessEndBehavior
+Root.IO paths (stdlib 6.2, 2026-10-25): getCurrentDir, setCurrentDir, getFullPath, getRelativePath
+lapse from a number (spec 3.4): milliseconds, integer = date lapse, real = clock lapse
 String functions (all of 4.2): Trim*, Substr, Replace, IndexOf, LastIndexOf, Contains, StartsWith, EndsWith, Split, ToLower, ToUpper, PadLeft, PadRight, ToCStr with StringEncoding; case-insensitive options, named arguments
 Char functions (all of 4.1): Is* tests and ToUpper / ToLower, from the Unicode data of the compiler (no locale)
 date, clock, lapse (null, compare, subtract, print)
@@ -83,7 +93,7 @@ Custom exception classes, catch by trait
 Class atEnd
 128/256-bit ints, r16/r128
 dec
-int/uns/real, native size (main may return int: it is an i32)
+real (native size), --native-real, --native-addr; --native-int with 8, 16, 128, 256; the cpus of spec 19.1 other than x86, x64, arm64 (int and uns are done: native size, main may return int and gives an i32 exit code)
 parse of dec
 Imports, multiple files
 TextStream, MemoryStream, ConsoleStream, async read / write, array views as buffers

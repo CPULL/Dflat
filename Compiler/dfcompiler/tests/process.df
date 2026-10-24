@@ -1,0 +1,112 @@
+namespace process
+alias Root as r
+alias Root.IO as fs
+alias Root.ExecProcess as ep
+
+// a number is a lapse in milliseconds (spec 3.4): an integer gives a date lapse, a real a clock lapse (0.1 ns)
+lapse whole = 1500
+lapse half = 0.5
+lapse negative = -3
+lapse fromVariable = 250 + 50
+r.Console.log($"lapses: {whole} {half} {negative} {fromVariable}")
+
+// sleep (stdlib 3): at least the time asked; zero and negative return at once
+clock start = r.Time.clock()
+r.Time.sleep(30)
+r.Time.sleep(0)
+r.Time.sleep(-5)
+r.Time.sleep(0.25)
+r.Console.log($"slept, the clock moved: {r.Time.clock() != start}")
+
+// Console (stdlib 2): with the input redirected, read gives the next character and null at the end; clear does nothing
+char? key = r.Console.read()
+r.Console.log($"read at the end of the input: {key == null}, as text: {key ?? '-'}")
+r.Console.clear()
+r.Console.log("clear on a redirected output prints nothing")
+
+// environment
+r.Console.log($"PATH is set: {ep.getEnv("PATH") != ""}, a missing variable: [{ep.getEnv("DFLAT_SURELY_MISSING_VARIABLE")}]")
+r.Console.log($"named argument: {ep.getEnv(name: "PATH") == ep.getEnv("PATH")}")
+
+// run: the output, the errors and the exit code are captured
+##if os == windows
+var shown = ep.run("cmd", ["/c", "echo hello& echo oops 1>&2& exit 3"])
+var echoed = ep.run("cmd", ["/c", "more"], input: "fed through the input\n")
+var slow = ep.run("ping", ["-n", "6", "127.0.0.1"], timeout: 200)
+var spaced = ep.run("cmd", ["/c", "echo", "two words", "a\"quote"])
+##else
+var shown = ep.run("sh", ["-c", "echo hello; echo oops 1>&2; exit 3"])
+var echoed = ep.run("cat", input: "fed through the input\n")
+var slow = ep.run("sleep", ["5"], timeout: 200)
+var spaced = ep.run("echo", ["two words", "a\"quote"])
+##endif
+r.Console.log($"exit {shown.exitCode}, output [{shown.output.trim()}], errors [{shown.errors.trim()}], timedOut {shown.timedOut}, error is null {shown.error == null}")
+r.Console.log($"input: [{echoed.output.trim()}], exit {echoed.exitCode}")
+r.Console.log($"timeout: timedOut {slow.timedOut}, exit {slow.exitCode}, error is null {slow.error == null}")
+r.Console.log($"arguments with spaces and quotes arrive whole: {spaced.output.contains("two words")}")
+
+// a program that does not exist: run gives the exception in error, exec throws it
+Root.ExecProcess.RunResult missing = Root.ExecProcess.run("dflat-no-such-program")
+r.Console.log($"missing: exit {missing.exitCode}, {missing.error.Message} (id {missing.error.Id})")
+
+fun string execMissing() {
+  ep.exec("dflat-no-such-program")
+  return "no exception"
+  catch FileNotFoundException e { return "exec raised " + e.Message }
+}
+r.Console.log(execMissing())
+
+fun string missingFolder() {
+  var result = ep.run("cmd", workDir: "/c:/dflat-no-such-folder/inside")
+  return result.error.Message
+}
+##if os == windows
+r.Console.log($"working directory missing: {missingFolder()}")
+##endif
+
+// a working directory in the Dflat form (/d:/folder on Windows)
+string tempFolder = File.getTempDir()
+##if os == windows
+var inTemp = ep.run("cmd", ["/c", "cd"], workDir: tempFolder)
+##else
+var inTemp = ep.run("pwd", workDir: tempFolder)
+##endif
+r.Console.log($"workDir: {fs.getFullPath(inTemp.output.trim()).toLower() == fs.getFullPath(tempFolder).toLower()}, error is null {inTemp.error == null}")
+
+// exec: the program writes on the same console
+##if os == windows
+int code = ep.exec("cmd", ["/c", "echo written by the program started with exec& exit 4"])
+##else
+int code = ep.exec("sh", ["-c", "echo written by the program started with exec; exit 4"])
+##endif
+r.Console.log($"exec gave {code}")
+
+// Root.IO (stdlib 6.2): the current directory and full and relative paths
+string here = fs.getCurrentDir().path
+r.Console.log($"getCurrentDir is a directory: {fs.getCurrentDir().isDirectory}")
+r.Console.log($"full path: {fs.getFullPath("a/../b/./c") == here + "/b/c"}, of . {fs.getFullPath(".") == here}, of an absolute path {fs.getFullPath("/q/r/../s").endsWith("/q/s")}")
+r.Console.log($"relative: {fs.getRelativePath("/x/y", "/x/z/w.df")} | {fs.getRelativePath("/x", "/x")} | {fs.getRelativePath("/x/y/z", "/x")} | {fs.getRelativePath("/x", "/x/y/z")}")
+##if os == windows
+r.Console.log($"other drive: {fs.getRelativePath("/c:/x", "/d:/q")}, case does not count: {fs.getRelativePath("/c:/Data/a", "/c:/data/B")}")
+##endif
+
+string temp = File.getTempDir()
+fs.setCurrentDir(temp)
+r.Console.log($"setCurrentDir(string): {fs.getCurrentDir().path == fs.getFullPath(temp)}")
+fs.setCurrentDir(File(here))
+r.Console.log($"setCurrentDir(File): {fs.getCurrentDir().path == here}")
+
+fun string enter(string path) {
+  fs.setCurrentDir(path)
+  return "entered"
+  catch FileNotFoundException e { return "FileNotFoundException" }
+  catch InvalidPathException e { return "InvalidPathException" }
+}
+string aFile = File.combinePaths(temp, "dflat-process-test.txt")
+File(aFile).writeAllText("x")
+r.Console.log($"missing folder: {enter(File.combinePaths(temp, "dflat-no-such-folder"))}, a file: {enter(aFile)}")
+File.delete(aFile)
+
+// exit: the program ends here with its code; the line after it never runs
+r.exit(5)
+r.Console.log("not printed")

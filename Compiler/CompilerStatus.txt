@@ -1,17 +1,6 @@
 Compiler version 0.0.20 alpha for version 0.0.14 of the specs 2026/10/24
 
 Changes from the previous version -----------------------
-- list: every node is allocated on its own (a pointer to the next node and the item); sort and reverse relink the nodes
-- list: truncate, removeAt(range), add(collection), copyFrom, transformTo<Kind>() (also on arr and vec), .sizeof (also on arr and vec)
-- vec and list: a for loop holds a counter of open iterators; while it is above zero the size and the order cannot change (ModifyingIteratedCollectionException); c[i] = v, swap, replace, fill(value) and clear() are allowed
-- arr, vec and list: clear() sets every item to its default value and keeps the size (truncate(0) empties a vec or a list)
-- copyFrom cannot be used on an iterated collection; supported spec version 0.0.14
-- vec: add(collection), removeAt(range), copyFrom; arr: copyFrom from a vec or a list
-- arr, vec, list: replace(position, value) gives back the old item; swap(i, j) only exchanges (swap(position, new) is gone)
-- parent and child objects (spec 12.5): `&Parent name as parent` in a class header, asparent and unrestricted functions, adopted children (a child that changes owner: ->, a return, a field, a collection) checked on every call, UsageOfDestroyedObjectException (48)
-- read-only references & (spec 1.6.2): only unrestricted functions are called through &Item o, its fields and items cannot be assigned, it cannot be passed as (&)
-- vec and list: getIterator() gives an iterator that is a child of the collection and keeps it locked until it ends (the list iterator follows the nodes); InvalidIteratorReleaseException (47)
-- views c[a..b], c[a..=b], c[..b], c[a..] on arr, vec and list (type View<vec<T>>): read-only, .len, v[i], has, indexOf, for; they keep the vec or the list locked until they end
 
 Done -----------------------
 

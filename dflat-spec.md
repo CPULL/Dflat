@@ -1,7 +1,7 @@
 # Dflat Language
 A new language D♭ that is the same as C# but easier to write and faster to execute
 
-**Version** 0.0.13  2026/10/22 by CPU
+**Version** 0.0.14  2026/10/24 by CPU
 
 ## D♭ — Dflat Language Specification (draft)
 
@@ -30,6 +30,7 @@ Status: design in progress. Decisions below reflect the latest choices; earlier 
   - Built in types (`i32`, `string`, `arr`) are lowercase
   - Types (classes, traits, enums): PascalCase; otherwise level 2 warning
   - Methods: camelCase is recommended but not enforced. Warning only if the same function name is defined with different capitalizations.
+  - The non-public methods that implement properties and operators (`get_len()`, `read_pos(k)`, 6.7) are snake_case, to keep them apart from the regular methods (provisional rule).
   - Constants declared with `const`: UPPER_SNAKE_CASE (`const u64 SECRET_CODE_PHASE2`); otherwise level 3 warning. Generic value parameters are not constants (`class Matrix<u64 Rows, u64 Cols>`).
   - Static properties (stdlib constants): UPPERCASE (`Math.PI`).
   - Variables, parameters, fields, properties, enum entries: no imposed case (camelCase suggested for variables and parameters).
@@ -117,6 +118,7 @@ For classes, if not overridden, the default is: class name and the values of the
 | `int` `uns` `real` | target-dependent aliases, to force a specific size for global data or registers; not allowed in `dfoot` |
 
 - **Native size**: one compiler option sets the native size used by `int` / `uns` / `real` and by unsuffixed literals. It can force a size below or above the CPU's own. [Ref: Compiler]
+- `uns` has the size of `int`: the cpu size by default, or the size forced by `--native-int` (19.1). The lengths and indexes of the collections use it, and so does `.hash` (6.2). A `uns` smaller than the cpu size limits the length of the collections and the size of `.hash`: the compiler gives a warning (19.3).
 - Numbers are **not nullable** unless declared `type?`.
 
 ## 2.2 Scalars
@@ -151,7 +153,7 @@ Converting an `addr` to a pointer results in an `unsafe` pointer.
 
 - The collections `arr`, `vec`, `list`, `map`, `hmap`, `set` and `hset` are described in section [Ref: Collections]
 - GUID is defined by the EF layer, platform-specific.
-- Lengths and default indexes are `u64` everywhere.
+- Lengths and default indexes are `uns` everywhere (2.1, 6.1).
 
 ## 2.5 Operators
 
@@ -276,6 +278,8 @@ Tuples can be also anonymous: `(i32 , string, string, r64)`
 
 Tuple need to have **at least 2 elements**; items can be accessed by name (`record.label`) if the names are specified or by index (`record[1]`).
 The index is a literal, a `const` or an enum value only; out of range is a compile error. Indexes apply left to right: in an array of tuples, `myTuple[2][1]` is the second item of the third tuple.
+
+An item of a tuple can be a writable reference `(&)Type` (`((&)Item value, bool isValid)`, the result of `writableNext()`, 6.7). The borrow lives as long as the tuple. A tuple that holds a `(&)` follows the rule of the iterators and the views (6.5): if it is not given away it lives only inside the scope that created it, so it cannot outlive the iterator it comes from.
 
 
 ## 3.3 Date and Time
@@ -449,14 +453,18 @@ A collection holds several items in one object. Dflat has seven: `arr`, `vec`, `
 - `==` between two collections compares identity only, never the content. `c!` makes a copy (`.clone()`, 12).
 - Lengths and default indexes are `uns` everywhere; `.len` is the number of items.
 - Every collection implements the trait `Collection<Item>` and one of its sub-traits `IndexCollection`, `MapCollection` or `SetCollection` (6.7).
+- A collection has an internal counter of its open iterators and views: while it is above zero the size of the collection cannot change (6.4).
 - By access: `arr`, `vec`, `list` are indexed by position (0 to `.len` - 1); `map` and `hmap` hold key/value pairs; `set` and `hset` hold each value once.
 - Hash against B-tree: `hmap` and `hset` are hash tables (fast lookup, no order); `map` and `set` are B-trees (kept sorted, O(log n)); `list` is a singly linked list used by position. The items of a `list` need no key rules.
 - Type, size and capacity: the size of an `arr` and the capacity of a `vec` are given only at initialization and are not part of the type.
-- `arr<T>` is a primitive: a block of memory for the items, with no code of its own and no limit on the types. `vec`, `list`, `map`, `hmap`, `set` and `hset` are ordinary generic classes (11.3) with their own copy limit (11.3.12).
+- `arr<T>` is a class like any other, even if the code generated for it is direct: it has ownership, a hash, methods and properties, and it can be an item of another collection (`list<arr<i32>> myZip` is valid). It cannot be subclassed. It has no limit on the types (11.3.12). `vec`, `list`, `map`, `hmap`, `set` and `hset` are ordinary generic classes (11.3) with their own copy limit (11.3.12).
+- Ownership of an `arr`: the variable that declares the array owns it, and drops the items and the block at the end of its scope; `b = a` is a borrow; `->a` moves it; a field that is an array is dropped by its class (12).
 - Index checks happen at compile time when possible, otherwise at runtime: an index outside the collection is a compile error when it can be detected at compile time. At runtime the check stays in every build (like Go, C#, Java and Rust): in Debug builds it raises `IndexOutOfRangeException` (not silent, catchable); in Release builds it is a `Panic`, and a `catch` for `IndexOutOfRangeException` is ignored with a level 3 warning. The rule is the same for `arr`, `vec` and `list`, and the check compares the index with `.len` before any work, so a failing `c[i]` costs O(1) in the three of them.
 - The seven collections are written by the compiler as generated C code (speed first). Users can write their own collection classes in Dflat; the traits that impose the signatures are in 6.7 and the custom collections in 6.9.
 - A collection owns its items (Rust model, 12): the drop code of the items is generated per item type. A result that is not assigned is destroyed at the end of the statement, `c[k] = v` drops the previous item, `->c[k]` moves the item out (6.6) and a `for` loop only borrows (6.4).
-- Moving an object into a collection that owns its items needs `->` when the object already exists (`list[3] = ->task`, `list.add(->task)`, `insert`, `swap`): the plain form with an existing object is a compile error, so the passage of the ownership is always visible. An object created in the same statement (`list.add(Task("a"))`) needs no marker. Basic values are copied and need no marker (12.4).
+- An owned object that loses its owner is destroyed and its `atEnd` runs: this covers `clear()` and `fill(...)` on every collection, `c[i] = v` and any other operation that drops an owned object (12).
+- Any allocation can run out of memory: a `vec` that grows, `reserve`, creating an `arr`, a `list` that adds a node. In Debug builds it raises `OutOfMemoryException` (15.3, catchable, not silent); in Release builds it is a `Panic` that ends the program (15.5). A size that does not fit (`n * size` overflowing `uns`) is reported in the same way, with no separate `OverflowException`. A literal size above the maximum is a compile error.
+- Moving an object into a collection that owns its items needs `->` when the object already exists (`list[3] = ->task`, `list.add(->task)`, `insert`, `replace`): the plain form with an existing object is a compile error, so the passage of the ownership is always visible. An object created in the same statement (`list.add(Task("a"))`) needs no marker. Basic values are copied and need no marker (12.4).
 - The members are listed in 6.6; each collection has its own section for the details (6.8).
 
 ## 6.2 Keys
@@ -465,9 +473,17 @@ Applies to the keys of `map` / `hmap` and to the items of `set` / `hset`.
 
 - Hashed collections (`hmap`, `hset`): the key needs `==` and a hash; the hash is sized to the architecture.
 - Sorted collections (`map`, `set`): the key needs an ordering.
-- `.hash` and `.order` exist on all types. A class can override its hash and `equals`; `==` on class objects calls `equals` only when the class overrides it (known at compile time), and compares identity otherwise.
-- Default class hash: the hash of the class name and the memory address. It is meant for collections only (not for `dfoot`).
-- Class order when none is declared: the hash values are compared; two different objects with the same hash are ordered by their address.
+- `.hash` is a mandatory property of every type, of size `uns` (2.1). The hash of the native types cannot be overridden. A class can override its hash and `equals`; `==` on class objects calls `equals` only when the class overrides it (known at compile time), and compares identity otherwise.
+- How the hash is calculated (how the hash tables use it is decided with the hash collections):
+  - A native value whose size is at most `uns` uses its own value as the hash.
+  - A value wider than `uns` (an `i256` with a 64-bit `uns`, a wide `real`) combines its parts in order: `h = (rotl(h, 5) ^ part) * K`, with `K = 0x517cc1b727220a95` for a 64-bit `uns` and `0x9e3779b9` for a 32-bit one (FxHash). Unlike a xor, the result depends on the order and `(x, x)` does not give 0.
+  - `real`: the bits of the value (transmute), then as above. A `-0.0` (or an unnormalized zero) is first turned into `+0.0`. All NaNs give the hash of the canonical NaN of the architecture.
+  - Strings: rapidhash on the bytes (a 32-bit variant for a 32-bit `uns`).
+  - Tuples: the same ordered combine over the hashes of the items.
+  - Classes: the hash of the class name and the memory address. A collection hashes like any other class. It is meant for collections only (not for `dfoot`).
+- `Root.Class` offers `getHash()` and `equals(any?)` (11.1.3).
+- There is no `.order`. Ordering uses the trait `Comparable<T>` (11.2.1) with the mandatory method `int compareTo(T value)`, which returns -1, 0 or 1 (`int` is the signed native integer).
+- Class order when a class provides none (the default implementation of `compareTo`): the hash values are compared; two different objects with the same hash are ordered by their address.
 - Orderings: numbers, `char`, `bool` (false before true), `date` and `time` by value; strings by bytes (the same as code point order in UTF-8), culture-invariant for now; tuples item by item, left to right.
 - `bool` can be a key (two possible values). Reals can be keys, except NaN: a NaN key is never stored or retrieved (no exception).
 - Maps and sets do not allow a null key (or a null item in a set). The empty string `""` is a valid key: for a `string`, `""` and null are the same value (7.1), so there is no separate null string key.
@@ -514,20 +530,29 @@ for i32 index = 1..=10 { }                       // a range is a virtual collect
 - The loop variable borrows the item; the collection keeps the ownership (there is no consuming loop). `for Item x in c` gives a read-only `x`; `for (&)Item x in c` gives a read/write `x` (`x.done = true` changes the object in the collection). The marker is written like on a parameter: `(&)Type variable` (13.1).
 - The items of a `set` / `hset` and the keys of a `map` / `hmap` are always read-only: `(&)` is a compile error on them.
 - On a basic value type without `(&)`, `x` is a copy: assigning to it (`x += 1`) changes only the copy and gives a level 3 warning. With `(&)` the item in the collection is changed in place.
-- A collection cannot be changed while it is iterated. When the compiler can prove that the loop body changes the collection, it is a compile error (Rust style, no cost at runtime); when it cannot prove it, the change is detected at runtime (C# style). The runtime check raises `ModifyingIteratedCollectionException` (15.3, not silent): in Debug builds it is catchable; in Release builds it is a `Panic`, and a `catch` for it is ignored with a level 3 warning (the same rule as `IndexOutOfRangeException`, 6.1).
+- A collection is read-only in size while it has open iterators or views:
+  - A collection has an internal counter of its open iterators and views. Creating an iterator or a view increments it; the default `atEnd` of the iterator or of the view decrements it. An explicit iterator (made with `getIterator()`) counts too: it holds a pointer to its collection to decrement the counter (6.7). The counter and its checks are provided by the trait `Collection` (11.2), so maps, sets, views and custom collections get them too.
+  - While the counter is above zero the size of the collection cannot change: a changing operation raises `ModifyingIteratedCollectionException` (15.3, not silent). In Debug builds it is catchable; in Release builds it is a `Panic`, and a `catch` for it is ignored with a level 3 warning (the same rule as `IndexOutOfRangeException`, 6.1). Every changing method of a collection checks the counter at runtime.
+  - Forbidden while the counter is above zero: `add`, `add(collection)`, `insert`, `pop`, `remove`, `removeAll`, `removeAt`, `resize`, `truncate`, `fillAtCapacity`, `fill(count, value)`, `reserve`, `shrinkToFit`, `sort`, `sortUnstable`, `reverse`, and `->c[i]` on a `list` (the node is removed).
+  - Allowed: reads, `swap`, `replace`, `c[i] = v` (objects included), `fill(value)`, `clear()`, `->c[i]` on `arr` and `vec`, and changes made in place to the value or to the fields of an item.
+  - Compile-time proof: the compiler proves only the direct case, when the body of the loop calls a changing member, or assigns an element, of the same variable (or field path) that the loop iterates; it is a compile error (Rust style, no cost at runtime). Everything else stays a runtime check (C# style). The proof will be improved later.
 - Iterating custom collections: 6.9. For the collections of the compiler the `for` is emitted as a direct loop in C.
 
 ## 6.5 Views
 
 ```
-arr<i32> head = scores[..3]           // read-only view, no copy
+View<arr<i32>> head = scores[..3]     // read-only view, no copy
 arr<i32> middle = scores[2..5]!       // copy
 ```
 
 - `c[a..b]`, `c[..b]`, `c[a..]` give a view: a reference to a part of the real collection, not a copy. A view is always read-only; there are no writable views.
-- A view can only be a local variable or a parameter: it cannot be stored in a field, put in a collection or returned from a function.
-- Views exist only on `arr`, `vec` and `list`. There are no ranges on keys (`map`, `hmap`, `set`, `hset`).
-- While a view exists, the collection cannot be changed (the same rule as during an iteration, 6.4).
+- A view is a dedicated class, `View<C>`, where `C` is the type of the collection it comes from: a `vec<string>` can only produce a `View<vec<string>>`. Each view class holds what its collection needs for the view to exist (for example a start and a length for `arr` and `vec`, a start node, an end node and a count for `list`, 6.8.3). The view classes of the collections are similar but are not the same class. Trees and maps will probably need dedicated views (`IndexView`, `MapView`); that is decided with those collections.
+- On an `IndexCollection` the operator `[a..b]` calls the non-public method `get_view(uns? start, uns? end)` (6.7), which returns `View<C>`. A missing bound (`[..b]`, `[a..]`) is passed as null.
+- Views exist only on `arr`, `vec` and `list`. There are no ranges on keys (`map`, `hmap`, `set`, `hset`). Creating a view of a `list` is O(n), because the start node has to be found.
+- Iterators and `for` can run over a view: it has a begin and an end.
+- Lock: the same rules as the iterators (6.4). A view increments the counter of open iterators and views of its collection, so the collection keeps its size while the view is used.
+- Where iterators and views live: if not given away, an iterator or a view lives only inside the scope that created it (the call to `getIterator()` or `c[a..b]`). If it is moved or borrowed, it follows the ownership and borrowing rules (12); the collection becomes changeable again only when the last holder ends.
+- `c[a..b]!` copies the items into a new collection of type `C` and leaves the original unchanged. It needs `.clone()` (12) to be fully implemented.
 
 ## 6.6 Members
 
@@ -552,48 +577,57 @@ arr<i32> middle = scores[2..5]!       // copy
 | `removeAll(v)` count | – | ✓ | ✓ | by value | by value | – | – |
 | `removeAt(k / range)` | – | ✓ | ✓ | by key | by key | – | – |
 | `tryGet(k, (&)out[, default])` bool | – | – | – | ✓ | ✓ | – | – |
-| `swap(position, new)` | ✓ | ✓ | ✓ | – | – | – | – |
+| `replace(pos, value)` | ✓ | ✓ | ✓ | – | – | – | – |
 | `swap(key, new)` | – | – | – | ✓ | ✓ | – | – |
 | `swap(i, j)` | ✓ | ✓ | ✓ | – | – | – | – |
 | `swap(key1, key2)` | – | – | – | ✓ | ✓ | – | – |
 | `->c[k]` moves the item out | zeroed | zeroed | removed | removed | removed | removed | removed |
-| `clear()` | defaults | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `clear()` | defaults | defaults | defaults | ✓ | ✓ | ✓ | ✓ |
 | `fill(value)` | ✓ | ✓ | ✓, and `fill(count, value)` | – | – | – | – |
-| `fillAtCapacity(value)`, `resize`, `truncate` | – | ✓ | – | – | – | – | – |
+| `fillAtCapacity(value)`, `resize` | – | ✓ | – | – | – | – | – |
+| `truncate` | – | ✓ | ✓ | – | – | – | – |
 | `sort`, `sortUnstable`, `reverse` | ✓ | ✓ | ✓ | – | – | – | – |
 | `copyFrom` | ✓ | ✓ | ✓ | – | – | – | – |
+| `transformTo<Kind>()` | ✓ | ✓ | ✓ | – | – | – | – |
 | set operations and tests | – | – | – | – | – | ✓ | ✓ |
 
 A member marked `–` is a compile error on that collection (for example `hasKey` on a `vec`). The trait that provides each member is in 6.7.
 
-- `.len`: count of items. `.sizeof`: bytes to store the object itself (for all types: to be discussed).
+- `.len`: count of items. `.sizeof`: bytes to store the object itself; it exists on every type, natives included (6.7). For a collection it is the header plus the allocated block of items (the capacity, not the length), without what the items own; for a `list` it is the header plus all the nodes.
 - `.capacity`: items that fit without growing. `reserve(n)` makes room for at least `n` more items; `shrinkToFit()` lowers the capacity to the length.
 - `.keys`: keys of a map (`map`, `hmap`). `.values`: values of a map. To walk the positions of `arr`, `vec` and `list` use a range (`0..list.len`, 6.4).
 - `c[k] = v`: on `arr`, `vec` and `list` it replaces an existing item only; an index past the end raises `IndexOutOfRangeException` (not silent). On `map` and `hmap` it replaces the value, or adds the key and the value when the key is missing.
 - Reading a missing map key gives the null or zero value of the value type; no exception. Use `hasKey` or `tryGet` to know whether the key exists.
 - `add(v)`: appends to `vec` and `list`. `add(k, v)`: adds the pair to a map, or replaces the value of an existing key; returns `false` when it replaced, `true` when the key is new. On sets it returns `true` if the value was added.
 - `add(collection)`: appends the items of another collection to `vec` and `list`; on maps it merges another map (the new value wins, no return value); on sets it returns the number of items actually added.
+  - On `vec` and `list`: items of basic types are copied. Objects are moved with `v.add(->other)`, and the other collection is left empty; a plain `v.add(other)` with objects is a compile error until cloning exists (12). The same collection as source and target raises `ModifyingProtectedSourceException`.
 - `insert(index, value)`: `index` goes from `0` to `.len` (`.len` appends); a larger index raises `IndexOutOfRangeException`.
 - `pop((&)out)`: removes the last item of a `vec` and moves it into `out` (the ownership passes to `out`); it returns `true` (the `isValid` of the result). On an empty `vec` it returns `false` and `out` gets the default value of its type (null for objects, `0` for numbers, `""` for `string`). There is no other form of `pop` and no `tryPop`; no exception is raised. The previous value of `out` is dropped.
 - `has(v)`: true if the value is present (on maps, searches the values). `hasKey(k)`: true if the key exists.
-- `indexOf(v)`: index of the first match, or the maximum `u64` value when not found (the `string` `IndexOf` keeps returning `-1`).
+- `indexOf(v)`: index of the first match, or the maximum `uns` value when not found (the `string` `IndexOf` keeps returning `-1`).
 - `keyOf(v)`: key of the first entry found with that value, or the default value of the key type when there is none; it raises no exception. Use `hasKey` to test a key.
 - `remove(v)`: removes the first match and returns `true` if something was removed. `removeAll(v)`: removes all matches and returns the number removed. On maps both work by value. Sets hold a value once, so they have `remove` only.
-- `removeAt(k / range)`: removes by index or range on `vec` and `list`, by key on maps.
+- `removeAt(k / range)`: removes by index or range on `vec` and `list`, by key on maps. The range forms are those of 6.5 (`a..b`, `a..=b`, `..b`, `a..`); the items removed end. A range outside the collection raises `IndexOutOfRangeException` (as `copyFrom`).
 - `bool tryGet(k, (&)out[, default])`: reads a map entry into `out` (`(&)` because the call writes to it) and returns `true` when the key exists. When the key is missing it returns `false` and `out` gets `default`, or the default value of its type when no `default` is given.
-- Swap, with the old item and the ownership:
-  - `Item old = sequence.swap(position, Item new)` and `Item old = map.swap(Key key, Item new)`: the item in the collection is replaced by `new`; the ownership of the old item moves to the caller and the collection owns `new`. On a map, a missing key adds the pair and returns a null (default) item.
-  - `sequence.swap(i, j)` exchanges two items of `arr`, `vec` or `list`; no ownership changes.
+- Replace and swap, with the old item and the ownership:
+  - `var old = sequence.replace(pos, value)` (`arr`, `vec`, `list`): puts the new item at `pos` and returns the old one; the ownership of the old item moves to the caller and the collection owns the new one. A new object that already exists needs `->` (6.1). If the result is not assigned, the old item ends at the end of the statement.
+  - `sequence.swap(posA, posB)` only exchanges two items of `arr`, `vec` or `list`; no ownership changes. There is no `swap(position, new)` form (use `replace`).
+  - `Item old = map.swap(Key key, Item new)`: the item in the map is replaced by `new`; the ownership of the old item moves to the caller and the map owns `new`. A missing key adds the pair and returns a null (default) item. The `swap` forms of maps are confirmed with the maps.
   - `map.swap(key1, key2)` exchanges the two values: if both keys exist the values are exchanged; if only one exists its value moves to the missing key and the original key is removed; if both are missing nothing happens.
 - `->c[k]` moves the item out of the collection (ownership passes to the receiver; a basic value type is copied). The slot is zeroed (null for objects, `0` for numbers) in `arr` and `vec`, and the item is removed in `list`, `map`, `hmap`, `set` and `hset`.
-- `clear()`: removes all items; on an `arr` it sets every item to the default value.
+- `clear()`: on `arr`, `vec` and `list` it cleans up the values: every item is set to the default value and the size is kept (the objects dropped end, 6.1). On maps and sets it removes all items. To remove all the items of a `vec` or a `list`, use `truncate(0)`.
 - `fill(value)`: sets every item up to the current `.len` (the whole array for `arr`; on an empty `list` it does nothing). `fillAtCapacity(value)` (`vec`): fills the whole capacity and sets `.len` to the capacity.
 - The value of `fill` can be any value: basic values, strings (duplicated, they are values), dates, times and every other type that is not a class. `null` is allowed: every item becomes null and the objects they held are no longer owned by the collection (they end, running their `atEnd` if they have one). A class instance is a compile error (the items would share one object).
 - `list` also has `fill(count, value)`: it adds `count` items with that value, under the same rules (`myList.fill(256, 'c')`).
-- `resize(newLen, value)`: sets `.len`; new items get `value`, extra items are cut. `truncate(len)`: cuts the `vec` to `len` items (no effect if shorter), the capacity is unchanged.
-- Sorting: `sort(SortDirection.ASC)` sorts in place with the default comparer (the `.order` of the items); `sort()` is ascending. `sort(lambda)` uses a temporary custom sorter. `SortDirection` has the entries `ASC` and `DESC`. The lambda returns a bool (true is -1, "first goes before second"; false is 1) or a number (negative, zero, positive). `sort` is stable; `sortUnstable` is not (it needs no extra memory). `reverse()` flips the current order in place.
-- `copyFrom(dstIndex, srcCollection, srcIndex, count)` and `copyFrom(dstIndex, srcCollection, range)`: copy items from another collection into this one; object items are cloned. A range outside either collection raises `IndexOutOfRangeException`, or is a compile error when it can be detected at compile time. Using the same collection as source and destination is a compile error when detectable, otherwise a non-silent `ModifyingProtectedSourceException` is raised.
+- `resize(newLen, value)`: sets `.len`; new items get `value`, extra items are cut. `truncate(len)`: cuts the `vec` or the `list` to `len` items (no effect if shorter; the items cut end); on a `vec` the capacity is unchanged.
+- Sorting: `sort(SortDirection.ASC)` sorts in place with the default comparer (`compareTo` of the items, 6.2); `sort()` is ascending. `sort(lambda)` uses a temporary custom sorter. `SortDirection` has the entries `ASC` and `DESC`. The lambda returns a bool (true is -1, "first goes before second"; false is 1) or a number (negative, zero, positive). `sort` is stable; `sortUnstable` is not (it needs no extra memory). `reverse()` flips the current order in place.
+- Sorting algorithms: on `arr` and `vec`, `sort` (stable) is a merge sort with run detection (TimSort style) and `sortUnstable` is pdqsort (as Rust and Go). On `list`, `sort` and `sortUnstable` are both a bottom-up merge sort that relinks the nodes directly, with no temporary array: only the pointers move. The comparison goes through `compareTo` (6.2), or through the function given to `sort`.
+- `copyFrom(dstIndex, srcCollection, srcIndex, count)` and `copyFrom(dstIndex, srcCollection, range)`: copy items from another index collection into this one; it works between any index collections (`arr`, `vec`, `list`). It copies for real (object items are cloned, 12), it is not a move. A range outside either collection raises `IndexOutOfRangeException`, or is a compile error when it can be detected at compile time; this check must always be there. Using the same collection as source and destination is a compile error when detectable, otherwise a non-silent `ModifyingProtectedSourceException` is raised.
 - On `vec` and `list`, `dstIndex` goes from `0` to `.len`: the items past the end are appended, so `copyFrom` is the only way to write past the end and it never leaves gaps; a larger `dstIndex` raises `IndexOutOfRangeException`.
+- `transformTo<Kind>()` converts a whole collection into another kind: `vec<i32> v = myArr.transformTo<vec>()`.
+  - It is a moving method: the original ends and the items go to the new collection without being cloned. Using `myArr` after the call is a compile error, as after `->myArr`.
+  - The item type is taken from the original (`arr<i32>` gives `vec<i32>`). `transformTo<vec<i32>>()` is accepted too; a different item type is a compile error.
+  - Between `arr`, `vec` and `list`. `vec` to `arr` can reuse the block with no copy, after shrinking it to the length.
 
 ```
 arr source = [1, 2, 3]
@@ -616,20 +650,69 @@ Every collection implements the trait `Collection` and one of its three sub-trai
 | `SetCollection<Item>` : `Collection<Item>` | `set`, `hset` | each value held once |
 
 - Rule: whatever is shared by the collections stays in the trait (in `Collection` when all seven have it, like `.len`); whatever is specific to one collection is defined by that collection class. Every collection is in a trait.
-- `arr` is a primitive: the traits do not really exist for it, but its properties and members are accessible in the same way.
-- `Collection<Item>` has: the read-only `len` property (the number of items, `uns`), `.sizeof`, `has(v)`, `->c[k]`, `clear()` and `fun Iterator getIterator()`. The meaning of each member is in 6.6.
+- `arr` is a class (6.1) that implements `IndexCollection`; the code generated for it is direct.
+- `Collection<Item>` has: the read-only `len` property (the number of items, `uns`), `has(v)`, `->c[k]` and `clear()`. `.sizeof` exists on every type (`Root.Class`, see the table below). The meaning of each member is in 6.6.
+- `Collection<Item>` has no `getIterator()`: each sub-trait declares its own, typed (an override that returns a subtype of the declared return type is not allowed):
+
+```
+trait IndexCollection<Item> : Collection<Item> {
+  fun IndexIterator<Item> getIterator()
+}
+
+trait MapCollection<Key, Value> : Collection<Value> {
+  fun MapIterator<Key, Value> getIterator()
+}
+
+trait SetCollection<Item> : Collection<Item> {
+  fun SetIterator<Item> getIterator()
+}
+```
 - `Item` is the type of the items. A map passes its `Value` (`has(v)` on a map searches the values); the key type is given by `MapCollection<Key, Value>`. `->c[k]` is a requirement of `Collection<Item>` whose key is given by each sub-trait: a position in `IndexCollection`, the key in `MapCollection`, the item in `SetCollection`.
 - The sub-traits extend `Collection<Item>` with a generic parent trait (11.3.2): a class that implements `IndexCollection<T>` implements `Collection<T>` too.
-- Iteration is done by an iterator: an object that implements the trait `Iterator` and holds the cursor and a read-only pointer to its collection (`*Collection collection`, 12.1) to check the end. `next()` returns a tuple whose last item is the bool `isValid`; `writableNext()` returns the same tuple with the item as a writable borrow `(&)` (the one `for (&)` uses). When `isValid` is `false` the other items of the tuple are not valid (the iteration is over), so null values and items are not a problem for the iteration.
-- Only the iterator of the index collections is defined in this version; the iterators of maps and sets, and their sub-traits, come later.
+- Iteration is done by an iterator: an object that implements the trait `Iterator`. `Iterator` is a non-generic marker trait with no members, and it has three sub-traits:
+
+| Iterator | Description |
+|---|---|
+| `IndexIterator<Item>` | used for linear and sorted collections like arrays and lists |
+| `MapIterator<Key, Value>` | used for key/value collections |
+| `SetIterator<Item>` | used for sets of unique keys |
+
+```
+trait Iterator { }
+
+trait IndexIterator<Item> : Iterator {
+  public fun (Item value, bool isValid) next()
+  public fun ((&)Item value, bool isValid) writableNext()
+}
+```
+
+- Whether `{ }` is written for an empty trait follows the trait grammar (11.2).
+- The cursor is internal to each iterator and cannot be reached from outside, so the trait does not specify it: the trait fixes only the methods. Iterators are specific to a collection type, so the pointer to the collection (used to check the end and to release the counter of 6.4) lives in each concrete iterator class, not in the trait.
+- `next()` returns a tuple whose last item is the bool `isValid`; `writableNext()` returns the same tuple with the item as a writable borrow `(&)` (3.2; the one `for (&)` uses). When `isValid` is `false` the other items of the tuple are not valid (the iteration is over), so null values and items are not a problem for the iteration.
+- The iterators follow a contract written with the trait. First rule: an iterator returns each element of the collection once and only once.
+- Only the iterator of the index collections is defined in this version; the members of `MapIterator` and `SetIterator` come later.
 - The collections of the compiler do not build an iterator object: the `for` is emitted as a direct loop in C (6.4).
+- The methods behind the properties and the operators: each trait defines a set of non-public methods for its properties and its operators. They can be virtual, and every class that implements the trait must implement them. They are internal: only someone writing a custom collection needs them. They are snake_case (1.1, provisional). When the argument type of an operator is not given (`->c[k]`), it is the generic form valid for all collections; each kind of collection fixes the argument type (`uns` for `IndexCollection`, `Key` for `MapCollection`, and the same for the sets). More methods will be added with the maps and the sets.
+
+| Written as | Method | Defined in |
+|---|---|---|
+| `x.sizeof` | `get_sizeof()` | `Root.Class` |
+| `c.len` | `get_len()` | `Collection` |
+| `->c[k]` | `move_out(k)` (generic form) | `Collection` |
+| `->c[uns k]` | `move_out(uns k)` | `IndexCollection` |
+| `->c[Key k]` | `move_out(Key k)` | `MapCollection` (later) |
+| `c[k]` (read) | `read_pos(uns k)` | `IndexCollection` |
+| `c[k] = value` | `set_pos(uns k, value)` | `IndexCollection` |
+| `c[a..b]`, `c[..b]`, `c[a..]` | `get_view(uns? a, uns? b)`, returns `View<C>`; a missing bound is null (6.5) | `IndexCollection` |
+
+- `len` stays a property; `getIterator`, `next` and `writableNext` are regular methods and keep their names.
 
 ### 6.7.1 IndexCollection
 
 - Implemented by `arr`, `vec` and `list`: the items are accessed by position, `c[i]`, from 0 to `.len` - 1.
-- Members: `c[i]` read, `c[i] = v`, `c[a..b]` view, `indexOf`, `swap(position, new)`, `swap(i, j)`, `sort`, `sortUnstable`, `reverse`, `copyFrom`, `fill(value)`. `vec` and `list` also have `add(v)`, `add(collection)`, `insert`, `remove`, `removeAll` and `removeAt`; `arr` does not provide them (compile error).
+- Members: `c[i]` read, `c[i] = v`, `c[a..b]` view, `indexOf`, `replace(pos, value)`, `swap(i, j)`, `sort`, `sortUnstable`, `reverse`, `copyFrom`, `transformTo<Kind>()`, `fill(value)`. `vec` and `list` also have `add(v)`, `add(collection)`, `insert`, `remove`, `removeAll`, `removeAt` and `truncate`; `arr` does not provide them (compile error).
 - `list` adds the overload `fill(count, value)` (6.6).
-- Iterator: `IndexIterator`, with `uns cursor` for `arr` and `vec` and a pointer to the node for `list`. `next()` returns `(Item value, bool isValid)` and `writableNext()` returns `((&)Item value, bool isValid)`.
+- Iterator: `IndexIterator`. In the default collections the iterator of `arr` and `vec` keeps a `uns` position and the iterator of `list` a pointer to the node (6.8.3). `next()` returns `(Item value, bool isValid)` and `writableNext()` returns `((&)Item value, bool isValid)`.
 
 ### 6.7.2 MapCollection
 
@@ -662,9 +745,10 @@ flat[row * width + column] = 7          // a matrix on a flat array
 - Arrays are not initialized automatically: `fill(value)` sets every element. Reading an element before it is filled or assigned gives a level 1 warning. Arrays of objects start as null.
 - No built-in multi-dimensional arrays: use an `arr` of `arr`, or a flat `arr` indexed by `row * width + column`.
 - Default iterator: index 0 up to `.len` - 1.
-- Trait: `IndexCollection` (6.7.1). `arr` is a primitive, so the trait does not really exist for it, but the properties and members of `Collection` and `IndexCollection` are accessible in the same way.
-- Differences from the trait: `c[k] = v` replaces only; `clear()` sets every item to the default value; `fill(value)` fills the whole array. `add`, `add(collection)`, `insert`, `remove`, `removeAll`, `removeAt` and `pop` are not available (compile error).
-- Default iterator: `IndexIterator` with `uns cursor`.
+- Trait: `IndexCollection` (6.7.1). `arr` is a class (6.1): it has ownership, a hash, methods and properties, and it can be an item (`list<arr<i32>>`). It cannot be subclassed. The code generated for it is direct.
+- Ownership: the variable that declares the array owns it and drops the items and the block at the end of its scope; `b = a` is a borrow; `->a` moves; a field that is an array is dropped by its class. The objects inside are owned by the array (12).
+- Differences from the trait: `c[k] = v` replaces only; `clear()` sets every item to the default value; `fill(value)` fills the whole array. `add`, `add(collection)`, `insert`, `remove`, `removeAll`, `removeAt`, `truncate` and `pop` are not available (compile error).
+- Default iterator: `IndexIterator`, keeping a `uns` position.
 
 ### 6.8.2 Vectors `vec`
 
@@ -679,16 +763,26 @@ bool isValid = numbers.pop((&)last)     // false (and last = 0) when the vec is 
 
 - Contiguous and growable (Rust `Vec` rules). `vec<T>` is empty; `vec<T>[n]` is empty with capacity `n`.
 - Trait: `IndexCollection` (6.7.1). It has all the members of `Collection` and `IndexCollection`.
-- Specific to `vec`: `pop`, `fillAtCapacity`, `resize`, `truncate`, `.capacity`, `reserve`, `shrinkToFit` and the `[n]` capacity form.
-- Default iterator: `IndexIterator` with `uns cursor`, index 0 up to `.len` - 1.
+- Specific to `vec`: `pop`, `fillAtCapacity`, `resize`, `.capacity`, `reserve`, `shrinkToFit` and the `[n]` capacity form. `truncate` is shared with `list`.
+- Growth policy and capacity:
+  - Growing: the capacity is at least what was requested; it does not have to be exact. Shrinking is exact: after `shrinkToFit()` the capacity equals the length.
+  - The capacity doubles until the block reaches `double-grow-limit` (default 4mb), then grows by the factor `further-grow-factor` (default 1.5) each time. A fixed increment would lose the amortized O(1) of `add` on large blocks. Both are compiler parameters (19). A fixed-increment option is kept only for small targets.
+  - The first allocation is 16 items (16 times the size of the item), made on the first `add`, unless a capacity is given (`vec<T>[n]`).
+- Default iterator: `IndexIterator`, keeping a `uns` position, index 0 up to `.len` - 1.
 
 ### 6.8.3 Lists `list`
 
 - A singly linked list: the list keeps the number of items, the first node and the last node, and each node holds an item and points to the next node. There are no double links. The list owns its items (6.1): the nodes own the objects they hold.
+- Every node is allocated separately; the list header has pointers to the first and the last node. There are two kinds of nodes: the pointer to the next node plus the value (basic types), or the pointer to the next node plus the pointer to the object. A node has no pointer to the list (the iterators and the views hold it). Natural size, no padding.
 - Trait: `IndexCollection` (6.7.1). It has all the members of `Collection` and `IndexCollection`.
-- Specific to `list`: `fill(count, value)` (6.6). `fill(value)` of the trait sets every existing item.
-- It has no capacity: `.capacity`, `reserve`, `shrinkToFit`, `fillAtCapacity` and the `[n]` form do not apply. `resize`, `truncate` and `pop` are not available.
-- Default iterator: `IndexIterator` from the first node to the last; the cursor is a pointer to the node, one step is O(1).
+- Specific to `list`: `fill(count, value)` (6.6). `fill(value)` of the trait sets every existing item. `truncate(n)` is available, as on `vec`.
+- It has no capacity: `.capacity`, `reserve`, `shrinkToFit`, `fillAtCapacity` and the `[n]` form do not apply. `resize` and `pop` are not available.
+- Default iterator: `IndexIterator` from the first node to the last; one step follows the link of the node to the next node, O(1).
+  - The iterator holds two pointers: one to its list (used to release the counter of 6.4 when the iterator ends) and one to the current node.
+  - The end of the list is marked by a null next pointer, so the node pointer is nullable. The pointer of the list to its last node is only a fast way to add items at the end; the iterators do not use it.
+  - `writableNext()` is syntactic sugar: it marks that the iterator changes the content of the node in place, through the node pointer. It does not change the structure of the list.
+  - The kind of the pointers (owning, borrowed, raw) is decided with the pointers (12.1).
+- Views (6.5): `l[a..b]` reaches the start in O(a), then O(1) per step. A `list` view holds a start node pointer, an end node pointer and a count; it is read-only (no `add`) and it increments the counter of 6.4 like the iterators.
 - Cost of the members:
 
 | Member | Cost | Note |
@@ -700,9 +794,10 @@ bool isValid = numbers.pop((&)last)     // false (and last = 0) when the vec is 
 | `insert(index, v)` | O(1) at 0 and at `.len`, otherwise O(n) | |
 | `removeAt(index)`, `->c[i]` | O(1) at 0, otherwise O(n) | removing the last node needs the previous one |
 | `remove(v)`, `removeAll(v)`, `has(v)`, `indexOf(v)` | O(n) | |
-| `swap(position, new)`, `swap(i, j)` | O(n) | walk to the positions |
-| `clear()` | O(n) | drops every item |
-| `sort`, `sortUnstable` | O(n log n) | merge sort by relinking the nodes, no item copies |
+| `replace(pos, value)`, `swap(i, j)` | O(n) | walk to the positions |
+| `clear()` | O(n) | sets every item to the default value |
+| `truncate(n)` | O(n) | walks to the new last node and drops the rest |
+| `sort`, `sortUnstable` | O(n log n) | bottom-up merge sort by relinking the nodes, no item copies |
 | `reverse()` | O(n) | relinks the nodes |
 | `copyFrom` | O(n + m) | |
 | `c[a..b]` view | O(a) to reach the start | read-only, then O(1) per step |
@@ -765,32 +860,31 @@ tags -= "red"
 Users can write their own collection classes in Dflat. A custom collection either implements the traits of 6.7 (`Collection` and one of its three sub-traits), or is a subclass of one of the default collections. This section stays vague for now: everything in it is a first design.
 
 - A collection trait takes the item type as a generic argument, and the class that implements it passes its own type parameter: `class MyCollection<Item> : IndexCollection<Item> { }`. There is no reserved type name; a generic parameter is always declared in the header (11.3).
-- A class that implements `Collection` gives a read-only `len` (11.1.4) and a `getIterator()` that returns an iterator. Only the iterator of the index collections is defined in this version (6.7); the iterators of maps and sets come later.
+- A class that implements `Collection` gives a read-only `len` (11.1.4, through `get_len()`, 6.7) and the methods behind the properties and the operators of its trait (6.7). A class that implements a sub-trait gives the `getIterator()` of that sub-trait, which returns an iterator. Only the iterator of the index collections is defined in this version (6.7); the members of the iterators of maps and sets come later.
 - `next()` returns a tuple whose last item is the bool `isValid`: `(Item value, bool isValid)`; `writableNext()` returns the item as a writable borrow.
+- The cursor and the pointer to the collection belong to the iterator class, not to the trait (6.7): each iterator keeps them as private fields.
 
 Sketch:
 
 ```
-trait IndexIterator<Item> {
-  uns cursor
-  *Collection collection
-  fun (Item value, bool isValid) next()
-  fun ((&)Item value, bool isValid) writableNext()
+class MyIterator<Item>(*MyCollection<Item> collection) : IndexIterator<Item> {
+  uns cursor = 0
+  override fun (Item value, bool isValid) next() { ... }
+  override fun ((&)Item value, bool isValid) writableNext() { ... }
 }
 ```
 
-First idea for maps (not yet defined: the sub-traits and the cursor types are open):
+First idea for maps (not yet defined: the members and the cursor types are open):
 
 ```
-trait MapIterator<Key, Value> {
-  Key cursor
+trait MapIterator<Key, Value> : Iterator {
   fun (Key key, Value value, bool isValid) next()
 }
 ```
 
 - `for x in c` on a custom collection asks `getIterator()` once and calls `next()` until `isValid` is `false`. For the collections of the compiler no iterator object is built: the `for` is a direct loop in C.
-- While the iterator exists the collection cannot be changed (6.4).
-- Open point for classes: whether the default collections (`vec`, `list`, `map`, `hmap`, `set`, `hset`) can be subclassed, and how the overridden methods are dispatched. `arr` is a primitive and cannot be subclassed.
+- While the iterator exists the collection cannot change its size (6.4). The counter and its checks come from the trait `Collection` through `executeAfter` blocks (11.2), so a custom collection gets them without writing them.
+- Open point for classes: whether the default collections (`vec`, `list`, `map`, `hmap`, `set`, `hset`) can be subclassed, and how the overridden methods are dispatched. `arr` cannot be subclassed.
 - For a later version: how a custom class provides the indexer `c[k]` and the literals, subclassing of the default collections, and lists of pointers and references (with the pointers work).
 
 ---
@@ -1082,6 +1176,7 @@ override fun bool equals(T other) {
 - A more generic type can match before a more specific one, so the order of the checks matters. A branch that can never run because an earlier check always matches is a level 3 warning.
 - Every path of `equals` must return a value, otherwise it is a compile error. The upward-check warning (level 2) does not fire in generic code when a check is true for one `T` only.
 - Null is handled by the compiler before `equals` is called: the function never receives a null argument.
+- `Root.Class` offers `get_hash()` to implement the `.hash` of the object (6.2) and `equals(any?)`. Ordering is given by the trait `Comparable<T>` (11.2.1).
 
 ## 11.1.4 Fields and properties
 
@@ -1129,6 +1224,41 @@ trait Shape : Named { fun r64 Area() }
 - How a property is read or written through a value of a trait type (`any Shape`) is left to the implementation of the compiler.
 - Same member in two traits: `TraitA.member` (inside), `px.TraitA.member` (outside), unqualified → compile error.
 - Trait-typed values: the compiler chooses static or dynamic dispatch; force with `specific Shape` (one type, known at compile time) / `any Shape` (any implementing type, dispatched at runtime). `list<any Shape>` holds mixed shapes.
+- `executeAfter`: a trait method can carry a block `executeAfter { }`. The class must implement the method; the block runs after the implementation of the class and cannot be overridden or removed by the class.
+  - `executeAfter` is one contextual keyword, written like `atEnd`; it is a keyword only right after the signature of a trait method.
+  - The block runs only when the implementation succeeds (if `getIterator()` fails, the counter of 6.4 is not incremented). This is the difference with the `atEnd` of a function (14.2), which runs on every exit, exceptions included.
+  - The block reads the return value as `<method>.result` (for example `getIterator.result`), read-only: it cannot change it.
+  - The blocks are chained: every trait of the hierarchy that defines an `executeAfter` for the method runs its block, similar to `atEnd`. The exact order of the chain is open (99).
+  - A method with a default body and a block is written `fun f() { default body } executeAfter { ... }`. An `executeBefore { }` with the same shape can be added later.
+- The trait `Collection` uses `executeAfter` to provide the counter of open iterators and views and its checks (6.4), so every collection gets them, the custom ones included. `releaseIterator()` is private and is called only by the default `atEnd` of the iterator or of the view; a release with the counter at zero raises `InvalidIteratorReleaseException` (not silent, 15.3).
+
+```
+trait Collection<Item> {
+  uns iteratorCounter      // not visible outside; private state in a trait is open (99)
+
+  private fun releaseIterator()
+    executeAfter {
+      if iteratorCounter == 0 throw InvalidIteratorReleaseException()
+      iteratorCounter--
+    }
+}
+
+trait IndexCollection<Item> : Collection<Item> {
+  fun IndexIterator<Item> getIterator()
+    executeAfter {
+      iteratorCounter++
+    }
+}
+```
+
+### 11.2.1 Basic traits
+
+| Trait | Members | Description |
+|---|---|---|
+| `Comparable<T>` | `int compareTo(T value)` (mandatory) | ordering: returns -1, 0 or 1 (`int` is the signed native integer); used by the sorted collections and by `sort` (6.2, 6.6) |
+
+- `Comparable<T>` replaces `.order`, which is removed. When a class provides nothing, the default order of 6.2 (compare the hashes, then the addresses) is the default implementation.
+- `.hash` is not a trait: it is a mandatory property of every type (6.2).
 
 ## 11.3 Generics
 
@@ -1154,7 +1284,7 @@ fun r64 sum<Source : Sequence>(Source items) where Source.Item : Numeric { }
 - Constraints on the type parameters are written inline, `<Item : Numeric>`, however many parameters there are. `where` is for the constraints that are not on a plain parameter: the placeholder of a trait (`Source.Item`, 11.3.4) or another type expression. Both forms can be used in the same declaration. Entries of a `where` clause are separated by commas.
 - Repeating in `where` a constraint already written inline on the same parameter (`<Item : Numeric> ... where Item : Numeric`) is a level 1 warning. A different constraint on that parameter in `where` is a compile error: join it inline with `&&`.
 - Several constraints are joined with `&&`: the type must satisfy all of them. No negative constraints.
-- There are no `Hashable`, `Orderable` or `Printable` constraints: every type already has `.hash`, `.order` and `toStr()` (6.1, 6.2), and `.hash` is sized to the architecture (`uns`).
+- There are no `Hashable`, `Orderable` or `Printable` constraints: every type already has `.hash` and `toStr()` (6.1, 6.2), and `.hash` is sized to the architecture (`uns`). Ordering is the trait `Comparable<T>` (11.2.1).
 - The body is checked at the definition, using only what the constraints guarantee, against every type that can reach it (11.3.6, 11.3.11).
 
 ### 11.3.2 Classes and traits
@@ -1339,7 +1469,7 @@ The value on the right is evaluated first. If it converts implicitly (section 6)
 | Copies per generic | different type combinations of one generic in the user code | 16 |
 | Copies per library collection | the same, for each collection defined by this specification (`vec`, `list`, `map`, `hmap`, `set`, `hset`) | 64 |
 
-- The copies are counted per generic: 64 different `list` types and 64 different `map` types are allowed. A custom collection, even one built on the library ones, uses the user limit. `arr<T>` is a primitive (no code of its own) and has no limit.
+- The copies are counted per generic: 64 different `list` types and 64 different `map` types are allowed. A custom collection, even one built on the library ones, uses the user limit. `arr<T>` (a class with direct generated code, 6.1) has no limit.
 - The same type arguments are one copy: `smaller<i32>` called many times is generated once. Identical machine code produced by different types is merged by the backend (the linker); the limits count the type combinations before any merging.
 - Exceeding a limit is a compile error with a clear message, for example: `Generic XYZ defined in file abc.df was used with more than 16 instances in function FunName in file def.df`. For the chain depth the message lists the chain.
 
@@ -1403,7 +1533,9 @@ Rust model, Dflat syntax.
 
 - Single owner; freed at the end of the owner's scope, running the class `atEnd` (11.4).
 - Function parameters borrow; returning moves ownership to the caller.
-- Collections own their elements: adding moves in, removing moves out, reading borrows.
+- Collections own their elements: adding moves in, removing moves out, reading borrows. This is true for `arr` too: the variable that declares an array owns it, `b = a` borrows it, `->a` moves it, and a field that is an array is dropped by its class (6.1).
+- An owned object that loses its owner is destroyed and its `atEnd` runs (`clear()`, `fill(...)`, `c[i] = v` and any other operation that drops an owned object, 6.1).
+- Iterators and views: if not given away, they live only inside the scope that created them; when moved or borrowed they follow the rules of this section, and their collection becomes changeable again only when the last holder ends (6.5).
 - Switching an object between the two counting kinds → `ChangingRefCountTypeException`.
 - Weak references are used through `enforce w { } else { }`; inside the block the object is kept alive.
 - `.asRefCount` / `.asSharedRefCount` / `.isRC` are built-in operations, not methods.
@@ -1734,8 +1866,10 @@ class Exception {
 | 44 | `FileRemovedWhileOpenException` | |
 | 45 | `StreamCloseFailureException` | |
 | 46 | `ModifyingIteratedCollectionException` | |
+| 47 | `InvalidIteratorReleaseException` (6.4, 11.2) | |
 
 - The list grows during development; each new standard exception takes the next ID.
+- `OutOfMemoryException`: any allocation can raise it (6.1). In Debug builds it is catchable and not silent; in Release builds it is a `Panic` that ends the program. A size that does not fit (`n * size` overflowing `uns`) is reported in the same way.
 - IDs are 64 bits. 0–255 are reserved for `Root`; every other exception has as ID a hash of its full name.
 
 ### 15.4 Silent exceptions
@@ -1774,7 +1908,7 @@ fun i64 useWithoutCatch(i64 a) {
 
 - `Panic(code)`: critical exit, not an exception; not catchable, no cleanup, exits with `code`.
 - Every panic prints `Panic <code>` on stdout and exits with `code`. An unhandled exception first prints its `Message` on its own line.
-- Unhandled exception at the top level, unhandled error inside a catch body, an exception that is not silent leaving an `atEnd` block (15.7.6), an exception not caught inside a property accessor (11.1.4), an index outside a collection in a Release build (6.1), double free: exit with -1000 for now. Every panic case will get its own code later.
+- Unhandled exception at the top level, unhandled error inside a catch body, an exception that is not silent leaving an `atEnd` block (15.7.6), an exception not caught inside a property accessor (11.1.4), an index outside a collection in a Release build (6.1), a change of the size of a collection with open iterators or views in a Release build (6.4), out of memory in a Release build (6.1), double free: exit with -1000 for now. Every panic case will get its own code later.
 
 ### 15.6 Targets without exceptions
 
@@ -2016,6 +2150,7 @@ Level 1 = most important, level 3 = least.
 | 3 | Generic call chosen over comparisons | 11.3.5 |
 | 3 | Primary parameter redeclared with an initializer | 11.1.1 |
 | 3 | Unreachable branch of a generic check | 11.1.3 |
+| 3 | `uns` smaller than the cpu size (limits the length of the collections and the size of `.hash`) | 2.1 |
 
 ---
 
@@ -2042,17 +2177,18 @@ Level 1 = most important, level 3 = least.
 - Generics: minimal intermediate form exported by compiled libraries for public generics (11.3.14), after 0.1.0
 - Stdlib: strings, files, time, collections extras (queue/stack)
 - Bitfields: whether `set`, `clear`, `setAs` and `toggle` modify the value in place or return a new value; nullability of bitfields (3.1.1, 7.1)
-- `.sizeof` for all types (whether it counts the items of a collection)
 - Functional collection members (`filter`, `map`, `reduce`)
 - Order of enum keys in sorted collections (declaration order or value)
-- Collections: the iterators of `map` / `hmap` / `set` / `hset`: the number of `Iterator` sub-traits (2 or 3), the cursor types of the tree `map` / `set` and of `hmap` / `hset`, and the shape of `next()` for sets (the index iterator is defined, 6.7.1)
+- Collections: the members of `MapIterator` and `SetIterator` (the three sub-traits of `Iterator` are decided, 6.7), the cursor types of the tree `map` / `set` and of `hmap` / `hset`, and the shape of `next()` for sets (the index iterator is defined, 6.7.1)
+- Collections: the exact order of the chain of `executeAfter` blocks (proposal: like `atEnd`, from the most specific trait to the root, once per call; a `parent` call inside the class implementation does not start the chain again), and private state in a trait (the counter of open iterators of `Collection`, 11.2)
+- Collections: `clear()` on maps and sets now differs from `clear()` on the index collections (which keeps the size, 6.6); to be confirmed with the maps and the sets
 - Collections: how a custom class provides `c[k]` (read and write) and literals (`[...]`, `{ ... }`)
 - Collections: the sets (members, operations, `swap` and `->c[k]` on sets; `c[k]` read does not exist on sets)
 - Collections: lists of pointers and references, with the pointers work
 - Structs: the definition (11.1.5)
-- Collections: views are read-only and live only in locals and parameters; revisit with tasks (6.5), the full Rust borrow model stays an option
+- Collections: views are read-only; revisit with tasks (6.5), the full Rust borrow model stays an option
 - Collections: hash table and B-tree implementations (several implementations chosen by target or compiler option, node size, hash function), shared C helpers against one copy per type (code size, 11.3.12), literal typing and lowering (6.3, briefing 9)
-- Collections: the other non-silent exceptions of the collection operations, to be formalized during the implementation
+- Collections: the other non-silent exceptions of the collection operations, to be formalized during the implementation (out of memory is decided, 6.1, 15.3)
 - Strings: how a `string` is stored in the generated C (hash tables, empty and null strings); to be decided in a session on strings
 - Properties: position of `readonly` / `readwrite` / `writeonly` next to `public` and `static`, and their use together with a body (11.1.4); `override` of a property with only one half; access to a property through a trait-typed value (`any`), left to the compiler
 - Writing a character by index into a string (`text[3] = 'x'`)
@@ -2394,3 +2530,50 @@ Level 1 = most important, level 3 = least.
 - 6.6 `fill(null)`: the items become null and the objects they held end (their `atEnd` runs)
 - 6.7 `Collection<Item>` is generic: `IndexCollection<Item>` and `SetCollection<Item>` extend `Collection<Item>`, `MapCollection<Key, Value>` extends `Collection<Value>` (`has(v)` on a map searches the values); the key of `->c[k]` is given by each sub-trait
 - 11.3.2 A generic trait can extend one generic trait (new; needed by the collection traits): the arguments of the parent are types built from the parameters of the child (the same list, a part of them or a concrete type), the chain can have several levels, the class implements the whole chain, one parent only, a parent with placeholders is not supported yet; examples `ABCCollection<Item> : HashCollection<Item>` and `ABCMap<Key, Value> : HashCollection<Value>`
+
+
+## Changes in 0.0.14
+
+- Header: version 0.0.14, 2026/10/24
+- 1.1 Naming: the non-public methods that implement properties and operators are snake_case (provisional)
+- 2.1 `uns` has the size of `int` (the cpu size, or `--native-int`); lengths, indexes and `.hash` use it; a `uns` smaller than the cpu size gives a warning (19.3)
+- 2.4 Lengths and default indexes are `uns` (the line still said `u64`)
+- 3.2 A tuple item can be a writable reference `(&)Type`; the borrow lives as long as the tuple; a tuple that holds a `(&)` follows the rule of the iterators and views
+- 6.1 `arr` is a class like any other (ownership, hash, methods, properties; it can be an item: `list<arr<i32>>`), with direct generated code; it cannot be subclassed; the declaring variable owns it, `b = a` borrows, `->a` moves, an array field is dropped by its class (was: a primitive)
+- 6.1 A collection has an internal counter of its open iterators and views
+- 6.1, 12 An owned object that loses its owner is destroyed and its `atEnd` runs (`clear()`, `fill(...)`, `c[i] = v`, ...)
+- 6.1, 15.3, 15.5 Out of memory: any allocation; `OutOfMemoryException` in Debug (catchable, not silent), `Panic` in Release; an overflowing size is reported the same way (no separate `OverflowException`); a literal size above the maximum is a compile error
+- 6.2 `.hash` is mandatory on every type, of size `uns`; native hashes cannot be overridden; how it is calculated: own value up to `uns`, FxHash combine of the parts above (`K` for 64 and 32 bits), `real` by its bits with `-0.0` as `+0.0` and one canonical NaN, rapidhash for strings, ordered combine for tuples, class name plus address for classes (collections included)
+- 6.2, 11.1.3 `Root.Class` offers `getHash()` and `equals(any?)`
+- 6.2, 6.6, 11.2.1, 11.3.1 `.order` is removed: ordering is the trait `Comparable<T>` with the mandatory `int compareTo(T value)` (-1, 0, 1); the default class order (hashes, then addresses) is its default implementation
+- 6.4 The collection is read-only in size while it has open iterators or views: the internal counter (created by an iterator or a view, released by their default `atEnd`; explicit iterators count too), provided by the trait `Collection`; a changing operation raises `ModifyingIteratedCollectionException`; every changing method checks the counter
+- 6.4 The list of the forbidden operations (`add`, `add(collection)`, `insert`, `pop`, `remove`, `removeAll`, `removeAt`, `resize`, `truncate`, `fillAtCapacity`, `fill(count, value)`, `reserve`, `shrinkToFit`, `sort`, `sortUnstable`, `reverse`, `->c[i]` on a `list`) and of the allowed ones (reads, `swap`, `replace`, `c[i] = v`, `fill(value)`, `clear()`, `->c[i]` on `arr` and `vec`, changes in place)
+- 6.4 The compile-time proof covers only the direct case (a changing member or an element assignment on the same variable or field path); everything else is a runtime check
+- 6.5 Views are the class `View<C>` (`C` is the type of the collection: `View<vec<string>>`); each view class holds what its collection needs; trees and maps will probably need dedicated views; `[a..b]` calls `get_view(uns? start, uns? end)`, a missing bound is null; a `list` view is created in O(n); iterators and `for` run over a view; the lock is the one of the iterators; `c[a..b]!` copies into a new collection of type `C` (needs `.clone()`)
+- 6.5, 12 Where iterators and views live: if not given away, only inside the scope that created them; moved or borrowed, they follow the ownership rules; the collection is changeable again when the last holder ends (replaces "a view can only be a local variable or a parameter")
+- 6.6 `.sizeof`: on every type; for a collection, the header plus the allocated block (the capacity), without what the items own; for a `list`, the header plus all the nodes
+- 6.6 `add(collection)` on `vec` and `list`: basic items copied, objects moved with `add(->other)` (the other is left empty), the plain form with objects is a compile error until cloning, the same collection raises `ModifyingProtectedSourceException`
+- 6.6 `indexOf` returns the maximum `uns` when not found (was `u64`)
+- 6.6 `removeAt(range)`: the ranges of 6.5; a range outside the collection raises `IndexOutOfRangeException`
+- 6.6, 6.7.1, 6.8.3 `swap(position, new)` is removed; `swap(posA, posB)` only exchanges; new `var old = c.replace(pos, value)` (the old item is returned, or ends at the end of the statement when not assigned); the `swap` forms of maps are left for the maps
+- 6.6 `clear()` on `arr`, `vec` and `list` sets every item to the default value and keeps the size (was: removes all items on `vec` and `list`); to remove all items, `truncate(0)`
+- 6.6, 6.7.1, 6.8.3 `truncate(n)` is available on `list`
+- 6.6 Sorting algorithms: `arr` and `vec` `sort` is a merge sort with run detection (TimSort style), `sortUnstable` is pdqsort; `list` uses a bottom-up merge sort that relinks the nodes for both; the comparison goes through `compareTo` or the given function
+- 6.6 `copyFrom` works between any index collections; it copies for real (objects cloned), it is not a move; the index check must always be there
+- 6.6, 6.7.1 New `transformTo<Kind>()`: a moving conversion between `arr`, `vec` and `list` (the original ends, no cloning; the item type comes from the original, a different one is a compile error; `vec` to `arr` can reuse the block)
+- 6.7 `Collection<Item>` has no `getIterator()`: `IndexCollection`, `MapCollection` and `SetCollection` each declare a typed one
+- 6.7 `Iterator` is a non-generic marker trait with three sub-traits: `IndexIterator<Item>`, `MapIterator<Key, Value>`, `SetIterator<Item>`; `IndexIterator` has `next()` and `writableNext()`
+- 6.7, 6.7.1, 6.8.1, 6.8.2, 6.9 The cursor is internal to each iterator and is not in the trait; the pointer to the collection lives in each concrete iterator class; the iterators follow a contract (first rule: each element once and only once)
+- 6.7 The methods behind the properties and the operators: non-public, possibly virtual, mandatory for the implementing classes, snake_case; table `get_sizeof()` (`Root.Class`), `get_len()`, `move_out(k)` (generic form, `uns k` for `IndexCollection`, `Key k` for `MapCollection`), `read_pos(uns k)`, `set_pos(uns k, value)`, `get_view(uns? a, uns? b)`; `.sizeof` moves from `Collection` to `Root.Class`
+- 6.8.2 Growth policy: the capacity is at least what was requested when growing and exact after `shrinkToFit()`; doubling up to `double-grow-limit` (default 4mb), then the factor `further-grow-factor` (default 1.5), both compiler parameters; a fixed increment only for small targets; the first allocation is 16 items, on the first `add`, unless a capacity is given
+- 6.8.3 Every node is allocated separately; two kinds of nodes (next pointer plus value, next pointer plus object pointer), no pointer to the list, natural size, no padding
+- 6.8.3 The `list` iterator holds a pointer to its list and one to the current node; the end is a null next pointer; the pointer to the last node is not used by iterators; `writableNext()` changes the node content in place, never the structure; the pointer kinds are decided with the pointers
+- 6.8.3 A `list` view holds a start node pointer, an end node pointer and a count; read-only; it increments the counter like the iterators
+- 6.9 The sketch of a custom iterator keeps the cursor and the pointer to the collection in the class; the counter comes from the `executeAfter` blocks of `Collection`
+- 11.2 New trait rule `executeAfter { }`: a block after a trait method that runs after the class implementation, only when it succeeds, cannot be overridden or removed, reads `<method>.result` read-only, blocks chained through the hierarchy; `fun f() { body } executeAfter { ... }`; `executeBefore` may come later; `Collection` uses it for the counter; `releaseIterator()` is private
+- 11.2.1 Basic traits (new section): `Comparable<T>`
+- 11.3.12 `arr<T>` is described as a class with direct generated code (still no copy limit)
+- 15.3 New exception `InvalidIteratorReleaseException` (not silent; its ID is set at 0.1.0)
+- 15.5 Panic cases: a change of the size of an iterated collection and out of memory, in Release builds
+- 19.3 Warning: `uns` smaller than the cpu size (level to be set)
+- 99 Open items: `.sizeof` removed (decided); the iterator item now asks only for the members of `MapIterator` and `SetIterator`; new items for the order of the `executeAfter` chain, private state in a trait and `clear()` on maps and sets; the views item no longer says "locals and parameters"; out of memory noted as decided

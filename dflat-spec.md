@@ -75,7 +75,7 @@ Labels are used as target for jumping around (including controlled jumps like br
 - An invalid code point in a literal (surrogate, above `0x10FFFF`) is a compile error.
 - Interpolated strings: `$"Hello {name}, total {x:D,02}"`; `\{` and `\}` for literal braces [Ref: Formatting]).
 
-## 1.5. Declarations and namespaces
+## 1.5 Declarations and namespaces
 
 ```
 i32 a = 10
@@ -97,6 +97,38 @@ i32 onlyCount, _, bool onlyActive = record       // partial, _ skips an item
 - A tuple or literal must be assigned, passed or returned; alone it's a compile error.
 - Tuple destructuring: the items of a tuple can be unpacked into separate variables in one statement; `_` skips an item.
 
+## 1.6 Accessibility rules
+## 1.6 Accessibility rules
+
+A few keywords are used to define who can call and use part of the code. Mostly classes, properties, and methods.
+It is important to note that 2 special cases are used to decide who is allowed to see it (visibility), and what kind of reference the caller holds (owned, writable `(&)` or read-only `&`).
+
+### 1.6.1 Visibility
+
+| Keyword | Who can use the member |
+|---|---|
+| (none) | private: only the class itself (default) |
+| `asparent` | only the children of the object, through the parent reference (12.5) |
+| `internal` | the namespace and its sub-namespaces |
+| `public` | everyone |
+| `unrestricted` | everyone, and it includes `public` |
+
+- The visibility keyword goes before `static`, `fun` or the field type. Only one visibility keyword can be used on a member.
+- `asparent` is not public. It can change the parent, because only its own children can call it.
+- An overriding function takes the visibility of the original: none is written on it (11.1.2).
+- A subclass sees everything when the source of the parent is available, public only for compiled libraries (11.1.2).
+- Constructors have a visibility; a private constructor can be called only by the class body (11.1.1).
+- A visibility keyword before `R` or `W` sets the visibility of that accessor; the property visibility applies to the other one (11.1.4).
+
+### 1.6.2 Access through a reference
+
+- Owned variable or writable reference `(&)`: all the members visible to the caller can be used.
+- Read-only reference `&`:
+  - properties can be read; assigning to them is a compile error;
+  - a `public` method cannot be called;
+  - an `unrestricted` method can be called;
+  - an `asparent` method can be called by the children of the object (12.5).
+- `unrestricted` is meant for methods that do not change the object; the compiler does not check it (open item, 99).
 
 
 # 2. Built-in types
@@ -531,7 +563,7 @@ for i32 index = 1..=10 { }                       // a range is a virtual collect
 - The items of a `set` / `hset` and the keys of a `map` / `hmap` are always read-only: `(&)` is a compile error on them.
 - On a basic value type without `(&)`, `x` is a copy: assigning to it (`x += 1`) changes only the copy and gives a level 3 warning. With `(&)` the item in the collection is changed in place.
 - A collection is read-only in size while it has open iterators or views:
-  - A collection has an internal counter of its open iterators and views. Creating an iterator or a view increments it; the default `atEnd` of the iterator or of the view decrements it. An explicit iterator (made with `getIterator()`) counts too: it holds a pointer to its collection to decrement the counter (6.7). The counter and its checks are provided by the trait `Collection` (11.2), so maps, sets, views and custom collections get them too.
+  - A collection has an internal counter of its open iterators and views. Creating an iterator or a view increments it; the default `atEnd` of the iterator or of the view decrements it, through the `asparent` method `releaseIterator()` of the collection. An explicit iterator (made with `getIterator()`) counts too: it holds a reference to its collection, declared with `as parent` (6.7), to decrement the counter. The collection is the parent of its iterators and views: when it ends, it destroys them. The counter and its checks are provided by the trait `Collection` (11.2), so maps, sets, views and custom collections get them too.
   - While the counter is above zero the size of the collection cannot change: a changing operation raises `ModifyingIteratedCollectionException` (15.3, not silent). In Debug builds it is catchable; in Release builds it is a `Panic`, and a `catch` for it is ignored with a level 3 warning (the same rule as `IndexOutOfRangeException`, 6.1). Every changing method of a collection checks the counter at runtime.
   - Forbidden while the counter is above zero: `add`, `add(collection)`, `insert`, `pop`, `remove`, `removeAll`, `removeAt`, `resize`, `truncate`, `fillAtCapacity`, `fill(count, value)`, `reserve`, `shrinkToFit`, `sort`, `sortUnstable`, `reverse`, and `->c[i]` on a `list` (the node is removed).
   - Allowed: reads, `swap`, `replace`, `c[i] = v` (objects included), `fill(value)`, `clear()`, `->c[i]` on `arr` and `vec`, and changes made in place to the value or to the fields of an item.
@@ -550,8 +582,8 @@ arr<i32> middle = scores[2..5]!       // copy
 - On an `IndexCollection` the operator `[a..b]` calls the non-public method `get_view(uns? start, uns? end)` (6.7), which returns `View<C>`. A missing bound (`[..b]`, `[a..]`) is passed as null.
 - Views exist only on `arr`, `vec` and `list`. There are no ranges on keys (`map`, `hmap`, `set`, `hset`). Creating a view of a `list` is O(n), because the start node has to be found.
 - Iterators and `for` can run over a view: it has a begin and an end.
-- Lock: the same rules as the iterators (6.4). A view increments the counter of open iterators and views of its collection, so the collection keeps its size while the view is used.
-- Where iterators and views live: if not given away, an iterator or a view lives only inside the scope that created it (the call to `getIterator()` or `c[a..b]`). If it is moved or borrowed, it follows the ownership and borrowing rules (12); the collection becomes changeable again only when the last holder ends.
+- Lock: the same rules as the iterators (6.4). A view is a child of its collection, declared with `as parent` like an iterator, and increments the counter of open iterators and views of its collection, so the collection keeps its size while the view is used.
+- Where iterators and views live: an iterator or a view is a child of its collection (`as parent`, 6.7). If not given away, it lives only inside the scope that created it (the call to `getIterator()` or `c[a..b]`) and ends before its collection. If it is moved with `->`, the checks of 6.7 apply; when the collection ends first, it destroys the iterator or view, and using it raises `UsageOfDestroyedObjectException`. The collection becomes changeable again only when the last holder ends.
 - `c[a..b]!` copies the items into a new collection of type `C` and leaves the original unchanged. It needs `.clone()` (12) to be fully implemented.
 
 ## 6.6 Members
@@ -687,12 +719,13 @@ trait IndexIterator<Item> : Iterator {
 ```
 
 - Whether `{ }` is written for an empty trait follows the trait grammar (11.2).
-- The cursor is internal to each iterator and cannot be reached from outside, so the trait does not specify it: the trait fixes only the methods. Iterators are specific to a collection type, so the pointer to the collection (used to check the end and to release the counter of 6.4) lives in each concrete iterator class, not in the trait.
+- The cursor is internal to each iterator and cannot be reached from outside, so the trait does not specify it: the trait fixes only the methods. Iterators are specific to a collection type, so the reference to the collection (used to check the end and to release the counter of 6.4) lives in each concrete iterator class, not in the trait. The collection is the parent of its iterators: the class declares it with `as parent` on a reference parameter (at most one per class). When the collection ends, it destroys its iterators and nulls their reference to it.
 - `next()` returns a tuple whose last item is the bool `isValid`; `writableNext()` returns the same tuple with the item as a writable borrow `(&)` (3.2; the one `for (&)` uses). When `isValid` is `false` the other items of the tuple are not valid (the iteration is over), so null values and items are not a problem for the iteration.
 - The iterators follow a contract written with the trait. First rule: an iterator returns each element of the collection once and only once.
 - Only the iterator of the index collections is defined in this version; the members of `MapIterator` and `SetIterator` come later.
 - The collections of the compiler do not build an iterator object: the `for` is emitted as a direct loop in C (6.4).
 - The methods behind the properties and the operators: each trait defines a set of non-public methods for its properties and its operators. They can be virtual, and every class that implements the trait must implement them. They are internal: only someone writing a custom collection needs them. They are snake_case (1.1, provisional). When the argument type of an operator is not given (`->c[k]`), it is the generic form valid for all collections; each kind of collection fixes the argument type (`uns` for `IndexCollection`, `Key` for `MapCollection`, and the same for the sets). More methods will be added with the maps and the sets.
+- The cursor is internal to each iterator and cannot be reached from outside, so the trait does not specify it: the trait fixes only the methods. Iterators are specific to a collection type, so the reference to the collection (used to check the end and to release the counter of 6.4) lives in each concrete iterator class, not in the trait. The collection is the parent of its iterators: the class declares it with `as parent` on a reference parameter (at most one per class). When the collection ends, it destroys its iterators and nulls their reference to it.
 
 | Written as | Method | Defined in |
 |---|---|---|
@@ -706,6 +739,18 @@ trait IndexIterator<Item> : Iterator {
 | `c[a..b]`, `c[..b]`, `c[a..]` | `get_view(uns? a, uns? b)`, returns `View<C>`; a missing bound is null (6.5) | `IndexCollection` |
 
 - `len` stays a property; `getIterator`, `next` and `writableNext` are regular methods and keep their names.
+
+```
+asparent fun releaseIterator() // In the Collection definition
+
+class ListIterator<Item>(&List<Item> list as parent) : IndexIterator<Item> {
+  Node<Item> cursor = list.first
+  override fun (Item value, bool isValid) next() { ... }
+  override fun ((&)Item value, bool isValid) writableNext() { ... }
+  } atEnd {
+  list.releaseIterator()
+}
+```
 
 ### 6.7.1 IndexCollection
 
@@ -778,10 +823,10 @@ bool isValid = numbers.pop((&)last)     // false (and last = 0) when the vec is 
 - Specific to `list`: `fill(count, value)` (6.6). `fill(value)` of the trait sets every existing item. `truncate(n)` is available, as on `vec`.
 - It has no capacity: `.capacity`, `reserve`, `shrinkToFit`, `fillAtCapacity` and the `[n]` form do not apply. `resize` and `pop` are not available.
 - Default iterator: `IndexIterator` from the first node to the last; one step follows the link of the node to the next node, O(1).
-  - The iterator holds two pointers: one to its list (used to release the counter of 6.4 when the iterator ends) and one to the current node.
-  - The end of the list is marked by a null next pointer, so the node pointer is nullable. The pointer of the list to its last node is only a fast way to add items at the end; the iterators do not use it.
+  - The iterator holds two references: one to its list, declared with `as parent` (6.7), used to release the counter of 6.4 when the iterator ends, and one to the current node.
+  - The end of the list is marked by a null next pointer, so the node reference is nullable. The pointer of the list to its last node is only a fast way to add items at the end; the iterators do not use it. When the list ends, it destroys its iterators, so the node reference of an iterator is never used after its nodes are gone: the check of 6.7 raises `UsageOfDestroyedObjectException` first.
   - `writableNext()` is syntactic sugar: it marks that the iterator changes the content of the node in place, through the node pointer. It does not change the structure of the list.
-  - The kind of the pointers (owning, borrowed, raw) is decided with the pointers (12.1).
+  - The iterator needs no explicit pointers: its references to the list and to the node are compiler-guaranteed (12.1, 6.7).
 - Views (6.5): `l[a..b]` reaches the start in O(a), then O(1) per step. A `list` view holds a start node pointer, an end node pointer and a count; it is read-only (no `add`) and it increments the counter of 6.4 like the iterators.
 - Cost of the members:
 
@@ -862,15 +907,17 @@ Users can write their own collection classes in Dflat. A custom collection eithe
 - A collection trait takes the item type as a generic argument, and the class that implements it passes its own type parameter: `class MyCollection<Item> : IndexCollection<Item> { }`. There is no reserved type name; a generic parameter is always declared in the header (11.3).
 - A class that implements `Collection` gives a read-only `len` (11.1.4, through `get_len()`, 6.7) and the methods behind the properties and the operators of its trait (6.7). A class that implements a sub-trait gives the `getIterator()` of that sub-trait, which returns an iterator. Only the iterator of the index collections is defined in this version (6.7); the members of the iterators of maps and sets come later.
 - `next()` returns a tuple whose last item is the bool `isValid`: `(Item value, bool isValid)`; `writableNext()` returns the item as a writable borrow.
-- The cursor and the pointer to the collection belong to the iterator class, not to the trait (6.7): each iterator keeps them as private fields.
+- The cursor and the reference to the collection belong to the iterator class, not to the trait (6.7): each iterator keeps them as private fields, and the collection is declared as its parent with `as parent`.
 
 Sketch:
 
 ```
-class MyIterator<Item>(*MyCollection<Item> collection) : IndexIterator<Item> {
+class MyIterator<Item>(&MyCollection<Item> collection as parent) : IndexIterator<Item> {
   uns cursor = 0
   override fun (Item value, bool isValid) next() { ... }
   override fun ((&)Item value, bool isValid) writableNext() { ... }
+} atEnd {
+  parent.releaseIterator()
 }
 ```
 
@@ -1230,13 +1277,13 @@ trait Shape : Named { fun r64 Area() }
   - The block reads the return value as `<method>.result` (for example `getIterator.result`), read-only: it cannot change it.
   - The blocks are chained: every trait of the hierarchy that defines an `executeAfter` for the method runs its block, similar to `atEnd`. The exact order of the chain is open (99).
   - A method with a default body and a block is written `fun f() { default body } executeAfter { ... }`. An `executeBefore { }` with the same shape can be added later.
-- The trait `Collection` uses `executeAfter` to provide the counter of open iterators and views and its checks (6.4), so every collection gets them, the custom ones included. `releaseIterator()` is private and is called only by the default `atEnd` of the iterator or of the view; a release with the counter at zero raises `InvalidIteratorReleaseException` (not silent, 15.3).
+- The trait `Collection` uses `executeAfter` to provide the counter of open iterators and views and its checks (6.4), so every collection gets them, the custom ones included. `releaseIterator()` is `asparent`: only the children of the collection (iterators and views) can call it, even through a read-only reference, and it is called only by their default `atEnd`; a release with the counter at zero raises `InvalidIteratorReleaseException` (not silent, 15.3).
 
 ```
 trait Collection<Item> {
   uns iteratorCounter      // not visible outside; private state in a trait is open (99)
 
-  private fun releaseIterator()
+  asparent fun releaseIterator()
     executeAfter {
       if iteratorCounter == 0 throw InvalidIteratorReleaseException()
       iteratorCounter--
@@ -1555,13 +1602,17 @@ string label = itemPointer[].Name
 - Types, prefix only: `*T` read-only (default), `(*)T` read/write. Nesting reads left to right: `**i32`, `(*)*i32`.
 - Bounds: `{count}` in entries, constant or variable, copied at creation; for read-only and writable pointers. Constant indexes are checked at compile time, variable ones at runtime.
 - Usage by index only: `p[i]`, `p[]` = `p[0]`, fields `p[].Field`. No prefix `*` dereference, no infix `->`.
-- `&x` gives a read-only pointer to `x`; `(&)x` a writable one; `(&)` on a `const` is a compile error.
+- `&x` gives a read-only pointer to `x`; `(&)x` a writable one; `(&)` on a `const` is a compile error. Whether a pointer is writable is always written explicitly where it is created or passed.
 - No untyped pointers: `*byte` stands in for C `void*`.
 - No pointer arithmetic (`p + 4` is a compile error); use the methods below.
-- `null` is the null pointer.
-- Conversions: transmute only (3.5); pointer → `addr` also with `=`. `addr` → pointer via transmute (`[*i32]someAddress`) is always unsafe.
+- `null` is the null pointer. Pointers are nullable by default, and the null pointer is the 0 pointer.
+- A reference is a pointer that the compiler generates and guarantees to be valid. It is what normal code uses. Explicit pointers are for low-level work (hardware drivers, memory-mapped access, C interop).
+- In safe code an explicit pointer exists only when the compiler can prove that its address is valid or null. Anything the compiler cannot prove needs unsafe code.
+- Conversions between pointers and numbers or `addr`: transmute only (3.5); pointer → `addr` also with `=`. `addr` → pointer via transmute (`[*i32]someAddress`) is always unsafe.
+- Between pointer types: `(*)T` converts to `*T` implicitly (autocast). `*T` to `(*)T` is a compile error; the way to do it exists only in unsafe code (defined with `unsafe`).
 - Logical model: base, size and cursor. The underlying implementation is decided by the compiler: base and size are kept only for bound checks, an unbounded pointer is just the cursor, and only the cursor crosses into C.
 - Pointers coming from outside the program (other libraries, OS calls) or built from numbers are always unsafe.
+- `unsafe` marks code that does operations the compiler cannot verify. It can be written on a scope (a block), on a function (a function is a scope) or on a class. A class marked `unsafe` can be used only from unsafe code.
 
 Methods (plain = steps of the pointed type, `Raw` = bytes):
 
@@ -1624,7 +1675,7 @@ function(->a.c)                    // a.c is null afterwards, a stays usable
 }
 ```
 
-- `->a.c` moves a field out of an object (also chains such as `->a.c.d`). The field holds null afterwards and the object stays usable; its class `atEnd` sees the field as null.
+- `->a.c` moves a field out of an object (also chains such as `->a.c.d`). The field holds null afterwards and the object stays usable; its class `atEnd` sees the field as null. Using a variable after `->` raises `UsageOfDestroyedObjectException`, or is a compile error when the compiler can detect it.
 - The owner of `a`, or a writable borrow `(&)A a`, can move a field out; a read-only borrow cannot (compile error).
 - `->` on a variable or field of a basic type is ignored and behaves like a plain copy; it is a level 1 warning (`i32 a; call(->a)` is the same as `call(a)`).
 - Moving out of a stored field or property: a value is copied; an object is passed with its ownership and the field becomes null. If the property is computed (its `R` returns a new object that is not stored), `->` gives away that new object, which needs no owner here; the property value is nullified in every case (11.1.4). Collections: `->c[k]` (6.6).
@@ -1632,9 +1683,26 @@ function(->a.c)                    // a.c is null afterwards, a stays usable
 - Finalizer: `f is atEnd.` is a statement only, never an expression. The final dot is mandatory, and only a line break or `;` may follow it (`f is atEnd.close()` is a compile error).
 - `f is atEnd.` releases the ownership held by the variable `f`: a single owner is destroyed running its full destructor (11.4); a reference counted object drops the counter by one and is destroyed when it reaches zero. In every case `f` becomes null; on a null `f` it does nothing.
 - When the object is destroyed, weak references to it see null (through `enforce`).
-- On a borrowed variable (not an owner) it is a compile error. Using `f` after the finalizer is a normal null access.
+- On a borrowed variable (not an owner) it is a compile error. Using `f` after the finalizer raises `UsageOfDestroyedObjectException`, or is a compile error when the compiler can detect it.
 - It works on fields, locals and parameters that own the object, and replaces the explicit `close()` calls in cleanup code.
 - `atEnd of f { f is atEnd. }` is legal and not flagged: the block can use `f` first and release it explicitly.
+
+## 12.5 Parent and child objects
+
+```
+class ListIterator<Item>(&List<Item> list as parent) : IndexIterator<Item> {
+  Node<Item> cursor = list.first
+}
+```
+
+- An object can have one parent: the object that guarantees its existence (an iterator or a view and its collection, a DataSet and its DB connection). When the parent ends, it destroys its children and nulls their reference to it.
+- The parent is declared in the parameter list of the class with `as parent` after a reference parameter (`&` or `(&)`). A class has at most one `as parent`; a second one is a compile error, and so is `as parent` on a parameter that is not a reference. In the body the parent is used by its parameter name. `parent` is a keyword only right after `as`.
+- A class with no `as parent` has no parent.
+- On every method call, a child checks its reference to the parent. If it is null, the child runs its own `atEnd` (without calling the parent) and raises `UsageOfDestroyedObjectException` (15.3).
+- If the ownership of the child is never transferred away (no `->` on it), the child always ends before its parent, so the compiler removes the checks. If `->` is used on it, the compiler emits the checks and gives a level 2 warning (19.3).
+- A method marked `asparent` can be called only by the children of the object, through the parent reference, even when it is read-only. It is not public. It can change the parent.
+- `unrestricted` replaces `public` in the visibility slot and includes it: the method can also be called through a read-only reference (`&`). A plain `public` method needs an owned or writable reference. Properties can be read through `&`; assigning to them is a compile error.
+- Who holds the link to a child after `->` is an open item (99).
 
 ---
 
@@ -1867,8 +1935,10 @@ class Exception {
 | 45 | `StreamCloseFailureException` | |
 | 46 | `ModifyingIteratedCollectionException` | |
 | 47 | `InvalidIteratorReleaseException` (6.4, 11.2) | |
+| 48 | `UsageOfDestroyedObjectException` (12.4, 12.5) | |
 
 - The list grows during development; each new standard exception takes the next ID.
+- `UsageOfDestroyedObjectException`: raised when an object that is gone is used: a child whose parent ended (12.5), or a variable released with `->` or `is atEnd.` (12.4). It is not silent and is catchable in Debug and Release builds (no `Panic` in Release).
 - `OutOfMemoryException`: any allocation can raise it (6.1). In Debug builds it is catchable and not silent; in Release builds it is a `Panic` that ends the program. A size that does not fit (`n * size` overflowing `uns`) is reported in the same way.
 - IDs are 64 bits. 0–255 are reserved for `Root`; every other exception has as ID a hash of its full name.
 
@@ -2144,6 +2214,7 @@ Level 1 = most important, level 3 = least.
 | 2 | Char compared with an integer | 2.5 |
 | 2 | `equals` and operator `==` both defined | 11.1.3 |
 | 2 | Unreachable case in a type switch | 11.3.7 |
+| 2 | Extra checks emitted for a child object moved with `->` (its parent may end first) | 12.5 |
 | 3 | Unmatched `##region` / `##endregion` | 19.1 |
 | 3 | `const` name not UPPER_SNAKE_CASE | 1.1 |
 | 3 | Folder ignored (invalid name) | 16 |
@@ -2184,7 +2255,6 @@ Level 1 = most important, level 3 = least.
 - Collections: `clear()` on maps and sets now differs from `clear()` on the index collections (which keeps the size, 6.6); to be confirmed with the maps and the sets
 - Collections: how a custom class provides `c[k]` (read and write) and literals (`[...]`, `{ ... }`)
 - Collections: the sets (members, operations, `swap` and `->c[k]` on sets; `c[k]` read does not exist on sets)
-- Collections: lists of pointers and references, with the pointers work
 - Structs: the definition (11.1.5)
 - Collections: views are read-only; revisit with tasks (6.5), the full Rust borrow model stays an option
 - Collections: hash table and B-tree implementations (several implementations chosen by target or compiler option, node size, hash function), shared C helpers against one copy per type (code size, 11.3.12), literal typing and lowering (6.3, briefing 9)
@@ -2200,6 +2270,9 @@ Level 1 = most important, level 3 = least.
 - Function pointers (objects); C function tables (COM vtables, Vulkan dispatch tables)
 - C interop: declaring external functions, struct layout, calling conventions, callbacks, strings (UTF-8 / UTF-16), ownership across the boundary, errors, unions, bit flags, varargs
 - Deferred: async/await, locks/atomics, tasks, SIMD, EF syntax, Vulkan, shaders
+- Parent and child objects: who holds the link to a child after `->` (existence hierarchy against scope ownership), and how this fits the double free rule of 11.4 ("whichever ends first wins")
+- Parent and child objects: how the collection tracks its live children (iterators, views, and other kinds of child) so it can destroy them and null their reference
+- Pointers: the exact way to convert `*T` to `(*)T` in unsafe code, the syntax of the `unsafe` block and what it allows, handling of null pointers in safe code, which cases the compiler can prove valid, pointer equality, `.hash` and `toStr()`, and pointers in generics
 
 ---
 
@@ -2577,3 +2650,20 @@ Level 1 = most important, level 3 = least.
 - 15.5 Panic cases: a change of the size of an iterated collection and out of memory, in Release builds
 - 19.3 Warning: `uns` smaller than the cpu size (level to be set)
 - 99 Open items: `.sizeof` removed (decided); the iterator item now asks only for the members of `MapIterator` and `SetIterator`; new items for the order of the `executeAfter` chain, private state in a trait and `clear()` on maps and sets; the views item no longer says "locals and parameters"; out of memory noted as decided
+- 12.1 Pointers are nullable by default (null is the 0 pointer); a reference is a pointer generated and guaranteed valid by the compiler; explicit pointers are for low-level work; in safe code an explicit pointer exists only when its validity can be proven
+- 12.1 `(*)T` converts to `*T` implicitly; `*T` to `(*)T` is a compile error, with a way that is allowed only in unsafe code; transmute-only now refers to conversions between pointers and numbers or `addr`
+- 12.1 Writability of a pointer is always explicit where it is created or passed
+- 12.1 `unsafe` can mark a scope, a function or a class; an unsafe class is usable only from unsafe code
+- 6.4 The counter of open iterators and views is released through the `asparent` method `releaseIterator()`; the collection is the parent of its iterators and views and destroys them when it ends
+- 6.5 Iterators and views are children of their collection (`as parent`); if moved with `->` and the collection ends first, using them raises `UsageOfDestroyedObjectException`
+- 6.7 The iterator holds a reference to its collection (not a pointer), declared with `as parent`; every method call checks it; checks removed when the iterator is never moved with `->`, otherwise a level 2 warning; `asparent` methods and the `ListIterator` example
+- 6.8.3 The `list` iterator holds two references (the list as parent, and the current node); no explicit pointers needed
+- 6.9 The custom iterator sketch uses `&MyCollection<Item> collection as parent` instead of `*MyCollection<Item>`
+- 11.2 `releaseIterator()` is `asparent` (only children can call it, even through a read-only reference)
+- 12.4 Use of a variable after `->` or `is atEnd.` raises `UsageOfDestroyedObjectException`, or is a compile error when detectable (replaces "normal null access")
+- 12.5 Parent and child objects (new): `as parent` on one reference parameter of a class (at most one); the parent destroys its children and nulls their reference when it ends; every method call of a child checks the reference; the checks are removed when the child is never moved with `->`, otherwise a level 2 warning
+- 12.5 `asparent` visibility: methods callable only by the children of the object, even through a read-only reference, not public
+- 12.5 `unrestricted` visibility: replaces `public` and includes it; callable also through a read-only reference (`&`); a plain `public` method needs an owned or writable reference; properties are readable through `&`, assigning to them is a compile error
+- 15.3 New exception `UsageOfDestroyedObjectException` (48): not silent, catchable in Debug and Release
+- 19.3 Warning level 2: extra checks emitted for a child object moved with `->`
+- 99 Open items: who holds the link to a child after `->`; how the collection tracks its live children; pointer details (conversion in unsafe code, `unsafe` block syntax, null handling in safe code, provable validity, equality, `.hash`, `toStr()`, generics); removed "lists of pointers and references" only if you decide it is resolved

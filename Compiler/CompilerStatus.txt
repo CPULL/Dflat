@@ -1,8 +1,6 @@
 Compiler version 0.0.16 alpha for version 0.0.13 of the specs 2026/10/24
 
 Changes from the previous version -----------------------
-- uns: the lengths and indexes of arr, vec and list use the native unsigned size of the target (df_uns in C), so 32-bit targets get 32-bit lengths
-- IndexIterator<Item>: the cursor is no longer part of the trait; each iterator keeps its own (private)
 
 Done -----------------------
 

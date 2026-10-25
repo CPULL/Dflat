@@ -389,7 +389,8 @@ public sealed partial class CodeGen {
     return new Expr(code, elem, IsClass(elem) || elem == "string");
   }
 
-  // arr<T>[n] name = [] / = [items] / = arr<T>[n]: the size on the declaration (spec 6.8.1); the declaration is rewritten before the compilation
+  // arr<T>[n] name = [] / = [items] / = arr<T>[n]: the size on the declaration (spec 6.8.1); vec<T>[n] name (= []): the capacity on the declaration,
+  // an empty vec (spec 6.3). The declaration is rewritten before the compilation
   void RewriteSizedArrays(Node node) {
     foreach (var child in node.Children) {
       RewriteSizedArrays(child);
@@ -399,16 +400,26 @@ public sealed partial class CodeGen {
     }
     var size = node.Children.FirstOrDefault(child => child.Kind == "Size");
     var typeNode = node.Children.FirstOrDefault(child => child.Kind == "Type");
-    if (size == null || typeNode is not { Text: "arr", Children.Count: 1 }) {
-      return;   // vec<T>[n] name and the others are not built (EmitDecl says so)
+    if (size == null || typeNode is not { Text: "arr" or "vec", Children.Count: 1 }) {
+      return;   // the others (hmap, hset, list, ...) are not built (EmitDecl says so)
     }
     var init = node.Children.FirstOrDefault(child => child.Kind == "Init");
     var sizeExpr = size.Children[0];
     long? declared = IntLiteralValue(sizeExpr) is System.Numerics.BigInteger value ? (long)value : null;
     Node NewArray() => Synthetic("Index", size)
-      .Add(Synthetic("GenericRef", size).Add(Synthetic("Name", size, "arr")).Add(typeNode.Children[0]))
+      .Add(Synthetic("GenericRef", size).Add(Synthetic("Name", size, typeNode.Text!)).Add(typeNode.Children[0]))
       .Add(sizeExpr);
     node.Children.Remove(size);
+    if (typeNode.Text == "vec") {
+      if (init != null && !(init.Children[0].Kind == "List" && init.Children[0].Children.Count == 0)) {
+        throw Error("vec<T>[n] name is an empty vec with capacity n: it takes nothing or []", node);
+      }
+      if (init != null) {
+        node.Children.Remove(init);
+      }
+      node.Add(Synthetic("Init", size).Add(NewArray()));
+      return;
+    }
     if (init == null || (init.Children[0].Kind == "List" && init.Children[0].Children.Count == 0)) {
       node.Children.Remove(init!);
       node.Add(Synthetic("Init", size).Add(NewArray()));

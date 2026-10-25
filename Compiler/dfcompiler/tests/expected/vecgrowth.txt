@@ -1,0 +1,14 @@
+start 0 0
+len 1 capacity 16
+len 17 capacity 32
+len 33 capacity 64
+len 65 capacity 128
+big 1048576 1048576
+big 1048577 1572864
+half 1001 2000
+joined 3 16
+joined 43 43
+parts 0 50
+few [1, 2, 3, 4] 4 6
+computed 0 14
+---- exit code 0 ----

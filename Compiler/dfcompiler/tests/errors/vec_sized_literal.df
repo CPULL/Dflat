@@ -1,0 +1,2 @@
+// vec<T>[n] name is an empty vec with capacity n: a literal with items is an error
+vec<i32>[4] numbers = [1, 2]

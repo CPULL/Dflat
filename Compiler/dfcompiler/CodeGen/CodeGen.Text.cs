@@ -340,8 +340,9 @@ public sealed partial class CodeGen {
     if (!userTypes.Contains("vec") && !userTypes.Contains("list") && Mentions(program, node => node.Text is "vec" or "list" or "View" or "getIterator" or "IndexIterator" or "IndexCollection" or "Iterator"
           || (node.Kind == "Index" && node.Children.Count > 1 && node.Children[1].Kind == "Range"))) {
       // its lines are numbered from LibraryLine so that no warning of this code is shown (Warn) and the errors can be told apart
-      // UNS_NONE is the largest uns of the target ("not found")
-      string prelude = VecPrelude.Replace("UNS_NONE", NativeUns == "u32" ? "4294967295" : "18446744073709551615");
+      // UNS_NONE is the largest uns of the target ("not found"); VEC_DOUBLE_LIMIT is the block size up to which a vec doubles (spec 6.8.2)
+      string prelude = VecPrelude.Replace("UNS_NONE", NativeUns == "u32" ? "4294967295" : "18446744073709551615")
+        .Replace("VEC_DOUBLE_LIMIT", VecDoubleGrowLimit.ToString());
       var vecLibrary = new Parser(new Lexer(prelude, LibraryLine).Tokenize()).ParseProgram();
       program.Children.InsertRange(0, vecLibrary.Children);
       vecPrelude = true;

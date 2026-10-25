@@ -1,0 +1,1 @@
+vec_sized_literal.df(2): error: vec<T>[n] name is an empty vec with capacity n: it takes nothing or []

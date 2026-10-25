@@ -636,6 +636,7 @@ A collection holds several items in one object. Dflat has seven: `arr`, `vec`, `
 
 Applies to the keys of `map` / `hmap` and to the items of `set` / `hset`.
 
+- Types that can be keys: all the native numeric types, `bool`, `char`, `string`, `date`, `time`, `clock`, `lapse`, enums, bitfields, tuples of valid key types, and classes (except `arr` and the collections, even if they are classes). Nullable types, `arr`, the collections, tuples that contain a collection and null objects cannot be keys (compile error). A key must have a hash, an equality and a stable identity while it is inside the collection.
 - Hashed collections (`hmap`, `hset`): the key needs `==` and a hash; the hash is sized to the architecture.
 - Sorted collections (`map`, `set`): the key needs an ordering.
 - `.hash` is a mandatory property of every type, of size `uns` (2.1). The hash of the native types cannot be overridden. A class can override its hash and `equals`; `==` on class objects calls `equals` only when the class overrides it (known at compile time), and compares identity otherwise.
@@ -646,10 +647,11 @@ Applies to the keys of `map` / `hmap` and to the items of `set` / `hset`.
   - Strings: rapidhash on the bytes (a 32-bit variant for a 32-bit `uns`).
   - Tuples: the same ordered combine over the hashes of the items.
   - Classes: the hash of the class name and the memory address. A collection hashes like any other class. It is meant for collections only (not for `dfoot`).
-- `Root.Class` offers `getHash()` and `equals(any?)` (11.1.3).
+- `Root.Class` offers `get_hash()` and `equals(any?)` (11.1.3).
 - There is no `.order`. Ordering uses the trait `Comparable<T>` (11.2.1) with the mandatory method `int compareTo(T value)`, which returns -1, 0 or 1 (`int` is the signed native integer).
 - Class order when a class provides none (the default implementation of `compareTo`): the hash values are compared; two different objects with the same hash are ordered by their address.
-- Orderings: numbers, `char`, `bool` (false before true), `date` and `time` by value; strings by bytes (the same as code point order in UTF-8), culture-invariant for now; tuples item by item, left to right.
+- Orderings: numbers, `char`, `bool` (false before true), `date` and `time` by value; enums by their numeric value (an enum can have explicit values), as `sort` does; strings by bytes (the same as code point order in UTF-8), culture-invariant for now; tuples item by item, left to right.
+- Objects as keys: the collection owns the key (6.6) and treats it as read-only: it cannot be changed through the collection, but it is not globally immutable. With the default hash and order of a class (the class name and the address) changing the fields of a key object is safe. For a class that overrides `get_hash()`, `compareTo` or `equals` with its fields, changing those fields while the object is a key gives undefined collection behavior. A key cannot vanish while it is in the collection, because the collection owns it.
 - `bool` can be a key (two possible values). Reals can be keys, except NaN: a NaN key is never stored or retrieved (no exception).
 - Maps and sets do not allow a null key (or a null item in a set). The empty string `""` is a valid key: for a `string`, `""` and null are the same value (7.1), so there is no separate null string key.
 - A `string` is a pointer to its first allocation, and a null pointer is the empty string (4.4): a null pointer alone cannot mark an empty slot of a hash table with string keys, because `""` is a valid key. How the hash tables handle it is decided with the hash collections.
@@ -693,7 +695,8 @@ for i32 index = 1..=10 { }                       // a range is a virtual collect
 - A range such as `1..=10` is a virtual collection: the `for` creates an anonymous iterator on it.
 - `var` can be used as the type of the loop variable when the type can be inferred (10.3).
 - The loop variable borrows the item; the collection keeps the ownership (there is no consuming loop). `for Item x in c` gives a read-only `x`; `for (&)Item x in c` gives a read/write `x` (`x.done = true` changes the object in the collection). The marker is written like on a parameter: `(&)Type variable` (13.1).
-- The items of a `set` / `hset` and the keys of a `map` / `hmap` are always read-only: `(&)` is a compile error on them.
+- The items of a `set` / `hset` and the keys of a `map` / `hmap` are always read-only: `(&)` is a compile error on them. Keys are structural: changing one means removing the entry and adding it again.
+- On maps, `for (string key, i32 value) in ages` gives a read-only key and value; `for (string key, (&)i32 value) in ages` changes the value in place; `for ((&)string key, i32 value) in ages` is a compile error. `for string key in ages.keys` is always read-only; `for (&)i32 age in ages.values` is allowed.
 - On a basic value type without `(&)`, `x` is a copy: assigning to it (`x += 1`) changes only the copy and gives a level 3 warning. With `(&)` the item in the collection is changed in place.
 - A collection is read-only in size while it has open iterators or views:
   - A collection has an internal counter of its open iterators and views. Creating an iterator or a view increments it; the default `atEnd` of the iterator or of the view decrements it, through the `asparent` method `releaseIterator()` of the collection. An explicit iterator (made with `getIterator()`) counts too: it holds a reference to its collection, declared with `as parent` (6.7), to decrement the counter. The collection is the parent of its iterators and views: when it ends, it nulls their reference to it (12.5). The counter and its checks are provided by the trait `Collection` (11.2), so maps, sets, views and custom collections get them too.
@@ -713,7 +716,7 @@ arr<i32> middle = scores[2..5]!       // copy
 - `c[a..b]`, `c[..b]`, `c[a..]` give a view: a reference to a part of the real collection, not a copy. A view is always read-only; there are no writable views.
 - A view is a dedicated class, `View<C>`, where `C` is the type of the collection it comes from: a `vec<string>` can only produce a `View<vec<string>>`. Each view class holds what its collection needs for the view to exist (for example a start and a length for `arr` and `vec`, a start node, an end node and a count for `list`, 6.8.3). The view classes of the collections are similar but are not the same class. Trees and maps will probably need dedicated views (`IndexView`, `MapView`); that is decided with those collections.
 - On an `IndexCollection` the operator `[a..b]` calls the non-public method `get_view(uns? start, uns? end)` (6.7), which returns `View<C>`. A missing bound (`[..b]`, `[a..]`) is passed as null.
-- Views exist only on `arr`, `vec` and `list`. There are no ranges on keys (`map`, `hmap`, `set`, `hset`). Creating a view of a `list` is O(n), because the start node has to be found.
+- Range views exist only on `arr`, `vec` and `list`. There are no ranges on keys (`map`, `hmap`, `set`, `hset`). The `.keys` and `.values` of a map are views too (6.6). Creating a view of a `list` is O(n), because the start node has to be found.
 - Iterators and `for` can run over a view: it has a begin and an end.
 - Lock: the same rules as the iterators (6.4). A view is a child of its collection, declared with `as parent` like an iterator, and increments the counter of open iterators and views of its collection, so the collection keeps its size while the view is used.
 - Where iterators and views live: an iterator or a view is a child of its collection (`as parent`, 6.7). If not given away, it lives only inside the scope that created it (the call to `getIterator()` or `c[a..b]`) and ends before its collection. If it is moved with `->`, it is an adopted child (12.5): when the collection ends first, it nulls the reference of the iterator or view, and using it raises `UsageOfDestroyedObjectException`. The collection becomes changeable again only when the last holder ends.
@@ -760,12 +763,14 @@ A member marked `–` is a compile error on that collection (for example `hasKey
 
 - `.len`: count of items. `.sizeof`: bytes to store the object itself; it exists on every type, natives included (6.7). For a collection it is the header plus the allocated block of items (the capacity, not the length), without what the items own; for a `list` it is the header plus all the nodes.
 - `.capacity`: items that fit without growing. `reserve(n)` makes room for at least `n` more items; `shrinkToFit()` lowers the capacity to the length.
-- `.keys`: keys of a map (`map`, `hmap`). `.values`: values of a map. To walk the positions of `arr`, `vec` and `list` use a range (`0..list.len`, 6.4).
+- `.keys`: keys of a map (`map`, `hmap`). `.values`: values of a map. Both are views (6.5): read-only, they increment the counter of open iterators and views of the map (6.4), they have `len`, `has` and an iterator, and they can be stored and passed. `ages.keys!` makes a `vec<Key>` and `ages.values!` a `vec<Value>`. Keys are never writable; values can be changed in a loop with `(&)` (6.4). To walk the positions of `arr`, `vec` and `list` use a range (`0..list.len`, 6.4).
 - `c[k] = v`: on `arr`, `vec` and `list` it replaces an existing item only; an index past the end raises `IndexOutOfRangeException` (not silent). On `map` and `hmap` it replaces the value, or adds the key and the value when the key is missing.
-- Reading a missing map key gives the null or zero value of the value type; no exception. Use `hasKey` or `tryGet` to know whether the key exists.
+- Reading a missing map key gives the null or zero value of the value type; no exception. Use `hasKey` or `tryGet` to know whether the key exists. With objects as values the result is null, so `map["a"].name` raises `NullPointerException` like any other access through null.
 - `add(v)`: appends to `vec` and `list`. `add(k, v)`: adds the pair to a map, or replaces the value of an existing key; returns `false` when it replaced, `true` when the key is new. On sets it returns `true` if the value was added.
+- A map owns its keys and its values: existing objects are moved in with `m.add(->key, ->value)` (6.1). The keys are read-only through the map (6.2).
 - `add(collection)`: appends the items of another collection to `vec` and `list`; on maps it merges another map (the new value wins, no return value); on sets it returns the number of items actually added.
   - On `vec` and `list`: items of basic types are copied. Objects are moved with `v.add(->other)`: the items move, the other collection ends and its variable becomes null (12); a plain `v.add(other)` clones the items, with the rules of `other!` (12.6), and leaves `other` unchanged. The same collection as source and target raises `ModifyingProtectedSourceException`.
+  - On maps: only a map of the same kind (`map` with `map`, `hmap` with `hmap`); mixing them is a compile error. `m.add(other)` clones the entries (12.6) and leaves `other` unchanged; `m.add(->other)` moves them.
 - `insert(index, value)`: `index` goes from `0` to `.len` (`.len` appends); a larger index raises `IndexOutOfRangeException`.
 - `pop((&)out)`: removes the last item of a `vec` and moves it into `out` (the ownership passes to `out`); it returns `true` (the `isValid` of the result). On an empty `vec` it returns `false` and `out` gets the default value of its type (null for objects, `0` for numbers, `""` for `string`). There is no other form of `pop` and no `tryPop`; no exception is raised. The previous value of `out` is dropped.
 - `has(v)`: true if the value is present (on maps, searches the values). `hasKey(k)`: true if the key exists.
@@ -774,12 +779,14 @@ A member marked `–` is a compile error on that collection (for example `hasKey
 - `remove(v)`: removes the first match and returns `true` if something was removed. `removeAll(v)`: removes all matches and returns the number removed. On maps both work by value. Sets hold a value once, so they have `remove` only.
 - `removeAt(k / range)`: removes by index or range on `vec` and `list`, by key on maps. The range forms are those of 6.5 (`a..b`, `a..=b`, `..b`, `a..`); the items removed end. A range outside the collection raises `IndexOutOfRangeException` (as `copyFrom`).
 - `bool tryGet(k, (&)out[, default])`: reads a map entry into `out` (`(&)` because the call writes to it) and returns `true` when the key exists. When the key is missing it returns `false` and `out` gets `default`, or the default value of its type when no `default` is given.
+  - For objects `out` is a borrow: the map keeps owning the object. The borrow is valid while the map exists and is not structurally modified (the rules of the views, 6.4, 6.5).
+  - `(&)` only lets `tryGet` write the variable: assigning to `out` afterwards (`out = otherDog`) re-points the variable and leaves the map unchanged; replacing the value in the map needs `map[k] = v`. Changing the fields of the object through `out` changes the object in the map.
 - Replace and swap, with the old item and the ownership:
   - `var old = sequence.replace(pos, value)` (`arr`, `vec`, `list`): puts the new item at `pos` and returns the old one; the ownership of the old item moves to the caller and the collection owns the new one. A new object that already exists needs `->` (6.1). If the result is not assigned, the old item ends at the end of the statement.
   - `sequence.swap(posA, posB)` only exchanges two items of `arr`, `vec` or `list`; no ownership changes. There is no `swap(position, new)` form (use `replace`).
   - `Item old = map.swap(Key key, Item new)`: the item in the map is replaced by `new`; the ownership of the old item moves to the caller and the map owns `new`. A missing key adds the pair and returns a null (default) item. The `swap` forms of maps are confirmed with the maps.
   - `map.swap(key1, key2)` exchanges the two values: if both keys exist the values are exchanged; if only one exists its value moves to the missing key and the original key is removed; if both are missing nothing happens.
-- `->c[k]` moves the item out of the collection (ownership passes to the receiver; a basic value type is copied). The slot is zeroed (null for objects, `0` for numbers) in `arr` and `vec`, and the item is removed in `list`, `map`, `hmap`, `set` and `hset`.
+- `->c[k]` moves the item out of the collection (ownership passes to the receiver; a basic value type is copied). The slot is zeroed (null for objects, `0` for numbers) in `arr` and `vec`, and the item is removed in `list`, `map`, `hmap`, `set` and `hset`. On maps `->m[k]` gives only the value and the key ends with the entry; `(key, value) = ->m[k]` is a compile error.
 - `clear()`: on `arr`, `vec` and `list` it cleans up the values: every item is set to the default value and the size is kept (the objects dropped end, 6.1). On maps and sets it removes all items. To remove all the items of a `vec` or a `list`, use `truncate(0)`.
 - `fill(value)`: sets every item up to the current `.len` (the whole array for `arr`; on an empty `list` it does nothing). `fillAtCapacity(value)` (`vec`): fills the whole capacity and sets `.len` to the capacity.
 - The value of `fill` can be any value: basic values, strings (each item gets its own copy, shrunk, 4), dates, times and every other type that is not a class. `null` is allowed: every item becomes null and the objects they held are no longer owned by the collection (they end, running their `atEnd` if they have one). A class instance is a compile error (the items would share one object).
@@ -858,7 +865,6 @@ trait IndexIterator<Item> : Iterator {
 - Only the iterator of the index collections is defined in this version; the members of `MapIterator` and `SetIterator` come later.
 - The collections of the compiler do not build an iterator object: the `for` is emitted as a direct loop in C (6.4).
 - The methods behind the properties and the operators: each trait defines a set of non-public methods for its properties and its operators. They can be virtual, and every class that implements the trait must implement them. They are internal: only someone writing a custom collection needs them. They are snake_case (1.1, provisional). When the argument type of an operator is not given (`->c[k]`), it is the generic form valid for all collections; each kind of collection fixes the argument type (`uns` for `IndexCollection`, `Key` for `MapCollection`, and the same for the sets). More methods will be added with the maps and the sets.
-- The cursor is internal to each iterator and cannot be reached from outside, so the trait does not specify it: the trait fixes only the methods. Iterators are specific to a collection type, so the reference to the collection (used to check the end and to release the counter of 6.4) lives in each concrete iterator class, not in the trait. The collection is the parent of its iterators: the class declares it with `as parent` on a reference parameter (at most one per class). When the collection ends, it nulls their reference to it (12.5).
 
 | Written as | Method | Defined in |
 |---|---|---|
@@ -1065,7 +1071,8 @@ trait MapIterator<Key, Value> : Iterator {
 - `for x in c` on a custom collection asks `getIterator()` once and calls `next()` until `isValid` is `false`. For the collections of the compiler no iterator object is built: the `for` is a direct loop in C.
 - While the iterator exists the collection cannot change its size (6.4). The counter and its checks come from the trait `Collection` through `executeAfter` blocks (11.2), so a custom collection gets them without writing them.
 - Open point for classes: whether the default collections (`vec`, `list`, `map`, `hmap`, `set`, `hset`) can be subclassed, and how the overridden methods are dispatched. `arr` cannot be subclassed.
-- For a later version: how a custom class provides the indexer `c[k]` and the literals, subclassing of the default collections, and lists of pointers and references (with the pointers work).
+- The indexer `c[k]` of a custom collection is given by the methods `read_pos` and `set_pos` of its trait (6.7).
+- For a later version: how a custom class receives the literals and defines `|=` and `+=`, subclassing of the default collections, and lists of pointers and references (with the pointers work).
 
 ---
 
@@ -2470,10 +2477,9 @@ Level 1 = most important, level 3 = least.
 - Stdlib: strings, files, time, collections extras (queue/stack)
 - Bitfields: whether `set`, `clear`, `setAs` and `toggle` modify the value in place or return a new value; nullability of bitfields (3.1.1, 7.1)
 - Functional collection members (`filter`, `map`, `reduce`)
-- Order of enum keys in sorted collections (declaration order or value)
 - Collections: the members of `MapIterator` and `SetIterator` (the three sub-traits of `Iterator` are decided, 6.7), the cursor types of the tree `map` / `set` and of `hmap` / `hset`, and the shape of `next()` for sets (the index iterator is defined, 6.7.1)
 - Collections: `clear()` on maps and sets now differs from `clear()` on the index collections (which keeps the size, 6.6); to be confirmed with the maps and the sets
-- Collections: how a custom class provides `c[k]` (read and write) and literals (`[...]`, `{ ... }`)
+- Collections: how a custom class receives literals (`[...]`, `{ ... }`) and defines `|=` and `+=` (`c[k]` is decided, 6.7)
 - Collections: the sets (members, operations, `swap` and `->c[k]` on sets; `c[k]` read does not exist on sets)
 - Structs: the definition (11.1.5)
 - Collections: views are read-only; revisit with tasks (6.5), the full Rust borrow model stays an option
@@ -2929,3 +2935,16 @@ Level 1 = most important, level 3 = least.
 - 4, 6.1, 6.6, 12.4 A string added to a collection (`add`, `insert`, `c[k] = s`, `fill`, literals) is always copied, and the copy is shrunk
 - 4 The iterator lock of a string is counted at run time for block strings and checked at compile time only for the other strings
 - 4.1, 4.2, 4.3, 6.6 The string and char methods are camelCase (`trim`, `substr`, `indexOf`, `toCStr`, `isLetter`, `toUpper` ...; was PascalCase)
+- 6.2 The types that can be keys (and items of a set): native numbers, `bool`, `char`, `string`, `date`, `time`, `clock`, `lapse`, enums, bitfields, tuples of valid key types, classes except `arr` and the collections; nullable types, `arr`, collections, tuples with a collection and null objects cannot
+- 6.2 Enum keys are ordered by their numeric value
+- 6.2 Objects as keys: owned by the collection and read-only through it, not globally immutable; safe with the default hash and order; undefined collection behavior when the fields used by an overridden `get_hash()`, `compareTo` or `equals` change while the object is a key
+- 6.2 `Root.Class` offers `get_hash()` (was `getHash()`, 11.1.3 already said `get_hash()`)
+- 6.4 Map loops: the value can be writable (`for (string key, (&)i32 value)`, `for (&)i32 age in ages.values`); a writable key is a compile error; keys are structural
+- 6.5, 6.6 `.keys` and `.values` are views: read-only, counted by the map, with `len`, `has` and an iterator, can be stored and passed; `ages.keys!` makes a `vec<Key>`, `ages.values!` a `vec<Value>`
+- 6.6 A missing key with object values reads as null (`map["a"].name` raises `NullPointerException`)
+- 6.6 A map owns its keys and values (`m.add(->key, ->value)`); `->m[k]` gives only the value, the key ends with the entry; `(key, value) = ->m[k]` is a compile error
+- 6.6 `add(map)`: same kind only (`map` with `hmap` is a compile error); `m.add(other)` clones, `m.add(->other)` moves
+- 6.6 `tryGet` with objects gives a borrow, valid while the map exists and is not structurally modified; assigning to `out` re-points the variable, the map is unchanged
+- 6.9 The indexer of a custom collection is given by `read_pos` and `set_pos` (6.7); literals and `|=` / `+=` stay for later
+- 99 Open items: the order of enum keys removed (decided, 6.2); the custom collection item asks only for literals and `|=` / `+=`
+- 6.7 A repeated paragraph on the cursor of the iterators is removed

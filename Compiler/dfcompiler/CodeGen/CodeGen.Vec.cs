@@ -218,10 +218,17 @@ public class vec<T> : IndexCollection<T> {
     return ->iterator
   }
 
+  // the growth policy (spec 6.8.2): 16 items first, then the capacity doubles until the block reaches VEC_DOUBLE_LIMIT bytes, then it grows by half.
+  // The .sizeof of an arr is its header plus the block, so the block is what an empty arr does not have
   fun grow(uns needed) {
-    uns newCapacity = items.len * 2
-    if newCapacity < 4 {
-      newCapacity = 4
+    uns newCapacity = 16
+    if items.len > 0 {
+      arr<T> empty
+      if items.sizeof - empty.sizeof < VEC_DOUBLE_LIMIT {
+        newCapacity = items.len * 2
+      } else {
+        newCapacity = items.len + items.len / 2
+      }
     }
     if newCapacity < needed {
       newCapacity = needed
@@ -687,14 +694,19 @@ public class list<T> : IndexCollection<T> {
   // the ones that reorder the items cannot run while the vec has open iterators (spec 6.4); fill(value) and swap can
   static readonly HashSet<string> VecChangingMembers = new() { "reverse", "sort", "sortUnstable" };
 
-  // room for at least needed items (the C of grow in VecPrelude: double, at least 4, at least what is needed); the new slots are zero
+  // the block size up to which a vec doubles its capacity; above it the capacity grows by half (spec 6.8.2, double-grow-limit, a fixed value for now)
+  const long VecDoubleGrowLimit = 4 * 1024 * 1024;
+
+  // room for at least needed items (the C of grow in VecPrelude: 16 items first, double up to VecDoubleGrowLimit bytes, then by half, at least what is
+  // needed); the new slots are zero
   string VecReserve(string held, string type, string needed) {
     string elemType = CType(VecElem(type));
     string items = $"{held}->{VecField(type, "items")}";
     string want = NewTemp();
     string capacity = NewTemp();
     string bigger = NewTemp();
-    return $"df_uns {want} = {needed}; if ({want} > {items}.len) {{ df_uns {capacity} = {items}.len * 2; if ({capacity} < 4) {{ {capacity} = 4; }} if ({capacity} < {want}) {{ {capacity} = {want}; }} "
+    return $"df_uns {want} = {needed}; if ({want} > {items}.len) {{ df_uns {capacity} = {items}.len == 0 ? 16 "
+      + $": {items}.len * sizeof({elemType}) < {VecDoubleGrowLimit} ? {items}.len * 2 : {items}.len + {items}.len / 2; if ({capacity} < {want}) {{ {capacity} = {want}; }} "
       + $"{elemType}* {bigger} = ({elemType}*)df_calloc({capacity}, sizeof({elemType})); if ({held}->{VecField(type, "count")} > 0) {{ memcpy({bigger}, {items}.p, {held}->{VecField(type, "count")} * sizeof({elemType})); }} "
       + $"free({items}.p); {items}.p = {bigger}; {items}.len = {capacity}; }} ";
   }

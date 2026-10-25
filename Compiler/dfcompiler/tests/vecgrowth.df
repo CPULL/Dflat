@@ -1,0 +1,49 @@
+// vec growth policy (spec 6.8.2) and the sized declaration vec<T>[n] name (spec 6.3)
+alias Root as r
+
+// 16 items on the first add, then the capacity doubles
+vec<i32> numbers = []
+r.Console.log($"start {numbers.len} {numbers.capacity}")
+uns last = numbers.capacity
+for i32 i in 0..100 {
+  numbers.add(i)
+  if numbers.capacity != last {
+    r.Console.log($"len {numbers.len} capacity {numbers.capacity}")
+    last = numbers.capacity
+  }
+}
+
+// past 4 MB of block the capacity grows by half: 1M i32 = 4 MB
+vec<i32> big = vec<i32>[1048576]
+big.fillAtCapacity(1)
+r.Console.log($"big {big.len} {big.capacity}")
+big.add(2)
+r.Console.log($"big {big.len} {big.capacity}")
+
+// below the limit it doubles
+vec<i64> half = vec<i64>[1000]
+half.fillAtCapacity(1)
+half.add(2)
+r.Console.log($"half {half.len} {half.capacity}")
+
+// add(collection) follows the same rule
+vec<i32> joined = []
+arr<i32> three = [1, 2, 3]
+joined.add(three)
+r.Console.log($"joined {joined.len} {joined.capacity}")
+arr<i32> forty = arr<i32>[40]
+joined.add(forty)
+r.Console.log($"joined {joined.len} {joined.capacity}")
+
+// the capacity on the declaration: an empty vec
+vec<string>[50] parts
+r.Console.log($"parts {parts.len} {parts.capacity}")
+vec<i32>[3] few = []
+few.add(1)
+few.add(2)
+few.add(3)
+few.add(4)
+r.Console.log($"few {few} {few.len} {few.capacity}")
+uns n = 7
+vec<u8>[n * 2] computed
+r.Console.log($"computed {computed.len} {computed.capacity}")

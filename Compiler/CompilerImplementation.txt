@@ -997,7 +997,7 @@ LISTS WITH NODES AND THE COUNTER OF OPEN ITERATORS (built 2026-10-24, compiler 0
 THE INDEX COLLECTIONS CLEANUP (built 2026-10-24, compiler 0.0.18alpha, spec 0.0.14: 6.6)
 =========================================================================================
 - vec (VecMember, called from TryReceiverCall before pop and the members shared with the arrays): add(collection) (VecAddCollection: the same rules as the list,
-  AddedCollectionType decides when the argument is a collection; the vec grows with VecReserve, the C of grow: double, at least 4, at least what is needed; ->other with
+  AddedCollectionType decides when the argument is a collection; the vec grows with VecReserve, the C of grow (see VEC GROWTH); ->other with
   objects takes the items, nulls them in the source and drops the source), removeAt(range) (VecRemoveRange: the items of the range end, memmove of the rest, the freed
   slots are zeroed), copyFrom (CollectionCopyFrom). The size changes check the counter of open iterators (LockCheck).
 - CollectionCopyFrom (CodeGen.List.cs, was ListCopyFrom) writes into a list, a vec (past the end the items are added, VecReserve) or an arr (the items must fit). CopyFrom of
@@ -1145,3 +1145,10 @@ PRIVATE STATE IN TRAITS, EXECUTEBEFORE / EXECUTEAFTER (built 2026-10-25, compile
 - Not done: the compile error when a constructor of the class does not set a public trait field, the diamond errors (two defaults for one member of a shared
   supertrait, two calls of its constructor with different arguments), executeBefore on the changing methods of the collection traits (add, remove ... are not
   trait methods), access through a value of a trait type (any) as in the spec (open).
+
+VEC GROWTH AND SIZED DECLARATION (2026-10-25, spec 6.8.2, 6.3)
+- grow in VecPrelude: 16 items when the block is empty, else doubles while the block (items.sizeof minus the .sizeof of an empty arr<T>) is below
+  VEC_DOUBLE_LIMIT, else grows by half; never less than what is needed. VEC_DOUBLE_LIMIT is replaced in the prelude text (AddPrelude, CodeGen.Text.cs)
+  by VecDoubleGrowLimit (CodeGen.Vec.cs, 4 MB). VecReserve (add(collection)) writes the same rule in C. reserve and shrinkToFit stay exact.
+- vec<T>[n] name (= []) is rewritten by RewriteSizedArrays into vec<T>[n] name = vec<T>[n]; any other initializer is a compile error. Test vecgrowth,
+  errors/vec_sized_literal. The options double-grow-limit and further-grow-factor are not built (fixed values).

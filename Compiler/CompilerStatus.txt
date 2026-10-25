@@ -1,6 +1,7 @@
 Compiler version 0.0.22 alpha for version 0.0.15 of the specs 2026/10/25
 
 Changes from the previous version -----------------------
+- vec: growth policy of spec 6.8.2 (16 items first, doubles up to a 4 MB block, then by half) and the sized declaration vec<T>[n] name
 
 Done -----------------------
 
@@ -198,7 +199,7 @@ Phase 7  Generics (spec 11.3)                                     IN PROGRESS
      2026-10-24 (iterators and views): getIterator() of vec and list gives a child iterator that holds the counter (the list one keeps a node), views c[a..b] (vecView,
      listView, arrView; View<C> as a type), var x = c.method() and var x = c[a..b] own what they get
      NOT yet: v!, c[a..b]! (needs clone), get_view and read_pos for custom collections, writableNext, the iterator of arr as a child (no counter on arr), sort(lambda),
-     sized declaration vec<T>[n] name, (&)Item in for, writableNext,
+     (&)Item in for, writableNext, the compiler options double-grow-limit and further-grow-factor (fixed at 4 MB and 1.5),
      the counter on arr (an arr has no header yet), the compile-time proof of a change in a loop, getIterator in Collection<Item>
      2026-10-25 (spec 0.0.15): the counter is the private field iteratorCounter of the trait Collection (executeAfter of getIterator and releaseIterator); custom
      collections get it, but no changing method of the traits carries an executeBefore yet (add, remove ... are not trait methods)

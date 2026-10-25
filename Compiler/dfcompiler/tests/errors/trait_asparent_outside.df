@@ -1,0 +1,6 @@
+trait Visited {
+  asparent fun ping() { }
+}
+public class Home : Visited { }
+Home h = Home()
+h.ping()

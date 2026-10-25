@@ -1,0 +1,13 @@
+ABC ABC ABC true true
+1000
+500
+Hello Ann Bob Cy!
+eve deedee EVE
+fin? 4 R2 L1
+pass 199
+[ABC, lit, ABC2]
+second
+4 []
+215
+anonymous generic ABCD
+---- exit code 0 ----

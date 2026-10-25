@@ -1,0 +1,6 @@
+trait Job {
+  public fun i32 work()
+    executeAfter {
+      work.result = 3
+    }
+}

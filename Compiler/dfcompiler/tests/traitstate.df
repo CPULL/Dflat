@@ -1,0 +1,164 @@
+// Private state in traits, sub-traits, asparent in traits, executeBefore / executeAfter and the counter of Collection (spec 11.2, 6.4)
+alias Root as r
+
+// a private member of a trait is seen only by the code of the trait
+trait Counter {
+  i32 hits
+  fun bump() { hits += 1 }
+  public fun i32 count() {
+    bump()
+    return hits
+  }
+}
+
+// the same private name in another trait: the compiler keeps them apart
+trait Tagged {
+  string hits = "tag"
+  public fun string tag() { hits }
+}
+
+// a sub-trait reads the private members of its parent and calls its private functions
+trait LoudCounter : Counter {
+  public fun i32 twice() {
+    bump()
+    bump()
+    return hits
+  }
+}
+
+// the constructor of a trait sets its private fields
+trait Started {
+  i32 start
+  Started() { start = 40 }
+  public fun i32 begin() { start + 2 }
+}
+
+public class Thing : LoudCounter, Tagged, Started {
+  public i32 hits = 7    // a field of the class: the private fields of the traits are not seen here
+}
+
+Thing t = Thing()
+r.Console.log($"{t.count()} {t.twice()} {t.count()} {t.tag()} {t.begin()} {t.hits}")
+
+// asparent in a trait: the children of the object call it through their parent reference
+trait Visited {
+  public i32 visits
+  asparent fun ping() { visits += 1 }
+}
+
+public class Home : Visited { }
+
+public class Guest(&Home home as parent) {
+  public fun visit() { home.ping() }
+}
+
+Home home = Home()
+Guest guest = Guest(home)
+guest.visit()
+guest.visit()
+r.Console.log($"visits {home.visits}")
+
+// executeBefore and executeAfter: they run around the implementation of the class, on every call
+trait Logged {
+  public fun i32 work(i32 n)
+    executeBefore {
+      r.Console.log($"before {n}")
+    }
+    executeAfter {
+      r.Console.log($"after {n} -> {work.result}")
+    }
+}
+
+public class NegativeWork : Exception { }
+
+public class Worker : Logged {
+  override fun i32 work(i32 n) {
+    if n < 0 {
+      throw NegativeWork("negative")
+    }
+    return n * 2
+  }
+}
+
+// a call of the parent implementation does not run the blocks again
+public class Lazy : Worker {
+  override fun i32 work(i32 n) { parent.work(n) + 1 }
+}
+
+fun string attempt(Logged job, i32 n) {
+  return $"result {job.work(n)}"
+  catch NegativeWork { return "failed: no executeAfter" }
+}
+
+Worker worker = Worker()
+r.Console.log(worker.work(3))
+r.Console.log(attempt(worker, 4))
+r.Console.log(attempt(worker, -1))
+Lazy lazy = Lazy()
+r.Console.log(lazy.work(5))
+
+// a custom collection gets the counter of open iterators from Collection: getIterator() adds one (executeAfter of IndexCollection),
+// releaseIterator() takes one back (executeAfter of Collection), whatever the class writes
+public class Bag : IndexCollection<i32> {
+  public arr<i32> items = [10, 20, 30]
+
+  override fun uns get_len() { items.len }
+  override fun bool has(i32 value) { items.has(value) }
+  override fun clear() { items.clear() }
+
+  override fun IndexIterator<i32> getIterator() {
+    BagIterator iterator = BagIterator(this)
+    return ->iterator
+  }
+
+  override fun releaseIterator() {
+    r.Console.log("released")
+  }
+
+  public fun string releaseAgain() {
+    releaseIterator()
+    return "released by hand"
+    catch InvalidIteratorReleaseException { return "nothing to release" }
+  }
+}
+
+public class BagIterator(&Bag collection as parent) : IndexIterator<i32> {
+  uns cursor = 0
+
+  override fun (i32 value, bool isValid) next() {
+    i32 none = 0
+    if cursor >= collection.len {
+      return (none, false)
+    }
+    i32 item = collection.items[cursor]
+    cursor += 1
+    return (item, true)
+  }
+} atEnd {
+  if collection != null {
+    collection.releaseIterator()
+  }
+}
+
+Bag bag = Bag()
+r.Console.log(bag.releaseAgain())
+fun walk(Bag source) {
+  var iterator = source.getIterator()
+  var got = iterator.next()
+  r.Console.log($"first {got.value}")
+}
+walk(bag)
+r.Console.log(bag.releaseAgain())
+for i32 x in bag {
+  r.Console.print($"{x};")
+}
+r.Console.log("")
+r.Console.log(bag.releaseAgain())
+
+// a break ends the iterator of the loop too
+for i32 x in bag {
+  if x == 20 {
+    break
+  }
+}
+r.Console.log(bag.releaseAgain())

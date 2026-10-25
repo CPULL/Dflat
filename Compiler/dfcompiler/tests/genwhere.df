@@ -2,7 +2,7 @@
 alias Root as r
 
 trait Named {
-  fun string Name()
+  public fun string Name()
 }
 
 public class Dog(string label) : Named {

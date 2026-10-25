@@ -44,14 +44,14 @@ typedef struct {
   char epad;              /* '0', '#' or 0 */
 } df_nf;
 
-static uint32_t df_nf_peek(df_string s, uint64_t i) {
+static uint32_t df_nf_peek(df_sv s, uint64_t i) {
   if (i >= s.len) {
     return DF_NF_NONE;
   }
   return df_utf8_next(s.p, s.len, &i);
 }
 
-static uint32_t df_nf_get(df_string s, uint64_t* i) {
+static uint32_t df_nf_get(df_sv s, uint64_t* i) {
   if (*i >= s.len) {
     return DF_NF_NONE;
   }
@@ -67,7 +67,7 @@ static bool df_nf_symbol(uint32_t c) {
   return c != DF_NF_NONE && !df_nf_letter(c);
 }
 
-static int df_nf_number(df_string s, uint64_t* i) {
+static int df_nf_number(df_sv s, uint64_t* i) {
   int n = 0;
   int digits = 0;
   while (*i < s.len && DF_ISD(s.p[*i])) {
@@ -80,7 +80,7 @@ static int df_nf_number(df_string s, uint64_t* i) {
   return digits == 0 ? -1 : n;
 }
 
-static bool df_nf_parse(df_string s, df_nf* f) {
+static bool df_nf_parse(df_sv s, df_nf* f) {
   memset(f, 0, sizeof *f);
   f->base = 10;
   f->decsep = '.';
@@ -642,7 +642,7 @@ static df_string df_nf_render(const df_nf* f, df_nv* v) {
 
 static df_string df_fmt_i64(int64_t x, int bits, df_string spec) {
   df_nf f;
-  if (!df_nf_parse(spec, &f)) {
+  if (!df_nf_parse(df_view(spec), &f)) {
     return df_str_from_i64(x);
   }
   df_nv v = { 0 };
@@ -655,7 +655,7 @@ static df_string df_fmt_i64(int64_t x, int bits, df_string spec) {
 
 static df_string df_fmt_u64(uint64_t x, int bits, df_string spec) {
   df_nf f;
-  if (!df_nf_parse(spec, &f)) {
+  if (!df_nf_parse(df_view(spec), &f)) {
     return df_str_from_u64(x);
   }
   df_nv v = { 0 };
@@ -667,7 +667,7 @@ static df_string df_fmt_u64(uint64_t x, int bits, df_string spec) {
 
 static df_string df_fmt_r64(double x, bool single, df_string spec) {
   df_nf f;
-  if (!df_nf_parse(spec, &f)) {
+  if (!df_nf_parse(df_view(spec), &f)) {
     return single ? df_str_from_r32((float)x) : df_str_from_r64(x);
   }
   df_nv v = { 0 };
@@ -695,7 +695,7 @@ static df_string df_fmt_r64(double x, bool single, df_string spec) {
 
 static df_string df_fmt_null(df_string spec) {
   df_nf f;
-  if (!df_nf_parse(spec, &f)) {
+  if (!df_nf_parse(df_view(spec), &f)) {
     return df_str_lit("null", 4);
   }
   df_nv v = { 0 };
@@ -731,7 +731,7 @@ static void df_pv_add(df_pv* r, char c) {
 }
 
 /* no format: skips what is not a number, reads the first number */
-static bool df_np_default(df_string t, bool real, df_pv* r) {
+static bool df_np_default(df_sv t, bool real, df_pv* r) {
   memset(r, 0, sizeof *r);
   uint64_t n = t.len;
   uint64_t j;
@@ -803,7 +803,7 @@ static bool df_np_default(df_string t, bool real, df_pv* r) {
   return true;
 }
 
-static void df_np_skipfill(const df_nf* f, df_string t, uint64_t* pos) {
+static void df_np_skipfill(const df_nf* f, df_sv t, uint64_t* pos) {
   if (!(f->fillgiven || f->width >= 0 || f->align)) {
     return;
   }
@@ -846,7 +846,7 @@ static int df_np_digitval(unsigned char c, int base) {
 }
 
 /* one placeholder at *pos */
-static bool df_np_one(const df_nf* f, df_string t, uint64_t* pos, df_pv* r) {
+static bool df_np_one(const df_nf* f, df_sv t, uint64_t* pos, df_pv* r) {
   memset(r, 0, sizeof *r);
   uint64_t n = t.len;
   uint64_t k = *pos;
@@ -988,7 +988,7 @@ static bool df_np_one(const df_nf* f, df_string t, uint64_t* pos, df_pv* r) {
 }
 
 /* a format "<prefix>{spec}{spec}<suffix>": the first placeholder that matches the whole text wins */
-static bool df_np_format(df_string t, df_string fmt, df_pv* r) {
+static bool df_np_format(df_sv t, df_sv fmt, df_pv* r) {
   uint64_t n = fmt.len;
   uint64_t i = 0;
   df_sb pre = { 0 };
@@ -1042,7 +1042,7 @@ static bool df_np_format(df_string t, df_string fmt, df_pv* r) {
   }
   df_nf specs[8];
   for (int a = 0; a < na; a++) {
-    df_string s = { alts[a].p, alts[a].n };
+    df_sv s = { alts[a].p, alts[a].n };
     if (!df_nf_parse(s, &specs[a])) {
       return false;
     }
@@ -1065,7 +1065,9 @@ static bool df_np_format(df_string t, df_string fmt, df_pv* r) {
   return false;
 }
 
-static bool df_np_run(df_string t, df_string fmt, df_pv* r, bool real) {
+static bool df_np_run(df_string text, df_string format, df_pv* r, bool real) {
+  df_sv t = df_view(text);
+  df_sv fmt = df_view(format);
   if (fmt.len == 0) {
     return df_np_default(t, real, r);
   }
@@ -1156,7 +1158,7 @@ static T df_parse_##N##_f(df_string text, T def, df_string fmt) { \
   return (T)df_np_signed(&r, BITS); \
 } \
 static T df_parse_##N(df_string text, T def) { \
-  df_string none = { "", 0 }; \
+  df_string none = NULL; \
   return df_parse_##N##_f(text, def, none); \
 } \
 static T df_parse_##N##_fmt(df_string text, df_string fmt) { \
@@ -1173,7 +1175,7 @@ static T df_parse_##N##_f(df_string text, T def, df_string fmt) { \
   return (T)df_np_unsigned(&r, BITS); \
 } \
 static T df_parse_##N(df_string text, T def) { \
-  df_string none = { "", 0 }; \
+  df_string none = NULL; \
   return df_parse_##N##_f(text, def, none); \
 } \
 static T df_parse_##N##_fmt(df_string text, df_string fmt) { \
@@ -1189,7 +1191,7 @@ static T df_parse_##N##_f(df_string text, T def, df_string fmt) { \
   return (T)df_np_real(&r); \
 } \
 static T df_parse_##N(df_string text, T def) { \
-  df_string none = { "", 0 }; \
+  df_string none = NULL; \
   return df_parse_##N##_f(text, def, none); \
 } \
 static T df_parse_##N##_fmt(df_string text, df_string fmt) { \
@@ -1229,7 +1231,7 @@ static bool df_tryparse_##N##_f(df_string text, T* result, df_string fmt) { \
   return fits; \
 } \
 static bool df_tryparse_##N(df_string text, T* result) { \
-  df_string none = { "", 0 }; \
+  df_string none = NULL; \
   return df_tryparse_##N##_f(text, result, none); \
 }
 

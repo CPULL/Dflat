@@ -166,7 +166,7 @@ public sealed partial class CodeGen {
     text.Append($"  if (value == 0) {{ return {CString(CodePoints("None"))}; }}\n");
     foreach (var entry in info.Entries.Where(entry => entry.Name is not ("None" or "All"))) {
       text.Append($"  if (value & {IntConstCode(entry.Value, info.ValueType)}) {{\n");
-      text.Append($"    result = first ? {CString(CodePoints(entry.Name))} : df_str_concat(result, {CString(CodePoints(" | " + entry.Name))});\n");
+      text.Append($"    result = first ? {CString(CodePoints(entry.Name))} : df_str_cat(result, {CString(CodePoints(" | " + entry.Name))});\n");
       text.Append("    first = false;\n  }\n");
     }
     text.Append("  return result;\n}\n\n");
@@ -349,7 +349,8 @@ public sealed partial class CodeGen {
     string fallThrough = context.DefaultIndex == null ? context.EndLabel : context.CaseLabel(context.DefaultIndex.Value);
 
     sb.Append($"{pad}{{\n");
-    sb.Append($"{pad}  {CType(subject.Type)} {subjectTemp} = {subject.Code};\n");
+    // a new string as subject is only read by the case tests: it ends with the statement
+    sb.Append($"{pad}  {CType(subject.Type)} {subjectTemp} = {StrRead(subject)};\n");
     sb.Append(tests);
     sb.Append($"{pad}  goto {fallThrough};\n");
     switches.Push(context);

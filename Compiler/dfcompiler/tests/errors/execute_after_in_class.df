@@ -1,0 +1,4 @@
+public class Thing {
+  public fun i32 work() { 1 }
+    executeAfter { }
+}

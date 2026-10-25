@@ -37,7 +37,7 @@ public sealed partial class CodeGen {
     for (int index = 0; index < values.Count; index++) {
       string temp = NewTemp();
       temps.Add(temp);
-      string code = Convert(values[index], elems[index].Type, n.Children[index]);
+      string code = StrOwnedAs(values[index], elems[index].Type, Convert(values[index], elems[index].Type, n.Children[index]));
       declarations.Append($"{CType(elems[index].Type)} {temp} = {code}; ");
     }
     return new Expr($"({{ {declarations}({CType(tupleType)}){{ {string.Join(", ", temps)} }}; }})", tupleType);
@@ -62,6 +62,9 @@ public sealed partial class CodeGen {
       string temp = NewTemp();
       temps.Add(temp);
       var value = ExprOf(s.Children[index], scope, elems[index].Type);
+      if (elems[index].Type == "string") {
+        value = StrReturned(value, s.Children[index], scope);
+      }
       sb.Append($"{pad}{CType(elems[index].Type)} {temp} = {Convert(value, elems[index].Type, s.Children[index])};\n");
     }
     return $"(({CType(currentRet!)}){{ {string.Join(", ", temps)} }})";
@@ -89,7 +92,7 @@ public sealed partial class CodeGen {
       string temp = NewTemp();
       sb.Append($"{pad}{CType(value.Type)} {temp} = {value.Code};\n");
       for (int index = 0; index < elems.Count; index++) {
-        resolved.Add(new Expr($"{temp}.e{index}", elems[index].Type));
+        resolved.Add(new Expr($"{temp}.e{index}", elems[index].Type, true));
       }
     } else {
       if (values.Count != targets.Count) {
@@ -110,7 +113,16 @@ public sealed partial class CodeGen {
         }
         string tempType = targetType ?? value.Type;
         string temp = NewTemp();
-        sb.Append($"{pad}{CType(tempType)} {temp} = {Convert(value, tempType, values[index])};\n");
+        string converted = Convert(value, tempType, values[index]);
+        sb.Append($"{pad}{CType(tempType)} {temp} = {converted};\n");
+        if (tempType == "string") {
+          string fresh = FreshCode(value, converted);
+          if (values[index].Kind == "Name" && scope.Find(values[index].Text!) is VarInfo { OwnFlag: string sourceFlag }) {
+            fresh = NewTemp();
+            sb.Append($"{pad}bool {fresh} = {sourceFlag};\n{pad}{sourceFlag} = false;\n");
+          }
+          stringFresh[temp] = fresh;
+        }
         resolved.Add(new Expr(temp, tempType));
       }
     }
@@ -118,7 +130,14 @@ public sealed partial class CodeGen {
     for (int index = 0; index < targets.Count; index++) {
       AssignTarget(targets[index], resolved[index], sb, scope, pad);
     }
+    stringFresh.Clear();
   }
+
+  // the temporaries of a multiple assignment that hold a string: C for "the string is new"
+  readonly Dictionary<string, string> stringFresh = new();
+
+  string TargetFresh(Expr value) =>
+    stringFresh.TryGetValue(value.Code, out var fresh) ? fresh : value.Fresh || value.Type != "string" ? "true" : "false";
 
   string? TargetType(Node target, Scope scope) {
     if (target.Kind == "Discard") {
@@ -144,11 +163,18 @@ public sealed partial class CodeGen {
         scope.Vars[target.Text!] = hoisted;
         MarkAssigned(hoisted);
         sb.Append($"{pad}{hoisted.CName} = {Convert(value.Value, type, target)};\n");
+        if (hoisted.OwnFlag != null) {
+          sb.Append($"{pad}{hoisted.OwnFlag} = {TargetFresh(value.Value)};\n");
+        }
         return;
       }
       string cname = "v_" + target.Text;
       sb.Append($"{pad}{CType(type)} {cname} = {Convert(value.Value, type, target)};\n");
-      scope.Vars[target.Text!] = new VarInfo(type, cname, false);
+      var declared = StringVar(new VarInfo(type, cname, false));
+      if (declared.OwnFlag != null) {
+        sb.Append($"{pad}bool {declared.OwnFlag} = {TargetFresh(value.Value)};\n{pad}(void){declared.OwnFlag};\n");
+      }
+      scope.Vars[target.Text!] = declared;
       return;
     }
     var lvalue = LValue(target, scope);
@@ -156,6 +182,10 @@ public sealed partial class CodeGen {
       throw Error($"'{target.Text}' is const", target);
     }
     MarkAssigned(lvalue.Variable);
+    if (lvalue.Type == "string") {
+      sb.Append($"{pad}{StrAssign(lvalue, TargetFresh(value.Value), Convert(value.Value, lvalue.Type, target))};\n");
+      return;
+    }
     sb.Append($"{pad}{lvalue.Code} = {Convert(value.Value, lvalue.Type, target)};\n");
   }
 }

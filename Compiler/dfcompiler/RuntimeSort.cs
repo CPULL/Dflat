@@ -40,8 +40,8 @@ DF_CMP_REAL(float, r32)
 DF_CMP_REAL(double, r64)
 
 static int df_cmp_str(const void* a, const void* b) {
-  df_string x = *(const df_string*)a;
-  df_string y = *(const df_string*)b;
+  df_sv x = df_view(*(const df_string*)a);
+  df_sv y = df_view(*(const df_string*)b);
   uint64_t n = x.len < y.len ? x.len : y.len;
   int c = n ? memcmp(x.p, y.p, n) : 0;
   if (c != 0) return c < 0 ? -1 : 1;

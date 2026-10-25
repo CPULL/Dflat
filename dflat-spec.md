@@ -1,7 +1,7 @@
 # Dflat Language
 A new language D♭ that is the same as C# but easier to write and faster to execute
 
-**Version** 0.0.14  2026/10/24 by CPU
+**Version** 0.0.15  2026/10/25 by CPU
 
 ## D♭ — Dflat Language Specification (draft)
 
@@ -106,7 +106,7 @@ It is important to note that 2 special cases are used to decide who is allowed t
 
 | Keyword | Who can use the member |
 |---|---|
-| (none) | private: only the class itself (default) |
+| (none) | private: only the class itself (default); in a trait, only the code of the trait and, read-only, its sub-traits (11.2) |
 | `asparent` | the object itself and its children, through their parent reference (12.5) |
 | `internal` | the namespace and its sub-namespaces |
 | `public` | everyone |
@@ -399,64 +399,195 @@ Signed 64-bit; raw value = `value × 8 + code`.
 
 # 4. Strings
 
+```
+string a = "hello"
+string b = a                 // the same string
+b += " world"                // a is "hello world" too
+string c = a!                // a copy
+a = "other"                  // a is rebound; compile error while b still borrows the old string
+str.trim()                   // in place
+str = str.trim()             // in place
+string t = str.trim()        // a new string, str unchanged
+```
+
 - UTF-8; `.len` = chars, `.sizeof` = bytes.
 - `""` and null are the same: a null string prints as nothing (`"a" + null + "b"` = `"ab"`); a null value of another type prints `null` (8.1).
-- Small strings: 64 bytes, 1-byte length, up to 62 bytes.
-- Large strings: 32-byte header (char count, byte length, sizeof, block count), content, 8-byte tail (0 or pointer to 4 KB blocks); a compact string is a valid C string.
-- `text[pos]` reads the character at position `pos` (characters, not bytes); writing by index is not yet decided.
-- Large strings behave like a StringBuilder: every operation (`+=`, `Replace`, …) works in place on the 4 KB blocks, without copying the existing text.
+- `text[pos]` reads the character at position `pos` (characters, not bytes); `text[pos] = c` writes it in place.
 - Every type has `toStr()` to convert it to a `string`.
+- Ownership: a string follows the rules of the objects (12). `b = a` is the same string (a borrow), `->a` moves it, `a!` copies it. A change made through `b` (`b += "x"`) is seen through `a`.
+- Assigning to a string variable (`a = "other"`, `a = b.trim()`) rebinds the variable, it does not change the string: the old string is dropped by its owner, and a borrow of it that is still alive is a compile error.
+- The owner frees the string at the end of its scope; a borrower never frees it.
+- `==` compares the content: the same string (same pointer, a moved string included, 4.4.2) is `true`, a different length in bytes is `false`, otherwise the bytes are compared. `<` `>` `<=` `>=` compare the bytes (6.2).
+- A string that is being iterated cannot be modified, like the collections (6.4). A block string counts its iterators at run time (4.4.4); for the other strings the check is done at compile time only.
+- A string added to a collection (`add`, `insert`, `c[k] = s`, `fill`, literals) is always copied, and the copy is shrunk (4.4.5).
 
-## 4.1 Char functions
-Tests follow Unicode categories. `ToUpper` / `ToLower` are culture-invariant for now (locale: open item).
+## 4.1 Modifying a string
+
+- `+=`, `text[pos] = c` and `clear()` always work in place.
+- The other modifying methods (`trim`, `trimLeft`, `trimRight`, `substr`, `replace`, `toLower`, `toUpper`, `padLeft`, `padRight`, `insert`, `remove`, `replaceAt`, `append`, `prepend`, `Random.shuffle`) work in place when their result is not used (`str.trim()`) or is assigned back to the same string (`str = str.trim()`, `obj.name = obj.name.trim()`, chains included: `str = str.trim().toUpper()`).
+- Any other use builds a new string and leaves the original unchanged: `b = str.trim()`, `f(str.trim())`, `if str.trim() == ""`. In a chain the first call builds the new string and the next calls work in place on it (`b = str.trim().toUpper()`).
+- A known alias counts as the same string (`b = str`, then `str = b.trim()` works in place); when the compiler cannot prove it, rebinding the borrowed string is a compile error.
+- Constant strings (`const`, literals, read-only borrows) are never modified in place: a modification in place on them is a compile error.
+- The rule applies only to the methods of `string`; the methods of user classes handle it on their own.
+
+## 4.2 Char functions
+Tests follow Unicode categories. `toUpper` / `toLower` are culture-invariant for now (locale: open item).
 
 | Definition | Description |
 |---|---|
-| `bool <char>.IsLetter()` | Unicode letter |
-| `bool <char>.IsDigit()` | Unicode decimal digit |
-| `bool <char>.IsLetterOrDigit()` | Letter or digit |
-| `bool <char>.IsWhiteSpace()` | Unicode white space |
-| `bool <char>.IsUpper()` | Uppercase letter |
-| `bool <char>.IsLower()` | Lowercase letter |
-| `bool <char>.IsHexDigit()` | `0`–`9`, `a`–`f`, `A`–`F` |
-| `bool <char>.IsPunctuation()` | Unicode punctuation |
-| `bool <char>.IsSymbol()` | Unicode symbol |
-| `bool <char>.IsControl()` | Control character |
-| `bool <char>.IsAscii()` | Code point below 128 |
-| `char <char>.ToUpper()` | Uppercase form, culture-invariant |
-| `char <char>.ToLower()` | Lowercase form, culture-invariant |
+| `bool <char>.isLetter()` | Unicode letter |
+| `bool <char>.isDigit()` | Unicode decimal digit |
+| `bool <char>.isLetterOrDigit()` | Letter or digit |
+| `bool <char>.isWhiteSpace()` | Unicode white space |
+| `bool <char>.isUpper()` | Uppercase letter |
+| `bool <char>.isLower()` | Lowercase letter |
+| `bool <char>.isHexDigit()` | `0`–`9`, `a`–`f`, `A`–`F` |
+| `bool <char>.isPunctuation()` | Unicode punctuation |
+| `bool <char>.isSymbol()` | Unicode symbol |
+| `bool <char>.isControl()` | Control character |
+| `bool <char>.isAscii()` | Code point below 128 |
+| `char <char>.toUpper()` | Uppercase form, culture-invariant |
+| `char <char>.toLower()` | Lowercase form, culture-invariant |
 
-## 4.2 String functions
+## 4.3 String functions
+
+The functions that return a `string` follow 4.1: in place when the result is not used or is assigned back to the same string, a new string otherwise.
 
 | Function | Definition |
 |---|---|
-| `string <string>.Trim()` | Removes all non-printable characters and all types of spaces from both ends of the string |
-| `string <string>.Trim(string c)` | Removes all specified characters from both ends of the string |
-| `string <string>.TrimLeft()` | Removes all non-printable characters and all types of spaces from the left of the string |
-| `string <string>.TrimLeft(string c)` | Removes all specified characters from the left of the string |
-| `string <string>.TrimRight()` | Removes all non-printable characters and all types of spaces from the right of the string |
-| `string <string>.TrimRight(string c)` | Removes all specified characters from the right of the string |
-| `string <string>.Substr(u32 start, u32 len)` | Produces a string containing the characters starting from `start` (zero-based) up to `len` length. Does not fail if `len` extends past the end |
-| `string <string>.Replace(string toFind, string replacement, bool caseSensitive = true)` | Returns a string where all occurrences of the specified string are replaced with the replacement string |
-| `i64 <string>.IndexOf(string val, bool caseSensitive = true)` | Returns the first zero-based index of the specified string, or `-1` if not found |
-| `i64 <string>.IndexOf(char val, bool caseSensitive = true)` | Returns the first zero-based index of the specified character, or `-1` if not found |
-| `i64 <string>.LastIndexOf(string val, bool caseSensitive = true)` | Returns the last zero-based index of the specified string, or `-1` if not found |
-| `i64 <string>.LastIndexOf(char val, bool caseSensitive = true)` | Returns the last zero-based index of the specified character, or `-1` if not found |
-| `bool <string>.Contains(string val, bool caseSensitive = true)` | Returns `true` if the specified string exists within the string |
-| `bool <string>.StartsWith(string val, bool caseSensitive = true)` | Returns `true` if the string begins with the specified string |
-| `bool <string>.EndsWith(string val, bool caseSensitive = true)` | Returns `true` if the string ends with the specified string |
-| `arr<string> <string>.Split(string separator)` | Splits the string into an array of substrings bounded by the specified separator string |
-| `string <string>.ToLower()` | Returns a copy of the string with all characters converted to lowercase |
-| `string <string>.ToUpper()` | Returns a copy of the string with all characters converted to uppercase |
-| `string <string>.PadLeft(u32 totalWidth, char paddingChar = ' ')` | Pads the left side of the string with `paddingChar` until it reaches `totalWidth` length |
-| `string <string>.PadRight(u32 totalWidth, char paddingChar = ' ')` | Pads the right side of the string with `paddingChar` until it reaches `totalWidth` length |
-| `arr<byte> <string>.ToCStr(StringEncoding encoding = StringEncoding.UTF8)` | Produces a byte array with the representation of the string as regular C string |
+| `string <string>.trim()` | Removes all non-printable characters and all types of spaces from both ends of the string |
+| `string <string>.trim(string c)` | Removes all specified characters from both ends of the string |
+| `string <string>.trimLeft()` | Removes all non-printable characters and all types of spaces from the left of the string |
+| `string <string>.trimLeft(string c)` | Removes all specified characters from the left of the string |
+| `string <string>.trimRight()` | Removes all non-printable characters and all types of spaces from the right of the string |
+| `string <string>.trimRight(string c)` | Removes all specified characters from the right of the string |
+| `string <string>.substr(u32 start, u32 len)` | Produces a string containing the characters starting from `start` (zero-based) up to `len` length. Does not fail if `len` extends past the end |
+| `string <string>.replace(string toFind, string replacement, bool caseSensitive = true)` | Returns a string where all occurrences of the specified string are replaced with the replacement string |
+| `i64 <string>.indexOf(string val, bool caseSensitive = true)` | Returns the first zero-based index of the specified string, or `-1` if not found |
+| `i64 <string>.indexOf(char val, bool caseSensitive = true)` | Returns the first zero-based index of the specified character, or `-1` if not found |
+| `i64 <string>.lastIndexOf(string val, bool caseSensitive = true)` | Returns the last zero-based index of the specified string, or `-1` if not found |
+| `i64 <string>.lastIndexOf(char val, bool caseSensitive = true)` | Returns the last zero-based index of the specified character, or `-1` if not found |
+| `bool <string>.contains(string val, bool caseSensitive = true)` | Returns `true` if the specified string exists within the string |
+| `bool <string>.startsWith(string val, bool caseSensitive = true)` | Returns `true` if the string begins with the specified string |
+| `bool <string>.endsWith(string val, bool caseSensitive = true)` | Returns `true` if the string ends with the specified string |
+| `arr<string> <string>.split(string separator)` | Splits the string into an array of substrings bounded by the specified separator string |
+| `string <string>.toLower()` | Returns a copy of the string with all characters converted to lowercase |
+| `string <string>.toUpper()` | Returns a copy of the string with all characters converted to uppercase |
+| `string <string>.padLeft(u32 totalWidth, char paddingChar = ' ')` | Pads the left side of the string with `paddingChar` until it reaches `totalWidth` length |
+| `string <string>.padRight(u32 totalWidth, char paddingChar = ' ')` | Pads the right side of the string with `paddingChar` until it reaches `totalWidth` length |
+| `arr<byte> <string>.toCStr(StringEncoding encoding = StringEncoding.UTF8)` | Produces a byte array with the representation of the string as regular C string; the array is a copy owned by the caller |
+| `string <string>.insert(u32 pos, string text)` | Inserts `text` before the character at `pos` |
+| `string <string>.remove(u32 pos, u32 len)` | Removes `len` characters starting from `pos`. Does not fail if `len` extends past the end |
+| `string <string>.replaceAt(u32 pos, u32 len, string text)` | Replaces `len` characters starting from `pos` with `text` |
+| `string <string>.append(string text)` | Adds `text` at the end |
+| `string <string>.prepend(string text)` | Adds `text` at the start |
+| `void <string>.clear()` | Empties the string, always in place |
+| `void <string>.shrink()` | Stores the string in the smallest form that holds it (4.4); the text does not change |
 
 `StringEncoding` is a default enum used to emit strings in specific encodings (used for interpos):
 `public enum String.StringEncoding { UTF8, UTF16, UTF32, UTF16BE, UTF32BE, ASCII, ISO88591 }`
 
-### 4.3 Strings detailed implementation
-TODO, differentiate between short strings and block strings.
+## 4.4 Strings detailed implementation
+
+This layout is for 32- and 64-bit targets; small targets (8 and 16 bits) have their own implementation.
+
+- A `string` is a pointer to its first allocation; a null pointer is the empty string. The first allocation is the identity of the string: it never moves, and borrows point to it.
+- The first 4 bits of every allocation give its class:
+
+| Class | Meaning |
+|---|---|
+| 0–7 | single-block string of 32, 64, 128, 256, 512, 1024, 2048 or 4096 bytes |
+| 8–10 | free |
+| 11 | literal: read-only sequence of bytes |
+| 12 | free |
+| 13 | moved: the string lives elsewhere |
+| 14 | free |
+| 15 | block string |
+
+- Every field of every header is aligned to 32 bits. Sizes are in bytes; a pointer is 8 bytes on 64-bit targets and 4 on 32-bit targets, and the starts in the tables are for 64-bit targets unless a 32-bit column is given.
+
+### 4.4.1 Single-block strings
+
+| Start | Size | Field | Description |
+|---|---|---|---|
+| 0 | 2 | class + length in bytes | class (4 bits, 0–7) and length in bytes (12 bits) |
+| 2 | 2 | length in chars | |
+| 4 | … | text | the text and a final 0 |
+
+- A single-block string is always a valid C string.
+- Capacity in bytes (size − 4 header − 1 final 0):
+
+| Class | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|---|
+| Size | 32 | 64 | 128 | 256 | 512 | 1024 | 2048 | 4096 |
+| Text bytes | 27 | 59 | 123 | 251 | 507 | 1019 | 2043 | 4091 |
+
+- A string that outgrows its class moves to the next class that holds it; beyond 4091 bytes it becomes a block string.
+
+### 4.4.2 Moved strings
+
+| Start | Size | Field | Description |
+|---|---|---|---|
+| 0 | 1 | class | 13 (4 bits), 4 free bits |
+| 1 | 3 | padding | |
+| 4 | 8 (4 on 32-bit) | new location | the single-block string or the block string root that holds the text |
+
+- When a string moves (a larger class, a block string, `shrink()`), its first allocation becomes class 13 and points to the new location. Every read already checks the class, so a borrow follows the pointer.
+- Only the first allocation is ever class 13: a second move updates its pointer, so there is never a chain.
+- The first allocation is freed together with the data when the string ends.
+
+### 4.4.3 Literals
+
+| Start | Size | Field | Description |
+|---|---|---|---|
+| 0 | 1 | class | 11 (4 bits), 4 free bits |
+| 1 | 3 | padding | |
+| 4 | 8 | length in chars | |
+| 12 | 8 | length in bytes | |
+| 20 | … | text | the text and a final 0 |
+
+- The compiler builds them in read-only memory; they have no size limit and every function reads them as strings.
+- A literal stays as is while it is only read. When the compiler sees a modification, the text is copied into a single-block or block string at the first modification.
+
+### 4.4.4 Block strings
+
+Meant for long text that is modified at any point (editor-like) without copying the whole string.
+
+- Root of a block string: 60 bytes on 64-bit targets, 48 on 32-bit targets.
+
+| Start | Size | Start (32-bit) | Size (32-bit) | Field | Description |
+|---|---|---|---|---|---|
+| 0 | 1 | 0 | 1 | class | 15 (4 bits), 4 free bits |
+| 1 | 1 | 1 | 1 | flags | none defined yet |
+| 2 | 2 | 2 | 2 | iterator counter | open iterators; while above zero the string cannot be modified |
+| 4 | 8 | 4 | 4 | first block | start of every walk |
+| 12 | 8 | 8 | 4 | last block | `+=` and `append` in O(1) |
+| 20 | 8 | 12 | 8 | total length in chars | `.len` in O(1) |
+| 28 | 8 | 20 | 8 | total length in bytes | `.sizeof` in O(1) |
+| 36 | 8 | 28 | 4 | cursor: block | block of the last modification |
+| 44 | 8 | 32 | 8 | cursor: char index | char index where the cursor block starts |
+| 52 | 8 | 40 | 8 | cursor: byte offset | byte offset where the cursor block starts; turns the byte positions found by a search into char indices without a walk |
+
+- Blocks are 4 KB. Header of a block: 24 bytes on 64-bit targets (payload 4072), 12 on 32-bit targets (payload 4084).
+
+| Start | Size | Start (32-bit) | Size (32-bit) | Field | Description |
+|---|---|---|---|---|---|
+| 0 | 8 | 0 | 4 | next block | null on the last block |
+| 8 | 8 | 4 | 4 | previous block | null on the first block; moving left from the cursor and merging with the left neighbour |
+| 16 | 2 | 8 | 2 | bytes used | bytes of text in this block |
+| 18 | 2 | 10 | 2 | chars | chars in this block |
+| 20 | 4 | — | — | free | |
+
+- A code point never straddles two blocks, so each block can be decoded on its own.
+- The counts are per block, not running totals: a change touches only its block and the totals of the root.
+- Finding position `n`: from the cursor, forward or backward, or from the first or the last block when they are closer, skipping whole blocks by their char count.
+- The cursor is updated only by the operations that modify the string; plain reads never touch it, so reading is pure (`const` strings and threads are safe). An iterator keeps its own position.
+- Changes in place: an insertion moves at most the bytes of one block; a full block is split in two; two neighbours under half full are merged.
+
+### 4.4.5 Shrinking
+
+- A string never moves to a smaller form on its own.
+- `shrink()` stores the string in the smallest form that holds it: a smaller class, the blocks of a block string packed full, or a single-block string when the text fits in 4091 bytes.
 
 
 # 5. `dfoot`
@@ -498,7 +629,7 @@ A collection holds several items in one object. Dflat has seven: `arr`, `vec`, `
 - A collection owns its items (Rust model, 12): the drop code of the items is generated per item type. A result that is not assigned is destroyed at the end of the statement, `c[k] = v` drops the previous item, `->c[k]` moves the item out (6.6) and a `for` loop only borrows (6.4).
 - An owned object that loses its owner is destroyed and its `atEnd` runs: this covers `clear()` and `fill(...)` on every collection, `c[i] = v` and any other operation that drops an owned object (12).
 - Any allocation can run out of memory: a `vec` that grows, `reserve`, creating an `arr`, a `list` that adds a node. In Debug builds it raises `OutOfMemoryException` (15.3, catchable, not silent); in Release builds it is a `Panic` that ends the program (15.5). A size that does not fit (`n * size` overflowing `uns`) is reported in the same way, with no separate `OverflowException`. A literal size above the maximum is a compile error.
-- Moving an object into a collection that owns its items needs `->` when the object already exists (`list[3] = ->task`, `list.add(->task)`, `insert`, `replace`): the plain form with an existing object is a compile error, so the passage of the ownership is always visible. An object created in the same statement (`list.add(Task("a"))`) needs no marker. Basic values are copied and need no marker (12.4).
+- Moving an object into a collection that owns its items needs `->` when the object already exists (`list[3] = ->task`, `list.add(->task)`, `insert`, `replace`): the plain form with an existing object is a compile error, so the passage of the ownership is always visible. An object created in the same statement (`list.add(Task("a"))`) needs no marker. Basic values are copied and need no marker (12.4); a string is always copied and the copy is shrunk (4).
 - The members are listed in 6.6; each collection has its own section for the details (6.8).
 
 ## 6.2 Keys
@@ -521,7 +652,7 @@ Applies to the keys of `map` / `hmap` and to the items of `set` / `hset`.
 - Orderings: numbers, `char`, `bool` (false before true), `date` and `time` by value; strings by bytes (the same as code point order in UTF-8), culture-invariant for now; tuples item by item, left to right.
 - `bool` can be a key (two possible values). Reals can be keys, except NaN: a NaN key is never stored or retrieved (no exception).
 - Maps and sets do not allow a null key (or a null item in a set). The empty string `""` is a valid key: for a `string`, `""` and null are the same value (7.1), so there is no separate null string key.
-- The way a `string` is stored in the generated C (and so whether the hash tables need an occupancy flag for string keys) is decided with the string implementation, not with the collections.
+- A `string` is a pointer to its first allocation, and a null pointer is the empty string (4.4): a null pointer alone cannot mark an empty slot of a hash table with string keys, because `""` is a valid key. How the hash tables handle it is decided with the hash collections.
 
 ## 6.3 Literals
 
@@ -638,7 +769,7 @@ A member marked `–` is a compile error on that collection (for example `hasKey
 - `insert(index, value)`: `index` goes from `0` to `.len` (`.len` appends); a larger index raises `IndexOutOfRangeException`.
 - `pop((&)out)`: removes the last item of a `vec` and moves it into `out` (the ownership passes to `out`); it returns `true` (the `isValid` of the result). On an empty `vec` it returns `false` and `out` gets the default value of its type (null for objects, `0` for numbers, `""` for `string`). There is no other form of `pop` and no `tryPop`; no exception is raised. The previous value of `out` is dropped.
 - `has(v)`: true if the value is present (on maps, searches the values). `hasKey(k)`: true if the key exists.
-- `indexOf(v)`: index of the first match, or the maximum `uns` value when not found (the `string` `IndexOf` keeps returning `-1`).
+- `indexOf(v)`: index of the first match, or the maximum `uns` value when not found (the `string` `indexOf` keeps returning `-1`).
 - `keyOf(v)`: key of the first entry found with that value, or the default value of the key type when there is none; it raises no exception. Use `hasKey` to test a key.
 - `remove(v)`: removes the first match and returns `true` if something was removed. `removeAll(v)`: removes all matches and returns the number removed. On maps both work by value. Sets hold a value once, so they have `remove` only.
 - `removeAt(k / range)`: removes by index or range on `vec` and `list`, by key on maps. The range forms are those of 6.5 (`a..b`, `a..=b`, `..b`, `a..`); the items removed end. A range outside the collection raises `IndexOutOfRangeException` (as `copyFrom`).
@@ -651,7 +782,7 @@ A member marked `–` is a compile error on that collection (for example `hasKey
 - `->c[k]` moves the item out of the collection (ownership passes to the receiver; a basic value type is copied). The slot is zeroed (null for objects, `0` for numbers) in `arr` and `vec`, and the item is removed in `list`, `map`, `hmap`, `set` and `hset`.
 - `clear()`: on `arr`, `vec` and `list` it cleans up the values: every item is set to the default value and the size is kept (the objects dropped end, 6.1). On maps and sets it removes all items. To remove all the items of a `vec` or a `list`, use `truncate(0)`.
 - `fill(value)`: sets every item up to the current `.len` (the whole array for `arr`; on an empty `list` it does nothing). `fillAtCapacity(value)` (`vec`): fills the whole capacity and sets `.len` to the capacity.
-- The value of `fill` can be any value: basic values, strings (duplicated, they are values), dates, times and every other type that is not a class. `null` is allowed: every item becomes null and the objects they held are no longer owned by the collection (they end, running their `atEnd` if they have one). A class instance is a compile error (the items would share one object).
+- The value of `fill` can be any value: basic values, strings (each item gets its own copy, shrunk, 4), dates, times and every other type that is not a class. `null` is allowed: every item becomes null and the objects they held are no longer owned by the collection (they end, running their `atEnd` if they have one). A class instance is a compile error (the items would share one object).
 - `list` also has `fill(count, value)`: it adds `count` items with that value, under the same rules (`myList.fill(256, 'c')`).
 - `resize(newLen, value)`: sets `.len`; new items get `value`, extra items are cut. `truncate(len)`: cuts the `vec` or the `list` to `len` items (no effect if shorter; the items cut end); on a `vec` the capacity is unchanged.
 - Sorting: `sort(SortDirection.ASC)` sorts in place with the default comparer (`compareTo` of the items, 6.2); `sort()` is ascending. `sort(lambda)` uses a temporary custom sorter. `SortDirection` has the entries `ASC` and `DESC`. The lambda returns a bool (true is -1, "first goes before second"; false is 1) or a number (negative, zero, positive). `sort` is stable; `sortUnstable` is not (it needs no extra memory). `reverse()` flips the current order in place.
@@ -690,15 +821,15 @@ Every collection implements the trait `Collection` and one of its three sub-trai
 
 ```
 trait IndexCollection<Item> : Collection<Item> {
-  fun IndexIterator<Item> getIterator()
+  public fun IndexIterator<Item> getIterator()
 }
 
 trait MapCollection<Key, Value> : Collection<Value> {
-  fun MapIterator<Key, Value> getIterator()
+  public fun MapIterator<Key, Value> getIterator()
 }
 
 trait SetCollection<Item> : Collection<Item> {
-  fun SetIterator<Item> getIterator()
+  public fun SetIterator<Item> getIterator()
 }
 ```
 - `Item` is the type of the items. A map passes its `Value` (`has(v)` on a map searches the values); the key type is given by `MapCollection<Key, Value>`. `->c[k]` is a requirement of `Collection<Item>` whose key is given by each sub-trait: a position in `IndexCollection`, the key in `MapCollection`, the item in `SetCollection`.
@@ -927,7 +1058,7 @@ First idea for maps (not yet defined: the members and the cursor types are open)
 
 ```
 trait MapIterator<Key, Value> : Iterator {
-  fun (Key key, Value value, bool isValid) next()
+  public fun (Key key, Value value, bool isValid) next()
 }
 ```
 
@@ -1258,12 +1389,12 @@ They are similar to C# interfaces and Rust traits
 
 ```
 trait Named {
-  string name
+  public string name
   Named(string n) { name = n }
-  fun string Label()                     // no body: must be implemented
-  fun string Hello() { $"Hi {Label()}" }
+  public fun string Label()                     // no body: must be implemented
+  public fun string Hello() { $"Hi {Label()}" }
 }
-trait Shape : Named { fun r64 Area() }
+trait Shape : Named { public fun r64 Area() }
 ```
 
 - Single parent class (listed first in the header); any number of traits; base of everything: `Root.Class` (implicit, never written, 11.1).
@@ -1272,21 +1403,32 @@ trait Shape : Named { fun r64 Area() }
 - A property in a trait declares how it is accessed (read only, read/write or write only, 11.1.4). It can have a default implementation (`R` and `W` blocks); when it has none the class must implement it, otherwise it is a compile error. A class can use the implementation of the trait or override it with `override`, giving the code for everything; a conflict is a compile error and a part not specified falls to the default implementation. A property that is read only in the trait stays read only in the class.
 - A trait has no start values (`= 3`). Its constructor can set values; the `W` code is used when one is defined.
 - How a property is read or written through a value of a trait type (`any Shape`) is left to the implementation of the compiler.
-- Same member in two traits: `TraitA.member` (inside), `px.TraitA.member` (outside), unqualified → compile error.
+- Same public member in two traits: the qualified name is needed only for the clash, `TraitA.member` (inside the class), `px.TraitA.member` (outside). The unqualified name is a compile error that asks for the qualified name. Private members never clash: the compiler aliases them (`TraitA.member`, `TraitB.member`) without anything written, because only the code of their own trait sees them.
+- Visibility in a trait: the rules of 1.6.1, as in classes. A member without a visibility keyword is private; a public member is written `public`. A private member is seen only by the code of its trait (methods, accessors, constructor, `executeBefore` and `executeAfter` blocks), not by the class that implements the trait. A method without a body that the class implements keeps the visibility of the trait: the implementation is written with `override` and no keyword.
+- Sub-traits: a sub-trait reads every member of its parent traits, the private ones included, read-only, and can call all their methods, the private ones included. To change a private field of the parent it calls a method of the parent. This is not `asparent`, which opens a member to the child objects (12.5).
+- Initialization: a public trait field must be initialized in every constructor of the class that implements the trait, directly or through the trait constructor; otherwise it is a compile error (`class ABC must initialize member "field" from trait MyTrait`). A private trait field is initialized only by the trait (its constructor); when the trait does not set it, it keeps its zero value (null for objects).
+- Diamond: a supertrait inherited twice exists once, with its fields. It is a compile error when two traits give different default implementations of the same member of the shared supertrait, or call the constructor of the shared supertrait with different arguments.
 - Trait-typed values: the compiler chooses static or dynamic dispatch; force with `specific Shape` (one type, known at compile time) / `any Shape` (any implementing type, dispatched at runtime). `list<any Shape>` holds mixed shapes.
 - `executeAfter`: a trait method can carry a block `executeAfter { }`. The class must implement the method; the block runs after the implementation of the class and cannot be overridden or removed by the class.
   - `executeAfter` is one contextual keyword, written like `atEnd`; it is a keyword only right after the signature of a trait method.
   - The block runs only when the implementation succeeds (if `getIterator()` fails, the counter of 6.4 is not incremented). This is the difference with the `atEnd` of a function (14.2), which runs on every exit, exceptions included.
   - The block reads the return value as `<method>.result` (for example `getIterator.result`), read-only: it cannot change it.
-  - The blocks are chained: every trait of the hierarchy that defines an `executeAfter` for the method runs its block, similar to `atEnd`. The exact order of the chain is open (99).
-  - A method with a default body and a block is written `fun f() { default body } executeAfter { ... }`. An `executeBefore { }` with the same shape can be added later.
-- The trait `Collection` uses `executeAfter` to provide the counter of open iterators and views and its checks (6.4), so every collection gets them, the custom ones included. `releaseIterator()` is `asparent`: only the children of the collection (iterators and views) can call it, even through a read-only reference, and it is called only by their default `atEnd`; a release with the counter at zero raises `InvalidIteratorReleaseException` (not silent, 15.3).
+  - The blocks are chained: every trait of the hierarchy that defines an `executeAfter` for the method runs its block, like `atEnd`: from the most specific trait to the root (`IndexCollection`, then `Collection`), once per call. A call to the parent implementation inside the class does not start the chain again.
+  - A method with a default body and a block is written `fun f() { default body } executeAfter { ... }`. The class can override the default body; the block still runs.
+- `executeBefore`: a trait method can carry a block `executeBefore { }`, with the same rules as `executeAfter`, except that it runs before the implementation of the class. The class can override the method, but the code of the trait always runs first. When the block raises an exception, the implementation does not run. Both blocks can be on the same method (`executeBefore` first). The order of a chain of `executeBefore` blocks is decided when it is needed.
+- The trait `Collection` uses `executeAfter` to provide the counter of open iterators and views and its checks (6.4), so every collection gets them, the custom ones included. The counter is a private field of `Collection`; `IndexCollection` (a sub-trait, so it reads the counter but cannot write it) increments it through the private method `acquireIterator()`. `releaseIterator()` is `asparent`: only the children of the collection (iterators and views) can call it, even through a read-only reference, and it is called only by their default `atEnd`; its default body is empty, so a class writes it only when it needs more, and the `executeAfter` takes the counter back in every case; a release with the counter at zero raises `InvalidIteratorReleaseException` (not silent, 15.3). `checkUnlocked()` raises `ModifyingIteratedCollectionException` while the counter is above zero: a collection that can change its size must not change it while it is iterated, and the trait methods that change the size will call it from an `executeBefore` (6.4).
 
 ```
 trait Collection<Item> {
-  uns iteratorCounter      // not visible outside; private state in a trait is open (99)
+  uns iteratorCounter                            // private: only Collection writes it
+  fun acquireIterator() { iteratorCounter++ }    // private: sub-traits can call it, child objects cannot
+  fun checkUnlocked() {                          // private: for the executeBefore of the changing methods
+    if iteratorCounter > 0 throw ModifyingIteratedCollectionException()
+  }
 
-  asparent fun releaseIterator()
+  // len, has(v), ->c[k] and clear() (6.7) are public
+
+  asparent fun releaseIterator() { }
     executeAfter {
       if iteratorCounter == 0 throw InvalidIteratorReleaseException()
       iteratorCounter--
@@ -1294,9 +1436,9 @@ trait Collection<Item> {
 }
 
 trait IndexCollection<Item> : Collection<Item> {
-  fun IndexIterator<Item> getIterator()
+  public fun IndexIterator<Item> getIterator()
     executeAfter {
-      iteratorCounter++
+      acquireIterator()
     }
 }
 ```
@@ -1356,7 +1498,7 @@ trait Indexed<Item> : Container<Item> {         // a generic parent trait: the c
 }
 
 trait HashCollection<Item> {
-  fun bool has(Item value)
+  public fun bool has(Item value)
 }
 trait ABCCollection<Item> : HashCollection<Item> {      // the same list of arguments
   fun Item first()
@@ -1400,7 +1542,7 @@ class Grid<u64 Width, u64 Height, Cell> { arr<Cell>[Width * Height] cells }
 ```
 trait Sequence {
   placeholder Item
-  fun (Item value, bool isValid) next()
+  public fun (Item value, bool isValid) next()
 }
 
 class Countdown : Sequence with (Item is u32) { ... }
@@ -1597,6 +1739,7 @@ Rust model, Dflat syntax.
 | `.isRC` | true for both kinds |
 
 - Single owner; freed at the end of the owner's scope, running the class `atEnd` (11.4).
+- Strings follow these rules (4): `b = a` is the same string, `->a` moves, `a!` copies; the owner frees the string at the end of its scope.
 - Function parameters borrow; returning moves ownership to the caller.
 - Collections own their elements: adding moves in, removing moves out, reading borrows. This is true for `arr` too: the variable that declares an array owns it, `b = a` borrows it, `->a` moves it, and a field that is an array is dropped by its class (6.1).
 - An owned object that loses its owner is destroyed and its `atEnd` runs (`clear()`, `fill(...)`, `c[i] = v` and any other operation that drops an owned object, 6.1).
@@ -1697,7 +1840,7 @@ function(->a.c)                    // a.c is null afterwards, a stays usable
 - The owner of `a`, or a writable borrow `(&)A a`, can move a field out; a read-only borrow cannot (compile error).
 - `->` on a variable or field of a basic type is ignored and behaves like a plain copy; it is a level 1 warning (`i32 a; call(->a)` is the same as `call(a)`).
 - Moving out of a stored field or property: a value is copied; an object is passed with its ownership and the field becomes null. If the property is computed (its `R` returns a new object that is not stored), `->` gives away that new object, which needs no owner here; the property value is nullified in every case (11.1.4). Collections: `->c[k]` (6.6).
-- Moving an object into a collection that owns its items needs `->` when the object already exists (`list[3] = ->task`, `list.add(->task)`, `insert`, `swap`); the plain form with an existing object is a compile error. An object created in the same statement needs no marker. Basic values are copied and need no marker (6.1).
+- Moving an object into a collection that owns its items needs `->` when the object already exists (`list[3] = ->task`, `list.add(->task)`, `insert`, `swap`); the plain form with an existing object is a compile error. An object created in the same statement needs no marker. Basic values are copied and need no marker (6.1); a string is always copied and the copy is shrunk (4).
 - Finalizer: `f is atEnd.` is a statement only, never an expression. The final dot is mandatory, and only a line break or `;` may follow it (`f is atEnd.close()` is a compile error).
 - `f is atEnd.` releases the ownership held by the variable `f`: a single owner is destroyed running its full destructor (11.4); a reference counted object drops the counter by one and is destroyed when it reaches zero. In every case `f` becomes null; on a null `f` it does nothing.
 - When the object is destroyed, weak references to it see null (through `enforce`).
@@ -1736,7 +1879,8 @@ public notclonable class File { }
 
 | Field | In the clone |
 |---|---|
-| native (numbers, `bool`, `char`, `string`, enums, bitfields, structs) | duplicated, it is a value |
+| native (numbers, `bool`, `char`, enums, bitfields, structs) | duplicated, it is a value |
+| owned `string` | copied: a new string with the same text |
 | owned object | deep cloned with the same rules; null when it cannot be cloned |
 | owned child (an object that has a parent, 12.5) | null: a child is never duplicated, a new one comes from the functions of its parent |
 | reference counted object | another reference: the object gets one more owner |
@@ -2328,7 +2472,6 @@ Level 1 = most important, level 3 = least.
 - Functional collection members (`filter`, `map`, `reduce`)
 - Order of enum keys in sorted collections (declaration order or value)
 - Collections: the members of `MapIterator` and `SetIterator` (the three sub-traits of `Iterator` are decided, 6.7), the cursor types of the tree `map` / `set` and of `hmap` / `hset`, and the shape of `next()` for sets (the index iterator is defined, 6.7.1)
-- Collections: the exact order of the chain of `executeAfter` blocks (proposal: like `atEnd`, from the most specific trait to the root, once per call; a `parent` call inside the class implementation does not start the chain again), and private state in a trait (the counter of open iterators of `Collection`, 11.2)
 - Collections: `clear()` on maps and sets now differs from `clear()` on the index collections (which keeps the size, 6.6); to be confirmed with the maps and the sets
 - Collections: how a custom class provides `c[k]` (read and write) and literals (`[...]`, `{ ... }`)
 - Collections: the sets (members, operations, `swap` and `->c[k]` on sets; `c[k]` read does not exist on sets)
@@ -2336,9 +2479,8 @@ Level 1 = most important, level 3 = least.
 - Collections: views are read-only; revisit with tasks (6.5), the full Rust borrow model stays an option
 - Collections: hash table and B-tree implementations (several implementations chosen by target or compiler option, node size, hash function), shared C helpers against one copy per type (code size, 11.3.12), literal typing and lowering (6.3, briefing 9)
 - Collections: the other non-silent exceptions of the collection operations, to be formalized during the implementation (out of memory is decided, 6.1, 15.3)
-- Strings: how a `string` is stored in the generated C (hash tables, empty and null strings); to be decided in a session on strings
+- Strings: borrowed strings in the advanced cases (who releases them, lifetimes across fields and collections)
 - Properties: position of `readonly` / `readwrite` / `writeonly` next to `public` and `static`, and their use together with a body (11.1.4); `override` of a property with only one half; access to a property through a trait-typed value (`any`), left to the compiler
-- Writing a character by index into a string (`text[3] = 'x'`)
 - DateTime library: import path, timezone database, parsing for `CalendarDate` / `ZonedDateTime`
 - Import paths of the standard library parts (`import stdrnd`)
 - Pointers: automatic bound for `&` on `arr` / `vec` / `list`; bound methods on unbounded pointers
@@ -2746,7 +2888,7 @@ Level 1 = most important, level 3 = least.
 - 12.5 An adopted child is a child whose ownership changes: moved with `->`, returned by a function (a return always moves, as in Rust), or put into a field or a collection; an `asparent` method can also be called by the object itself
 - 1.6 The duplicated heading is removed; `asparent` in 1.6.1 and 1.6.2: the object itself and its children can call it (as in 12.5)
 
-## Changes in the next version (version and date set when merging)
+## Changes in 0.0.15
 
 - 12, 12.6 Cloning (new section): `a!` is a shortcut for `.clone()`; classes are clonable by default and `clone()` can be overridden freely; the default clone fills each field by its kind (native duplicated, owned deep cloned, owned child null, reference counted one more owner, borrowed null, weak another reference); anything that cannot be duplicated becomes null; weak references into the object's own parts are remapped to the copies; a clone has none of the children of the original
 - 12.6 Not clonable (compile error): a `notclonable` class, an object that has a parent, an `unsafe` class, a class with pointer fields; through a trait type `clone()` is a compile error and `tryClone()` is used
@@ -2762,3 +2904,28 @@ Level 1 = most important, level 3 = least.
 - 3.4 A number converts implicitly to a `lapse`, in milliseconds (there is no `lapse` literal): an integer gives a date lapse, a real gives a clock lapse (a date lapse beyond ±3.6 years, rounding away from zero; NaN gives null)
 - 17 Standard library 0.0.10: `Root.exit(int code)`; `Root.Console.read()` returns a `char?` and does not wait (null when no key is pressed, no echo, no Enter); `Root.Console.clear()`; `Root.Time.sleep(lapse duration)`; `Root.IO.getCurrentDir()`, `setCurrentDir(File | string)`, `getFullPath`, `getRelativePath`
 - 17 Standard library 0.0.10, section 7 Running programs (new): `Root.ExecProcess.run` (gives a `RunResult`: `exitCode`, `output`, `errors`, `timedOut`, `error`), `exec` (same console, returns the exit code, raises `FileNotFoundException` when the program is not found), `getEnv` (`""` when missing); arguments as an array, no shell; the `Process` object and `ProcessEndBehavior { Wait, Kill, Detach }` are for later
+- 11.2 Traits: the qualified name `TraitA.member` is needed only for a clash of public members; the unqualified name is a compile error that asks for it; private members of two traits never clash, the compiler aliases them
+- 11.2, 1.6.1 A private member of a trait is seen only by the code of that trait, not by the implementing class; a sub-trait reads every member of its parent traits read-only (private included) and can call all their methods (private included); not `asparent`
+- 11.2 A public trait field must be initialized in every constructor of the implementing class, directly or through the trait constructor (compile error otherwise); a private trait field is initialized only by the trait, or keeps its zero value
+- 11.2 Diamond: compile error when two traits give different default implementations of the same member of the shared supertrait, or call its constructor with different arguments
+- 11.2 The chain of `executeAfter` blocks runs like `atEnd`, from the most specific trait to the root, once per call; a call to the parent implementation does not start it again
+- 11.2 `Collection`: `iteratorCounter` is a private field; new private method `acquireIterator()`, called by the `executeAfter` of `IndexCollection`
+- 99 Open items: the order of the `executeAfter` chain and private state in a trait removed (decided, 11.2)
+- 6.7, 6.9, 11.2, 11.3.2, 11.3.4 The examples of iterators, collection traits and `Named` write `public` on their public methods and properties
+- 11.2 Visibility in a trait follows 1.6.1: no keyword is private, a public member is written `public`; an implemented method keeps the visibility of the trait
+- 11.2 `executeBefore { }` (new): runs before the implementation of the class, cannot be overridden; an exception in it stops the call; the order of a chain is decided when needed
+- 11.2 `Collection`: `releaseIterator() { }` has an empty default body (the `executeAfter` takes the counter back); new private `checkUnlocked()` for the `executeBefore` of the methods that change the size
+- 4 Strings follow the object ownership of 12: `b = a` is the same string, `->a` moves, `a!` copies; a change through `b` is seen through `a`; assigning rebinds the variable (a live borrow of the old string is a compile error); the owner frees the string at the end of its scope, a borrower never does (was: strings are values, never freed)
+- 4 `==` on strings compares the content (same pointer `true`, different byte length `false`, then the bytes); `text[pos] = c` writes in place (was: not decided); a string being iterated cannot be modified
+- 4.1 Modifying a string (new): `+=`, `text[pos] = c` and `clear()` always in place; the other modifying methods work in place when the result is not used or is assigned back to the same string (chains and known aliases included), a new string otherwise; in place on a constant string is a compile error; user class methods are not covered
+- 4.2, 4.3, 4.4 Renumbered: char functions 4.2 (was 4.1), string functions 4.3 (was 4.2), implementation 4.4 (was 4.3)
+- 4.3 New string methods: `insert`, `remove`, `replaceAt`, `append`, `prepend`, `clear`, `shrink`; `toCStr` returns a copy owned by the caller
+- 4.4 String implementation (new, replaces the small / large strings of 4): a string is a pointer to its first allocation, which never moves; every header field aligned to 32 bits; a 4-bit class: 0–7 single-block strings of 32 to 4096 bytes (4-byte header: class, 12-bit byte length, 16-bit char length; text and a final 0), 11 literal (read-only, 64-bit lengths, copied at the first modification), 13 moved (pointer to the new location), 15 block string; 8–10, 12, 14 free
+- 4.4.4 Block strings: a root of 60 bytes (48 on 32-bit targets) with class, flags, iterator counter, first and last block, 64-bit totals and a cursor (block, char index, byte offset); 4 KB blocks with next and previous pointers and 16-bit per-block counts (24-byte header, 12 on 32-bit targets), no running totals; a code point never straddles two blocks; the cursor is updated only by modifications; `shrink()` is the only way to a smaller form; small targets have their own implementation
+- 6.2 String storage in the generated C is decided (4.4): a null pointer is `""`, so it cannot mark an empty slot of a hash table by itself
+- 6.6 `fill` with a string gives each item its own copy (was: duplicated, they are values)
+- 12, 12.6 Strings follow the ownership rules; the default clone copies an owned `string` field (was: duplicated as a native value)
+- 99 Open items: string storage and writing by index removed (decided, 4, 4.4); new item for borrowed strings in the advanced cases
+- 4, 6.1, 6.6, 12.4 A string added to a collection (`add`, `insert`, `c[k] = s`, `fill`, literals) is always copied, and the copy is shrunk
+- 4 The iterator lock of a string is counted at run time for block strings and checked at compile time only for the other strings
+- 4.1, 4.2, 4.3, 6.6 The string and char methods are camelCase (`trim`, `substr`, `indexOf`, `toCStr`, `isLetter`, `toUpper` ...; was PascalCase)

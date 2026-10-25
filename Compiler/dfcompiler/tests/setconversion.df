@@ -8,7 +8,7 @@ Generic Num { i64, r64 }
 Generic Shapes { Circle, Shape }
 
 trait Named {
-  fun string Name()
+  public fun string Name()
 }
 
 public class Shape : Named {

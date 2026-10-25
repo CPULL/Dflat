@@ -85,6 +85,7 @@ sealed class FunctionContext {
   public string PanicLabel => $"fn{Id}_panic";
   public string RetVar => $"df_ret{Id}";
   public bool UsesRetVar { get; set; }
+  public bool UsesTmp { get; set; }      // the function frees temporary strings (df_tmp): it takes the mark df_tm when it starts
   public StringBuilder Decls { get; } = new();
 }
 
@@ -206,10 +207,7 @@ public sealed partial class CodeGen {
   FunctionContext NewFunctionContext(string header, string retType, bool isMain) {
     tempCounter++;
     var context = new FunctionContext(tempCounter, header, retType, isMain);
-    var bytes = new List<int>(CodePoints(header));
-    string literal = CString(bytes);
-    // df_str_lit("...", n) → "..."
-    string quoted = literal["df_str_lit(".Length..literal.LastIndexOf(',')];
+    string quoted = CQuoted(CodePoints(header), out _);
     functionNames.Append($"static const char {context.NameConst}[] = {quoted};\n");
     return context;
   }
@@ -275,10 +273,10 @@ public sealed partial class CodeGen {
       var mods = decl.Children.FirstOrDefault(child => child.Kind == "Mods");
       bool isConst = mods?.Text?.Split(' ').Contains("const") == true;
       string type = TypeForHoist(decl, typingScope);
-      frame.Hoisted[name] = new VarInfo(type, $"v_{name}_{frame.Id}", isConst) {
+      frame.Hoisted[name] = StringVar(new VarInfo(type, $"v_{name}_{frame.Id}", isConst) {
         Own = declOwner.TryGetValue(decl, out bool owns) && owns,
         IsWeak = decl.Children.Any(child => child.Kind == "WeakInit")
-      };
+      });
       typingScope.Vars[name] = frame.Hoisted[name];
     }
     foreach (var statement in frame.Statements) {
@@ -312,6 +310,9 @@ public sealed partial class CodeGen {
   void EmitHoists(Frame frame, StringBuilder sb, string pad) {
     foreach (var variable in frame.Hoisted.Values) {
       sb.Append($"{pad}{CType(variable.Type)} {variable.CName} = {ZeroValue(variable.Type)};\n");
+      if (variable.OwnFlag != null) {
+        sb.Append($"{pad}bool {variable.OwnFlag} = false;\n");
+      }
     }
     if (frame.RanFlag != null) {
       sb.Append($"{pad}bool {frame.RanFlag} = false;\n");
@@ -349,7 +350,9 @@ public sealed partial class CodeGen {
         catchOrdinal++;
         continue;
       }
+      int start = sb.Length;
       EmitStmt(statement, sb, scope, indent);
+      EmitTmpRelease(sb, start, pad);
     }
     frame.CurrentIndex = frame.Statements.Count;
 
@@ -757,7 +760,7 @@ public sealed partial class CodeGen {
     string message = args.Count == 1 ? Convert(ExprOf(args[0], scope, "string"), "string", s) : "df_str_lit(\"\", 0)";
     string temp = NewTemp();
     string raise = $"{{ df_string {temp} = {message}; "
-      + $"df_err = df_new_exception(&df_desc_{ExceptionName(id)}, {temp}.p, {temp}.len, {fn!.NameConst}); "
+      + $"df_err = df_new_exception(&df_desc_{ExceptionName(id)}, df_view({temp}).p, df_str_len({temp}), {fn!.NameConst}); "
       + $"df_err_thrown = true; goto {Handler}; }}";
     sb.Append(condition == "" ? $"{pad}{raise}\n" : $"{pad}if ({condition}) {raise}\n");
     return condition == "";

@@ -2,16 +2,16 @@
 alias Root as r
 
 trait TraitA {
-  string tag = "A"
-  fun string Who() { "A's who" }
-  fun string OnlyA() { "only A" }
+  public string tag = "A"
+  public fun string Who() { "A's who" }
+  public fun string OnlyA() { "only A" }
 }
 trait TraitB {
-  string tag = "B"
-  fun string Who() { "B's who" }
+  public string tag = "B"
+  public fun string Who() { "B's who" }
 }
 trait Counted {
-  i32 made
+  public i32 made
   Counted() { made = 100 }
 }
 

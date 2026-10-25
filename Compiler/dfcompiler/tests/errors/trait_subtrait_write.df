@@ -1,0 +1,6 @@
+trait Counter {
+  i32 hits
+}
+trait Loud : Counter {
+  public fun reset() { hits = 0 }
+}

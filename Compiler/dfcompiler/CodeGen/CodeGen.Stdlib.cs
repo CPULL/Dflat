@@ -249,9 +249,14 @@ public sealed partial class CodeGen {
           && index == args.Count - 1 && args[index].Kind == "String") {
         CheckParseFormat(FromCodePoints(Unescape(args[index].Text![1..^1], args[index])), args[index]);
       }
-      codes.Add(paramType == "any"
-        ? StrOf(ExprOf(args[index], scope), args[index])
-        : Convert(ExprOf(args[index], scope, paramType), paramType, args[index]));
+      // a library function only reads the strings it gets: a new one is a temporary
+      if (paramType == "any") {
+        codes.Add(StrReadOf(ExprOf(args[index], scope), args[index]));
+      } else {
+        var value = ExprOf(args[index], scope, paramType);
+        string converted = Convert(value, paramType, args[index]);
+        codes.Add(paramType == "string" ? StrRead(new Expr(converted, "string", FreshCode(value, converted) == "true" && !IsStaticStr(converted))) : converted);
+      }
     }
     if (chosen.Tail != "") {
       codes.Add(chosen.Tail);

@@ -376,7 +376,8 @@ static void df_cur_trim(df_cur* c) {
 
 /* yyyy-MM-dd or yyyy/MM/dd, then optionally ' ' or 'T' and HH[:mm[:ss[.fff]]], then optionally Z or +hh[:mm] */
 static bool df_date_parse_default(df_string text, int64_t* out) {
-  df_cur c = { text.p, text.len, 0 };
+  df_sv tv = df_view(text);
+  df_cur c = { tv.p, tv.len, 0 };
   df_dfields f;
   df_dfields_init(&f);
   df_cur_trim(&c);
@@ -424,7 +425,8 @@ static bool df_date_parse_default(df_string text, int64_t* out) {
 }
 
 static bool df_time_parse_default(df_string text, int32_t* out) {
-  df_cur c = { text.p, text.len, 0 };
+  df_sv tv = df_view(text);
+  df_cur c = { tv.p, tv.len, 0 };
   df_dfields f;
   df_dfields_init(&f);
   df_cur_trim(&c);
@@ -459,8 +461,10 @@ static int32_t df_time_from_str(df_string text) {
 }
 
 /* strict parsing with the printing letters; nothing is skipped */
-static bool df_parse_format(df_string text, df_string fmt, bool isTime, int64_t* out) {
-  df_cur c = { text.p, text.len, 0 };
+static bool df_parse_format(df_string text, df_string fmtText, bool isTime, int64_t* out) {
+  df_sv fmt = df_view(fmtText);
+  df_sv tv = df_view(text);
+  df_cur c = { tv.p, tv.len, 0 };
   df_dfields f;
   df_dfields_init(&f);
   uint64_t i = 0;
@@ -682,7 +686,8 @@ static void df_iso_week(const df_dparts* p, int64_t* week, int64_t* year) {
   *year = y;
 }
 
-static df_string df_date_format(int64_t ms, df_string fmt) {
+static df_string df_date_format(int64_t ms, df_string fmtText) {
+  df_sv fmt = df_view(fmtText);
   if (ms == DF_NULL_DATE) {
     return df_str_lit("null", 4);
   }
@@ -821,7 +826,8 @@ static df_string df_date_format(int64_t ms, df_string fmt) {
     uint64_t left = align == '>' ? gap : align == '^' ? gap / 2 : 0;
     df_sb padded = { 0 };
     for (uint64_t k = 0; k < left; k++) df_sb_bytes(&padded, " ", 1);
-    df_sb_bytes(&padded, out.p, out.len);
+    df_sv ov = df_view(out);
+    df_sb_bytes(&padded, ov.p, ov.len);
     for (uint64_t k = left; k < gap; k++) df_sb_bytes(&padded, " ", 1);
     out = df_sb_done(&padded);
   }

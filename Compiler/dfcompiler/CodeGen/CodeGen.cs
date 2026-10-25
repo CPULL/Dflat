@@ -86,6 +86,9 @@ sealed class VarInfo {
   public bool IsWeak { get; set; }    // a weak reference: used only through enforce
   public bool ReadOnlyRef { get; set; }   // &Item o: a read-only reference to an object or a collection (spec 1.6.2)
   public long? KnownLength { get; set; }   // an array that starts from a literal or arr<T>[n] and is never assigned again: its length is known
+  public string? OwnFlag { get; set; }     // a string variable: the C flag that says whether it owns its string (CodeGen.Strings.cs)
+  public bool ReadOnlyString { get; set; } // a string parameter or loop variable: a read-only borrow, never changed in place (spec 4.1)
+  public VarInfo? AliasOf { get; set; }    // string b = a: b is known to be the same string as a (spec 4.1, in place through an alias)
 }
 
 sealed class Scope {
@@ -238,6 +241,9 @@ public sealed partial class CodeGen {
     main.Append("int main(int argc, char** argv) {\n");
     main.Append("  df_init();\n  df_set_args(argc, argv);\n");
     main.Append(StaticInitCode());
+    if (fn.UsesTmp) {
+      fn.Decls.Append("  size_t df_tm = df_tmp_top;\n  (void)df_tm;\n");
+    }
     main.Append(fn.Decls);
     if (fn.UsesRetVar) {
       main.Append($"  int32_t {fn.RetVar} = 0;\n");
@@ -265,6 +271,7 @@ public sealed partial class CodeGen {
     output.Append(Runtime.Source).Append('\n');
     output.Append(OptionalRuntime());
     output.Append("/* ---- program ---- */\n\n");
+    output.Append(literalCode).Append('\n');
     output.Append(typeDefs);
     output.Append(listNodeTypes);
     foreach (var cls in classOrder.Where(cls => cls.ParentField != null)) {
@@ -382,7 +389,7 @@ public sealed partial class CodeGen {
       }
       ps.Add(new ParamSig(p.Text!, variadic ? "arr<" + paramType + ">" : paramType, def?.Children[0]) {
         IsVariadic = variadic,
-        IsGift = p.Kind == "GiftParam" && IsClass(paramType),
+        IsGift = p.Kind == "GiftParam" && (IsClass(paramType) || paramType == "string"),
         Ref = reference
       });
     }
@@ -434,7 +441,11 @@ public sealed partial class CodeGen {
       // a reference parameter is a pointer in C; the body reads and writes through it, a read-only one cannot be assigned
       scope.Vars[p.Name] = IsByPointer(p)
         ? new VarInfo(p.Type, $"(*{ParamName(p)})", p.Ref == 1) { ReadOnlyRef = p.Ref == 1 && IsArr(p.Type) }
-        : new VarInfo(p.Type, "v_" + p.Name, false) { Own = p.IsGift, ReadOnlyRef = p.Ref == 1 && IsClass(p.Type) };
+        : StringVar(new VarInfo(p.Type, "v_" + p.Name, false) { Own = p.IsGift, ReadOnlyRef = p.Ref == 1 && IsClass(p.Type), ReadOnlyString = p.Type == "string" && !p.IsGift });
+      if (scope.Vars[p.Name].OwnFlag is string flag) {
+        // a parameter borrows its string (one taken with -> owns it); assigned again, it may own the new one
+        fn.Decls.Append($"  bool {flag} = {(p.IsGift ? "true" : "false")};\n  (void){flag};\n");
+      }
     }
     var block = f.Node.Children.First(c => c.Kind == "Block");
     // the atEnd after the function body is its final cleanup; a parameter taken with -> ends with the function
@@ -443,8 +454,11 @@ public sealed partial class CodeGen {
     if (trailing != null) {
       statements.Insert(0, Synthetic("AtEnd", trailing).Add(trailing.Children[0]));
     }
-    foreach (var p in f.Params.Where(p => p.IsGift)) {
+    foreach (var p in f.Params.Where(p => p.IsGift && !(p.Type == "string" && !IsByPointer(p)))) {
       statements.Insert(0, DropNode(p.Name, f.Node));
+    }
+    foreach (var p in f.Params.Where(p => p.Type == "string" && !IsByPointer(p) && (p.IsGift || AssignedAgain(p.Name)))) {
+      statements.Insert(0, StrDropNode(p.Name, f.Node));
     }
     var root = PrepareFrame(statements, scope, FrameKind.Function);
     root.OuterHandler = fn.FailLabel;
@@ -454,7 +468,11 @@ public sealed partial class CodeGen {
     if (singleValue && statements.Count == 1 && statements[0].Kind == "ExprStmt") {
       frames.Push(root);
       root.CurrentIndex = 0;
-      var e = Convert(ExprOf(block.Children[0].Children[0], scope, f.Ret), f.Ret, block.Children[0]);
+      var returned = ExprOf(block.Children[0].Children[0], scope, f.Ret);
+      if (f.Ret == "string") {
+        returned = StrReturned(returned, block.Children[0].Children[0], scope);
+      }
+      var e = Convert(returned, f.Ret, block.Children[0]);
       body.Append(fn.PairOf != null ? $"  return {PairValue(f, e)};\n" : $"  return {e};\n");
       frames.Pop();
     } else {
@@ -470,6 +488,9 @@ public sealed partial class CodeGen {
 
     var sb = new StringBuilder();
     sb.Append(Signature(f)).Append(" {\n");
+    if (fn.UsesTmp) {
+      fn.Decls.Append("  size_t df_tm = df_tmp_top;\n  (void)df_tm;\n");
+    }
     sb.Append(fn.Decls);
     if (fn.UsesRetVar) {
       sb.Append($"  {CType(f.Ret)} {fn.RetVar} = {ZeroValue(f.Ret)};\n");
@@ -519,6 +540,10 @@ public sealed partial class CodeGen {
         EmitDecl(s, sb, scope, pad);
         return;
 
+      case "StrDrop":
+        EmitStrDrop(s, sb, scope, pad);
+        return;
+
       case "RawC":
         sb.Append(pad).Append(s.Text).Append('\n');   // C made by the compiler (the release of a loop's counter, EmitForEach)
         return;
@@ -536,11 +561,17 @@ public sealed partial class CodeGen {
           EmitFinalize(s.Children[0], sb, scope, pad);
           return;
         }
+        if (s.Children[0].Kind == "Call" && EmitInPlaceStatement(s.Children[0], sb, scope, pad)) {
+          return;   // s.trim() alone changes s (spec 4.1)
+        }
         var e = ExprOf(s.Children[0], scope);
         string k = s.Children[0].Kind;
         if (k == "Call" && e.Fresh && IsClass(e.Type)) {
           // a new object nobody keeps ends here
           sb.Append(pad).Append(CheckRaise($"df_drop((void*)({e.Code}))", "void")).Append(";\n");
+        } else if (k == "Call" && e.Type == "string") {
+          // a string nobody keeps ends here
+          sb.Append(pad).Append(e.Fresh ? $"df_str_free({e.Code});\n" : $"(void)({e.Code});\n");
         } else if (k is "Call" or "PostInc" or "PostDec" or "PreInc" or "PreDec") {
           // a result nobody keeps: say so to the C compiler (a call that checks an exception is a statement expression)
           sb.Append(pad).Append(e.Type == "void" || IsMulti(e.Type) ? e.Code : $"(void)({e.Code})").Append(";\n");
@@ -702,15 +733,25 @@ public sealed partial class CodeGen {
       throw Error($"'{s.Text}' would own an object that something else owns: write ->x to move it, or start from a new object", s);
     }
     VarInfo variable;
+    string ownsString = type == "string" && initValue is Expr stringValue ? FreshCode(stringValue, code) : "false";
     if (frames.Peek().Hoisted.TryGetValue(s.Text!, out var hoisted)) {
       // already created at the start of the scope (the scope has atEnd blocks)
       variable = hoisted;
       sb.Append($"{pad}{hoisted.CName} = {code};\n");
+      if (hoisted.OwnFlag != null) {
+        sb.Append($"{pad}{hoisted.OwnFlag} = {ownsString};\n");
+      }
     } else {
-      variable = new VarInfo(type, "v_" + s.Text, isConst);
-      sb.Append($"{pad}{(isConst ? "const " : "")}{CType(type)} {variable.CName} = {code};\n");
+      variable = StringVar(new VarInfo(type, "v_" + s.Text, isConst));
+      sb.Append($"{pad}{(isConst && variable.OwnFlag == null ? "const " : "")}{CType(type)} {variable.CName} = {code};\n");
+      if (variable.OwnFlag != null) {
+        sb.Append($"{pad}bool {variable.OwnFlag} = {ownsString};\n{pad}(void){variable.OwnFlag};\n");
+      }
     }
     variable.IsWeak = weak;
+    if (type == "string" && init?.Children[0] is { Kind: "Name" } source && scope.Find(source.Text!) is VarInfo { Type: "string" } original) {
+      variable.AliasOf = original.AliasOf ?? original;
+    }
     if (init != null && !weak && IsArr(type) && ConstantArrayLength(init.Children[0]) is long length && !AssignedAgain(s.Text!)) {
       variable.KnownLength = length;
     }
@@ -943,6 +984,9 @@ public sealed partial class CodeGen {
     }
     var returned = ExprOf(s.Children[0], scope, currentRet);
     returned = CheckReturnOwnership(returned, s.Children[0], scope, s);
+    if (currentRet == "string") {
+      returned = StrReturned(returned, s.Children[0], scope);
+    }
     return Convert(returned, currentRet!, s);
   }
 
@@ -952,8 +996,9 @@ public sealed partial class CodeGen {
   LValueInfo LValue(Node target, Scope scope) {
     if (target.Kind == "Name") {
       var variable = scope.Find(target.Text!);
-      if (variable == null && currentClass != null && FindField(currentClass, target.Text!) is FieldInfo ownField) {
+      if (variable == null && currentClass != null && FindField(currentClass, target.Text!, target) is FieldInfo ownField) {
         var bare = BareField(target.Text!, scope, target)!.Value;
+        CheckTraitFieldWrite(ownField, target);
         if (ownField.IsParentRef) {
           // the reference to the parent: set once, by the constructor
           return initializing ? new LValueInfo(bare.Code, bare.Type, false) : throw Error($"'{target.Text}' is the reference to the parent: only the constructor sets it", target);
@@ -989,6 +1034,12 @@ public sealed partial class CodeGen {
       throw Error($"'{targetNode.Text}' is const", s);
     }
     string op = s.Text!;
+    if (op == "=" && target.Type == "string" && InPlaceAssign(targetNode, s.Children[1], scope, s) is string inPlace) {
+      return inPlace;   // x = x.trim() changes x (spec 4.1)
+    }
+    if (op == "+=" && target.Type == "string" && StrAppendAssign(targetNode, s.Children[1], scope, s) is string appended) {
+      return appended;   // always in place
+    }
     if (op == "=") {
       var assigned = ExprOf(s.Children[1], scope, target.Type);
       if (IsClass(target.Type) && (target.Variable != null || target.IsField)) {
@@ -996,6 +1047,9 @@ public sealed partial class CodeGen {
       }
       string value = Convert(assigned, target.Type, s);
       MarkAssigned(target.Variable);
+      if (target.Type == "string") {
+        return StrAssign(target, FreshCode(assigned, value), value);
+      }
       return $"{target.Code} = {value}";
     }
     if (op == "_=") {
@@ -1010,12 +1064,22 @@ public sealed partial class CodeGen {
     string bin = op[..^1];
     var left = new Expr(target.Code, target.Type);
     var result = BinaryOp(bin, left, s.Children[1], scope, s);
+    if (target.Type == "string") {
+      string converted = Convert(result, target.Type, s);
+      return StrAssign(target, FreshCode(result, converted), converted);
+    }
     return $"{target.Code} = {Convert(result, target.Type, s)}";
   }
 
   // ---------------------------------------------------------------- expressions
 
+  // a string says whether it is new (CodeGen.Strings.cs)
   Expr ExprOf(Node n, Scope scope, string? expected = null) {
+    var e = ExprOfNode(n, scope, expected);
+    return e.Type == "string" ? e with { Fresh = StrNodeFresh(n, e) } : e;
+  }
+
+  Expr ExprOfNode(Node n, Scope scope, string? expected) {
     switch (n.Kind) {
       case "Int":
         return IntLiteral(n, expected, false);
@@ -1129,6 +1193,14 @@ public sealed partial class CodeGen {
           throw NotSupported("Pointers", n);
         }
         return IndexExpr(n, scope);
+      case "Copy": {
+        // a! of a string: a copy (the objects need cloning, spec 12.6)
+        var copied = ExprOf(n.Children[0], scope);
+        if (copied.Type == "string") {
+          return new Expr(copied.Fresh ? copied.Code : $"df_str_dup({copied.Code})", "string", true);
+        }
+        throw NotSupported(NodeFeatures["Copy"], n);
+      }
       default:
         if (NodeFeatures.TryGetValue(n.Kind, out var feature)) {
           throw NotSupported(feature, n);
@@ -1345,12 +1417,28 @@ public sealed partial class CodeGen {
     return text.EnumerateRunes().Select(rune => rune.Value).ToList();
   }
 
-  static string CString(List<int> cps) {
+  // a string literal is a read-only class 11 object (spec 4.4.3), one per text, written before the program; "" is NULL
+  string CString(List<int> cps) {
+    if (cps.Count == 0) {
+      return "((df_string)0)";
+    }
+    string text = CQuoted(cps, out int byteCount);
+    if (!literalNames.TryGetValue(text, out var name)) {
+      name = $"df_lit{literalNames.Count}";
+      literalNames[text] = name;
+      literalCode.Append($"static const struct {{ uint8_t h[4]; uint32_t w[4]; char t[{byteCount + 1}]; }} {name} = ");
+      literalCode.Append($"{{ {{ 11, 0, 0, 0 }}, {{ {cps.Count}u, 0, {byteCount}u, 0 }}, {text} }};\n");
+    }
+    return $"((df_string)&{name})";
+  }
+
+  // the UTF-8 bytes of the text as a C string literal, with its quotes
+  static string CQuoted(List<int> cps, out int byteCount) {
     var bytes = new List<byte>();
     foreach (int cp in cps) {
       bytes.AddRange(Encoding.UTF8.GetBytes(char.ConvertFromUtf32(cp)));
     }
-    var sb = new StringBuilder("df_str_lit(\"");
+    var sb = new StringBuilder("\"");
     foreach (byte b in bytes) {
       if (b >= 0x20 && b < 0x7F && b != '"' && b != '\\' && b != '?') {
         sb.Append((char)b);
@@ -1358,20 +1446,23 @@ public sealed partial class CodeGen {
         sb.Append('\\').Append(System.Convert.ToString(b, 8).PadLeft(3, '0'));
       }
     }
-    sb.Append($"\", {bytes.Count})");
-    return sb.ToString();
+    byteCount = bytes.Count;
+    return sb.Append('"').ToString();
   }
 
   // The holes are evaluated one after the other, left to right: C leaves the order of function arguments open, so with two or
   // more holes each one goes into a temporary first.
+  // The result is a new string: the pieces that are new strings are freed as they are joined.
   Expr Interpolated(Node n, Scope scope) {
     string code = "df_str_lit(\"\", 0)";
     bool first = true;
-    var pieces = new List<string>();
+    bool codeFresh = false;
+    var pieces = new List<(string Code, bool Fresh)>();
     var setup = new StringBuilder();
     bool ordered = n.Children.Count(part => part.Kind != "Text") > 1;
     foreach (var part in n.Children) {
       string piece;
+      bool pieceFresh = false;
       if (part.Kind == "Text") {
         piece = CString(Unescape(part.Text![1..^1], part));
       } else {
@@ -1382,19 +1473,30 @@ public sealed partial class CodeGen {
           specWarned = true;
         }
         piece = formatted?.Code ?? StrOf(hole, part);
+        pieceFresh = formatted != null || hole.Type != "string" || hole.Fresh;
         if (ordered) {
           string temp = NewTemp();
           setup.Append($"df_string {temp} = {piece}; ");
           piece = temp;
         }
       }
-      pieces.Add(piece);
+      pieces.Add((piece, pieceFresh && !IsStaticStr(piece)));
     }
-    foreach (string piece in pieces) {
-      code = first ? piece : $"df_str_concat({code}, {piece})";
+    foreach (var (piece, pieceFresh) in pieces) {
+      if (first) {
+        code = piece;
+        codeFresh = pieceFresh;
+      } else {
+        code = codeFresh ? $"{(pieceFresh ? "df_str_catx" : "df_str_cat")}({code}, {piece})"
+          : $"df_str_concat({code}, {(pieceFresh ? StrRead(new Expr(piece, "string", true)) : piece)})";
+        codeFresh = true;
+      }
       first = false;
     }
-    return new Expr(ordered ? $"({{ {setup}{code}; }})" : code, "string");
+    if (!codeFresh && !IsStaticStr(code)) {
+      code = $"df_str_dup({code})";   // $"{name}": a string of its own
+    }
+    return new Expr(ordered ? $"({{ {setup}{code}; }})" : code, "string", true);
   }
 
   // ---------------------------------------------------------------- operators
@@ -1428,8 +1530,10 @@ public sealed partial class CodeGen {
   Expr Combine(string op, Expr l, Expr r, Node at) {
     // string building
     if (op == "+" && (l.Type is "string" or "char" || r.Type is "string" or "char")) {
-      return new Expr($"df_str_concat({StrOf(l, at)}, {StrOf(r, at)})", "string");
+      return new Expr($"df_str_concat({StrReadOf(l, at)}, {StrReadOf(r, at)})", "string", true);
     }
+    l = StrReadExpr(l);
+    r = StrReadExpr(r);
     if (IsTimeType(l.Type) || IsTimeType(r.Type)) {
       return TimeOp(op, l, r, at);
     }
@@ -1686,10 +1790,15 @@ public sealed partial class CodeGen {
       return TraitDirectCall(qualified, callee.Text!, args, scope, n);
     }
 
+    // s.clear() and s.shrink(): in place on a string variable, field or item
+    if (StrInPlaceCall(n, scope) is string inPlace) {
+      return new Expr(inPlace, "void");
+    }
+
     // x.toStr() and x.toStr(format)
     if (callee.Kind == "Member" && callee.Text == "toStr" && args.Count <= 1) {
       var value = ExprOf(callee.Children[0], scope);
-      return args.Count == 0 ? new Expr(StrOf(value, n), "string") : FormatCall(value, args, scope, n);
+      return args.Count == 0 ? new Expr(StrOf(value, n), "string", value.Type != "string" || value.Fresh) : FormatCall(value, args, scope, n);
     }
 
     // a function of a value: "text".Trim(), c.IsDigit(), d.addDays(1), numbers.has(3)
@@ -1801,7 +1910,7 @@ public sealed partial class CodeGen {
       return TraitView(obj, n.Text!, n) ?? ObjectField(obj, n.Text!, n);   // x.TraitName, x.field
     }
     if (obj.Type == "string" && n.Text == "len") {
-      return new Expr($"df_str_chars({obj.Code})", "u64");
+      return new Expr($"df_str_chars({StrRead(obj)})", "u64");
     }
     if (IsArr(obj.Type) && n.Text == "len") {
       return new Expr($"(({obj.Code}).len)", NativeUns);
@@ -1810,7 +1919,7 @@ public sealed partial class CodeGen {
       return property;
     }
     if (obj.Type == "string" && n.Text == "sizeof") {
-      return new Expr($"(({obj.Code}).len)", "u64");
+      return new Expr($"df_str_len({StrRead(obj)})", "u64");
     }
     if (IsArr(obj.Type) && n.Text == "sizeof") {
       return CollectionSizeof(obj);

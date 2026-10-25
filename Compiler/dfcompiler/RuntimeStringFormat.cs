@@ -36,7 +36,8 @@ typedef struct {
 static bool df_sf_letter(uint32_t c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
 
 /* the grammar of 8.3; false for a spec that is not valid (the text is then left as it is) */
-static bool df_sf_parse(df_string spec, df_sf* f) {
+static bool df_sf_parse(df_string specText, df_sf* f) {
+  df_sv spec = df_view(specText);
   memset(f, 0, sizeof *f);
   f->fill = ' ';
   uint64_t i = 0;
@@ -114,8 +115,9 @@ static bool df_sf_parse(df_string spec, df_sf* f) {
   return !(f->trunc && !f->hasWidth);
 }
 
-static uint64_t df_sf_measure(df_string s, bool columns) {
-  if (!columns) return df_str_chars(s);
+static uint64_t df_sf_measure(df_string text, bool columns) {
+  if (!columns) return df_str_chars(text);
+  df_sv s = df_view(text);
   uint64_t n = 0;
   uint64_t i = 0;
   while (i < s.len) n += (uint64_t)df_cp_columns(df_utf8_next(s.p, s.len, &i));
@@ -123,9 +125,10 @@ static uint64_t df_sf_measure(df_string s, bool columns) {
 }
 
 /* U upper, L lower, S sentence (the first letter), T title (the first letter of every word) */
-static df_string df_sf_case(df_string s, int mode) {
-  if (mode == 'U') return df_str_toupper(s);
-  if (mode == 'L') return df_str_tolower(s);
+static df_string df_sf_case(df_string text, int mode) {
+  if (mode == 'U') return df_str_toupper(text);
+  if (mode == 'L') return df_str_tolower(text);
+  df_sv s = df_view(text);
   df_sb b = { 0 };
   uint64_t i = 0;
   bool start = true;
@@ -138,7 +141,8 @@ static df_string df_sf_case(df_string s, int mode) {
 }
 
 /* the escapes of a Dflat string literal, between double quotes */
-static df_string df_sf_quote(df_string s) {
+static df_string df_sf_quote(df_string text) {
+  df_sv s = df_view(text);
   df_sb b = { 0 };
   df_sb_bytes(&b, "\"", 1);
   uint64_t i = 0;
@@ -166,7 +170,8 @@ static df_string df_sf_quote(df_string s) {
 }
 
 /* the marker as written between the quotes: \' and \\ stand for themselves */
-static df_string df_sf_marker(df_string m) {
+static df_string df_sf_marker(df_string text) {
+  df_sv m = df_view(text);
   df_sb b = { 0 };
   uint64_t i = 0;
   while (i < m.len) {
@@ -178,7 +183,8 @@ static df_string df_sf_marker(df_string m) {
 }
 
 /* the first characters of s that fit in the room given (characters or columns) */
-static df_string df_sf_prefix(df_string s, uint64_t room, bool columns) {
+static df_string df_sf_prefix(df_string text, uint64_t room, bool columns) {
+  df_sv s = df_view(text);
   uint64_t i = 0;
   uint64_t used = 0;
   while (i < s.len) {
@@ -188,10 +194,11 @@ static df_string df_sf_prefix(df_string s, uint64_t room, bool columns) {
     if (used + w > room) return df_str_slice(s, 0, before);
     used += w;
   }
-  return s;
+  return df_str_dup(text);
 }
 
-static df_string df_sf_suffix(df_string s, uint64_t room, bool columns) {
+static df_string df_sf_suffix(df_string text, uint64_t room, bool columns) {
+  df_sv s = df_view(text);
   uint64_t i = s.len;
   uint64_t used = 0;
   while (i > 0) {
@@ -207,8 +214,9 @@ static df_string df_sf_suffix(df_string s, uint64_t room, bool columns) {
 
 /* order: trim, case, quote, truncate (the marker counts in the width), then fill and alignment */
 static df_string df_str_format(df_string s, df_string spec) {
+  df_string original = s;
   df_sf f;
-  if (!df_sf_parse(spec, &f)) return s;
+  if (!df_sf_parse(spec, &f)) return df_str_dup(s);
   if (f.trim == 1) s = df_str_trim_left(s); else if (f.trim == 2) s = df_str_trim_right(s); else if (f.trim == 3) s = df_str_trim(s);
   if (f.casing) s = df_sf_case(s, f.casing);
   if (f.quote) s = df_sf_quote(s);
@@ -221,12 +229,14 @@ static df_string df_str_format(df_string s, df_string spec) {
       uint64_t room = f.width - markerWidth;
       df_sb b = { 0 };
       if (f.trunc == 1) {
-        df_string kept = df_sf_prefix(s, room, f.columns);
+        df_sv kept = df_view(df_sf_prefix(s, room, f.columns));
+        df_sv mark = df_view(marker);
         df_sb_bytes(&b, kept.p, kept.len);
-        df_sb_bytes(&b, marker.p, marker.len);
+        df_sb_bytes(&b, mark.p, mark.len);
       } else {
-        df_string kept = df_sf_suffix(s, room, f.columns);
-        df_sb_bytes(&b, marker.p, marker.len);
+        df_sv kept = df_view(df_sf_suffix(s, room, f.columns));
+        df_sv mark = df_view(marker);
+        df_sb_bytes(&b, mark.p, mark.len);
         df_sb_bytes(&b, kept.p, kept.len);
       }
       s = df_sb_done(&b);
@@ -241,13 +251,14 @@ static df_string df_str_format(df_string s, df_string spec) {
       uint64_t before = f.align == 2 ? count : f.align == 1 ? count / 2 : 0;
       uint64_t after = count - before;
       df_sb b = { 0 };
+      df_sv text = df_view(s);
       for (uint64_t k = 0; k < before; k++) df_sb_cp(&b, f.fill);
-      df_sb_bytes(&b, s.p, s.len);
+      df_sb_bytes(&b, text.p, text.len);
       for (uint64_t k = 0; k < after; k++) df_sb_cp(&b, f.fill);
       s = df_sb_done(&b);
     }
   }
-  return s;
+  return s == original ? df_str_dup(s) : s;
 }
 
 """;

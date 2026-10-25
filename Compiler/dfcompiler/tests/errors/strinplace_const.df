@@ -1,0 +1,3 @@
+const string fixed = "a" + "b"
+fixed.trim()
+Root.Console.log(fixed)

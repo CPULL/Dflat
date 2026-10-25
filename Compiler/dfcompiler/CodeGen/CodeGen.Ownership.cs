@@ -242,6 +242,15 @@ public sealed partial class CodeGen {
   HashSet<Node> AddImplicitDrops(Frame frame, List<Node> statements) {
     var drops = new List<Node>();
     var owners = new HashSet<Node>();
+    foreach (var statement in statements.Where(statement => statement.Kind == "Decl" && IsStringDecl(statement))) {
+      owners.Add(statement);
+      drops.Add(StrDropNode(statement.Text!, statement));
+    }
+    foreach (var target in statements.Where(statement => statement.Kind == "MultiAssign")
+               .SelectMany(statement => statement.Children[0].Children).Where(target => target.Kind == "Decl" && IsStringDecl(target))) {
+      owners.Add(target);
+      drops.Add(StrDropNode(target.Text!, target));
+    }
     foreach (var statement in statements.Where(statement => statement.Kind == "Decl")) {
       var mods = statement.Children.FirstOrDefault(child => child.Kind == "Mods");
       if (mods?.Text?.Split(' ').Contains("const") == true || ObjectTypeOf(statement) == null) {
@@ -264,7 +273,8 @@ public sealed partial class CodeGen {
     if (statements.Count == 0 || statements.Any(s => s.Kind is "AtEnd" or "AtEndOf" or "Catch" or "Label")) {
       return statements;
     }
-    if (!statements.Any(s => s.Kind == "Decl" && ObjectTypeOf(s) != null)) {
+    if (!statements.Any(s => (s.Kind == "Decl" && (ObjectTypeOf(s) != null || IsStringDecl(s)))
+        || (s.Kind == "MultiAssign" && s.Children[0].Children.Any(target => target.Kind == "Decl" && IsStringDecl(target))))) {
       return statements;
     }
     var wrapper = Synthetic("Block", statements[0]);
@@ -290,6 +300,9 @@ public sealed partial class CodeGen {
     }
     if (operand.Kind is not ("Name" or "Member")) {
       throw Error("only a variable or a field can be moved with ->", n);
+    }
+    if (StrGift(operand, scope, n) is Expr movedString) {
+      return movedString;
     }
     var value = ExprOf(operand, scope);
     if (!IsClass(value.Type)) {
@@ -428,6 +441,11 @@ public sealed partial class CodeGen {
 
   // ---------------------------------------------------------------- the destruction code of the classes
 
+  List<FieldInfo> OwnedStringFields(ClassInfo cls) {
+    return IntroducedTraits(cls).SelectMany(trait => trait.Fields).Concat(cls.Fields)
+      .Where(field => !field.IsStatic && field.Type == "string").ToList();
+  }
+
   List<FieldInfo> OwnedObjectFields(ClassInfo cls) {
     return IntroducedTraits(cls).SelectMany(trait => trait.Fields).Concat(cls.Fields)
       .Where(field => !field.IsStatic && IsClass(field.Type) && !field.IsParentRef).ToList();
@@ -450,6 +468,9 @@ public sealed partial class CodeGen {
     }
     foreach (var field in OwnedObjectFields(cls)) {
       sb.Append($"  if (self->{field.CName} != NULL) {{ void* o = (void*)self->{field.CName}; self->{field.CName} = NULL; df_drop(o); }}\n");
+    }
+    foreach (var field in OwnedStringFields(cls)) {
+      sb.Append($"  df_str_free(self->{field.CName});\n  self->{field.CName} = NULL;\n");
     }
     if (IsVec(cls.Name)) {
       EmitVecDropGlue(sb, cls);

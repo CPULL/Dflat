@@ -4,10 +4,10 @@ using dfparser;
 namespace dfcompiler;
 
 public static class Program {
-  public const string Version = "0.0.21alpha";
+  public const string Version = "0.0.22alpha";
 
   // the version of the specification this compiler was built for: the variable `version` of the preprocessor (spec 19.1)
-  public const string LanguageVersion = "0.0.14";
+  public const string LanguageVersion = "0.0.15";
 
   // the os and cpu pairs the compiler builds for, and the clang triple of each (a target equal to this machine passes none: clang's own default)
   static readonly Dictionary<string, string> Triples = new() {

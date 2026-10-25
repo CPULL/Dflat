@@ -1,0 +1,6 @@
+trait Counter {
+  fun bump() { }
+}
+public class Thing : Counter {
+  public fun poke() { bump() }
+}

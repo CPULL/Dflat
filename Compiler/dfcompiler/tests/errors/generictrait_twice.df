@@ -1,7 +1,7 @@
 alias Root as r
 
 trait Container<Item> {
-  fun Item Get(u64 index)
+  public fun Item Get(u64 index)
 }
 
 public class Both : Container<string>, Container<i32> {

@@ -23,7 +23,7 @@ r.Console.log(describe(Square(), 0))                // division by zero
 r.Console.log(describe(Flat(), 0))                  // area 0
 
 trait Measure {
-  fun i64 size(i64 k)
+  public fun i64 size(i64 k)
 }
 public class Wide : Measure {
   override fun i64 size(i64 k) { k * 2 }

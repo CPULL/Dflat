@@ -1,0 +1,97 @@
+// Changes in place (spec 4.1): a borrow sees them; a result used elsewhere is a new string
+alias Root as r
+
+class Note {
+  public string text
+}
+
+// += is always in place: b borrows a, so b sees the change; the string moves to bigger classes and b follows
+string a = "start" + "!"
+string b = a
+for i32 round in 0..100 {
+  a += "x"
+}
+r.Console.log($"{a.len} {b.len} {a == b}")
+b += "-b"
+r.Console.log(a.endsWith("-b"))
+
+// a result not used, or given back to the same string: in place
+string s = "  Hello " + "World  "
+string view = s
+s.trim()
+r.Console.log($"[{view}]")
+s = s.toUpper()
+r.Console.log(view)
+view = view.substr(0, 5).toLower()
+r.Console.log(s)
+
+// a result used elsewhere: a new string, the original is unchanged
+string original = "keep me"
+string other = original.toUpper()
+r.Console.log($"{original} / {other}")
+
+// an alias: string same = text, then text = same.trim() works in place
+string text = " ali" + "ased "
+string same = text
+text = same.trim()
+r.Console.log($"[{text}] [{same}]")
+
+// fields and array items
+Note n = Note()
+n.text = "field"
+n.text += " grows"
+n.text.toUpper()
+r.Console.log(n.text)
+arr<string> items = ["one", "two"]
+items[1] += "!"
+items[0].toUpper()
+r.Console.log(items)
+
+// a literal is never written: the variable gets a string of its own
+string lit = "literal"
+string litView = lit
+lit += "!"
+r.Console.log($"{lit} {litView}")
+
+// text[pos] = c, same size and different sizes
+string chars = "hel" + "lo"
+string charsView = chars
+chars[0] = 'J'
+chars[4] = 'é'
+chars[1] = '\u{1F600}'
+r.Console.log($"{chars} {charsView} {chars.len} {chars.sizeof}")
+{
+  chars[99] = 'x'
+  catch IndexOutOfRangeException {
+    r.Console.log("index out of range")
+  }
+}
+
+// clear, shrink and the new methods
+string work = "abc" + "def"
+string workView = work
+work.insert(3, "-")
+work.remove(0, 1)
+work.replaceAt(0, 2, "XY")
+work.append("!")
+work.prepend(">")
+r.Console.log($"{work} {workView}")
+string fresh = work.append("?")
+r.Console.log($"{fresh} {work}")
+string big = "".padLeft(5000, 'z')
+string bigView = big
+big.clear()
+r.Console.log($"[{big}] [{bigView}] {big.len}")
+string grown = "a"
+for i32 round in 0..200 {
+  grown += "bc"
+}
+grown = grown.substr(0, 3)
+grown.shrink()
+r.Console.log($"{grown} {grown.len}")
+
+// shuffle in place keeps the characters
+string letters = "abcd"
+string lettersView = letters
+r.Random.shuffle(letters)
+r.Console.log($"{letters.len} {lettersView.len} {letters.contains("a")}")

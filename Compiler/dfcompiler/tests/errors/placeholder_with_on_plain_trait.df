@@ -2,11 +2,11 @@ alias Root as r
 
 trait Sequence {
   placeholder Item
-  fun Item? Next()
+  public fun Item? Next()
 }
 
 trait Plain {
-  fun i32 Get()
+  public fun i32 Get()
 }
 
 public class Broken : Plain with (Item is i32) {

@@ -3,7 +3,7 @@ alias Root as r
 
 trait Sequence {
   placeholder Item
-  fun Item? Next()
+  public fun Item? Next()
 }
 
 public class Countdown(u32 start) : Sequence with (Item is u32) {

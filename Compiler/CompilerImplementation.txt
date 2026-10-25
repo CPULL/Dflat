@@ -45,7 +45,43 @@ Where a decision came from the spec the section is named; where I (Claude) chose
   imports, multiple files.
 - Casts: out of range saturates; a float to integer cast truncates. (spec 3.5)
 - `var`: for variables and for-loop items only; the type is the type of the value. Not allowed for fields.
-- Strings: UTF-8, a pointer and a byte length, never freed. Small / block strings of 4.3 are not implemented.
+- Strings (spec 4.4): a df_string is a pointer to the first allocation, NULL is "". The class is the low 4 bits of byte 0. Classes
+  0-7: single block of 32 << class bytes (byte length in the high nibble of byte 0 and byte 1, chars in bytes 2-3, text at 4);
+  11: literal, chars and bytes as two 32-bit words each at bytes 4 and 12, text at 20 (CString writes one static object per text,
+  emitted before the program); 13: moved, pointer at byte 4 (read only, nothing moves yet). Every text ends with a 0. The runtime reads
+  a string through df_view (pointer + byte length, type df_sv), df_str_len and df_str_chars; df_str_alloc / df_str_make build one in
+  the smallest class. Until block strings exist, a string above 4091 bytes is a class 11 on the heap (bit 0x80 of byte 0: a literal
+  of the program has it clear and is never freed).
+- Ownership of strings (CodeGen.Strings.cs): a string local or parameter has a C flag o_<cname> (VarInfo.OwnFlag): true when it owns
+  its string. Declarations and assignments set it from Expr.Fresh (StrNodeFresh: a call, +, an interpolation, a!, a literal are new;
+  a name, a field, an item are borrowed); df_str_set frees the old string when owned. Declarations written 'string x' (and string
+  parameters assigned in the body) get an implicit atEnd StrDrop, so every exit of the scope frees them. Fields (df_str_put, drop glue),
+  items and tuple items (StrOwnedAs) always own: a borrowed value is copied. A function returns a string its caller owns (StrReturned:
+  an owned local moves out, anything else is copied). Runtime functions never return their argument. A new string that is only read
+  (operands, library and user arguments, conditions, receivers) goes through df_tmp; each statement that made some ends with
+  df_tmp_drop(df_tm), the mark the function took when it started. Text builders use df_str_cat / df_str_catx (free the left part).
+  DF_STR_TRACE (a define given to clang by hand) prints the strings alive at exit.
+- Changes in place (spec 4.1, CodeGen.Strings.cs): the runtime works on a place (df_string* and the bool* of its flag; fields and
+  items use df_str_owner). df_str_room makes room keeping the identity: a full allocation moves to a new one and the first allocation
+  becomes class 13 (old class in the high nibble, for shrink); a literal or the empty string is never written, the place gets a new
+  string. df_str_append (+=), df_str_set_char (text[pos] = c), df_str_clear, df_str_shrink; df_str_take puts the text of a new string
+  (the result of s.trim()...) into the place and frees it. The compiler uses take for a changing method whose result is not used
+  (EmitInPlaceStatement) or goes back to the same place (InPlaceAssign; SamePlace knows string b = a through VarInfo.AliasOf).
+  StrPlace refuses const, parameters and loop variables (VarInfo.ReadOnlyString). Vec and list items are not places yet.
+- Block strings (Runtime.cs, spec 4.4.4): df_sroot and df_sblock under #pragma pack(4) (layout checked by _Static_assert);
+  df_str_make / df_str_concat / df_str_dup build one above 4091 bytes (df_bs_push*). Native: df_str_len, df_str_chars, df_str_fwrite
+  (console), df_bs_char_at and df_str_set_char, df_str_append, df_str_splice_in -> df_bs_splice (insert, remove, replaceAt, prepend:
+  seek from the cursor, the first or the last block; remove across blocks; insert in the block or split it; free an empty block; merge
+  neighbours that fit; the cursor ends on the changed block), df_str_clear, df_str_become (a place takes a big new string: a block
+  root takes its blocks, a smaller form points to it as class 13), df_str_shrink (repack, or back to a single block: the root becomes
+  a class 1 when the text fits 59 bytes). Every other reader goes through df_view, which flattens a block string into a ring of 16
+  copies (DF_FLAT_RING); a for loop over a string uses df_view_keep (its own copy, freed after the loop). The compiler calls
+  df_str_splice_in / df_str_append directly for s.insert/remove/replaceAt/append/prepend on a place (DirectEdit).
+- Strings in collections (step e): StrItemAs -> df_str_item(value, fresh) for every item stored (a new string in its smallest form is
+  kept, anything else is copied by df_str_dup, which always gives the smallest form); item stores use df_str_put (the old item ends);
+  DropListItem, EmitVecDropGlue (all the slots of the block) and EmitListDropGlue free string items; add(collection), copyFrom and
+  fill copy every string; pop, ->c[i], takeAt and replace give the item (Fresh). StrGift: ->x on a string variable or field moves it
+  (a borrowed one is copied); a parameter ->string owns its string (ParamSig.IsGift), which the vec and list library code uses.
   `text[i]` reads a character by position (IndexOutOfRangeException). Writing a character by index is an error (open in the spec).
 - date is milliseconds since 1970 UTC (null = minimum i64); time is milliseconds since midnight (null = -1);
   clock and lapse follow the spec. date and time are nullable by default (`date?` is an error).
@@ -126,7 +162,7 @@ Where a decision came from the spec the section is named; where I (Claude) chose
 - Calling a constructor: a function with the name of the class. A function cannot be named like a class.
 - Visibility: private (default), public, internal. internal behaves as public until namespaces exist. Private is checked at compile
   time: usable inside the class and in its subclasses (they see everything). Overriding functions take the visibility of the
-  original, and writing one on an override is an error. Trait members are public.
+  original, and writing one on an override is an error. Trait members follow spec 11.2 (see PRIVATE STATE IN TRAITS).
 - Statics: fields, static const, functions. Stored in C globals; initialized at program start in dependency order (a static that reads
   another runs after it; a cycle is an error; dependencies are found in the initializer text, not through function calls).
   Statics are inherited (Child.create()); a static function cannot be overridden or redeclared with the same signature.
@@ -921,7 +957,7 @@ UNS LENGTHS AND INDEXES (built 2026-10-24, compiler 0.0.16alpha, spec 3.1 and 6.
   fails the bounds check instead of wrapping. A literal index keeps the u64 hint.
 - The list prelude writes "not found" as UNS_NONE, replaced by the largest uns of the target when the prelude is parsed. The slot numbers of the list nodes stay u64
   (UINT64_MAX ends a chain) until the nodes become separate allocations (point 29).
-- Not changed: string lengths (uint64_t, the string layout is temporary) and the version counter of vec and list.
+- Not changed: string lengths (uint64_t) and the version counter of vec and list.
 - Checked by building arrays, vec, list and sorting for win-x32 and running them: the same output as x64, except arrays.df line 32, which compares indexOf with the
   64-bit maximum (on 32 bits "not found" is the 32-bit maximum).
 
@@ -1080,3 +1116,32 @@ STDLIB 0.0.10: PROCESSES, SLEEP, CONSOLE, PATHS (built 2026-10-25, compiler 0.0.
   failed test (-Verbose is still accepted). process.df: a byte order mark at the start of the input is skipped before the read check (the runner sends one
   from this machine, maybe not elsewhere); the working directory and setCurrentDir checks look for a marker file by its bare name instead of comparing path
   texts (the temp folder can be a short 8.3 path on the build machine). dfcompiler.csproj <Version> follows Program.Version (0.0.21-alpha).
+
+PRIVATE STATE IN TRAITS, EXECUTEBEFORE / EXECUTEAFTER (built 2026-10-25, compiler 0.0.22alpha, spec 0.0.15: 11.2, 6.4)
+=======================================================================================================================
+- Visibility: a trait member without a keyword is private (spec 1.6.1), as in classes; it was always public before. RegisterTraitMembers reads the
+  visibility, asparent and unrestricted of trait functions; a class function that answers a trait function takes them (it was made public). CheckAccess:
+  a private member of a trait is reached only from the code of that trait or of a sub-trait. FieldCandidates leaves the private fields of the traits
+  out when it starts from a class (withPrivate puts them back for the C glue), so a class never sees them and two traits with the same private name
+  never clash; FindField with a node reports "private in the trait" when that is why the name is not found. CheckTraitFieldWrite: a sub-trait cannot
+  assign a private field of its parent trait (LValue and ClassLValue). The 24 tests with traits now write public on their members.
+- LibraryCode (the function being compiled is in VecPrelude, line >= LibraryLine): the collections of the compiler use the private members of the collection
+  traits (vec and list call checkUnlocked()).
+- Trait initializers and trait constructor bodies are compiled as a trait function __tinit (RegisterTraitInit) that the init of the class calls through
+  TraitDirectCall, so they run in the trait and see its private fields (they were statements copied into the class init).
+- executeBefore / executeAfter: the parser adds ExecuteBefore / ExecuteAfter nodes after a function (also on the next line, also after a body). SplitExecuteBlocks
+  turns m into __impl_m (the old body or none; private; what the class implements) and m (body: before; var __result = __impl_m(args); after; return __result),
+  the default of the trait; m.result in the after block reads __result (ResultReads, assigning it is an error). RegisterMethods renames 'override fun m' of
+  a class to __impl_m when one of its traits hooks m (trait.Hooked). parent.m() calls the parent's __impl_m directly (ParentCall), so the blocks run once.
+  An exception of the implementation skips the after block. Generic functions and several return values are not supported. A sub-trait cannot redeclare
+  a method of its parent trait yet, so a chain has only one trait.
+- Collection (VecPrelude) holds uns iteratorCounter (private), acquireIterator(), checkUnlocked(), asparent releaseIterator() { } with an executeAfter that
+  raises InvalidIteratorReleaseException at zero and takes one back; IndexCollection.getIterator() has an executeAfter that calls acquireIterator(). vec and
+  list lost their own counter, checkUnlocked and releaseIterator; the C glue (LockCheck, the for loop, the views) reads iteratorCounter through VecField.
+- The for loop over a custom collection now declares the iterator as an owned hidden variable (__iterN) of a block around the loop, so it ends with the
+  loop on every way out and gives the counter back (before, the iterator was never ended).
+- Tests: traitstate (new), errors/trait_private_field_class, trait_private_field_outside, trait_private_function_class, trait_subtrait_write,
+  trait_asparent_outside, execute_after_in_class, execute_result_write. Checked with --release and on win-x32 (traitstate, iterviews).
+- Not done: the compile error when a constructor of the class does not set a public trait field, the diamond errors (two defaults for one member of a shared
+  supertrait, two calls of its constructor with different arguments), executeBefore on the changing methods of the collection traits (add, remove ... are not
+  trait methods), access through a value of a trait type (any) as in the spec (open).

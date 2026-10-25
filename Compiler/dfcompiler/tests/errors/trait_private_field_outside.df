@@ -1,0 +1,6 @@
+trait Counter {
+  i32 hits
+}
+public class Thing : Counter { }
+Thing t = Thing()
+Root.Console.log(t.hits)

@@ -119,7 +119,7 @@ Decision:
 - Good for now, to be improved later. The compiler proves only the direct case: the body of the loop calls a changing member, or assigns an element, of the same variable (or field path) that the loop iterates. Everything else stays a runtime check.
 - Every changing method of a collection checks the counter at runtime and raises the exception.
 
-### 9. [DECIDED, TOBEDISCUSSED] Change detection in custom collections: executeAfter
+### 9. [DECIDED] Change detection in custom collections: executeAfter
 
 Context: Specs6.9 says "while the iterator exists the collection cannot be changed". A custom collection implements its own members.
 
@@ -129,14 +129,22 @@ Decision:
   - `executeAfter` is one contextual keyword, written like `atEnd`; it is a keyword only right after a trait method signature.
   - The block runs only when the implementation succeeds (if `getIterator()` fails, the counter is not incremented). This is the difference with `atEnd` of a function (Specs10.9), which runs on every exit, exceptions included; the spec says it.
   - The block reads the return value as `<method>.result` (for example `getIterator.result`), read-only. It cannot change it.
-  - The blocks are chained: every trait of the hierarchy that defines an `executeAfter` for the method runs its block, similar to `atEnd`.
+  - The blocks are chained: every trait of the hierarchy that defines an `executeAfter` for the method runs its block, like `atEnd`: from the most specific trait to the root (`IndexCollection`, then `Collection`), once per call. A call to the parent implementation inside the class does not start the chain again (otherwise the counter is incremented twice).
   - A method with a default body and a block is written `fun f() { default body } executeAfter { ... }`. A `executeBefore { }` can be added later with the same shape.
-- `releaseIterator()` is private and is called only by the default `atEnd` of the iterator or view. A release with the counter at zero raises `InvalidIteratorReleaseException` (non-silent; the IDs are set at 0.1.0).
+- `releaseIterator()` is `asparent` and is called only by the default `atEnd` of the iterator or view. A release with the counter at zero raises `InvalidIteratorReleaseException` (non-silent; the IDs are set at 0.1.0).
+- Private state in a trait (Specs11.2, 2026/10/25):
+  - A private member of a trait is seen only by the code of that trait, not by the implementing class.
+  - A sub-trait reads every member of its parent traits read-only (private included) and can call all their methods (private included). It is not `asparent`, which would open them to the iterators (the children). So `IndexCollection` increments the counter through the private method `acquireIterator()` of `Collection`.
+  - Public members of two traits with the same name need the qualified name only for the clash (compile error asking for it); private ones are aliased by the compiler.
+  - A public trait field must be initialized in every constructor of the class (compile error otherwise); a private one is initialized by the trait or keeps its zero value (`iteratorCounter` starts at 0, no class code).
+  - Diamond: a supertrait inherited twice exists once; two different defaults for the same member, or two calls of its constructor with different arguments, are a compile error.
+  - Access through a trait-typed value (`any`) stays open (Specs99).
 ```
 trait Collection<Item> {
-  uns iteratorCounter      // not visible outside, see the open point below
+  uns iteratorCounter                            // private: only Collection writes it
+  fun acquireIterator() { iteratorCounter++ }    // private: sub-traits can call it, child objects cannot
 
-  private fun releaseIterator()
+  asparent fun releaseIterator()
     executeAfter {
       if iteratorCounter == 0 throw InvalidIteratorReleaseException()
       iteratorCounter--
@@ -146,13 +154,10 @@ trait Collection<Item> {
 trait IndexCollection<Item> : Collection<Item> {
   fun IndexIterator<Item> getIterator()
     executeAfter {
-      iteratorCounter++
+      acquireIterator()
     }
 }
 ```
-TOBEDISCUSSED:
-- The exact order of the chain. Proposal: like `atEnd`, from the most specific trait to the root (`IndexCollection`, then `Collection`), once per call; a `super` call inside the class implementation does not start the chain again (otherwise the counter is incremented twice). Not confirmed.
-- Private fields in a trait (`iteratorCounter`): a trait has properties (Specs11.1.4) but no private state. Undefined for now.
 
 ### 10. [DECIDED] .sizeof of a collection
 
@@ -215,19 +220,22 @@ Decision:
 - Only how the hashes are calculated is defined now. How the hash tables use them is for the hash collections.
 - Spec: 6.2, 11.1.3 and the basic traits section.
 
-### 15. [TOBEDISCUSSED] Which types can be keys
+### 15. [DECIDED] Which types can be keys
 
 Context: Specs6.2 lists the rules but not the forbidden types. `Hashable` and `Orderable` were removed from the traits (Specs11.3.1), every type has `.hash` and `.order`.
 Question: can a nullable number (`i16?`) be a key (null is not allowed)? An enum, a bitfield, a tuple that contains an object, a class, a collection? What is the compile error for a type without ordering?
-COMPILERPROPOSAL: allowed: numbers, `bool`, `char`, `string`, `date`, `time`, enums, tuples of those, classes (by their hash and order). Not allowed: nullable numbers, collections, tuples with collections. A message names the type.
-Left for the work on maps and sets. Note: `.order` is replaced by `compareTo` (point 14).
 
+Allow: All native numeric types, bool, char, string (when shrinked), date, time, clock, lapse, enum, bitfield, tuple of valid key types, class
+Disallow: nullable types, arr, all collections, tuple containing a collection, null classes
+A key must satisfy: hash, equality, stable identity while inside a collection
+null keys are not allowed.
 
-### 16. [TOBEDISCUSSED] Order of enum keys
+Note: `.order` is replaced by `compareTo` (point 14).
+
+### 16. [DECIDED] Order of enum keys
 
 Context: Specs99 asks whether enum keys in sorted collections follow the declaration order or the numeric value.
-COMPILERPROPOSAL: the numeric value (an enum can have explicit values), which is also what `sort` does today.
-Left for the work on maps and sets.
+The numeric value (an enum can have explicit values), which is also what `sort` does today.
 
 ### 17. Equality without a hash on a key
 

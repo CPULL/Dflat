@@ -1,0 +1,77 @@
+// Strings in collections (spec 4, 6): an item is always its own copy; the collection frees its strings
+alias Root as r
+
+// a copy: changing the source later does not change the item
+string source = "so" + "urce"
+vec<string> words = ["first"]
+words.add(source)
+list<string> chain = ["one"]
+chain.add(source)
+arr<string> slots = [source, "lit"]
+source += "!"
+r.Console.log($"{words} {chain} {slots} {source}")
+
+// add, insert, items written again, removed
+for i32 round in 0..50 {
+  words.add("w" + round.toStr())
+  chain.add("c" + round.toStr())
+}
+words.insert(0, "zero")
+chain.insert(1, "between")
+words[1] = words[2]
+words[2] += "+"
+chain[0] = "ONE"
+chain[3] += "+"
+words.removeAt(5)
+words.remove("w10")
+chain.removeAt(4)
+chain.removeAll("c20")
+words.truncate(10)
+chain.truncate(10)
+r.Console.log($"{words.len} {words}")
+r.Console.log($"{chain.len} {chain}")
+
+// fill copies the value into every item; clear empties them
+words.fill("same" + "!")
+chain.fill(3, "x")
+slots.fill("filled")
+r.Console.log($"{words[0]} {words[9]} {chain} {slots}")
+slots.clear()
+r.Console.log(slots)
+
+// pop, ->c[i] and replace give the item to the receiver
+vec<string> stack = ["a", "b" + "b", "c" + "c"]
+string top = ""
+bool popped = stack.pop((&)top)
+string moved = ->stack[0]
+string old = stack.replace(1, "new")
+r.Console.log($"{popped} {top} {moved} {old} {stack}")
+
+// resize, fillAtCapacity, sort, swap
+vec<string> sized = ["q", "p"]
+sized.resize(4, "r")
+sized.sort()
+sized.swap(0, 3)
+r.Console.log(sized)
+
+// add(collection) copies, add(->other) moves; copyFrom copies; transformTo moves
+vec<string> more = ["m1", "m2" + ""]
+vec<string> target = ["t"]
+target.add(more)
+more[0] += "*"
+vec<string> given = ["g1", "g2"]
+target.add(->given)
+arr<string> plain = ["a1", "a2", "a3"]
+target.copyFrom(1, plain, 0, 2)
+plain[0] += "#"
+list<string> asList = target.transformTo<list>()
+r.Console.log($"{more} {asList} {plain}")
+
+// a long string as an item, and a string that grew in place before it was added
+string longText = "".padLeft(5000, 'L')
+string small = "".padLeft(4500, 's')
+small.clear()
+small += "tiny"
+vec<string> mixed = [longText, small]
+mixed.add(longText + "!")
+r.Console.log($"{mixed[0].len} {mixed[1]} {mixed[2].len}")

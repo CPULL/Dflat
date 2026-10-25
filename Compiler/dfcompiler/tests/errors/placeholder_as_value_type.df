@@ -2,7 +2,7 @@ alias Root as r
 
 trait Sequence {
   placeholder Item
-  fun Item? Next()
+  public fun Item? Next()
 }
 
 fun i32 use(Sequence s) { 1 }

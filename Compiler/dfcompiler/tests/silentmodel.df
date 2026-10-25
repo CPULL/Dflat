@@ -117,7 +117,7 @@ r.Console.log(reading(Noisy(), 9))                          // noise: noisy
 r.Console.log(ignoring(Noisy(), 9))                         // ignoring 0: nobody observes it, read returned at its throw with the zero value
 
 trait Probe {
-  fun i64 level(i64 v)
+  public fun i64 level(i64 v)
 }
 public class Deep : Probe {
   override fun i64 level(i64 v) {

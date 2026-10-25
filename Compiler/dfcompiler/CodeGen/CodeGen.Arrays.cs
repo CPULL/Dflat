@@ -33,9 +33,9 @@ public sealed partial class CodeGen {
       arrayCode.Append($"static df_string {name}({ArrCType(elem)} a) {{\n");
       arrayCode.Append("  df_string r = df_str_lit(\"[\", 1);\n");
       arrayCode.Append("  for (df_uns i = 0; i < a.len; i++) {\n");
-      arrayCode.Append("    if (i > 0) {\n      r = df_str_concat(r, df_str_lit(\", \", 2));\n    }\n");
-      arrayCode.Append($"    r = df_str_concat(r, {item});\n  }}\n");
-      arrayCode.Append("  return df_str_concat(r, df_str_lit(\"]\", 1));\n}\n\n");
+      arrayCode.Append("    if (i > 0) {\n      r = df_str_catx(r, df_str_lit(\", \", 2));\n    }\n");
+      arrayCode.Append($"    r = {(elem == "string" ? "df_str_cat" : "df_str_catx")}(r, {item});\n  }}\n");
+      arrayCode.Append("  return df_str_catx(r, df_str_lit(\"]\", 1));\n}\n\n");
     }
     return name;
   }
@@ -89,7 +89,7 @@ public sealed partial class CodeGen {
       if (IsClass(elem) && !itemValue.Fresh && itemValue.Type != "null") {
         throw Error("a collection owns its items: put a new object in the literal, or move one in with ->x", item);
       }
-      sb.Append($"{array}.p[{index}] = {Convert(itemValue, elem, item)}; ");
+      sb.Append($"{array}.p[{index}] = {StrItemAs(itemValue, elem, Convert(itemValue, elem, item))}; ");
     }
     sb.Append($"{array}; }})");
     return new Expr(sb.ToString(), type);
@@ -148,7 +148,7 @@ public sealed partial class CodeGen {
     }
     var index = ExprOf(n.Children[1], scope, "u64");
     if (obj.Type == "string") {
-      string call = $"df_str_char_at({obj.Code}, {IndexValue(index, n)}, {fn!.NameConst})";
+      string call = $"df_str_char_at({StrRead(obj)}, {IndexValue(index, n)}, {fn!.NameConst})";
       return new Expr(CheckRaise(Need("text", call), "char"), "char");
     }
     if (IsVec(obj.Type)) {
@@ -174,7 +174,7 @@ public sealed partial class CodeGen {
     }
     var obj = ExprOf(target.Children[0], scope);
     if (obj.Type == "string") {
-      throw Error("writing a character by index is not decided yet (spec 4)", s);
+      return StrSetChar(target, s.Children[1], s.Text!, scope, s);
     }
     if (IsView(obj.Type)) {
       throw Error("a view is read-only: its items cannot be assigned (spec 6.5)", s);
@@ -206,7 +206,7 @@ public sealed partial class CodeGen {
       if (IsClass(elem) && !assigned.Fresh && assigned.Type != "null" && s.Line < LibraryLine) {
         throw Error("a collection owns its items: move an existing object in with ->x, or put a new one", s);
       }
-      value = Convert(assigned, elem, s);
+      value = StrItemAs(assigned, elem, Convert(assigned, elem, s));
     } else {
       value = Convert(BinaryOp(op[..^1], new Expr(slot, elem), s.Children[1], scope, s), elem, s);
     }
@@ -218,8 +218,10 @@ public sealed partial class CodeGen {
         + $"if (!df_idx_ok({length}, {position}, {fn!.NameConst})) {RaiseJump} {CType(elem)} {replaced} = {slot}; {slot} = {incoming}; "
         + $"if ({replaced} != {incoming}) {{ df_drop((void*){replaced}); }} }})";
     }
+    // a string item that is replaced ends
+    string store = elem == "string" ? $"df_str_put(&{slot}, {value}, true);" : $"{slot} = {value};";
     return $"({{ {CType(obj.Type)} {array} = {holder}; df_uns {position} = {IndexValue(index, target)}; "
-      + $"if (!df_idx_ok({length}, {position}, {fn!.NameConst})) {RaiseJump} {slot} = {value}; }})";
+      + $"if (!df_idx_ok({length}, {position}, {fn!.NameConst})) {RaiseJump} {store} }})";
   }
 
   // members of an array
@@ -258,6 +260,13 @@ public sealed partial class CodeGen {
         if (IsClass(elem) && args[0].Kind != "Null") {
           throw Error("fill would put one object in every item: a class instance is not allowed, fill(null) is", at);
         }
+        if (elem == "string") {
+          // every item gets its own copy; the strings the items held end
+          var text = ExprOf(args[0], scope, elem);
+          string read = StrRead(new Expr(Convert(text, elem, args[0]), "string", text.Fresh));
+          string at2 = NewTemp();
+          return new Expr(WithTemp(array, a => $"({{ df_string {at2} = {read}; for (df_uns k_{at2} = 0; k_{at2} < {a}.len; k_{at2}++) {{ df_str_put(&{Elem(a, $"k_{at2}")}, df_str_dup({at2}), true); }} }})"), "void");
+        }
         var value = Value(args[0]);
         string i = NewTemp();
         string replacedItem = NewTemp();
@@ -274,7 +283,7 @@ public sealed partial class CodeGen {
         // every item gets its default value; the objects the items held end (spec 6.1)
         string reset = IsClass(elem)
           ? $"if ({{0}} != NULL) {{{{ void* {gone} = (void*){{0}}; {{0}} = NULL; df_drop({gone}); }}}}"
-          : $"{{0}} = {ZeroValue(elem)};";
+          : elem == "string" ? "df_str_free({0}); {0} = NULL;" : $"{{0}} = {ZeroValue(elem)};";
         string code = WithTemp(array, a =>
           $"({{ for (df_uns {i} = 0; {i} < {a}.len; {i}++) {{ {string.Format(reset, Elem(a, i))} }} }})");
         return new Expr(code, "void");
@@ -375,9 +384,9 @@ public sealed partial class CodeGen {
     string i = NewTemp();
     string incoming = NewTemp();
     string old = NewTemp();
-    string code = $"({{ {CType(array.Type)} {a} = {array.Code}; df_uns {i} = {IndexValue(first, args[0])}; {CType(elem)} {incoming} = {Convert(replacement, elem, args[1])}; "
+    string code = $"({{ {CType(array.Type)} {a} = {array.Code}; df_uns {i} = {IndexValue(first, args[0])}; {CType(elem)} {incoming} = {StrItemAs(replacement, elem, Convert(replacement, elem, args[1]))}; "
       + $"if (!df_idx_ok({a}.len, {i}, {fn!.NameConst})) {RaiseJump} {CType(elem)} {old} = {a}.p[{i}]; {a}.p[{i}] = {incoming}; {old}; }})";
-    return new Expr(code, elem, IsClass(elem));
+    return new Expr(code, elem, IsClass(elem) || elem == "string");
   }
 
   // arr<T>[n] name = [] / = [items] / = arr<T>[n]: the size on the declaration (spec 6.8.1); the declaration is rewritten before the compilation
@@ -564,7 +573,9 @@ public sealed partial class CodeGen {
       + $"df_uns {di} = {dstIndex}; df_uns {si} = {srcIndex}; df_uns {n} = {count}; "
       + $"if ({d}.p != NULL && {d}.p == {source0}.p) {{ df_raise(&df_desc_ModifyingProtectedSourceException, {fn!.NameConst}); {RaiseJump} }} "
       + $"if ({di} > {d}.len || {n} > {d}.len - {di} || {si} > {source0}.len || {n} > {source0}.len - {si}) {{ df_raise(&df_desc_IndexOutOfRangeException, {fn!.NameConst}); {RaiseJump} }} "
-      + $"if ({n} > 0) {{ memcpy({d}.p + {di}, {source0}.p + {si}, {n} * sizeof(*{d}.p)); }} }})";
+      + (elem == "string"
+        ? $"for (df_uns k_{n} = 0; k_{n} < {n}; k_{n}++) {{ df_str_put(&{d}.p[{di} + k_{n}], df_str_dup({source0}.p[{si} + k_{n}]), true); }} }})"
+        : $"if ({n} > 0) {{ memcpy({d}.p + {di}, {source0}.p + {si}, {n} * sizeof(*{d}.p)); }} }})");
     return new Expr(code, "void");
   }
 
@@ -583,12 +594,10 @@ public sealed partial class CodeGen {
       if (arg.Kind != "Name" && arg.Kind != "Member") {
         throw Error("shuffle of a string needs a variable to hold the result", at);
       }
+      // in place (spec 4.1)
       var target = LValue(arg, scope);
-      if (target.IsConst) {
-        throw Error($"'{arg.Text}' is const", at);
-      }
-      MarkAssigned(target.Variable);
-      return new Expr(Need("text", $"({target.Code} = df_str_shuffle({target.Code}))"), "void");
+      var (slot, flag) = StrPlace(arg, scope, at)!.Value;
+      return new Expr(Need("text", $"df_str_take({slot}, {flag}, df_str_shuffle({target.Code}))"), "void");
     }
     throw Error($"shuffle works on arrays and strings, not {value.Type}", at);
   }
@@ -622,6 +631,18 @@ public sealed partial class CodeGen {
       return;
     }
     string? customElem = overVec || overView ? null : CustomCollectionElem(collection.Type);
+    if (customElem != null && counted.Counter == null) {
+      // a custom collection: the iterator is an owned variable of a block around the loop, so it ends (and gives back the counter of open
+      // iterators, spec 6.4) on every way out
+      tempCounter++;
+      string iteratorName = $"__iter{tempCounter}";
+      countedLoops[s] = (iteratorName, collection);
+      var getIterator = Synthetic("Call", s).Add(Synthetic("Member", s, "getIterator").Add(source)).Add(Synthetic("Args", s));
+      var declaration = Synthetic("Decl", s, iteratorName).Add(Synthetic("Type", s, "var")).Add(Synthetic("Init", s).Add(getIterator));
+      EmitBlock(Synthetic("Block", s).Add(declaration).Add(s), sb, scope, indent);
+      countedLoops.Remove(s);
+      return;
+    }
     if (overView) {
       elem = ViewElem(collection.Type);
     } else if (overList) {
@@ -648,7 +669,7 @@ public sealed partial class CodeGen {
 
     var innerScope = new Scope(scope);
     string cname = "v_" + varNode.Text;
-    innerScope.Vars[varNode.Text!] = new VarInfo(type, cname, false);
+    innerScope.Vars[varNode.Text!] = new VarInfo(type, cname, false) { ReadOnlyString = type == "string" };
     var body = PrepareFrame(LoopStatements(block.Children), innerScope, FrameKind.LoopBody);
     bool cleanup = body.AtEnds.Count > 0;
 
@@ -664,27 +685,32 @@ public sealed partial class CodeGen {
     if (cleanup) {
       EmitHoists(body, sb, innerPad);
     }
-    sb.Append($"{innerPad}{wholeType} {whole} = {(overVec || overView ? NullChecked(collection.Code, collection.Type) : collection.Code)};\n");
+    if (customElem == null) {
+      sb.Append($"{innerPad}{wholeType} {whole} = {(overVec || overView ? NullChecked(collection.Code, collection.Type) : collection.Code)};\n");
+    }
     if (overVec) {
-      sb.Append($"{innerPad}{counted.Counter} = &{whole}->{VecField(collection.Type, "iterators")};\n{innerPad}*{counted.Counter} += 1;\n");
+      sb.Append($"{innerPad}{counted.Counter} = &{whole}->{VecField(collection.Type, "iteratorCounter")};\n{innerPad}*{counted.Counter} += 1;\n");
     }
     string iteration = "";
     if (customElem != null) {
-      // the iterator is asked for once; each pass calls next() and stops when isValid is false
-      var iterator = ObjectCall(new Expr(whole, collection.Type), "getIterator", new List<Node>(), scope, s) ?? throw Error("no iterator", s);
-      string iterVar = $"df_iter{tempCounter}";
-      sb.Append($"{innerPad}{CType(iterator.Type)} {iterVar} = {iterator.Code};\n");
-      var step = ObjectCall(new Expr(iterVar, iterator.Type), "next", new List<Node>(), scope, s) ?? throw Error("no next()", s);
+      // the iterator was asked for once, in the block around the loop; each pass calls next() and stops when isValid is false
+      var iterator = ExprOf(Synthetic("Name", s, counted.Counter!), scope);
+      var step = ObjectCall(iterator, "next", new List<Node>(), scope, s) ?? throw Error("no next()", s);
       string tuple = $"df_step{tempCounter}";
       iteration = $"({{ {CType(step.Type)} {tuple} = {step.Code}; if (!{tuple}.e1) {{ break; }} {tuple}.e0; }})";
     }
     string itemCode;
     string loop;
+    string? keptText = null;
     if (collection.Type == "string") {
       Need("text", "");
+      // a block string is read from a copy of its text, freed after the loop
+      string text = NewTemp();
+      keptText = NewTemp();
+      sb.Append($"{innerPad}char* {keptText} = NULL;\n{innerPad}df_sv {text} = df_view_keep({whole}, &{keptText});\n");
       sb.Append($"{innerPad}uint64_t {byteOffset} = 0;\n");
-      loop = $"for (uint64_t {position} = 0; {byteOffset} < {whole}.len; {position}++)";
-      itemCode = $"df_utf8_next({whole}.p, {whole}.len, &{byteOffset})";
+      loop = $"for (uint64_t {position} = 0; {byteOffset} < {text}.len; {position}++)";
+      itemCode = $"df_utf8_next({text}.p, {text}.len, &{byteOffset})";
     } else if (customElem != null) {
       loop = "for (;;)";
       itemCode = iteration;
@@ -713,6 +739,12 @@ public sealed partial class CodeGen {
     sb.Append($"{innerPad}}}\n");
     if (cleanup) {
       EmitLoopTail(body, sb, inner);
+    }
+    if (keptText != null) {
+      sb.Append($"{innerPad}free({keptText});\n");
+    }
+    if (collection.Type == "string" && collection.Fresh) {
+      sb.Append($"{innerPad}df_str_free({whole});\n");   // the new string the loop went through (a return out of the loop leaves it)
     }
     sb.Append($"{pad}}}\n");
   }

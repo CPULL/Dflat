@@ -206,8 +206,8 @@ All the enums are in `Root.IO`.
 | `fs.StreamReadWriteAccessMode` | `None`, `Exclusive`, `Shared` (used for both `readMode` and `writeMode` of a stream) |
 | `fs.StreamOpenMode` | `OpenExisting`, `CreateOrOpen`, `CreateIfMissing`, `CreateOrTruncate`, `TruncateExisting`, `CreateOrAppend`, `AppendExisting` |
 | `fs.StreamSeekOrigin` | `Begin`, `CurrentPosition`, `End` |
-| `fs.ExistResult` | `None`, `IsThere`, `YouCantAccesIt`, `CannottellYou` |
-
+| `fs.ExistResult` | `None`, `Exists`, `AccessDenied`, `Unknown` |
+    
 `String.StringEncoding` is the existing enum: `UTF8`, `UTF16`, `UTF32`, `UTF16BE`, `UTF32BE`, `ASCII`, `ISO88591`.
 
 File write modes (`fs.FileWriteMode`):

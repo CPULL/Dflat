@@ -1,0 +1,1 @@
+execute_after_in_class.df(3): error: 'executeAfter' goes on a function of a trait

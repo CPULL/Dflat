@@ -60,6 +60,8 @@ sealed class ClassInfo {
   public List<ImplInfo> Impls { get; } = new();
   public List<FunSig> TraitMethods { get; } = new();          // the methods of a trait, in slot order
   public Node? CtorBlock { get; set; }                        // the body of the constructor of a trait
+  public FunSig? InitFun { get; set; }                        // a trait: its property initializers and constructor body (__tinit)
+  public HashSet<string> Hooked { get; } = new();             // a trait: the methods with executeBefore / executeAfter (the class implements __impl_<name>)
   public FieldInfo? ParentField { get; set; }                 // a child class: its reference to the parent (spec 12.5)
   public bool HasChildren { get; set; }                       // a parent class: it keeps the list of its adopted children
   public string Descriptor => $"df_cls_{Name}";
@@ -285,7 +287,7 @@ public sealed partial class CodeGen {
         if (IsClass(type) && p.Kind != "GiftParam") {
           throw Error($"the object '{p.Text}' goes into a field of {cls.Name}, which owns it: write ->{type} {p.Text}", p);
         }
-        cls.PrimaryParams.Add(new ParamSig(p.Text!, type, def?.Children[0]) { IsGift = p.Kind == "GiftParam" && IsClass(type) });
+        cls.PrimaryParams.Add(new ParamSig(p.Text!, type, def?.Children[0]) { IsGift = p.Kind == "GiftParam" && (IsClass(type) || type == "string") });
         CheckFieldName(cls, p.Text!, p);
         cls.Fields.Add(new FieldInfo(p.Text!, type, cls, p) { FromParam = true });
       }
@@ -471,6 +473,13 @@ public sealed partial class CodeGen {
       if (member.Children.Any(child => child.Kind == "NoBody")) {
         throw Error("a function without a body is virtual and can be used only in traits", member);
       }
+      if (member.Children.FirstOrDefault(child => child.Kind is "ExecuteBefore" or "ExecuteAfter") is Node hook) {
+        throw Error($"'{(hook.Kind == "ExecuteBefore" ? "executeBefore" : "executeAfter")}' goes on a function of a trait", hook);
+      }
+      // override fun m() answering a trait method with executeBefore / executeAfter: the class implements __impl_m, the trait keeps m (spec 11.2)
+      if (isOverride && AllTraits(cls).Any(trait => trait.Hooked.Contains(member.Text!))) {
+        member.Text = ImplPrefix + member.Text;
+      }
       if (cls.Fields.Any(field => field.Name == member.Text)) {
         throw Error($"'{member.Text}' is already a field of {cls.Name}", member);
       }
@@ -526,7 +535,9 @@ public sealed partial class CodeGen {
           if (ofTrait.Ret != f.Ret) {
             throw Error($"it returns {ofTrait.Ret}, like the trait function it answers", member);
           }
-          f.Visibility = Vis.Public;
+          f.Visibility = ofTrait.Visibility;   // the visibility of the trait function (private: the trait and the class itself)
+          f.IsAsParent = ofTrait.IsAsParent;
+          f.IsUnrestricted = ofTrait.IsUnrestricted;
         } else if (isOverride) {
           throw Error($"'{member.Text}' overrides nothing: no function with this signature in a parent class or trait", member);
         }
@@ -658,6 +669,9 @@ public sealed partial class CodeGen {
     if (found.Count > 1 && at != null) {
       throw Error($"'{name}' is in {string.Join(" and ", found.Select(f => f.Owner.Name))}: write TraitName.{name}", at);
     }
+    if (found.Count == 0 && at != null && !cls.IsTrait && FieldCandidates(cls, name, true).FirstOrDefault() is FieldInfo hidden) {
+      throw Error($"'{name}' is private in the trait {DisplayName(hidden.Owner.Name)}: only the code of the trait sees it", at);
+    }
     return found.FirstOrDefault();
   }
 
@@ -772,7 +786,8 @@ public sealed partial class CodeGen {
   void CheckParentAccess(FunSig chosen, string? receiver, string name, Node at) {
     var parent = receiver == null ? null : ParentReceiver(receiver);
     if (chosen.IsAsParent) {
-      bool itself = receiver == "self" && currentClass != null && (currentClass == chosen.Class || IsSubclass(currentClass.Name, chosen.Class!.Name));
+      // the object itself: code of its class, of a subclass, or of a trait (asparent in a trait: the class that implements it)
+      bool itself = receiver == "self" && currentClass != null && (currentClass == chosen.Class || IsSubtype(currentClass.Name, chosen.Class!.Name));
       if (parent == null && !itself) {
         throw Error($"'{name}' is asparent: only a {DisplayName(chosen.Class!.Name)} itself and its children (through their parent reference) call it", at);
       }
@@ -788,11 +803,28 @@ public sealed partial class CodeGen {
     if (visibility != Vis.Private) {
       return;                                   // internal is as open as public until namespaces exist
     }
+    if (owner.IsTrait) {
+      // private in a trait (spec 11.2): the code of the trait and of its sub-traits, not the class that implements it
+      if (currentClass != null && (currentClass == owner || currentClass.IsTrait && IsSubtype(currentClass.Name, owner.Name)) || LibraryCode) {
+        return;
+      }
+      throw Error($"'{what}' is private in the trait {DisplayName(owner.Name)}: only the code of the trait sees it", at);
+    }
     // a subclass sees everything of its parents (their source is available)
     if (currentClass != null && (currentClass == owner || IsSubclass(currentClass.Name, owner.Name))) {
       return;
     }
     throw Error($"'{what}' is private in {owner.Name}", at);
+  }
+
+  // the code of the collections of the compiler (VecPrelude) uses the private members of the collection traits
+  bool LibraryCode => currentFun != null && currentFun.Node.Line >= LibraryLine;
+
+  // a sub-trait reads the private properties of its parent traits but does not change them (spec 11.2)
+  void CheckTraitFieldWrite(FieldInfo field, Node at) {
+    if (currentClass is { IsTrait: true } && field.Owner.IsTrait && field.Owner != currentClass && field.Visibility == Vis.Private && !LibraryCode) {
+      throw Error($"'{field.Name}' belongs to the parent trait {DisplayName(field.Owner.Name)}: a sub-trait reads it and changes it through a function of {DisplayName(field.Owner.Name)}", at);
+    }
   }
 
   // ---------------------------------------------------------------- names, fields, members
@@ -872,6 +904,7 @@ public sealed partial class CodeGen {
     }
     var instance = ObjectField(owner, target.Text!, target);
     var info = FindField(ObjInfo(owner.Type), target.Text!)!;
+    CheckTraitFieldWrite(info, target);
     if (info.IsParentRef) {
       // the reference to the parent: set once, by the constructor
       return initializing ? new LValueInfo(instance.Code, instance.Type, false) : throw Error($"'{target.Text}' is the reference to the parent: only the constructor sets it", target);
@@ -944,6 +977,9 @@ public sealed partial class CodeGen {
     }
     var value = ExprOf(arg, scope, param.Type);
     string code = Convert(value, param.Type, arg);
+    if (param.Type == "string") {
+      code = StrRead(new Expr(code, "string", FreshCode(value, code) == "true" && !IsStaticStr(code)));
+    }
     if (arg.Kind == "Name" && value.Type == param.Type && scope.Find(arg.Text!) is VarInfo variable) {
       ReadCheck(variable, arg.Text!, arg);
       return "&" + variable.CName;
@@ -999,6 +1035,10 @@ public sealed partial class CodeGen {
       throw Error($"'{param.Name}' is not a (&) parameter: remove the (&)", arg);
     }
     var value = ExprOf(arg, scope, param.Type);
+    if (param.Type == "string") {
+      string converted = Convert(value, param.Type, arg);
+      return param.IsGift ? StrOwnedAs(value, "string", converted) : StrRead(new Expr(converted, "string", FreshCode(value, converted) == "true" && !IsStaticStr(converted)));
+    }
     if (IsClass(param.Type)) {
       if (param.IsGift && !value.Fresh && value.Type != "null") {
         throw Error($"'{param.Name}' takes ownership of the object: write ->x", arg);
@@ -1103,6 +1143,13 @@ public sealed partial class CodeGen {
     if (currentClass?.Parent == null || scope.Find("this") == null) {
       throw Error("'parent' needs an object of a class with a parent class", at);
     }
+    // a trait method with executeBefore / executeAfter: the parent's implementation, without running the blocks again (spec 11.2)
+    if (AllTraits(currentClass.Parent).FirstOrDefault(trait => trait.Hooked.Contains(name)) is ClassInfo hooked) {
+      name = ImplPrefix + name;
+      if (LookupMethods(currentClass.Parent, name).All(f => f.Class!.IsTrait)) {
+        return TraitDirectCall(hooked, name, args, scope, at);   // the parent uses the default body of the trait
+      }
+    }
     return MethodCall(currentClass.Parent, name, "self", true, args, scope, at);
   }
 
@@ -1186,14 +1233,14 @@ public sealed partial class CodeGen {
         } else {
           value = StrOf(new Expr($"o->{field.CName}", field.Type), cls.Node);
         }
-        sb.Append($"  r = df_str_concat(r, {CString(CodePoints(label))});\n");
-        sb.Append($"  r = df_str_concat(r, {value});\n");
+        sb.Append($"  r = df_str_cat(r, {CString(CodePoints(label))});\n");
+        sb.Append($"  r = {(field.Type == "string" ? "df_str_cat" : "df_str_catx")}(r, {value});\n");
       }
       if (all.Count > 3) {
-        sb.Append($"  r = df_str_concat(r, {CString(CodePoints(", ..."))});\n");
+        sb.Append($"  r = df_str_cat(r, {CString(CodePoints(", ..."))});\n");
       }
       if (all.Count > 0) {
-        sb.Append($"  r = df_str_concat(r, {CString(CodePoints(" }"))});\n");
+        sb.Append($"  r = df_str_cat(r, {CString(CodePoints(" }"))});\n");
       }
       sb.Append("  return r;\n}\n");
       sb.Append($"static df_string df_strp_{cls.Name}(const void* o) {{\n  return df_str_{cls.Name}((const {cls.StructName}*)o);\n}}\n\n");
@@ -1240,7 +1287,7 @@ public sealed partial class CodeGen {
     var sb = new StringBuilder();
     if (cls.IsException && cls.Parent == null) {
       sb.Append("  df_exc_live++;\n");
-      sb.Append("  self->message = df_cstr_truncated(v_message.p, v_message.len, 2048);\n");
+      sb.Append("  self->message = df_cstr_truncated(df_view(v_message).p, df_str_len(v_message), 2048);\n");
       sb.Append("  self->function = df_cstr_truncated(\"\", 0, 1024);\n");
     }
     if (cls.Parent != null) {

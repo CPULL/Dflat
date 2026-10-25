@@ -1,0 +1,55 @@
+// String layout (spec 4.4): size classes, literals, the lengths kept in the header
+alias Root as r
+
+// the edges of the size classes: 27 bytes fit in 32, 28 need 64; 4091 fit in 4096, 4092 are above
+arr<u32> sizes = [0, 1, 27, 28, 59, 60, 123, 124, 4091, 4092, 10000]
+for u32 size in sizes {
+  string s = "".padLeft(size, 'a')
+  r.Console.log($"{size}: len {s.len} sizeof {s.sizeof} last {s.endsWith("a")}")
+}
+
+// two-byte characters: chars and bytes differ
+string accents = "".padLeft(2100, 'é')
+r.Console.log($"accents: len {accents.len} sizeof {accents.sizeof}")
+string mixed = accents + "x"
+r.Console.log($"mixed: len {mixed.len} sizeof {mixed.sizeof} index {mixed.indexOf("x")}")
+
+// a concatenation that crosses the classes
+string grow = ""
+arr<i32> rounds = [1, 2, 3, 4, 5, 6, 7, 8]
+for i32 round in rounds {
+  grow = grow + "0123456789"
+  r.Console.log($"grow {grow.len} {grow.sizeof}")
+}
+
+// equality: the same string, an equal copy, different lengths, empty and null
+string a = "same text"
+string b = a
+string c = "same " + "text"
+r.Console.log($"{a == b} {a == c} {a == "same tex"} {a != "other"}")
+string empty = ""
+string none = "x".substr(5, 1)
+r.Console.log($"{empty == none} {empty == ""} [{empty}] {empty.len} {empty.sizeof}")
+if empty {
+  r.Console.log("empty is true")
+} else {
+  r.Console.log("empty is false")
+}
+
+// a literal used twice is the same text
+string first = "literal"
+string second = "literal"
+r.Console.log($"{first == second} {first.len} {first.sizeof}")
+
+// a long string: iteration, substr, chars by position
+string longText = "".padLeft(5000, 'b') + "end"
+i32 count = 0
+for char ch in longText {
+  count += 1
+}
+r.Console.log($"chars {count} tail {longText.substr(5000, 10)} at {longText[5001]}")
+r.Console.log(longText.substr(4998, 4).toUpper())
+
+// literals with escapes and multi-byte characters
+string escaped = "tab\there \"quoted\" \u{1F600}"
+r.Console.log($"{escaped} {escaped.len} {escaped.sizeof}")

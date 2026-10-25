@@ -1,0 +1,1 @@
+trait_subtrait_write.df(5): error: 'hits' belongs to the parent trait Counter: a sub-trait reads it and changes it through a function of Counter

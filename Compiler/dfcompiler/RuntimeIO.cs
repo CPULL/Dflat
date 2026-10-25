@@ -114,7 +114,8 @@ static void df_io_emit(df_io_buf* b, uint32_t cp, int enc) {
   }
 }
 
-static df_arr_u8 df_io_encode(df_string text, int enc) {
+static df_arr_u8 df_io_encode(df_string source, int enc) {
+  df_sv text = df_view(source);
   df_io_buf b = { NULL, 0, 0 };
   uint64_t i = 0;
   while (i < text.len) {
@@ -158,30 +159,29 @@ static df_string df_io_decode(const uint8_t* data, uint64_t len, int enc) {
       }
       break;
   }
-  df_string s = { b.p ? b.p : "", b.len };
+  df_string s = df_str_make(b.p ? b.p : "", b.len);
+  free(b.p);
   return s;
 }
 
 /* ---- paths (17.6.2) ---- */
 
 static df_string df_io_str(const char* p, uint64_t n) {
-  char* copy = (char*)df_alloc(n);
-  if (n) memcpy(copy, p, n);
-  df_string s = { copy, n };
-  return s;
+  return df_str_make(p, n);
 }
 
 /* "/" separator, a drive letter as the first folder ("/d:/x"), no repeated or trailing separators; illegal characters raise
    InvalidPathException (30) and the text is returned as it came */
-static df_string df_io_normalize(df_string raw) {
+static df_string df_io_normalize(df_string source) {
+  df_sv raw = df_view(source);
   char* t = (char*)df_alloc(raw.len + 4);
   uint64_t n = 0;
   for (uint64_t i = 0; i < raw.len; i++) {
     unsigned char c = (unsigned char)raw.p[i];
-    if (c == 0) { df_io_fail(DF_IO_INVALID_PATH); return raw; }
+    if (c == 0) { df_io_fail(DF_IO_INVALID_PATH); return df_str_dup(source); }
 #ifdef _WIN32
     if (c == '\\') c = '/';
-    if (c < 32 || c == '<' || c == '>' || c == '"' || c == '|' || c == '?' || c == '*') { df_io_fail(DF_IO_INVALID_PATH); return raw; }
+    if (c < 32 || c == '<' || c == '>' || c == '"' || c == '|' || c == '?' || c == '*') { df_io_fail(DF_IO_INVALID_PATH); return df_str_dup(source); }
 #endif
     t[n++] = (char)c;
   }
@@ -195,7 +195,7 @@ static df_string df_io_normalize(df_string raw) {
     if (drive >= 'A' && drive <= 'Z') drive = (char)(drive + 32);
   }
   for (uint64_t i = start; i < n; i++) {
-    if (t[i] == ':') { df_io_fail(DF_IO_INVALID_PATH); return raw; }
+    if (t[i] == ':') { df_io_fail(DF_IO_INVALID_PATH); return df_str_dup(source); }
   }
 #else
   uint64_t start = 0;
@@ -216,12 +216,12 @@ static df_string df_io_normalize(df_string raw) {
   }
   if (m > 1 && out[m - 1] == '/') m--;
   free(t);
-  df_string s = { out, m };
-  return s;
+  return df_str_make(out, m);
 }
 
 /* the OS form: "/d:/x" is "d:/x"; the result is malloc'd */
-static df_ochar* df_io_os(df_string path) {
+static df_ochar* df_io_os(df_string text) {
+  df_sv path = df_view(text);
   const char* p = path.p;
   uint64_t n = path.len;
 #ifdef _WIN32
@@ -254,14 +254,15 @@ static df_string df_io_from_os(const df_ochar* name) {
   int bytes = WideCharToMultiByte(CP_UTF8, 0, name, -1, NULL, 0, NULL, NULL);
   char* text = (char*)df_alloc((uint64_t)(bytes > 0 ? bytes : 1));
   if (bytes > 0) WideCharToMultiByte(CP_UTF8, 0, name, -1, text, bytes, NULL, NULL);
-  df_string s = { text, (uint64_t)(bytes > 0 ? bytes - 1 : 0) };
-  return s;
+  return df_str_make(text, (uint64_t)(bytes > 0 ? bytes - 1 : 0));
 #else
   return df_io_str(name, strlen(name));
 #endif
 }
 
-static df_string df_io_join(df_string dir, df_string name) {
+static df_string df_io_join(df_string dirText, df_string nameText) {
+  df_sv dir = df_view(dirText);
+  df_sv name = df_view(nameText);
   bool root = dir.len == 1 && dir.p[0] == '/';
   uint64_t n = dir.len + (root ? 0 : 1) + name.len;
   char* p = (char*)df_alloc(n);
@@ -269,60 +270,59 @@ static df_string df_io_join(df_string dir, df_string name) {
   uint64_t m = dir.len;
   if (!root) p[m++] = '/';
   memcpy(p + m, name.p, name.len);
-  df_string s = { p, n };
-  return s;
+  return df_str_make(p, n);
 }
 
 /* the part before the last separator; "" when there is none */
-static df_string df_io_parent(df_string path) {
+static df_string df_io_parent(df_string text) {
+  df_sv path = df_view(text);
   for (uint64_t i = path.len; i > 0; i--) {
     if (path.p[i - 1] == '/') {
-      df_string s = { path.p, i == 1 ? 1 : i - 1 };
-      return s;
+      return df_str_make(path.p, i == 1 ? 1 : i - 1);
     }
   }
-  df_string none = { "", 0 };
-  return none;
+  return NULL;
 }
 
 /* File.name: the part after the last separator */
-static df_string df_io_name(df_string path) {
+static df_string df_io_name(df_string text) {
+  df_sv path = df_view(text);
   for (uint64_t i = path.len; i > 0; i--) {
     if (path.p[i - 1] == '/') {
-      df_string s = { path.p + i, path.len - i };
-      return s;
+      return df_str_make(path.p + i, path.len - i);
     }
   }
-  return path;
+  return df_str_dup(text);
 }
 
 /* File.extension: after the last dot of the name, without the dot; none for a name that starts with its only dot */
 static df_string df_io_extension(df_string path) {
-  df_string name = df_io_name(path);
+  df_sv name = df_view(df_io_name(path));
   for (uint64_t i = name.len; i > 1; i--) {
     if (name.p[i - 1] == '.') {
-      df_string s = { name.p + i, name.len - i };
-      return s;
+      return df_str_make(name.p + i, name.len - i);
     }
   }
-  df_string none = { "", 0 };
-  return none;
+  return NULL;
 }
 
 /* File.parent: "" when the path is a root ("/" or a drive "/d:") or one of "." and ".."; "." for a bare relative name */
-static df_string df_io_parent_path(df_string path) {
-  df_string none = { "", 0 };
+static df_string df_io_parent_path(df_string text) {
+  df_sv path = df_view(text);
+  df_string none = NULL;
   if (path.len == 0 || (path.len == 1 && path.p[0] == '/') || (path.len == 3 && path.p[0] == '/' && path.p[2] == ':')) return none;
   if ((path.len == 1 && path.p[0] == '.') || (path.len == 2 && path.p[0] == '.' && path.p[1] == '.')) return none;
-  df_string parent = df_io_parent(path);
-  return parent.len == 0 ? df_str_lit(".", 1) : parent;
+  df_string parent = df_io_parent(text);
+  return df_str_len(parent) == 0 ? df_str_lit(".", 1) : parent;
 }
 
 /* File.combinePaths: an absolute second path replaces the first (as C# Path.Combine) */
-static df_string df_io_combine(df_string a, df_string b) {
-  if (a.len == 0 || (b.len > 0 && b.p[0] == '/')) return b;
-  if (b.len == 0) return a;
-  return df_io_join(a, b);
+static df_string df_io_combine(df_string first, df_string second) {
+  df_sv a = df_view(first);
+  df_sv b = df_view(second);
+  if (a.len == 0 || (b.len > 0 && b.p[0] == '/')) return df_str_dup(second);
+  if (b.len == 0) return df_str_dup(first);
+  return df_io_join(first, second);
 }
 
 /* ---- the operating system layer ---- */
@@ -600,7 +600,9 @@ static void df_io_list_dir(df_io_list_ctx* c, df_string dir);
 static void df_io_list_visit(df_string name, bool isDir, void* ctx) {
   df_io_list_ctx* c = (df_io_list_ctx*)ctx;
   df_string full = df_io_join(c->dir, name);
-  bool wanted = isDir ? c->itemType != 0 : (c->itemType != 1 && df_io_match(c->match.p, c->match.len, name.p, name.len));
+  df_sv pattern = df_view(c->match);
+  df_sv entry = df_view(name);
+  bool wanted = isDir ? c->itemType != 0 : (c->itemType != 1 && df_io_match(pattern.p, pattern.len, entry.p, entry.len));
   if (wanted) df_io_list_add(c, full);
   if (isDir && c->recursive) {
     df_string saved = c->dir;
@@ -619,7 +621,7 @@ static void df_io_list_dir(df_io_list_ctx* c, df_string dir) {
 /* the items of a directory as normalized paths (17.6.5): a missing path is FileNotFoundException */
 static df_arr_string df_io_list(df_string path, bool recursive, int32_t itemType, df_string match) {
   df_arr_string result = { NULL, 0 };
-  if (path.len == 0) { df_io_fail(DF_IO_INVALID_PATH); return result; }
+  if (df_str_len(path) == 0) { df_io_fail(DF_IO_INVALID_PATH); return result; }
   int32_t kind = df_io_kind(path);
   if (kind == 0) { df_io_fail(DF_IO_NOT_FOUND); return result; }
   if (kind == 1) { df_io_fail(DF_IO_INVALID_PATH); return result; }
@@ -680,7 +682,9 @@ static bool df_io_delete(df_string path, int32_t flags) {
   return df_io_delete_flags(path, flags);
 }
 
-static bool df_io_starts_inside(df_string path, df_string dir) {
+static bool df_io_starts_inside(df_string pathText, df_string dirText) {
+  df_sv path = df_view(pathText);
+  df_sv dir = df_view(dirText);
   return path.len > dir.len && memcmp(path.p, dir.p, dir.len) == 0 && path.p[dir.len] == '/';
 }
 
@@ -735,7 +739,7 @@ static bool df_io_copy_item(df_string from, df_string to, bool overwrite, bool* 
 /* true when the item was copied; false when it was skipped or failed (the id is in the error register) */
 static bool df_io_copy(df_string from, df_string to, bool overwrite) {
   df_string parent = df_io_parent(to);
-  if (parent.len > 0 && df_io_kind(parent) != 2) { df_io_fail(DF_IO_FULL_PATH_NOT_FOUND); return false; }
+  if (df_str_len(parent) > 0 && df_io_kind(parent) != 2) { df_io_fail(DF_IO_FULL_PATH_NOT_FOUND); return false; }
   bool skipped = false;
   bool ok = df_io_copy_item(from, to, overwrite, &skipped);
   return ok && !skipped;
@@ -743,7 +747,7 @@ static bool df_io_copy(df_string from, df_string to, bool overwrite) {
 
 static bool df_io_move(df_string from, df_string to, bool overwrite) {
   df_string parent = df_io_parent(to);
-  if (parent.len > 0 && df_io_kind(parent) != 2) { df_io_fail(DF_IO_FULL_PATH_NOT_FOUND); return false; }
+  if (df_str_len(parent) > 0 && df_io_kind(parent) != 2) { df_io_fail(DF_IO_FULL_PATH_NOT_FOUND); return false; }
   int32_t a = df_io_kind(from);
   int32_t b = df_io_kind(to);
   if (a == 0) { df_io_fail(DF_IO_NOT_FOUND); return false; }
@@ -771,7 +775,7 @@ static int32_t df_io_mkdir(df_string path) {
   int32_t kind = df_io_kind(path);
   if (kind != 0) { df_io_fail(DF_IO_NAME_EXISTS); return 1; }
   df_string parent = df_io_parent(path);
-  if (parent.len > 0 && df_io_kind(parent) != 2) { df_io_fail(DF_IO_INVALID_PATH); return 1; }
+  if (df_str_len(parent) > 0 && df_io_kind(parent) != 2) { df_io_fail(DF_IO_INVALID_PATH); return 1; }
   df_ochar* os = df_io_os(path);
   bool ok = df_io_os_mkdir(os);
   if (!ok) df_io_fail(df_io_os_code());
@@ -840,8 +844,9 @@ static bool df_io_set_current_dir(df_string path) {
 }
 
 /* the folders of a normalized path ("/d:/a/b" is "d:", "a", "b"); the array is malloc'd */
-static df_string* df_io_segments(df_string path, uint64_t* count) {
-  df_string* parts = (df_string*)malloc((size_t)(path.len / 2 + 2) * sizeof(df_string));
+static df_sv* df_io_segments(df_string text, uint64_t* count) {
+  df_sv path = df_view(text);
+  df_sv* parts = (df_sv*)malloc((size_t)(path.len / 2 + 2) * sizeof(df_sv));
   if (!parts) df_out_of_memory();
   uint64_t n = 0;
   uint64_t start = 0;
@@ -859,7 +864,7 @@ static df_string* df_io_segments(df_string path, uint64_t* count) {
   return parts;
 }
 
-static df_string df_io_from_segments(df_string* parts, uint64_t count) {
+static df_string df_io_from_segments(df_sv* parts, uint64_t count) {
   uint64_t n = 0;
   for (uint64_t i = 0; i < count; i++) n += parts[i].len + 1;
   if (n == 0) return df_str_lit("/", 1);
@@ -870,37 +875,36 @@ static df_string df_io_from_segments(df_string* parts, uint64_t count) {
     memcpy(p + m, parts[i].p, parts[i].len);
     m += parts[i].len;
   }
-  df_string s = { p, m };
-  return s;
+  return df_str_make(p, m);
 }
 
-static bool df_io_is_drive(df_string part) {
+static bool df_io_is_drive(df_sv part) {
   return part.len == 2 && part.p[1] == ':';
 }
 
 /* absolute, without "." and ".."; a relative path starts from the current directory (on Windows "/x" is on its drive) */
-static df_string df_io_full_path(df_string path) {
-  df_string full = path;
+static df_string df_io_full_path(df_string text) {
+  df_sv path = df_view(text);
+  df_string full = text;
   if (path.len == 0 || path.p[0] != '/') {
-    full = path.len == 0 ? df_io_current_dir() : df_io_join(df_io_current_dir(), path);
+    full = path.len == 0 ? df_io_current_dir() : df_io_join(df_io_current_dir(), text);
   }
 #ifdef _WIN32
   else if (!(path.len >= 3 && path.p[2] == ':')) {
-    df_string cwd = df_io_current_dir();
+    df_sv cwd = df_view(df_io_current_dir());
     if (cwd.len >= 3 && cwd.p[2] == ':') {
       char* p = (char*)df_alloc(path.len + 3);
       memcpy(p, cwd.p, 3);
       memcpy(p + 3, path.p, path.len);
-      full.p = p;
-      full.len = path.len + 3;
+      full = df_str_make(p, path.len + 3);
     }
   }
 #endif
   uint64_t count;
-  df_string* parts = df_io_segments(full, &count);
+  df_sv* parts = df_io_segments(full, &count);
   uint64_t kept = 0;
   for (uint64_t i = 0; i < count; i++) {
-    df_string part = parts[i];
+    df_sv part = parts[i];
     if (part.len == 1 && part.p[0] == '.') continue;
     if (part.len == 2 && part.p[0] == '.' && part.p[1] == '.') {
       if (kept > 0 && !df_io_is_drive(parts[kept - 1])) kept--;   /* the root and a drive have no parent */
@@ -913,7 +917,7 @@ static df_string df_io_full_path(df_string path) {
   return result;
 }
 
-static bool df_io_same_part(df_string a, df_string b) {
+static bool df_io_same_part(df_sv a, df_sv b) {
   if (a.len != b.len) return false;
   for (uint64_t i = 0; i < a.len; i++) {
     char x = a.p[i];
@@ -932,8 +936,8 @@ static df_string df_io_relative_path(df_string from, df_string to) {
   df_string fullFrom = df_io_full_path(from);
   df_string fullTo = df_io_full_path(to);
   uint64_t fromCount, toCount;
-  df_string* fromParts = df_io_segments(fullFrom, &fromCount);
-  df_string* toParts = df_io_segments(fullTo, &toCount);
+  df_sv* fromParts = df_io_segments(fullFrom, &fromCount);
+  df_sv* toParts = df_io_segments(fullTo, &toCount);
   uint64_t common = 0;
   while (common < fromCount && common < toCount && df_io_same_part(fromParts[common], toParts[common])) common++;
   df_string result;
@@ -954,8 +958,7 @@ static df_string df_io_relative_path(df_string from, df_string to) {
         m += toParts[i].len;
         p[m++] = '/';
       }
-      result.p = p;
-      result.len = m - 1;     /* without the last separator */
+      result = df_str_make(p, m - 1);     /* without the last separator */
     }
   }
   free(fromParts);
@@ -1012,7 +1015,7 @@ static df_string df_io_read_all_text(df_string path, int32_t encoding) {
 /* mode (17.6.4): 0 CreateOnly, 1 ReplaceOnly, 2 CreateReplace, 3 AppendOnly, 4 CreateAppend */
 static bool df_io_write_all(df_string path, df_arr_u8 data, int32_t mode) {
   df_string parent = df_io_parent(path);
-  if (parent.len > 0 && df_io_kind(parent) != 2) { df_io_fail(DF_IO_FULL_PATH_NOT_FOUND); return false; }
+  if (df_str_len(parent) > 0 && df_io_kind(parent) != 2) { df_io_fail(DF_IO_FULL_PATH_NOT_FOUND); return false; }
   df_ochar* os = df_io_os(path);
   df_io_info info = df_io_stat(os);
   bool bad = false;
@@ -1059,7 +1062,7 @@ static uint64_t df_io_stream_open(df_string path, int32_t readMode, int32_t writ
   bool appending = openMode == 5 || openMode == 6;
   if ((!read && !write) || (!write && (truncating || appending))) { df_io_fail(37); return 0; }
   df_string parent = df_io_parent(path);
-  if (parent.len > 0 && df_io_kind(parent) != 2) { df_io_fail(DF_IO_FULL_PATH_NOT_FOUND); return 0; }
+  if (df_str_len(parent) > 0 && df_io_kind(parent) != 2) { df_io_fail(DF_IO_FULL_PATH_NOT_FOUND); return 0; }
   df_ochar* os = df_io_os(path);
   df_io_info info = df_io_stat(os);
   bool mustExist = openMode == 0 || openMode == 4 || openMode == 6;

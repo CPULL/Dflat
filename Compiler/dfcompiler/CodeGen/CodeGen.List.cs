@@ -47,6 +47,9 @@ public sealed partial class CodeGen {
 
   // the item of a node leaves the list: an object ends (spec 6.1)
   string DropListItem(string elem, string slot) {
+    if (elem == "string") {
+      return $"df_str_free({slot}); {slot} = NULL; ";
+    }
     if (!IsClass(elem)) {
       return "";
     }
@@ -87,7 +90,7 @@ public sealed partial class CodeGen {
       if (IsClass(elem) && !assigned.Fresh && assigned.Type != "null" && s.Line < LibraryLine) {
         throw Error("a collection owns its items: move an existing object in with ->x, or put a new one", s);
       }
-      string value = Convert(assigned, elem, s);
+      string value = StrItemAs(assigned, elem, Convert(assigned, elem, s));
       if (IsClass(elem)) {
         string incoming = NewTemp();
         string replaced = NewTemp();
@@ -95,10 +98,10 @@ public sealed partial class CodeGen {
         return head + $"{CType(elem)} {incoming} = {value}; " + check + WalkToNode(list, obj.Type, node, position)
           + $"{CType(elem)} {replaced} = {slot}; {slot} = {incoming}; if ({replaced} != {incoming}) {{ df_drop((void*){replaced}); }} }})";
       }
-      return head + check + WalkToNode(list, obj.Type, node, position) + $"{slot} = {value}; }})";
+      return head + check + WalkToNode(list, obj.Type, node, position) + (elem == "string" ? $"df_str_put(&{slot}, {value}, true); }})" : $"{slot} = {value}; }})");
     }
     string combined = Convert(BinaryOp(op[..^1], new Expr(slot, elem), s.Children[1], scope, s), elem, s);
-    return head + check + WalkToNode(list, obj.Type, node, position) + $"{slot} = {combined}; }})";
+    return head + check + WalkToNode(list, obj.Type, node, position) + (elem == "string" ? $"df_str_put(&{slot}, {combined}, true); }})" : $"{slot} = {combined}; }})");
   }
 
   // a list made from a literal: one node per item, in order
@@ -113,7 +116,7 @@ public sealed partial class CodeGen {
         throw Error("a list owns its items: put a new object in the literal, or move one in with ->x", item);
       }
       string node = NewTemp();
-      sb.Append("{ ").Append(NewListNode(type, node, Convert(value, elem, item))).Append(AppendListNode(held, type, node)).Append("} ");
+      sb.Append("{ ").Append(NewListNode(type, node, StrItemAs(value, elem, Convert(value, elem, item)))).Append(AppendListNode(held, type, node)).Append("} ");
     }
     sb.Append($"{held}; }})");
     return new Expr(sb.ToString(), type, true);
@@ -138,9 +141,9 @@ public sealed partial class CodeGen {
       arrayCode.Append("  if (v == NULL) {\n    return df_str_lit(\"null\", 4);\n  }\n");
       arrayCode.Append("  df_string r = df_str_lit(\"[\", 1);\n  bool firstItem = true;\n");
       arrayCode.Append($"  for ({ListNode(listType)}* node = v->{VecField(listType, "first")}; node != NULL; node = node->next) {{\n");
-      arrayCode.Append("    if (!firstItem) {\n      r = df_str_concat(r, df_str_lit(\", \", 2));\n    }\n    firstItem = false;\n");
-      arrayCode.Append($"    r = df_str_concat(r, {item});\n  }}\n");
-      arrayCode.Append("  return df_str_concat(r, df_str_lit(\"]\", 1));\n}\n\n");
+      arrayCode.Append("    if (!firstItem) {\n      r = df_str_catx(r, df_str_lit(\", \", 2));\n    }\n    firstItem = false;\n");
+      arrayCode.Append($"    r = {(elem == "string" ? "df_str_cat" : "df_str_catx")}(r, {item});\n  }}\n");
+      arrayCode.Append("  return df_str_catx(r, df_str_lit(\"]\", 1));\n}\n\n");
     }
     return name;
   }
@@ -152,6 +155,9 @@ public sealed partial class CodeGen {
     sb.Append($"  for ({nodeType}* node = self->{first}; node != NULL; ) {{\n    {nodeType}* after = node->next;\n");
     if (IsClass(ListElem(cls.Name))) {
       sb.Append("    if (node->value != NULL) { void* o = (void*)node->value; node->value = NULL; df_drop(o); }\n");
+    }
+    if (ListElem(cls.Name) == "string") {
+      sb.Append("    df_str_free(node->value);\n");
     }
     sb.Append("    free(node);\n    node = after;\n  }\n");
     sb.Append($"  self->{first} = NULL;\n  self->{VecField(cls.Name, "last")} = NULL;\n  self->{VecField(cls.Name, "count")} = 0;\n");
@@ -211,10 +217,20 @@ public sealed partial class CodeGen {
 
     string Arg(int index, string argType) => Convert(ExprOf(args[index], scope, argType), argType, args[index]);
 
+    // an item that goes into the list (its own copy of a string), and one that is only compared
     string Item(int index) {
       var value = ExprOf(args[index], scope, elem);
-      return Convert(value, elem, args[index]);
+      return StrItemAs(value, elem, Convert(value, elem, args[index]));
     }
+
+    string ItemRead(int index) {
+      var value = ExprOf(args[index], scope, elem);
+      string converted = Convert(value, elem, args[index]);
+      return elem == "string" ? StrRead(new Expr(converted, "string", FreshCode(value, converted) == "true" && !IsStaticStr(converted))) : converted;
+    }
+
+    // a value given once and copied into many items
+    string Copied(string value) => elem == "string" ? $"df_str_dup({value})" : value;
 
     switch (name) {
       case "node_append": {
@@ -242,7 +258,7 @@ public sealed partial class CodeGen {
           + $"if ({position} == 0) {{ {l}->{first} = {node}->next; if ({l}->{first} == NULL) {{ {l}->{last} = NULL; }} }} "
           + $"else {{ {WalkToNode(l, type, before, $"{position} - 1")}{node} = {before}->next; {before}->next = {node}->next; if ({node} == {l}->{last}) {{ {l}->{last} = {before}; }} }} "
           + $"{elemType} {taken} = {node}->value; free({node}); {l}->{count} -= 1; {taken}; }})";
-        return new Expr(code, elem, IsClass(elem));
+        return new Expr(code, elem, IsClass(elem) || elem == "string");
       }
       case "node_indexOf": {
         string value = NewTemp();
@@ -250,7 +266,7 @@ public sealed partial class CodeGen {
         string index = NewTemp();
         string node = NewTemp();
         string same = EqualsCode(new Expr($"{node}->value", elem), new Expr(value, elem), at);
-        string code = head + $"{elemType} {value} = {Item(0)}; df_uns {found} = DF_UNS_MAX; df_uns {index} = 0; "
+        string code = head + $"{elemType} {value} = {ItemRead(0)}; df_uns {found} = DF_UNS_MAX; df_uns {index} = 0; "
           + $"for ({nodeType}* {node} = {l}->{first}; {node} != NULL; {node} = {node}->next, {index}++) {{ if ({same}) {{ {found} = {index}; break; }} }} {found}; }})";
         return new Expr(code, NativeUns);
       }
@@ -261,7 +277,7 @@ public sealed partial class CodeGen {
         string node = NewTemp();
         string after = NewTemp();
         string same = EqualsCode(new Expr($"{node}->value", elem), new Expr(value, elem), at);
-        string code = head + $"{elemType} {value} = {Item(0)}; df_uns {removed} = 0; {nodeType}* {before} = NULL; {nodeType}* {node} = {l}->{first}; "
+        string code = head + $"{elemType} {value} = {ItemRead(0)}; df_uns {removed} = 0; {nodeType}* {before} = NULL; {nodeType}* {node} = {l}->{first}; "
           + $"while ({node} != NULL) {{ {nodeType}* {after} = {node}->next; "
           + $"if ({same}) {{ if ({before} == NULL) {{ {l}->{first} = {after}; }} else {{ {before}->next = {after}; }} if ({node} == {l}->{last}) {{ {l}->{last} = {before}; }} "
           + $"{DropListItem(elem, $"{node}->value")}free({node}); {removed}++; }} else {{ {before} = {node}; }} {node} = {after}; }} "
@@ -270,7 +286,7 @@ public sealed partial class CodeGen {
       }
       case "node_clear": {
         string node = NewTemp();
-        string reset = IsClass(elem) ? DropListItem(elem, $"{node}->value") : $"{node}->value = {ZeroValue(elem)}; ";
+        string reset = IsClass(elem) || elem == "string" ? DropListItem(elem, $"{node}->value") : $"{node}->value = {ZeroValue(elem)}; ";
         return new Expr(head + $"for ({nodeType}* {node} = {l}->{first}; {node} != NULL; {node} = {node}->next) {{ {reset}}} }})", "void");
       }
       case "node_fill": {
@@ -279,16 +295,16 @@ public sealed partial class CodeGen {
         string old = NewTemp();
         string store = IsClass(elem)
           ? $"{elemType} {old} = {node}->value; {node}->value = {value}; if ({old} != {value}) {{ df_drop((void*){old}); }} "
-          : $"{node}->value = {value}; ";
-        return new Expr(head + $"{elemType} {value} = {Item(0)}; for ({nodeType}* {node} = {l}->{first}; {node} != NULL; {node} = {node}->next) {{ {store}}} }})", "void");
+          : elem == "string" ? $"df_str_put(&{node}->value, df_str_dup({value}), true); " : $"{node}->value = {value}; ";
+        return new Expr(head + $"{elemType} {value} = {(elem == "string" ? ItemRead(0) : Item(0))}; for ({nodeType}* {node} = {l}->{first}; {node} != NULL; {node} = {node}->next) {{ {store}}} }})", "void");
       }
       case "node_fillCount": {
         string amount = NewTemp();
         string value = NewTemp();
         string step = NewTemp();
         string node = NewTemp();
-        return new Expr(head + $"df_uns {amount} = {Arg(0, NativeUns)}; {elemType} {value} = {Item(1)}; "
-          + $"for (df_uns {step} = 0; {step} < {amount}; {step}++) {{ {NewListNode(type, node, value)}{AppendListNode(l, type, node)}}} }})", "void");
+        return new Expr(head + $"df_uns {amount} = {Arg(0, NativeUns)}; {elemType} {value} = {(elem == "string" ? ItemRead(1) : Item(1))}; "
+          + $"for (df_uns {step} = 0; {step} < {amount}; {step}++) {{ {NewListNode(type, node, Copied(value))}{AppendListNode(l, type, node)}}} }})", "void");
       }
       case "node_reverse": {
         string previous = NewTemp();
@@ -312,7 +328,7 @@ public sealed partial class CodeGen {
         string node = NewTemp();
         string old = NewTemp();
         return new Expr(head + $"df_uns {position} = {Arg(0, NativeUns)}; {elemType} {value} = {Item(1)}; " + WalkToNode(l, type, node, position)
-          + $"{elemType} {old} = {node}->value; {node}->value = {value}; {old}; }})", elem, IsClass(elem));
+          + $"{elemType} {old} = {node}->value; {node}->value = {value}; {old}; }})", elem, IsClass(elem) || elem == "string");
       }
       case "node_truncate": {
         string keep = NewTemp();
@@ -413,7 +429,7 @@ public sealed partial class CodeGen {
     }
     sb.Append($"if ({start} > {end} || {end} > {length}) {outside} ");
     if (!IsArr(obj.Type)) {
-      sb.Append($"{held}->{VecField(obj.Type, "iterators")} += 1; ");   // released by the atEnd of the view
+      sb.Append($"{held}->{VecField(obj.Type, "iteratorCounter")} += 1; ");   // released by the atEnd of the view
     }
     string call = UserCallCode(ctor, $"{ctor.CName}({held}, {start}, {end} - {start})");
     sb.Append($"{call}; }})");
@@ -472,9 +488,9 @@ public sealed partial class CodeGen {
           sb.Append($"  for (df_uns i = 0; i < {count}; i++, node = node->next) {{\n");
         }
       }
-      sb.Append("    if (i > 0) {\n      r = df_str_concat(r, df_str_lit(\", \", 2));\n    }\n");
-      sb.Append($"    r = df_str_concat(r, {StrOf(new Expr(item, elem), at)});\n  }}\n");
-      sb.Append("  return df_str_concat(r, df_str_lit(\"]\", 1));\n}\n\n");
+      sb.Append("    if (i > 0) {\n      r = df_str_catx(r, df_str_lit(\", \", 2));\n    }\n");
+      sb.Append($"    r = {(elem == "string" ? "df_str_cat" : "df_str_catx")}(r, {StrOf(new Expr(item, elem), at)});\n  }}\n");
+      sb.Append("  return df_str_catx(r, df_str_lit(\"]\", 1));\n}\n\n");
       arrayCode.Append(sb);
     }
     return name;
@@ -558,8 +574,8 @@ public sealed partial class CodeGen {
     } else {
       sb.Append(ForEachSourceItem(sourceType, s, "0", SourceLength(sourceType, s), item => {
         string node = NewTemp();
-        string take = moving && IsClass(elem) ? $"{item} = NULL; " : "";
-        return NewListNode(list.Type, node, item) + take + AppendListNode(held, list.Type, node);
+        string take = moving && (IsClass(elem) || elem == "string") ? $"{item} = NULL; " : "";
+        return NewListNode(list.Type, node, elem == "string" && !moving ? $"df_str_dup({item})" : item) + take + AppendListNode(held, list.Type, node);
       }));
     }
     if (moving && sourceIsObject) {
@@ -670,7 +686,9 @@ public sealed partial class CodeGen {
       if (intoVec) {
         sb.Append($"if ({di} + {n} > {count}) {{ {VecReserve(held, destination.Type, $"{di} + {n}")}}} ");
       }
-      sb.Append($"for (df_uns {step} = 0; {step} < {n}; {step}++) {{ {items}.p[{di} + {step}] = {buffer}[{step}]; }} ");
+      sb.Append(elem == "string"
+        ? $"for (df_uns {step} = 0; {step} < {n}; {step}++) {{ df_str_put(&{items}.p[{di} + {step}], df_str_dup({buffer}[{step}]), true); }} "
+        : $"for (df_uns {step} = 0; {step} < {n}; {step}++) {{ {items}.p[{di} + {step}] = {buffer}[{step}]; }} ");
       if (intoVec) {
         sb.Append($"if ({di} + {n} > {count}) {{ {count} = {di} + {n}; }} ");
       }
@@ -679,8 +697,10 @@ public sealed partial class CodeGen {
     }
     sb.Append(WalkToNode(held, destination.Type, node, di));
     string added = NewTemp();
-    sb.Append($"for (df_uns {step} = 0; {step} < {n}; {step}++) {{ if ({node} != NULL) {{ {node}->value = {buffer}[{step}]; {node} = {node}->next; }} "
-      + $"else {{ {NewListNode(destination.Type, added, $"{buffer}[{step}]")}{AppendListNode(held, destination.Type, added)}}} }} ");
+    string copied = elem == "string" ? $"df_str_dup({buffer}[{step}])" : $"{buffer}[{step}]";
+    string write = elem == "string" ? $"df_str_put(&{node}->value, {copied}, true);" : $"{node}->value = {copied};";
+    sb.Append($"for (df_uns {step} = 0; {step} < {n}; {step}++) {{ if ({node} != NULL) {{ {write} {node} = {node}->next; }} "
+      + $"else {{ {NewListNode(destination.Type, added, copied)}{AppendListNode(held, destination.Type, added)}}} }} ");
     sb.Append($"free({buffer}); }})");
     return new Expr(sb.ToString(), "void");
   }

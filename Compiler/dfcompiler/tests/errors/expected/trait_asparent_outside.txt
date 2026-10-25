@@ -1,0 +1,1 @@
+trait_asparent_outside.df(6): error: 'ping' is asparent: only a Visited itself and its children (through their parent reference) call it

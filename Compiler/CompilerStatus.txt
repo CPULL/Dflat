@@ -1,6 +1,17 @@
-Compiler version 0.0.21 alpha for version 0.0.14 of the specs 2026/10/25
+Compiler version 0.0.22 alpha for version 0.0.15 of the specs 2026/10/25
 
 Changes from the previous version -----------------------
+- traits (spec 11.2): a member without a keyword is private: only the code of the trait sees it; public members are written public; same private names in two traits never clash
+- a sub-trait reads the private fields of its parent traits and calls their private functions; it cannot assign the fields
+- asparent functions in traits
+- executeBefore { } and executeAfter { } on trait methods (m.result in executeAfter), not overridable, not run again by parent.m()
+- Collection holds the counter of open iterators (acquireIterator, checkUnlocked, releaseIterator); custom collections get it; a for loop over a custom collection ends its iterator
+- strings use the layout of spec 4.4 (step a): size classes 32 to 4096 bytes, read-only literals, lengths in the header (.len and .sizeof are O(1)); same behaviour as before
+- strings are freed (step b): the owner frees its string when it is assigned again or its scope ends; b = a borrows, a! copies; fields, items and returned values own their string; new strings only read in a statement are freed at its end
+- strings change in place (step c, spec 4.1): +=, text[pos] = c, clear() always; trim, substr, replace, toUpper ... when the result is not used or goes back to the same string (s = s.trim(), known aliases included); a borrow sees the change; a string that outgrows its class moves (class 13) and its borrows follow; new methods insert, remove, replaceAt, append, prepend, clear, shrink; in place on a const, a parameter or a loop variable is a compile error
+- block strings (step d, spec 4.4.4): above 4091 bytes a string is a root and a chain of 4 KB blocks; +=, insert, remove, replaceAt, append, prepend and text[pos] = c change only the blocks touched (split when full, merge small neighbours, cursor on the last change); .len, .sizeof, printing and text[pos] work on the blocks; the other functions read a flat copy; shrink packs the blocks or goes back to a single block
+- strings in collections (step e): an item is always its own copy in its smallest form (add, insert, c[k] = s, fill, literals, add(collection), copyFrom); a replaced or removed item is freed; vec and list free their strings when they end; ->s moves a string (the variable or field is left empty), also into a parameter written ->string
+- supported spec version 0.0.15
 
 Done -----------------------
 
@@ -56,7 +67,7 @@ Partial -----------------------
 
 Arrays arr<T>: literals, arr<T>[size], index read/write with IndexOutOfRangeException, .len, for-in, has, indexOf, fill, clear, reverse, sort / sortUnstable (default order, SortDirection.ASC / DESC; numbers, bool, char, string, date, time, clock, lapse, enums), copyFrom (count or range form; an obvious misfit of constant indexes on arrays of known length is a compile error). Missing: sort with a lambda (no lambdas yet), sort and copyFrom of objects (a comparer, cloning), views and ranges as values, sized declarations (arr<T>[n] x), warning for elements read before fill
 Silent exceptions: library calls (date(string), time(...), (time)n) raise them only when a catch in the same function can handle them; catches in callers do not see them yet; custom ones need classes
-Strings: every string is a pointer and a byte length, never freed; no small / block strings (4.3), no writing by index (open item)
+Strings: layout of spec 4.4 (single-block classes 0-7, literals class 11, moved class 13 read only); ownership and freeing (step b); changes in place (step c); block strings (step d; the iterator counter of the root is not used yet, the functions that are not block-aware read a flat copy). Still leaking (never a double free): the items of arrays (arrays are never freed), strings in tuples, var declarations of strings, a for-in over a new string left with return. Missing: the compile error for an owner that ends or is assigned again while a borrow is alive
 Parsing: date.parse, time.parse and <integer or real type>.parse(text, default, format) (all of section 9 for numbers); tryParse for integers, reals, date and time with (&)variable (a library form, not general (&) parameters); no dec
 Formatting: dates and times (8.4), integers and reals (8.1, 8.2) and strings (8.3), all as toStr(format) and {x:format}; the other types (char, bool ...) ignore a spec with a warning
 Namespaces: the namespace line is accepted, names are not qualified
@@ -123,6 +134,9 @@ Phase 3  Traits                                                    DONE
   specific T / any T are accepted for traits (both dispatch at run time)
   the same member in two traits: unqualified is an error; TraitName.member inside the class (the trait's own body), x.TraitName.member outside
   is with classes and traits (binding allowed), assigning a class to a trait it implements, trait to parent trait
+  2026-10-25 (spec 0.0.15): private trait members (only the trait and, read-only for fields, its sub-traits), asparent / unrestricted in traits,
+  executeBefore / executeAfter (one trait per method: a sub-trait cannot redeclare the method, so the chain has one link)
+  not yet: the check that every constructor sets the public trait fields, the diamond errors (two defaults, two constructor calls)
   limits: generic traits, placeholders, trait constructors with parameters (they need secondary constructors),
   a trait redeclaring a function of its parent trait, static members in traits, static / specific dispatch is not chosen (always dynamic)
 Phase 4  Ownership                                                 IN PROGRESS
@@ -196,7 +210,9 @@ Phase 7  Generics (spec 11.3)                                     IN PROGRESS
      listView, arrView; View<C> as a type), var x = c.method() and var x = c[a..b] own what they get
      NOT yet: v!, c[a..b]! (needs clone), get_view and read_pos for custom collections, writableNext, the iterator of arr as a child (no counter on arr), sort(lambda),
      sized declaration vec<T>[n] name, (&)Item in for, writableNext,
-     the counter on arr (an arr has no header yet) and on custom collections (executeAfter, spec 11.2), the compile-time proof of a change in a loop, getIterator in Collection<Item>
+     the counter on arr (an arr has no header yet), the compile-time proof of a change in a loop, getIterator in Collection<Item>
+     2026-10-25 (spec 0.0.15): the counter is the private field iteratorCounter of the trait Collection (executeAfter of getIterator and releaseIterator); custom
+     collections get it, but no changing method of the traits carries an executeBefore yet (add, remove ... are not trait methods)
 
 Decisions: operator is "fun bool ==(V o)"; only primary constructors for now; default toStr is
 "Px { a: Py{}, b: 3, c: BTree{}, ... }" (first 3 fields, one level, "..." when there are more);

@@ -18,8 +18,8 @@ public static class RuntimeExec {
 #endif
 
 static uint64_t df_exec_err = 0;
-static df_string df_exec_out = { "", 0 };
-static df_string df_exec_errout = { "", 0 };
+static df_string df_exec_out = NULL;
+static df_string df_exec_errout = NULL;
 static bool df_exec_timed_out = false;
 
 static uint64_t df_exec_error(void) {
@@ -28,8 +28,9 @@ static uint64_t df_exec_error(void) {
   return id;
 }
 
-static df_string df_exec_output(void) { return df_exec_out; }
-static df_string df_exec_errors(void) { return df_exec_errout; }
+/* the caller owns what it gets: a copy */
+static df_string df_exec_output(void) { return df_str_dup(df_exec_out); }
+static df_string df_exec_errors(void) { return df_str_dup(df_exec_errout); }
 static bool df_exec_timedout(void) { return df_exec_timed_out; }
 
 /* the error of the RunResult: the exception of the last failure to start, or NULL */
@@ -42,7 +43,7 @@ static df_exception* df_exec_failure(df_string program, df_string workDir) {
     : id == 31 ? &df_desc_FullPathNotFoundException : &df_desc_GenericIOErrorException;
   const char* text = id == 25 ? "Program not found: " : id == 26 ? "The program cannot be run: "
     : id == 31 ? "The working directory does not exist: " : "The program cannot be started: ";
-  df_string about = id == 31 ? workDir : program;
+  df_sv about = df_view(id == 31 ? workDir : program);
   uint64_t length = strlen(text) + about.len;
   char* message = (char*)malloc(length + 1);
   if (!message) df_out_of_memory();
@@ -68,13 +69,7 @@ static void df_exec_add(df_exec_buf* b, const void* data, uint64_t n) {
 }
 
 static df_string df_exec_text(df_exec_buf* b) {
-  df_string s = { "", 0 };
-  if (b->len) {
-    char* p = (char*)df_alloc(b->len);
-    memcpy(p, b->p, b->len);
-    s.p = p;
-    s.len = b->len;
-  }
+  df_string s = df_str_make(b->p ? b->p : "", b->len);
   free(b->p);
   b->p = NULL;
   b->len = b->cap = 0;
@@ -98,20 +93,17 @@ static int64_t df_exec_timeout_ms(int64_t l) {
 #ifdef _WIN32
 
 /* a path in the Dflat form ("/d:/x", stdlib 6.2) is given to Windows as "d:/x"; a drive alone is its root folder */
-static df_string df_exec_os_path(df_string path) {
+static df_string df_exec_os_path(df_string text) {
+  df_sv path = df_view(text);
   if (path.len >= 3 && path.p[0] == '/' && path.p[2] == ':') {
     path.p++;
     path.len--;
   }
   if (path.len == 2 && path.p[1] == ':') {
-    char* root = (char*)df_alloc(3);
-    root[0] = path.p[0];
-    root[1] = ':';
-    root[2] = '/';
-    path.p = root;
-    path.len = 3;
+    char root[3] = { path.p[0], ':', '/' };
+    return df_str_make(root, 3);
   }
-  return path;
+  return df_str_make(path.p, path.len);
 }
 
 static wchar_t* df_exec_wide(const char* p, uint64_t n) {
@@ -124,7 +116,8 @@ static wchar_t* df_exec_wide(const char* p, uint64_t n) {
 }
 
 /* one argument as CommandLineToArgvW reads it back: quotes when needed, backslashes doubled before a quote */
-static void df_exec_quote(df_exec_buf* b, df_string arg) {
+static void df_exec_quote(df_exec_buf* b, df_string text) {
+  df_sv arg = df_view(text);
   bool plain = arg.len > 0;
   for (uint64_t i = 0; i < arg.len && plain; i++) {
     char c = arg.p[i];
@@ -172,7 +165,7 @@ static uint64_t df_exec_os_code(DWORD e) {
 }
 
 typedef struct { HANDLE pipe; df_exec_buf buf; } df_exec_reader;
-typedef struct { HANDLE pipe; df_string text; } df_exec_writer;
+typedef struct { HANDLE pipe; df_sv text; } df_exec_writer;
 
 static DWORD WINAPI df_exec_read_all(LPVOID context) {
   df_exec_reader* r = (df_exec_reader*)context;
@@ -200,8 +193,8 @@ static DWORD WINAPI df_exec_write_all(LPVOID context) {
 /* starts the program; false (and df_exec_err) when it cannot start */
 static bool df_exec_start(df_string program, df_arr_string args, df_string workDir, STARTUPINFOW* start, PROCESS_INFORMATION* info) {
   wchar_t* line = df_exec_command_line(df_exec_os_path(program), args);
-  df_string osFolder = df_exec_os_path(workDir);
-  wchar_t* folder = workDir.len ? df_exec_wide(osFolder.p, osFolder.len) : NULL;
+  df_sv osFolder = df_view(df_exec_os_path(workDir));
+  wchar_t* folder = df_str_len(workDir) ? df_exec_wide(osFolder.p, osFolder.len) : NULL;
   BOOL started = CreateProcessW(NULL, line, NULL, NULL, TRUE, 0, NULL, folder, start, info);
   DWORD e = GetLastError();
   free(line);
@@ -215,8 +208,10 @@ static bool df_exec_start(df_string program, df_arr_string args, df_string workD
 }
 
 static int64_t df_exec_run(df_string program, df_arr_string args, df_string workDir, df_string input, int64_t timeout) {
-  df_exec_out = df_str_lit("", 0);
-  df_exec_errout = df_str_lit("", 0);
+  df_str_free(df_exec_out);
+  df_str_free(df_exec_errout);
+  df_exec_out = NULL;
+  df_exec_errout = NULL;
   df_exec_timed_out = false;
   df_exec_err = 0;
   SECURITY_ATTRIBUTES inherit = { sizeof inherit, NULL, TRUE };
@@ -251,7 +246,7 @@ static int64_t df_exec_run(df_string program, df_arr_string args, df_string work
   }
   df_exec_reader out = { outRead, { NULL, 0, 0 } };
   df_exec_reader err = { errRead, { NULL, 0, 0 } };
-  df_exec_writer in = { inWrite, input };
+  df_exec_writer in = { inWrite, df_view(input) };
   HANDLE threads[3];
   threads[0] = CreateThread(NULL, 0, df_exec_read_all, &out, 0, NULL);
   threads[1] = CreateThread(NULL, 0, df_exec_read_all, &err, 0, NULL);
@@ -297,10 +292,11 @@ static int64_t df_exec_exec(df_string program, df_arr_string args, df_string wor
   return (int64_t)(int32_t)code;
 }
 
-static df_string df_exec_get_env(df_string name) {
+static df_string df_exec_get_env(df_string text) {
+  df_sv name = df_view(text);
   wchar_t* wide = df_exec_wide(name.p, name.len);
   DWORD n = GetEnvironmentVariableW(wide, NULL, 0);
-  df_string value = { "", 0 };
+  df_string value = NULL;
   if (n > 0) {
     wchar_t* buffer = (wchar_t*)malloc((size_t)n * sizeof(wchar_t));
     if (!buffer) df_out_of_memory();
@@ -309,8 +305,7 @@ static df_string df_exec_get_env(df_string name) {
       int bytes = WideCharToMultiByte(CP_UTF8, 0, buffer, (int)got, NULL, 0, NULL, NULL);
       char* text = (char*)df_alloc((uint64_t)(bytes > 0 ? bytes : 1));
       if (bytes > 0) WideCharToMultiByte(CP_UTF8, 0, buffer, (int)got, text, bytes, NULL, NULL);
-      value.p = text;
-      value.len = (uint64_t)(bytes > 0 ? bytes : 0);
+      value = df_str_make(text, (uint64_t)(bytes > 0 ? bytes : 0));
     }
     free(buffer);
   }
@@ -320,7 +315,8 @@ static df_string df_exec_get_env(df_string name) {
 
 #else
 
-static char* df_exec_cstr(df_string s) {
+static char* df_exec_cstr(df_string text) {
+  df_sv s = df_view(text);
   char* p = (char*)malloc(s.len + 1);
   if (!p) df_out_of_memory();
   memcpy(p, s.p, s.len);
@@ -368,7 +364,7 @@ static pid_t df_exec_spawn(df_string program, df_arr_string args, df_string work
   }
   fcntl(report[1], F_SETFD, FD_CLOEXEC);
   char** argv = df_exec_argv(program, args);
-  char* folder = workDir.len ? df_exec_cstr(workDir) : NULL;
+  char* folder = df_str_len(workDir) ? df_exec_cstr(workDir) : NULL;
   fflush(stdout);
   fflush(stderr);
   pid_t pid = fork();
@@ -407,9 +403,12 @@ static int64_t df_exec_status(int status) {
   return -1;
 }
 
-static int64_t df_exec_run(df_string program, df_arr_string args, df_string workDir, df_string input, int64_t timeout) {
-  df_exec_out = df_str_lit("", 0);
-  df_exec_errout = df_str_lit("", 0);
+static int64_t df_exec_run(df_string program, df_arr_string args, df_string workDir, df_string inputText, int64_t timeout) {
+  df_sv input = df_view(inputText);
+  df_str_free(df_exec_out);
+  df_str_free(df_exec_errout);
+  df_exec_out = NULL;
+  df_exec_errout = NULL;
   df_exec_timed_out = false;
   df_exec_err = 0;
   int outPipe[2], errPipe[2], inPipe[2];
@@ -509,11 +508,7 @@ static df_string df_exec_get_env(df_string name) {
   if (!value) {
     return df_str_lit("", 0);
   }
-  uint64_t n = strlen(value);
-  char* copy = (char*)df_alloc(n ? n : 1);
-  memcpy(copy, value, n);
-  df_string s = { copy, n };
-  return s;
+  return df_str_make(value, strlen(value));
 }
 
 #endif

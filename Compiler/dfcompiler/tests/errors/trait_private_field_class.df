@@ -1,0 +1,6 @@
+trait Counter {
+  i32 hits
+}
+public class Thing : Counter {
+  public fun i32 peek() { hits }
+}

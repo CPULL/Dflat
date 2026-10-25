@@ -1,0 +1,18 @@
+106 106 true
+true
+[Hello World]
+HELLO WORLD
+hello
+keep me / KEEP ME
+[aliased] [aliased]
+FIELD GROWS
+[ONE, two!]
+literal! literal
+J😀llé J😀llé 5 9
+index out of range
+>XY-def! >XY-def!
+>XY-def!? >XY-def!
+[] [] 0
+abc 3
+4 4 true
+---- exit code 0 ----

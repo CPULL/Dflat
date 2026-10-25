@@ -15,6 +15,10 @@ public sealed partial class CodeGen {
   readonly HashSet<string> definedTypes = new();
   readonly Dictionary<string, string> tupleCNames = new();
 
+  // the string literals of the program (CString): C text -> name of its static object
+  readonly Dictionary<string, string> literalNames = new();
+  readonly StringBuilder literalCode = new();
+
   static bool IsNullable(string type) => type.EndsWith('?');
   static string BaseOf(string type) => IsNullable(type) ? type[..^1] : type;
   static bool IsTuple(string type) => type.StartsWith('(') && type.EndsWith(')');
@@ -544,6 +548,7 @@ public sealed partial class CodeGen {
     if (e.Type == "bool") {
       return e.Code;
     }
+    e = StrReadExpr(e);
     if (e.Type == "null") {
       return "false";
     }
@@ -560,7 +565,7 @@ public sealed partial class CodeGen {
       return $"df_rbool({e.Code})";
     }
     if (e.Type == "string") {
-      return $"(({e.Code}).len != 0)";
+      return $"(df_str_len({e.Code}) != 0)";
     }
     if (e.Type == "date") {
       return $"(({e.Code}) != INT64_MIN)";
@@ -603,11 +608,12 @@ public sealed partial class CodeGen {
         string code = "df_str_lit(\"(\", 1)";
         for (int index = 0; index < elems.Count; index++) {
           if (index > 0) {
-            code = $"df_str_concat({code}, df_str_lit(\", \", 2))";
+            code = $"df_str_catx({code}, df_str_lit(\", \", 2))";
           }
-          code = $"df_str_concat({code}, {StrOf(new Expr($"{temp}.e{index}", elems[index].Type), at)})";
+          string join = elems[index].Type == "string" ? "df_str_cat" : "df_str_catx";
+          code = $"{join}({code}, {StrOf(new Expr($"{temp}.e{index}", elems[index].Type), at)})";
         }
-        return $"df_str_concat({code}, df_str_lit(\")\", 1))";
+        return $"df_str_catx({code}, df_str_lit(\")\", 1))";
       });
     }
     if (IsEnum(e.Type)) {
@@ -685,7 +691,7 @@ public sealed partial class CodeGen {
         return WithTemp(l, temp => $"(!{temp}.has)");
       }
       if (l.Type == "string") {
-        return WithTemp(l, temp => $"({temp}.len == 0)");
+        return WithTemp(l, temp => $"(df_str_len({temp}) == 0)");
       }
       throw Error($"{l.Type} values are never null", at);
     }

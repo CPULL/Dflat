@@ -2,7 +2,7 @@ alias Root as r
 
 trait Sequence {
   placeholder Item
-  fun Item? Next()
+  public fun Item? Next()
 }
 
 public class Names : Sequence with (Item is string) {

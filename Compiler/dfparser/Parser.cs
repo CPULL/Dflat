@@ -1001,12 +1001,37 @@ public sealed class Parser {
     }
     if (IsOp("{")) {
       node.Add(ParseBlock());
+    } else if (IsExecuteBlockAhead()) {
+      node.Add(new Node("NoBody", name));
     } else {
       pos = save;
       node.Add(new Node("NoBody", name));
       EndStatement(false);
+      return node;
     }
+    ParseExecuteBlocks(node);
     return node;
+  }
+
+  // executeBefore { } / executeAfter { } after the signature or the body of a trait method (spec 11.2): contextual words, also on the next line
+  bool IsExecuteBlockAhead() {
+    int at = pos;
+    while (toks[at].Kind == TokenKind.Newline) {
+      at++;
+    }
+    return toks[at].Kind == TokenKind.Ident && toks[at].Text is "executeBefore" or "executeAfter" && toks[at + 1].Is("{");
+  }
+
+  void ParseExecuteBlocks(Node fun) {
+    while (IsExecuteBlockAhead()) {
+      SkipNewlines();
+      var t = Next();
+      string kind = t.Text == "executeBefore" ? "ExecuteBefore" : "ExecuteAfter";
+      if (fun.Children.Any(child => child.Kind == kind)) {
+        throw Error($"'{t.Text}' is written once on a function");
+      }
+      fun.Add(new Node(kind, t).Add(ParseBlock()));
+    }
   }
 
   // <Item, Key : Hashable && Named, u64 Width>

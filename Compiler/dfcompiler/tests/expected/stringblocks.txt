@@ -1,0 +1,15 @@
+4300 4300 4300 true false
+aabbbbb
+4305 bb<MID>bb true
+4300 bbbb
+4304 >>XYZa bb<<
+13304 q q a
+4304 >>XYZqqq
+3000 6000 é é
+3000 6001 x 😀 é
+3000 true 1500 2999
+bbbbbbbbbb<<
+[] 0
+small again 11 small again
+100 kkkkk
+---- exit code 0 ----

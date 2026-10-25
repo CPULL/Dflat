@@ -2,16 +2,16 @@
 alias Root as r
 
 trait Named {
-  string name = "unnamed"
-  fun string Label()                          // must be implemented
-  fun string Hello() { "Hi " + Label() + " (" + name + ")" }
+  public string name = "unnamed"
+  public fun string Label()                          // must be implemented
+  public fun string Hello() { "Hi " + Label() + " (" + name + ")" }
 }
 
 trait Shape : Named {
-  i32 sides
+  public i32 sides
   Shape() { sides = 3 }
-  fun r64 Area()
-  fun string Info() { Hello() + " area " + Area() + " sides " + sides }
+  public fun r64 Area()
+  public fun string Info() { Hello() + " area " + Area() + " sides " + sides }
 }
 
 public class Square : Shape {

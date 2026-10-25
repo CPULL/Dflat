@@ -1,0 +1,128 @@
+﻿// Ownership of strings (spec 4, 12): b = a is the same string, a! copies, the owner frees at the end of the scope
+alias Root as r
+
+class Person {
+  public string name
+  public string tag
+}
+
+fun string greet(string who) {
+  return "Hello " + who
+}
+
+fun string keep(string who) {
+  return who
+}
+
+fun string upperName(Person p) {
+  p.name.toUpper()
+}
+
+fun string retag(string text) {
+  text = text + "!"
+  return text
+}
+
+fun string, u64 pair(string text) {
+  string local = text + "?"
+  return local, local.len
+}
+
+// borrow and copy
+string a = "abc".toUpper()
+string b = a
+string c = a!
+r.Console.log($"{a} {b} {c} {a == b} {a == c}")
+
+// a variable assigned again frees the string it owned
+string grow = ""
+for i32 round in 0..1000 {
+  grow = grow + "x"
+}
+r.Console.log(grow.len)
+
+// temporaries of expressions, conditions and arguments
+i32 found = 0
+for i32 round in 0..500 {
+  if ("a" + round.toStr()).trim().len > 1 {
+    found += 1
+  }
+  r.Console.print("")
+}
+r.Console.log(found)
+
+// returns: a new string, a borrowed parameter, an owned local, a field
+r.Console.log(greet("Ann") + " " + keep("Bob") + " " + retag("Cy"))
+Person p = Person()
+p.name = "dee" + "dee"
+p.tag = p.name
+p.name = "eve"
+r.Console.log($"{p.name} {p.tag} {upperName(p)}")
+
+// several returned values and a swap
+string text, u64 size = pair("fin")
+string left = "L" + "1"
+string right = "R" + "2"
+left, right = right, left
+r.Console.log($"{text} {size} {left} {right}")
+
+// strings in a loop body end with each pass
+for i32 round in 0..200 {
+  string inner = "pass " + round.toStr()
+  string other = inner
+  if round == 199 {
+    r.Console.log(other)
+  }
+}
+
+// items own their strings
+arr<string> items = [a, "lit", a + "2"]
+a = "changed"
+r.Console.log(items)
+
+// a loop over a new string, a switch on a new string, a while condition
+i32 letters = 0
+for char ch in ("ab" + "cd").toUpper() {
+  letters += 1
+}
+string word = "  beta "
+switch word.trim() {
+  "alpha": r.Console.log("first")
+  "beta": r.Console.log("second")
+  default: r.Console.log("unknown")
+}
+string countdown = "xxxx"
+while countdown.trim() != "" {
+  countdown = countdown.substr(1, 100)
+}
+r.Console.log($"{letters} [{countdown}]")
+
+// an exception in the middle of a statement that made temporaries
+fun i32 failing(string text) {
+  if text.len > 3 then throw IndexOutOfRangeException()
+  return (i32)text.len
+}
+i32 total = 0
+for i32 round in 0..5 {
+  total += failing("ab" + round.toStr()) + failing(("x" + round.toStr() + (round >= 3 ? { "yy", "" })).trim())
+  catch IndexOutOfRangeException {
+    total += 100
+  }
+}
+r.Console.log(total)
+
+// ?? on strings, generics, a return from inside a loop
+string blank = ""
+string named = blank ?? "anon" + "ymous"
+fun Item same<Item>(Item value) { value }
+string generic = same("gen" + "eric")
+fun string firstLong(arr<string> words) {
+  for string w in words {
+    string upper = w.toUpper()
+    if upper.len > 3 {
+      return upper
+    }
+  }
+  return "none"
+}
+r.Console.log($"{named} {generic} {firstLong(["ab", "abcd", "abcdef"])}")

@@ -1,0 +1,27 @@
+1 3 4 tag 42 7
+visits 2
+before 3
+after 3 -> 6
+6
+before 4
+after 4 -> 8
+result 8
+before -1
+failed: no executeAfter
+before 5
+after 5 -> 11
+11
+released
+nothing to release
+first 10
+released
+released
+nothing to release
+10;20;30;released
+
+released
+nothing to release
+released
+released
+nothing to release
+---- exit code 0 ----

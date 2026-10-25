@@ -1,0 +1,1 @@
+strinplace_loopvar.df(3): error: 'w' is a read-only borrow (a parameter or a loop variable): its string cannot be changed in place (spec 4.1)

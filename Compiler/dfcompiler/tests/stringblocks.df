@@ -1,0 +1,64 @@
+// Block strings (spec 4.4.4): above 4091 bytes a string is a chain of 4 KB blocks, changed where it is
+alias Root as r
+
+// growing past 4091 bytes makes a block string; a borrow follows it
+string text = "".padLeft(4000, 'a')
+string view = text
+for i32 round in 0..300 {
+  text += "b"
+}
+r.Console.log($"{text.len} {view.len} {text.sizeof} {text == view} {text.endsWith("ab")}")
+
+// reading by position across the blocks, from the start, the end and the middle
+string chars = ""
+arr<u64> positions = [0, 3999, 4000, 4071, 4072, 4073, 4299]
+for u64 p in positions {
+  chars += text[p].toStr()
+}
+r.Console.log(chars)
+
+// editing in the middle: insert, remove, replaceAt; only the blocks touched change
+text.insert(4050, "<MID>")
+r.Console.log($"{text.len} {text.substr(4048, 9)} {view.contains("<MID>")}")
+text.remove(4050, 5)
+r.Console.log($"{text.len} {text.substr(4048, 4)}")
+text.replaceAt(0, 3, "XYZ")
+text.prepend(">>")
+text.append("<<")
+r.Console.log($"{text.len} {text.substr(0, 6)} {text.substr(4300, 10)}")
+
+// a big insertion splits the block; a big removal frees blocks
+string big = "".padLeft(9000, 'q')
+text.insert(10, big)
+r.Console.log($"{text.len} {text[10]} {text[9009]} {text[9010]}")
+text.remove(5, 9000)
+r.Console.log($"{text.len} {text.substr(0, 8)}")
+
+// multi-byte characters never straddle two blocks
+string wide = "".padLeft(3000, 'é')
+r.Console.log($"{wide.len} {wide.sizeof} {wide[2047]} {wide[2999]}")
+wide[1500] = 'x'
+wide[2036] = '\u{1F600}'
+r.Console.log($"{wide.len} {wide.sizeof} {wide[1500]} {wide[2036]} {wide[2037]}")
+
+// iteration, comparison, search and printing
+i32 count = 0
+for char c in wide {
+  count += 1
+}
+string other = wide!
+r.Console.log($"{count} {other == wide} {wide.indexOf("x")} {wide.lastIndexOf('é')}")
+r.Console.log(text.substr((u32)text.len - 12, 12))
+
+// clear keeps a block string; shrink makes it small again
+string temp = "".padLeft(5000, 'w')
+string tempView = temp
+temp.clear()
+r.Console.log($"[{temp}] {tempView.len}")
+temp += "small again"
+temp.shrink()
+r.Console.log($"{temp} {temp.len} {tempView}")
+string longText = "".padLeft(4500, 'k')
+longText.remove(100, 4400)
+longText.shrink()
+r.Console.log($"{longText.len} {longText.substr(95, 10)}")

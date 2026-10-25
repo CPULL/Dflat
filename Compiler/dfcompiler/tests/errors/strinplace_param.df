@@ -1,0 +1,5 @@
+fun string shout(string text) {
+  text += "!"
+  return text
+}
+Root.Console.log(shout("hi"))

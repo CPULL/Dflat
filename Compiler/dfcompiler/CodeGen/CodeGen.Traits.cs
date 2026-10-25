@@ -141,9 +141,12 @@ public sealed partial class CodeGen {
     foreach (var member in body.Children) {
       switch (member.Kind) {
         case "Decl": {
-          var (_, _, isStatic, isConst, isOverride) = ReadMods(member);
+          var (visibility, _, isStatic, isConst, isOverride) = ReadMods(member);
           if (isStatic || isConst || isOverride) {
             throw Error("a trait property cannot be static, const or override", member);
+          }
+          if (ModsOf(member).Any(mod => mod is "asparent" or "unrestricted")) {
+            throw Error("'asparent' and 'unrestricted' apply to functions", member);
           }
           if (member.Children.Any(child => child.Kind == "Size")) {
             throw NotSupported("Sized declarations (arr<T>[n] name)", member);
@@ -159,8 +162,9 @@ public sealed partial class CodeGen {
           if (FieldCandidates(trait, member.Text!).Any()) {
             throw Error($"the property '{member.Text}' is already declared in {trait.Name} or its parent trait", member);
           }
+          // private (no keyword, spec 1.6.1): only the code of the trait and, read-only, its sub-traits (spec 11.2)
           trait.Fields.Add(new FieldInfo(member.Text!, ResolveType(typeNode), trait, member) {
-            Visibility = Vis.Public,
+            Visibility = visibility,
             Init = init?.Children[0]
           });
           break;
@@ -187,9 +191,15 @@ public sealed partial class CodeGen {
           throw Error($"'{member.Kind}' is not allowed in a trait", member);
       }
     }
-    foreach (var member in body.Children.Where(member => member.Kind == "Fun")) {
+    var members = body.Children.Where(member => member.Kind == "Fun").ToList();
+    foreach (var member in members.ToList()) {
+      if (member.Children.Any(child => child.Kind is "ExecuteBefore" or "ExecuteAfter")) {
+        members.Insert(members.IndexOf(member), SplitExecuteBlocks(trait, member));
+      }
+    }
+    foreach (var member in members) {
       RejectAtEnd(member);
-      var (_, _, isStatic, isConst, isOverride) = ReadMods(member);
+      var (visibility, explicitVisibility, isStatic, isConst, isOverride) = ReadMods(member);
       if (isStatic || isConst) {
         throw Error("a trait function cannot be static", member);
       }
@@ -202,10 +212,16 @@ public sealed partial class CodeGen {
       if (FieldCandidates(trait, member.Text!).Any()) {
         throw Error($"'{member.Text}' is already a property of {trait.Name}", member);
       }
+      var mods = ModsOf(member);
+      if (mods.Count(mod => mod is "public" or "internal" or "private" or "asparent" or "unrestricted") > 1) {
+        throw Error("a function has one visibility: public, internal, private, asparent or unrestricted", member);
+      }
       var f = RegisterFun(member, null, trait)!;
       f.Class = trait;
       f.IsAbstract = member.Children.Any(child => child.Kind == "NoBody");
-      f.Visibility = Vis.Public;
+      f.Visibility = visibility;   // private (no keyword, spec 1.6.1): only the trait, its sub-traits and the class that implements it
+      f.IsAsParent = mods.Contains("asparent");
+      f.IsUnrestricted = mods.Contains("unrestricted");
       f.TSlot = trait.TraitMethods.Count;
       trait.TraitMethods.Add(f);
       for (var up = trait.Super; up != null; up = up.Super) {
@@ -214,6 +230,107 @@ public sealed partial class CodeGen {
         }
       }
     }
+    RegisterTraitInit(trait);
+  }
+
+  // ---------------------------------------------------------------- executeBefore / executeAfter (spec 11.2)
+
+  const string ImplPrefix = "__impl_";   // a name no program can write (a name cannot start with _)
+
+  // fun R m(params) executeBefore { B } executeAfter { A } becomes two trait functions:
+  //   __impl_m(params): what the class implements (its body is the default body of m, if any); private
+  //   m(params) { B; var __result = __impl_m(params); A; return __result }: the default of the trait, the only m there is
+  // so B and A run on every call of m, cannot be overridden, and A runs only when the implementation succeeded. The class writes
+  // 'override fun m', which RegisterMethods turns into __impl_m. Returns the node of __impl_m.
+  Node SplitExecuteBlocks(ClassInfo trait, Node member) {
+    string name = member.Text!;
+    if (member.Children.Any(child => child.Kind == "GenericParams")) {
+      throw NotSupported("executeBefore / executeAfter on a generic function", member);
+    }
+    var returns = member.Children.FirstOrDefault(child => child.Kind == "Returns");
+    if (returns != null && returns.Children.Count > 1) {
+      throw NotSupported("executeBefore / executeAfter on a function with several return values", member);
+    }
+    var before = member.Children.FirstOrDefault(child => child.Kind == "ExecuteBefore")?.Children[0];
+    var after = member.Children.FirstOrDefault(child => child.Kind == "ExecuteAfter")?.Children[0];
+    var parameters = member.Children.First(child => child.Kind == "Params");
+    var implementation = Synthetic("Fun", member, ImplPrefix + name);
+    foreach (var child in member.Children.Where(child => child.Kind is "Returns" or "Params" or "Block" or "NoBody")) {
+      implementation.Add(child);
+    }
+    trait.Hooked.Add(name);
+
+    var args = Synthetic("Args", member);
+    foreach (var p in parameters.Children) {
+      Node arg = Synthetic("Name", p, p.Text);
+      if (p.Kind == "WritableRefParam") {
+        arg = Synthetic("WritableAddressOf", p).Add(arg);
+      } else if (p.Kind == "GiftParam") {
+        arg = Synthetic("Gift", p).Add(arg);
+      }
+      args.Add(arg);
+    }
+    var call = Synthetic("Call", member).Add(Synthetic("Name", member, ImplPrefix + name)).Add(args);
+    var block = Synthetic("Block", member);
+    if (before != null) {
+      foreach (var statement in before.Children) {
+        block.Add(statement);
+      }
+    }
+    if (returns == null) {
+      block.Add(Synthetic("ExprStmt", member).Add(call));
+    } else {
+      block.Add(Synthetic("Decl", member, "__result").Add(Synthetic("Type", member, "var")).Add(Synthetic("Init", member).Add(call)));
+    }
+    if (after != null) {
+      foreach (var statement in after.Children) {
+        block.Add(ResultReads(statement, name, returns != null));
+      }
+    }
+    if (returns != null) {
+      block.Add(Synthetic("Return", member).Add(Synthetic("Name", member, "__result")));
+    }
+    member.Children.RemoveAll(child => child.Kind is "Block" or "NoBody" or "ExecuteBefore" or "ExecuteAfter");
+    member.Add(block);
+    return implementation;
+  }
+
+  // m.result in an executeAfter block: the value the implementation returned, read-only
+  Node ResultReads(Node node, string method, bool hasResult) {
+    bool IsResult(Node n) => n is { Kind: "Member", Text: "result" } && n.Children[0] is { Kind: "Name" } owner && owner.Text == method;
+    if (node.Kind is "Assign" or "PreInc" or "PostInc" && node.Children.Count > 0 && IsResult(node.Children[0])
+        || node.Kind == "WritableAddressOf" && IsResult(node.Children[0]) || node.Kind == "Gift" && IsResult(node.Children[0])) {
+      throw Error($"{method}.result is read-only", node);
+    }
+    if (IsResult(node)) {
+      return hasResult ? Synthetic("Name", node, "__result") : throw Error($"{method} returns nothing: there is no {method}.result", node);
+    }
+    for (int i = 0; i < node.Children.Count; i++) {
+      node.Children[i] = ResultReads(node.Children[i], method, hasResult);
+    }
+    return node;
+  }
+
+  // the property initializers and the constructor of a trait run in a function of the trait (__tinit), so they see its private members
+  void RegisterTraitInit(ClassInfo trait) {
+    var statements = new List<Node>();
+    foreach (var field in trait.Fields.Where(field => field.Init != null)) {
+      statements.Add(Assignment(field.Name, field.Init!, field.At, false));
+    }
+    if (trait.CtorBlock != null) {
+      statements.AddRange(trait.CtorBlock.Children);
+    }
+    if (statements.Count == 0) {
+      return;
+    }
+    var block = Synthetic("Block", trait.Node);
+    foreach (var statement in statements) {
+      block.Add(statement);
+    }
+    var node = Synthetic("Fun", trait.Node, "__tinit").Add(Synthetic("Params", trait.Node)).Add(block);
+    var f = RegisterFun(node, null, trait)!;
+    f.Class = trait;
+    trait.InitFun = f;
   }
 
   // for every class: what answers each method of each trait it implements
@@ -231,7 +348,8 @@ public sealed partial class CodeGen {
           implementation = method;                 // the default implementation of the trait
         }
         if (implementation == null) {
-          throw Error($"class '{cls.Name}' must implement {trait.Name}.{method.Name[(method.Name.IndexOf('.') + 1)..]}", cls.Node);
+          string shown = method.Name[(method.Name.IndexOf('.') + 1)..];
+          throw Error($"class '{cls.Name}' must implement {trait.Name}.{(shown.StartsWith(ImplPrefix) ? shown[ImplPrefix.Length..] : shown)}", cls.Node);
         }
         methods.Add(implementation);
       }
@@ -242,7 +360,8 @@ public sealed partial class CodeGen {
   // ---------------------------------------------------------------- properties of traits
 
   // every field of this name visible from a class or a trait: its own, its parents', those of the traits it implements
-  IEnumerable<FieldInfo> FieldCandidates(ClassInfo start, string name) {
+  // withPrivate: also the private properties of the traits of a class (the C glue of the collections)
+  IEnumerable<FieldInfo> FieldCandidates(ClassInfo start, string name, bool withPrivate = false) {
     if (start.IsTrait) {
       for (var t = start; t != null; t = t.Super) {
         foreach (var field in t.Fields.Where(f => f.Name == name)) {
@@ -255,8 +374,9 @@ public sealed partial class CodeGen {
       foreach (var field in c.Fields.Where(f => f.Name == name)) {
         yield return field;
       }
+      // the private properties of a trait are not seen from the class: two traits with the same private name never clash (spec 11.2)
       foreach (var trait in TraitClosure(c.Traits)) {
-        foreach (var field in trait.Fields.Where(f => f.Name == name)) {
+        foreach (var field in trait.Fields.Where(f => f.Name == name && (f.Visibility != Vis.Private || withPrivate || LibraryCode))) {
           yield return field;
         }
       }
@@ -305,22 +425,12 @@ public sealed partial class CodeGen {
 
   // ---------------------------------------------------------------- construction
 
-  // statements of the traits this class introduces: property initializers, then the trait constructor bodies
+  // the traits this class introduces, parent traits first: a call of TraitName.__tinit() each (property initializers, then the constructor body)
   List<Node> TraitInitStatements(ClassInfo cls, Node at) {
     var statements = new List<Node>();
-    foreach (var trait in IntroducedTraits(cls)) {
-      foreach (var field in trait.Fields.Where(field => field.Init != null)) {
-        // this.name, or this.TraitName.name when two traits have a property of this name
-        Node owner = Synthetic("Name", at, "this");
-        if (FieldCandidates(cls, field.Name).Distinct().Count() > 1) {
-          owner = Synthetic("Member", at, trait.Name).Add(owner);
-        }
-        var target = Synthetic("Member", at, field.Name).Add(owner);
-        statements.Add(Synthetic("Assign", at, "=").Add(target).Add(field.Init!));
-      }
-      if (trait.CtorBlock != null) {
-        statements.AddRange(trait.CtorBlock.Children);
-      }
+    foreach (var trait in IntroducedTraits(cls).Where(trait => trait.InitFun != null)) {
+      var callee = Synthetic("Member", at, "__tinit").Add(Synthetic("Name", at, trait.Name));
+      statements.Add(Synthetic("ExprStmt", at).Add(Synthetic("Call", at).Add(callee).Add(Synthetic("Args", at))));
     }
     return statements;
   }

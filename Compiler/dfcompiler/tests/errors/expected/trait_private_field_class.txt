@@ -1,0 +1,1 @@
+trait_private_field_class.df(5): error: 'hits' is private in the trait Counter: only the code of the trait sees it

@@ -15,7 +15,7 @@ public class Car(->Engine engine, string plate) {
 }
 
 trait Shape {
-  fun string Name()
+  public fun string Name()
 }
 public class Square : Shape {
   override fun string Name() { "square" }

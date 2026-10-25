@@ -120,6 +120,11 @@ public sealed partial class CodeGen {
     Add("string", "padLeft", Fun("string", "df_str_pad_left", new[] { "u32", "char" }, needs: TextNeed));
     Add("string", "padRight", Fun("string", "df_str_pad_right", new[] { "u32" }, "32u", TextNeed));
     Add("string", "padRight", Fun("string", "df_str_pad_right", new[] { "u32", "char" }, needs: TextNeed));
+    Add("string", "insert", Fun("string", "df_str_insert", new[] { "u32", "string" }, needs: TextNeed));
+    Add("string", "remove", Fun("string", "df_str_remove", new[] { "u32", "u32" }, needs: TextNeed));
+    Add("string", "replaceAt", Fun("string", "df_str_replace_at", new[] { "u32", "u32", "string" }, needs: TextNeed));
+    Add("string", "append", Fun("string", "df_str_append_new", new[] { "string" }, needs: TextNeed));
+    Add("string", "prepend", Fun("string", "df_str_prepend", new[] { "string" }, needs: TextNeed));
     Add("string", "toCStr", Fun("arr<u8>", "df_str_tocstr", NoParams, "0", TextNeed));
     Add("string", "toCStr", Fun("arr<u8>", "df_str_tocstr", new[] { "StringEncoding" }, needs: TextNeed));
 
@@ -158,7 +163,8 @@ public sealed partial class CodeGen {
       ["contains"] = new[] { "val", "caseSensitive" }, ["startsWith"] = new[] { "val", "caseSensitive" },
       ["endsWith"] = new[] { "val", "caseSensitive" }, ["split"] = new[] { "separator" },
       ["padLeft"] = new[] { "totalWidth", "paddingChar" }, ["padRight"] = new[] { "totalWidth", "paddingChar" },
-      ["toCStr"] = new[] { "encoding" }
+      ["toCStr"] = new[] { "encoding" }, ["insert"] = new[] { "pos", "text" }, ["remove"] = new[] { "pos", "len" },
+      ["replaceAt"] = new[] { "pos", "len", "text" }, ["append"] = new[] { "text" }, ["prepend"] = new[] { "text" }
     };
     foreach (var entry in table["string"].Where(entry => names.ContainsKey(entry.Key))) {
       for (int index = 0; index < entry.Value.Count; index++) {
@@ -234,7 +240,7 @@ public sealed partial class CodeGen {
       return ObjectCall(receiver, name, args, scope, at);
     }
     if (Methods.TryGetValue(receiver.Type, out var byName) && byName.TryGetValue(name, out var overloads)) {
-      return StdCall($"{receiver.Type}.{name}", overloads, args, scope, at, receiver.Code);
+      return StdCall($"{receiver.Type}.{name}", overloads, args, scope, at, StrRead(receiver));
     }
     return null;
   }

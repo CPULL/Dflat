@@ -1,0 +1,29 @@
+0: len 0 sizeof 0 last false
+1: len 1 sizeof 1 last true
+27: len 27 sizeof 27 last true
+28: len 28 sizeof 28 last true
+59: len 59 sizeof 59 last true
+60: len 60 sizeof 60 last true
+123: len 123 sizeof 123 last true
+124: len 124 sizeof 124 last true
+4091: len 4091 sizeof 4091 last true
+4092: len 4092 sizeof 4092 last true
+10000: len 10000 sizeof 10000 last true
+accents: len 2100 sizeof 4200
+mixed: len 2101 sizeof 4201 index 2100
+grow 10 10
+grow 20 20
+grow 30 30
+grow 40 40
+grow 50 50
+grow 60 60
+grow 70 70
+grow 80 80
+true true false true
+true true [] 0 0
+empty is false
+true 7 7
+chars 5003 tail end at n
+BBEN
+tab	here "quoted" 😀 19 22
+---- exit code 0 ----

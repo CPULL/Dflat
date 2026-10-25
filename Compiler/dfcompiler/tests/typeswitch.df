@@ -4,7 +4,7 @@ alias Root as r
 Generic Convertible { Numeric, char, string }
 
 trait Named {
-  fun string Name()
+  public fun string Name()
 }
 
 public class Dog(string label) : Named {

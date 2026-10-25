@@ -1,0 +1,4 @@
+arr<string> words = ["a", "b"]
+for string w in words {
+  w = w.toUpper()
+}

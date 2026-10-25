@@ -62,7 +62,10 @@ Some methods are inherited from Root.IO.Stream
 | `bool writeByte(byte value)` | Writes one byte; true if the byte was written |
 | `flush()` | Sends and receives any pending data |
 | `close()` | Terminate gracefully the connection, the connection can be reopen later as new connection |
-| `reopen()` | Tries to reconnect with a closed connection. |
+| `reopen()` | Tries to reconnect with a closed connection.
+`reopen()` is a convenience operation.
+It closes the current socket if needed and creates a new connection
+using the original connection parameters. |
 
 ### Network exceptions
 
@@ -150,7 +153,7 @@ Exceptions: Can throw ConnectionRefusedException, ConnectionTimedOutException, o
 - Address vs endpoint: IPAddress carries the port. Is that deliberate (like .NET IPEndPoint), or should address and port be separate types? The i32 port property takes reserved values, but the constructors take u32.
 - DNS in the constructor: IPAddress("www.google.com") blocks on a lookup. A name can also resolve to several addresses (IPv4 and IPv6). Which one wins? What happens when the lookup fails? - There is no DNS exception in the list.
 - Silent exceptions on constructors: if TCPStream(...) is refused and no catch is present, what does the constructor return? Null, since it’s an object?
-- Reopen: close() says the connection can be reopened, and there is reopen(). As I recall the stdlib streams, a closed stream cannot be reopened. Should network streams behave differently?
+- Reopen: close() says the connection can be reopened, and there is reopen(). As I recall the stdlib streams, a closed stream cannot be reopened. Should network streams behave differently? Yes, reopen is a convenience operation that closes the previous and creates a new one using the same conneciton parameters.
 - Callbacks: wait, waitText and waitBinary imply an event model. On which thread or loop does the callback run? Does the language have threads or async yet, or is this a new concept?
 - TLS: wss:// needs it, and nothing in the spec covers it. Is TLS in scope for this library, or ws:// only for now? Is TCPStream also used for TLS?
 - Blocking and timeouts: read returns 0 when nothing is available and null at the end. Does that mean non-blocking? How does timeOut combine with that, and with TimedOutException, which overlaps ConnectionTimedOutException?

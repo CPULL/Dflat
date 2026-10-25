@@ -90,8 +90,10 @@ public sealed partial class CodeGen {
       return ExprOf(n.Children[1], scope, expected);
     }
     if (left.Type == "string") {
-      string fallback = Convert(ExprOf(n.Children[1], scope, "string"), "string", n);
-      return new Expr(WithTemp(left, temp => $"({temp}.len != 0 ? {temp} : {fallback})"), "string");
+      // the result is a string of its own: the side that is borrowed is copied (the other side is not evaluated)
+      var other = ExprOf(n.Children[1], scope, "string");
+      string fallback = StrOwnedAs(other, "string", Convert(other, "string", n));
+      return new Expr(WithTemp(left, temp => $"(df_str_len({temp}) != 0 ? {StrOwnedAs(left, "string", temp)} : {fallback})"), "string", true);
     }
     if (!IsNullable(left.Type)) {
       throw Error($"the left side of '??' is {left.Type}, which is never null", n);
@@ -122,7 +124,7 @@ public sealed partial class CodeGen {
     }
     if (target.Type == "string") {
       string value = Convert(ExprOf(valueNode, scope, "string"), "string", at);
-      return $"({target.Code}.len != 0 ? (void)0 : (void)({target.Code} = {value}))";
+      return $"(df_str_len({target.Code}) != 0 ? (void)0 : (void)({target.Code} = {value}))";
     }
     throw Error($"'??=' needs a nullable target, not {target.Type}", at);
   }
@@ -156,7 +158,7 @@ public sealed partial class CodeGen {
         throw Error("'?.' needs a member with a single value", safeNode);
       }
       resultType = IsNullable(inner.Type) || IsClass(inner.Type) || NullByDefault(inner.Type) ? inner.Type : inner.Type + "?";
-      string has = IsNullable(target.Type) ? $"{temp}.has" : IsClass(target.Type) ? $"{temp} != NULL" : $"{temp}.len != 0";
+      string has = IsNullable(target.Type) ? $"{temp}.has" : IsClass(target.Type) ? $"{temp} != NULL" : $"df_str_len({temp}) != 0";
       string whenNull = Convert(new Expr("0", "null"), resultType, safeNode);
       return $"(({has}) ? {Convert(inner, resultType, safeNode)} : {whenNull})";
     });

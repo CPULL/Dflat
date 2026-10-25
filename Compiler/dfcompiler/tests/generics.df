@@ -5,7 +5,7 @@ Generic Texts { string, char }
 Generic Whole { Integers, bool }
 
 trait Named {
-  fun string Name()
+  public fun string Name()
 }
 
 public class Dog(string label) : Named {

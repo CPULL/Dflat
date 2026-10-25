@@ -3,7 +3,7 @@
 // arr<T> has an iterator too
 alias Root as r
 
-public class Evens(u64 limit) : IndexCollection<u64> {
+public class Evens(uns limit) : IndexCollection<u64> {
   override fun uns get_len() { limit }
   override fun bool has(u64 value) { value % 2 == 0 && value < limit * 2 }
   override fun clear() { }

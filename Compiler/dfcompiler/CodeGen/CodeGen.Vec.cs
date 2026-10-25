@@ -19,17 +19,42 @@ trait Iterator { }
 
 // the cursor is internal to each iterator, the trait fixes only the methods (spec 6.7.1)
 trait IndexIterator<Item> : Iterator {
-  fun (Item value, bool isValid) next()
+  public fun (Item value, bool isValid) next()
 }
 
+// the counter of open iterators and views (spec 6.4, 11.2): private to the trait, so every collection has it and none can change it.
+// While it is above zero the size and the order of the collection cannot change (checkUnlocked)
 trait Collection<Item> {
-  fun uns get_len()
-  fun bool has(Item value)
-  fun clear()
+  uns iteratorCounter
+  public fun uns get_len()
+  public fun bool has(Item value)
+  public fun clear()
+
+  fun acquireIterator() {
+    iteratorCounter += 1
+  }
+
+  fun checkUnlocked() {
+    if iteratorCounter > 0 {
+      throw ModifyingIteratedCollectionException("Modifying Iterated Collection Exception")
+    }
+  }
+
+  // called by the atEnd of the iterators and views (spec 6.4, 12.5)
+  asparent fun releaseIterator() { }
+    executeAfter {
+      if iteratorCounter == 0 {
+        throw InvalidIteratorReleaseException("Invalid Iterator Release Exception")
+      }
+      iteratorCounter -= 1
+    }
 }
 
 trait IndexCollection<Item> : Collection<Item> {
-  fun IndexIterator<Item> getIterator()
+  public fun IndexIterator<Item> getIterator()
+    executeAfter {
+      acquireIterator()
+    }
 }
 
 // the iterator of a vec (spec 6.7): a child of its vec (12.5). While it exists the vec counts it as open (spec 6.4) and cannot change its size;
@@ -172,15 +197,8 @@ public class arrIterator<T>(arr<T> items) : IndexIterator<T> {
 public class vec<T> : IndexCollection<T> {
   arr<T> items = arr<T>[0]
   uns count = 0
-  uns iterators = 0   // the open iterators and views (spec 6.4): while above zero the size cannot change
 
   override fun uns get_len() { count }
-
-  fun checkUnlocked() {
-    if iterators > 0 {
-      throw ModifyingIteratedCollectionException("Modifying Iterated Collection Exception")
-    }
-  }
 
   override fun bool has(T value) {
     uns i = 0
@@ -194,18 +212,10 @@ public class vec<T> : IndexCollection<T> {
   }
   public fun uns get_capacity() { items.len }
 
+  // the counter of open iterators comes from the executeAfter of IndexCollection
   override fun IndexIterator<T> getIterator() {
-    iterators += 1
     vecIterator<T> iterator = vecIterator<T>(this)
     return ->iterator
-  }
-
-  // called by the atEnd of the iterators and views of the vec (spec 6.4, 12.5)
-  asparent fun releaseIterator() {
-    if iterators == 0 {
-      throw InvalidIteratorReleaseException("Invalid Iterator Release Exception")
-    }
-    iterators -= 1
   }
 
   fun grow(uns needed) {
@@ -372,15 +382,8 @@ public class list<T> : IndexCollection<T> {
   u64 first           // the first node: a pointer to a node in the C (CodeGen.List.cs)
   u64 last            // the last node, only to add at the end
   uns count = 0
-  uns iterators = 0   // the open iterators and views (spec 6.4): while above zero the size cannot change
 
   override fun uns get_len() { count }
-
-  fun checkUnlocked() {
-    if iterators > 0 {
-      throw ModifyingIteratedCollectionException("Modifying Iterated Collection Exception")
-    }
-  }
 
   public fun add(->T value) {
     checkUnlocked()
@@ -467,18 +470,10 @@ public class list<T> : IndexCollection<T> {
     return this.node_replace(position, ->value)
   }
 
+  // the counter of open iterators comes from the executeAfter of IndexCollection
   override fun IndexIterator<T> getIterator() {
-    iterators += 1
     listIterator<T> iterator = listIterator<T>(this)
     return ->iterator
-  }
-
-  // called by the atEnd of the iterators and views of the list (spec 6.4, 12.5)
-  asparent fun releaseIterator() {
-    if iterators == 0 {
-      throw InvalidIteratorReleaseException("Invalid Iterator Release Exception")
-    }
-    iterators -= 1
   }
 
   // the position of value among count items from start, relative to start (the indexOf of a list view)
@@ -493,7 +488,7 @@ public class list<T> : IndexCollection<T> {
 
   string VecElem(string type) => classInstanceArgs[type].Args[0];
 
-  string VecField(string type, string name) => FindField(ObjInfo(type), name)!.CName;
+  string VecField(string type, string name) => FieldCandidates(ObjInfo(type), name, true).First().CName;
 
   string VecArrType(string vecType) => "arr<" + VecElem(vecType) + ">";
 
@@ -566,7 +561,7 @@ public class list<T> : IndexCollection<T> {
       if (IsClass(elem) && !value.Fresh && value.Type != "null") {
         throw Error("a vec owns its items: put a new object in the literal, or move one in with ->x", item);
       }
-      sb.Append($"{held}->{VecField(type, "items")}.p[{index}] = {Convert(value, elem, item)}; ");
+      sb.Append($"{held}->{VecField(type, "items")}.p[{index}] = {StrItemAs(value, elem, Convert(value, elem, item))}; ");
     }
     sb.Append($"{held}->{VecField(type, "count")} = {count}; {held}; }})");
     return new Expr(sb.ToString(), type, true);
@@ -616,14 +611,14 @@ public class list<T> : IndexCollection<T> {
     if (IsList(obj.Type)) {
       // the item leaves the list and the node goes away (spec 6.6)
       var removed = ObjectCall(obj, "takeAt", new List<Node> { operand.Children[1] }, scope, gift) ?? throw Error("no takeAt", gift);
-      return new Expr(removed.Code, removed.Type, IsClass(removed.Type));
+      return new Expr(removed.Code, removed.Type, IsClass(removed.Type) || removed.Type == "string");
     }
     bool isVec = IsVec(obj.Type);
     if (!isVec && !IsArr(obj.Type)) {
       throw Error("only a variable, a field or an item of an array or a vector can be moved with ->", gift);
     }
     string elem = isVec ? VecElem(obj.Type) : ArrElem(obj.Type);
-    if (!IsClass(elem)) {
+    if (!IsClass(elem) && elem != "string") {
       Warn("-> on a basic value is ignored: it is a copy", gift, 1);
       return IndexExpr(operand, scope);
     }
@@ -645,6 +640,9 @@ public class list<T> : IndexCollection<T> {
     string count = VecField(cls.Name, "count");
     if (IsClass(VecElem(cls.Name))) {
       sb.Append($"  for (df_uns i = 0; i < self->{count}; i++) {{ if (self->{items}.p[i] != NULL) {{ void* o = (void*)self->{items}.p[i]; self->{items}.p[i] = NULL; df_drop(o); }} }}\n");
+    }
+    if (VecElem(cls.Name) == "string") {
+      sb.Append($"  for (df_uns i = 0; i < self->{items}.len; i++) {{ df_str_free(self->{items}.p[i]); self->{items}.p[i] = NULL; }}\n");
     }
     sb.Append($"  free(self->{items}.p);\n  self->{items}.p = NULL;\n  self->{items}.len = 0;\n  self->{count} = 0;\n");
   }
@@ -673,10 +671,12 @@ public class list<T> : IndexCollection<T> {
     bool owned = IsClass(target.Type) && (target.Variable?.Own ?? target.IsField);
     string zero = ZeroValue(elem);
     string store = Convert(new Expr(incoming, elem), target.Type, at);
+    string assignCode = target.Type == "string"
+      ? StrAssign(target, "true", incoming) + "; "   // the item moves into the variable or the field, the old string ends
+      : $"{CType(target.Type)} {old} = {target.Code}; {target.Code} = {store}; " + (owned ? $"if ({old} != {target.Code}) {{ df_drop((void*){old}); }} " : "");
     string code = $"({{ {CType(vec.Type)} {held} = {NullChecked(vec.Code, vec.Type)}; bool {ok} = false; {CType(elem)} {incoming} = {zero}; {LockCheck(held, vec.Type)}"
       + $"if ({held}->{count} > 0) {{ {held}->{count} -= 1; {incoming} = {held}->{items}.p[{held}->{count}]; {held}->{items}.p[{held}->{count}] = {zero}; {ok} = true; }} "
-      + $"{CType(target.Type)} {old} = {target.Code}; {target.Code} = {store}; "
-      + (owned ? $"if ({old} != {target.Code}) {{ df_drop((void*){old}); }} " : "")
+      + assignCode
       + $"{ok}; }})";
     return new Expr(owned ? CheckRaise(code, "bool") : code, "bool");
   }
@@ -736,7 +736,7 @@ public class list<T> : IndexCollection<T> {
     sb.Append(LockCheck(held, vec.Type));
     sb.Append($"df_uns {amount} = {SourceLength(sourceType, s)}; {VecReserve(held, vec.Type, $"{count} + {amount}")}");
     sb.Append(ForEachSourceItem(sourceType, s, "0", amount, item =>
-      $"{items}.p[{count}] = {item}; {count} += 1; " + (moving && IsClass(elem) ? $"{item} = NULL; " : "")));
+      $"{items}.p[{count}] = {(elem == "string" && !moving ? $"df_str_dup({item})" : item)}; {count} += 1; " + (moving && (IsClass(elem) || elem == "string") ? $"{item} = NULL; " : "")));
     if (moving && sourceIsObject) {
       sb.Append($"df_drop((void*){s}); ");   // the collection was moved in: its items are gone and it ends
     }
@@ -775,7 +775,7 @@ public class list<T> : IndexCollection<T> {
 
   // a change of the size or of the order while the collection has open iterators or views (spec 6.4): ModifyingIteratedCollectionException
   string LockCheck(string held, string type) =>
-    $"if ({held}->{VecField(type, "iterators")} > 0) {{ df_raise(&df_desc_ModifyingIteratedCollectionException, {fn!.NameConst}); {RaiseJump} }} ";
+    $"if ({held}->{VecField(type, "iteratorCounter")} > 0) {{ df_raise(&df_desc_ModifyingIteratedCollectionException, {fn!.NameConst}); {RaiseJump} }} ";
 
   Expr? VecArrayMember(Expr vec, string name, List<Node> args, Scope scope, Node at) {
     if (!VecChangingMembers.Contains(name)) {

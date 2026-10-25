@@ -1,17 +1,6 @@
 Compiler version 0.0.22 alpha for version 0.0.15 of the specs 2026/10/25
 
 Changes from the previous version -----------------------
-- traits (spec 11.2): a member without a keyword is private: only the code of the trait sees it; public members are written public; same private names in two traits never clash
-- a sub-trait reads the private fields of its parent traits and calls their private functions; it cannot assign the fields
-- asparent functions in traits
-- executeBefore { } and executeAfter { } on trait methods (m.result in executeAfter), not overridable, not run again by parent.m()
-- Collection holds the counter of open iterators (acquireIterator, checkUnlocked, releaseIterator); custom collections get it; a for loop over a custom collection ends its iterator
-- strings use the layout of spec 4.4 (step a): size classes 32 to 4096 bytes, read-only literals, lengths in the header (.len and .sizeof are O(1)); same behaviour as before
-- strings are freed (step b): the owner frees its string when it is assigned again or its scope ends; b = a borrows, a! copies; fields, items and returned values own their string; new strings only read in a statement are freed at its end
-- strings change in place (step c, spec 4.1): +=, text[pos] = c, clear() always; trim, substr, replace, toUpper ... when the result is not used or goes back to the same string (s = s.trim(), known aliases included); a borrow sees the change; a string that outgrows its class moves (class 13) and its borrows follow; new methods insert, remove, replaceAt, append, prepend, clear, shrink; in place on a const, a parameter or a loop variable is a compile error
-- block strings (step d, spec 4.4.4): above 4091 bytes a string is a root and a chain of 4 KB blocks; +=, insert, remove, replaceAt, append, prepend and text[pos] = c change only the blocks touched (split when full, merge small neighbours, cursor on the last change); .len, .sizeof, printing and text[pos] work on the blocks; the other functions read a flat copy; shrink packs the blocks or goes back to a single block
-- strings in collections (step e): an item is always its own copy in its smallest form (add, insert, c[k] = s, fill, literals, add(collection), copyFrom); a replaced or removed item is freed; vec and list free their strings when they end; ->s moves a string (the variable or field is left empty), also into a parameter written ->string
-- supported spec version 0.0.15
 
 Done -----------------------
 

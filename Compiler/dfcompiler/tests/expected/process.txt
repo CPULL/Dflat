@@ -1,6 +1,6 @@
 lapses: 1500 5000000 -3 300
 slept, the clock moved: true
-read at the end of the input: false, as text: ﻿
+read at the end of the input: true, as text: -
 clear on a redirected output prints nothing
 PATH is set: true, a missing variable: []
 named argument: true
@@ -11,14 +11,14 @@ arguments with spaces and quotes arrive whole: true
 missing: exit -1, Program not found: dflat-no-such-program (id 25)
 exec raised Program not found: dflat-no-such-program
 working directory missing: The working directory does not exist: /c:/dflat-no-such-folder/inside
-workDir: true, error is null true
+workDir: found, error is null true
 written by the program started with exec
 exec gave 4
 getCurrentDir is a directory: true
 full path: true, of . true, of an absolute path true
 relative: ../z/w.df | . | ../.. | y/z
 other drive: /d:/q, case does not count: ../B
-setCurrentDir(string): true
+setCurrentDir(string): the marker by its bare name true
 setCurrentDir(File): true
 missing folder: FileNotFoundException, a file: InvalidPathException
 ---- exit code 5 ----

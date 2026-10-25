@@ -20,6 +20,7 @@ r.Console.log($"slept, the clock moved: {r.Time.clock() != start}")
 
 // Console (stdlib 2): with the input redirected, read gives the next character and null at the end; clear does nothing
 char? key = r.Console.read()
+if key == '\u{FEFF}' then key = r.Console.read()    // the test runner may start the input with a byte order mark
 r.Console.log($"read at the end of the input: {key == null}, as text: {key ?? '-'}")
 r.Console.clear()
 r.Console.log("clear on a redirected output prints nothing")
@@ -64,14 +65,17 @@ fun string missingFolder() {
 r.Console.log($"working directory missing: {missingFolder()}")
 ##endif
 
-// a working directory in the Dflat form (/d:/folder on Windows)
+// a working directory in the Dflat form (/d:/folder on Windows): the program finds a file of that folder by its bare name
+// (a file, not the text of the path: the temp folder can be a short 8.3 path, C:\Users\RUNNER~1\...)
 string tempFolder = File.getTempDir()
+string marker = "dflat-process-marker.txt"
+File(File.combinePaths(tempFolder, marker)).writeAllText("x")
 ##if os == windows
-var inTemp = ep.run("cmd", ["/c", "cd"], workDir: tempFolder)
+var inTemp = ep.run("cmd", ["/c", "if exist " + marker + " echo found"], workDir: tempFolder)
 ##else
-var inTemp = ep.run("pwd", workDir: tempFolder)
+var inTemp = ep.run("sh", ["-c", "test -f " + marker + " && echo found"], workDir: tempFolder)
 ##endif
-r.Console.log($"workDir: {fs.getFullPath(inTemp.output.trim()).toLower() == fs.getFullPath(tempFolder).toLower()}, error is null {inTemp.error == null}")
+r.Console.log($"workDir: {inTemp.output.trim()}, error is null {inTemp.error == null}")
 
 // exec: the program writes on the same console
 ##if os == windows
@@ -92,7 +96,7 @@ r.Console.log($"other drive: {fs.getRelativePath("/c:/x", "/d:/q")}, case does n
 
 string temp = File.getTempDir()
 fs.setCurrentDir(temp)
-r.Console.log($"setCurrentDir(string): {fs.getCurrentDir().path == fs.getFullPath(temp)}")
+r.Console.log($"setCurrentDir(string): the marker by its bare name {File(marker).exists()}")
 fs.setCurrentDir(File(here))
 r.Console.log($"setCurrentDir(File): {fs.getCurrentDir().path == here}")
 
@@ -106,6 +110,7 @@ string aFile = File.combinePaths(temp, "dflat-process-test.txt")
 File(aFile).writeAllText("x")
 r.Console.log($"missing folder: {enter(File.combinePaths(temp, "dflat-no-such-folder"))}, a file: {enter(aFile)}")
 File.delete(aFile)
+File.delete(File.combinePaths(temp, marker))
 
 // exit: the program ends here with its code; the line after it never runs
 r.exit(5)

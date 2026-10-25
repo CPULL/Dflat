@@ -1076,3 +1076,7 @@ STDLIB 0.0.10: PROCESSES, SLEEP, CONSOLE, PATHS (built 2026-10-25, compiler 0.0.
   branches was only written).
 - Tests: process.df (Windows commands under ##if os == windows, sh / cat / sleep / echo / pwd otherwise), features.df uses char? read(),
   errors/read_not_nullable, errors/lapse_from_string. Code examples/snake.df replaces snake-turnbased.df (real time: read, clear, sleep(250)).
+- 2026-10-25, after the first GitHub run: process failed on the build machine without saying the line. run-tests.ps1 now prints the differing lines of every
+  failed test (-Verbose is still accepted). process.df: a byte order mark at the start of the input is skipped before the read check (the runner sends one
+  from this machine, maybe not elsewhere); the working directory and setCurrentDir checks look for a marker file by its bare name instead of comparing path
+  texts (the temp folder can be a short 8.3 path on the build machine). dfcompiler.csproj <Version> follows Program.Version (0.0.21-alpha).

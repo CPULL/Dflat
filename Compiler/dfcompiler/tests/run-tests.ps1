@@ -4,7 +4,7 @@
 #   .\run-tests.ps1 -Build           build the compiler first
 #   .\run-tests.ps1 -Only a,b        run only these tests (names without .df)
 #   .\run-tests.ps1 -Update          save what the tests give now as the expected result (check the diff in git before you trust it)
-#   .\run-tests.ps1 -Verbose         also print the first differing lines
+#   .\run-tests.ps1 -Verbose         accepted for old scripts: the first differing lines of a failed test are always printed
 #
 # Two kinds of test:
 #  * tests\*.df are programs. The expected output is expected\<name>.txt: everything the program printed after the line "---- run ----"
@@ -116,7 +116,8 @@ function Test-One([string]$name, [hashtable]$result, [string]$expectedFile) {
   }
   $script:failed += $name
   Write-Host ("FAIL  {0}" -f $name) -ForegroundColor Red
-  if ($Verbose -or -not $result.Ok) {
+  # always: the log of the automatic build must say which line differs
+  if ($true) {
     $got = $result.Text -split "`n"
     $want = $expected -split "`n"
     $shown = 0

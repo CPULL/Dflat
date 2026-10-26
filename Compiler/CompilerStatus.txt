@@ -1,15 +1,6 @@
 Compiler version 0.0.27 alpha for version 0.0.15 of the specs 2026/10/26
 
 Changes from the previous version -----------------------
-- vec: growth policy of spec 6.8.2 (16 items first, doubles up to a 4 MB block, then by half) and the sized declaration vec<T>[n] name
-- map<K, V> (alias bmap, spec 6.8.4, B+ tree of spec 6.8.4.1), step 1: native keys (integers, bool, char, enums, reals, date, time, and the nullable ones: null is a key, it sorts first) and native values; m[k], m[k] = v, m[k] += v, add, hasKey, has, tryGet, ->m[k], removeAt, remove, removeAll, keyOf, clear, .len, .sizeof, printing in key order; map<K, V> m = [] is an empty map
-- map step 2: string keys (sorted by bytes; the first 8 bytes are the sort key, the full text decides a tie; "" and null are the same key) and string values; the map keeps its own shrunk copies and frees them
-- map step 3: for (K k, V v) in m, for (k, v) in m, for (var k, var v) in m and for var (k, v) in m, in key order (the null key first); the loop holds the counter of open iterators (a new key or a removal inside it raises ModifyingIteratedCollectionException, a new value for an existing key is allowed)
-- map step 4: m.keys and m.values (for x in m.keys, .len, .has, printing, m.keys! and m.values! as a vec); a view kept in a variable counts as open until it ends
-- map string values are inline in a 64-byte slot (up to 59 bytes; a longer one is pointed to); a variable that keeps a value read from a map gets a copy
-- map step 7: literals [k: v, ...] (spec 6.3): keys are expressions; map m = [...] and var m = [...] take their types from the literal; the same constant key twice is a compile error, a key calculated at run time that comes again keeps the later value; the old { k: v } form gives an error that shows the new one
-- a value of the wrong type for a map (m[k] = v, a literal, add, has ...) is a compile error; a function that returns a literal or a copy (x!) returns a new object
-- fixed: tryGet and keyOf of a map with string values no longer give the map's own string as a new one (a double free); ->m[k] of a string and x! held in a variable are freed
 
 Done -----------------------
 

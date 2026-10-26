@@ -1,0 +1,2 @@
+enum Color { red, blue }
+map<Color, i32> paints = [Color.red: 1, Color.red: 2]

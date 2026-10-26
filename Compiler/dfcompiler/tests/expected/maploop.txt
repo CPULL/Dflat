@@ -1,0 +1,24 @@
+alice is 25
+bob is 30
+carol is 40
+95
+30
+33
+45
+alice=25
+bob=30
+carol=40
+[alice: 26, bob: 31, carol: 41]
+false
+false
+4
+alice
+bob
+3
+null: none
+-7: minus seven
+3: three
+900
+true
+41791750
+---- exit code 0 ----

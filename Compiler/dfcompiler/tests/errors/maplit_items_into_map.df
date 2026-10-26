@@ -1,0 +1,1 @@
+﻿map<i32, bool> flags = [1, 2]

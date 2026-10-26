@@ -1,0 +1,41 @@
+alice
+bob
+carol
+95
+50
+60
+80
+3
+3
+true
+false
+true
+[alice, bob, carol]
+[25, 30, 40]
+4
+[alice, bob, carol, dave, eve]
+[25, 30, 40, 50]
+5
+locked
+3
+30 40 50 3 true [30, 40, 50]
+[bob, carol, dave, zed]
+locked
+30
+40
+50
+1
+[null, 2]
+[false, true]
+five
+59
+62
+true
+five!
+62
+1
+[small 0, small 1, small 2, small 4, five!, a string of exactly fifty-nine bytes, the most a slot holds]
+replaced in the loop
+6
+small 0
+---- exit code 0 ----

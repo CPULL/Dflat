@@ -1,0 +1,1 @@
+map_nullable_string_key.df(1): error: string is already nullable; 'string?' is not allowed

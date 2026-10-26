@@ -1,0 +1,1 @@
+map_collection_key.df(1): error: a collection cannot be a key (spec 6.2): vec<i32>

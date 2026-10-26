@@ -1,0 +1,2 @@
+map<i32, bool> flags = []
+for var (i32 k, v) in flags { }

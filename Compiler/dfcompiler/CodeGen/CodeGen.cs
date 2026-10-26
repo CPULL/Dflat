@@ -734,6 +734,11 @@ public sealed partial class CodeGen {
     }
     VarInfo variable;
     string ownsString = type == "string" && initValue is Expr stringValue ? FreshCode(stringValue, code) : "false";
+    if (type == "string" && ownsString == "false" && code.Contains(MapBorrowMark)) {
+      // a string read in place from a map moves with its leaf (spec 6.8.4.1): the variable keeps a copy
+      code = $"df_str_dup({code})";
+      ownsString = "true";
+    }
     if (frames.Peek().Hoisted.TryGetValue(s.Text!, out var hoisted)) {
       // already created at the start of the scope (the scope has atEnd blocks)
       variable = hoisted;
@@ -1187,15 +1192,34 @@ public sealed partial class CodeGen {
         if (expected != null && IsList(expected)) {
           return ListLiteral(n, scope, expected);
         }
+        if (expected != null && IsMap(expected)) {
+          return MapEmptyLiteral(n, expected);
+        }
+        if (n.Children.Count == 0 && expected == null) {
+          throw Error("an empty literal needs a declared type: arr<T>, vec<T>, map<K, V> ...", n);
+        }
         throw Error("a list needs a declared type: arr<T> name = [...]", n);
+      case "MapLit":
+        // [k: v, ...] (spec 6.3, CodeGen.Map.cs)
+        return MapLiteral(n, scope, expected != null && IsMap(expected) ? expected : expected == null ? InferMapType(n, scope, n)
+          : throw Error($"a map literal [k: v] cannot be a {DisplayName(expected)}", n));
+      case "Map":
+        throw Error("map literals are written [k: v, ...] (spec 6.3): the { k: v } form is removed", n);
       case "Index":
         if (n.Children[1].Kind == "Empty") {
           throw NotSupported("Pointers", n);
         }
         return IndexExpr(n, scope);
       case "Copy": {
+        // m.keys! and m.values!: a vec with a copy of them (spec 6.6)
+        if (MapViewOf(n.Children[0], scope) is (Expr viewMap, bool viewKeys)) {
+          return MapViewCopy(viewMap, viewKeys, n);
+        }
         // a! of a string: a copy (the objects need cloning, spec 12.6)
         var copied = ExprOf(n.Children[0], scope);
+        if (MapViewKind(copied.Type) is string viewKind) {
+          return MapViewCopy(MapOfView(copied), viewKind == "mapKeys", n);
+        }
         if (copied.Type == "string") {
           return new Expr(copied.Fresh ? copied.Code : $"df_str_dup({copied.Code})", "string", true);
         }
@@ -1801,6 +1825,11 @@ public sealed partial class CodeGen {
       return args.Count == 0 ? new Expr(StrOf(value, n), "string", value.Type != "string" || value.Fresh) : FormatCall(value, args, scope, n);
     }
 
+    // m.keys.has(k), m.values.has(v): the map itself, no view object (CodeGen.Map.cs)
+    if (callee.Kind == "Member" && callee.Text == "has" && MapViewOf(callee.Children[0], scope) is (Expr viewMap, bool viewKeys)) {
+      return ObjectCall(viewMap, viewKeys ? "hasKey" : "has", args, scope, n) ?? throw Error("no has", n);
+    }
+
     // a function of a value: "text".Trim(), c.IsDigit(), d.addDays(1), numbers.has(3)
     if (callee.Kind == "Member" && IsValueReceiver(callee.Children[0], scope)) {
       var receiver = ExprOf(callee.Children[0], scope);
@@ -1883,6 +1912,9 @@ public sealed partial class CodeGen {
         return EnumEntryExpr(parts[0], parts[1]) ?? throw Error($"'{parts[0]}' has no entry '{parts[1]}'", n);
       }
     }
+    if (n.Text == "len" && MapViewOf(n.Children[0], scope) is (Expr viewMap, _)) {
+      return MapLen(viewMap);   // m.keys.len: the map itself, no view object (CodeGen.Map.cs)
+    }
     var obj = ExprOf(n.Children[0], scope);
     if (IsNullable(obj.Type)) {
       throw Error($"'{n.Text}': the {obj.Type} may be null; use '?.'", n);
@@ -1896,6 +1928,9 @@ public sealed partial class CodeGen {
     }
     if ((IsVec(obj.Type) || IsList(obj.Type)) && n.Text == "sizeof") {
       return CollectionSizeof(obj);
+    }
+    if (IsMap(obj.Type) && n.Text == "sizeof") {
+      return MapSizeof(obj);
     }
     if (IsClass(obj.Type)) {
       // a read-only property of a library class: x.size calls its get_size()

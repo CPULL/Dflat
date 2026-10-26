@@ -126,7 +126,10 @@ public sealed partial class CodeGen {
       case "Paren":
         return ReturnKind(e.Children[0], locals, state);
       case "Gift":
-        return true;
+      case "List":
+      case "MapLit":
+      case "Copy":
+        return true;   // ->x, a literal or a copy: a new object
       case "Call":
         return CallMoves(e, state);
       case "Name":
@@ -151,8 +154,8 @@ public sealed partial class CodeGen {
     if (simple == null) {
       return false;
     }
-    if (callee.Kind == "Member" && simple is "node_take" or "node_replace" && call.Line >= LibraryLine) {
-      return true;   // the item that leaves a list node moves to the caller (CodeGen.List.cs)
+    if (callee.Kind == "Member" && simple is "node_take" or "node_replace" or "tree_take" && call.Line >= LibraryLine) {
+      return true;   // the item that leaves a list node or a map entry moves to the caller (CodeGen.List.cs, CodeGen.Map.cs)
     }
     if (callee.Kind == "Name" && genericFuns.TryGetValue(simple, out var inferredFun)) {
       return TemplateReturnsMoves(inferredFun);
@@ -186,13 +189,21 @@ public sealed partial class CodeGen {
   bool GuessOwner(Node e, Dictionary<FunSig, int>? state) {
     return e.Kind switch {
       "Null" or "Gift" => true,
-      "List" => true,   // a literal: a new collection (it only matters when the variable is an object)
+      "List" or "MapLit" => true,   // a literal: a new collection (it only matters when the variable is an object)
       "Index" => e.Children[0].Kind == "GenericRef" || (e.Children.Count > 1 && e.Children[1].Kind == "Range"),   // vec<T>[n]: a new collection; c[a..b]: a new view
       "Paren" => GuessOwner(e.Children[0], state),
+      "Copy" => true,   // x! and m.keys!: a new copy
       "Call" => CallMoves(e, state),
+      "Member" => IsMapViewMember(e),
       _ => false
     };
   }
+
+  // m.keys and m.values give a new view of the map (spec 6.6, CodeGen.Map.cs). Told apart by the name only, so not when a class of the program has
+  // a member of that name
+  bool IsMapViewMember(Node e) =>
+    vecPrelude && e.Kind == "Member" && e.Text is "keys" or "values"
+    && !classes.Values.Any(cls => cls.Node.Line < LibraryLine && (FindField(cls, e.Text!) != null || LookupMethods(cls, "get_" + e.Text).Count > 0));
 
   // ---------------------------------------------------------------- implicit drops
 
@@ -202,7 +213,7 @@ public sealed partial class CodeGen {
     if (typeNode == null) {
       return null;
     }
-    if (typeNode is { Kind: "Type", Text: "vec" or "list", Children.Count: 0 } && vecPrelude) {
+    if (typeNode is { Kind: "Type", Text: "vec" or "list" or "map" or "bmap", Children.Count: 0 } && vecPrelude) {
       return typeNode.Text;   // vec values = [1, 2, 3]: the type comes from the literal
     }
     if (typeNode is { Kind: "Type", Text: "var" or "arr" }) {
@@ -217,6 +228,12 @@ public sealed partial class CodeGen {
       }
       if (typeNode.Text == "var" && init?.Children[0] is { Kind: "Index" } ranged && ranged.Children.Count > 1 && ranged.Children[1].Kind == "Range") {
         return "var";   // var part = c[a..b]: a view (spec 6.5)
+      }
+      if (typeNode.Text == "var" && init?.Children[0] is { Kind: "MapLit" }) {
+        return "var";   // var ages = ["one": 1]: a new map
+      }
+      if (typeNode.Text == "var" && init?.Children[0] is { Kind: "Member" } viewMember && IsMapViewMember(viewMember)) {
+        return "var";   // var held = m.keys: a view of the map (spec 6.6)
       }
       if (typeNode.Text == "var" && init?.Children[0] is { Kind: "Call" } memberCall && memberCall.Children[0].Kind == "Member" && CallMoves(memberCall)) {
         // var it = numbers.getIterator(): a function that gives a new or moved object (the exact class is known when the call is compiled)
@@ -477,6 +494,9 @@ public sealed partial class CodeGen {
     }
     if (IsList(cls.Name)) {
       EmitListDropGlue(sb, cls);
+    }
+    if (IsMap(cls.Name)) {
+      EmitMapDropGlue(sb, cls);
     }
     sb.Append("}\n");
     sb.Append($"static void df_dropall_{cls.Name}(void* p) {{\n");

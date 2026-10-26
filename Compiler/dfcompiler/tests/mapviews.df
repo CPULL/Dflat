@@ -1,0 +1,112 @@
+// .keys and .values of a map (spec 6.5, 6.6), step 4, and string values inline in a 64-byte slot (spec 6.8.4.1)
+alias Root as r
+
+map<string, i32> ages = []
+ages["bob"] = 30
+ages["alice"] = 25
+ages["carol"] = 40
+
+for string name in ages.keys {
+  r.Console.log(name)                                // alice, bob, carol
+}
+i32 total = 0
+for i32 age in ages.values {
+  total += age
+}
+r.Console.log(total)                                 // 95
+for var age in ages.values {
+  r.Console.log(age * 2)                             // 50, 60, 80
+}
+r.Console.log(ages.keys.len)                         // 3
+r.Console.log(ages.values.len)                       // 3
+r.Console.log(ages.keys.has("bob"))                  // true
+r.Console.log(ages.keys.has("dave"))                 // false
+r.Console.log(ages.values.has(40))                   // true
+r.Console.log(ages.keys)                             // [alice, bob, carol]
+r.Console.log(ages.values)                           // [25, 30, 40]
+ages["dave"] = 50                                    // the views above are gone: the map can grow
+r.Console.log(ages.len)                              // 4
+
+// m.keys! and m.values! are vectors with a copy
+vec<string> names = ages.keys!
+vec<i32> years = ages.values!
+names.add("eve")
+r.Console.log(names)                                 // [alice, bob, carol, dave, eve]
+r.Console.log(years)                                 // [25, 30, 40, 50]
+ages.removeAt("alice")
+r.Console.log(names.len)                             // 5: the copy does not change
+
+// a view held in a variable counts as open: the map cannot change its size while it exists
+fun string grow(map<string, i32> m) {
+  var held = m.keys
+  m["zed"] = 1
+  return "grew"
+  catch ModifyingIteratedCollectionException { return "locked" }
+}
+r.Console.log(grow(ages))                            // locked
+r.Console.log(ages.len)                              // 3: the view ended with the function
+fun string walk(map<string, i32> m) {
+  var held = m.values
+  string text = ""
+  for i32 v in held {
+    text += $"{v} "
+  }
+  return text + $"{held.len} {held.has(40)} {held}"
+}
+r.Console.log(walk(ages))                            // 30 40 50 3 true [30, 40, 50]
+ages["zed"] = 1
+r.Console.log(ages.keys)                             // [bob, carol, dave, zed]
+
+// the loop over a view holds the counter like the loop over the map
+fun string addInLoop(map<string, i32> m) {
+  for string k in m.keys {
+    m["new"] = 0
+  }
+  return "added"
+  catch ModifyingIteratedCollectionException { return "locked" }
+}
+r.Console.log(addInLoop(ages))                       // locked
+for i32 v in ages.values {
+  r.Console.log(v)                                   // 30, 40, 50, 1
+}
+
+// nullable keys: null comes first in .keys too
+map<i32?, bool> maybe = []
+maybe[2] = true
+maybe[null] = false
+r.Console.log(maybe.keys)                            // [null, 2]
+r.Console.log(maybe.values)                          // [false, true]
+
+// string values: up to 59 bytes in the slot, longer ones point to the string; a kept string is a copy
+map<i32, string> words = []
+words[5] = "five"
+words[6] = "a string of exactly fifty-nine bytes, the most a slot holds"
+words[7] = "a string of sixty bytes is longer than the slot and is pointed"
+string kept = words[5]
+string held
+held = words[6]
+i32 i = 0
+while i < 5 {
+  words[i] = $"small {i}"                            // the leaf moves its entries
+  i += 1
+}
+r.Console.log(kept)                                  // five
+r.Console.log(held.len)                              // 59
+r.Console.log(words[7].len)                          // 62
+r.Console.log(words[6] == held)                      // true
+words[5] += "!"
+r.Console.log(words[5])                              // five!
+string out = ->words[7]
+r.Console.log(out.len)                               // 62
+r.Console.log(words.removeAll("small 3"))            // 1
+r.Console.log(words.values)                          // [small 0, small 1, small 2, small 4, five!, a string of exactly fifty-nine bytes, the most a slot holds]
+for (i32 k, string w) in words {
+  if k == 6 {
+    words[k] = "replaced in the loop"
+  }
+}
+r.Console.log(words[6])                              // replaced in the loop
+vec<string> texts = words.values!
+words.clear()
+r.Console.log(texts.len)                             // 6
+r.Console.log(texts[0])                              // small 0

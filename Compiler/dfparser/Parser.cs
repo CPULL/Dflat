@@ -519,6 +519,13 @@ public sealed class Parser {
     if (Peek.Kind == TokenKind.Ident && PeekAt(1).Is("in")) {
       var n = Next();
       node.Add(new Node("Var", n, n.Text));
+    } else if (IsOp("(") && !PeekMarker("&")) {
+      // for (string key, i32 value) in m: the items of each tuple go into separate variables (spec 6.4)
+      node.Add(ParseForDestructure(null));
+    } else if (Peek.Kind == TokenKind.Ident && Peek.Text == "var" && PeekAt(1).Is("(")) {
+      // for var (key, value) in m: every variable takes its type from the item
+      var v = Next();
+      node.Add(ParseForDestructure(new Node("Type", v, "var")));
     } else {
       var type = ParseType();
       var n = ExpectIdent();
@@ -538,6 +545,37 @@ public sealed class Parser {
     noBrace = saved;
     node.Add(ParseBlock());
     return node;
+  }
+
+  // (type name, (&)type name, name, ...) of a for header: a Destructure node with one Var per name (WritableVar for (&)); a Var without a type
+  // takes the type given (var) or none
+  Node ParseForDestructure(Node? sharedType) {
+    var open = ExpectOp("(");
+    var list = new Node("Destructure", open);
+    do {
+      bool writable = false;
+      if (PeekMarker("&")) {
+        Next();
+        Next();
+        Next();
+        writable = true;
+      }
+      Node? type = sharedType;
+      if (!(Peek.Kind == TokenKind.Ident && (PeekAt(1).Is(",") || PeekAt(1).Is(")")))) {
+        if (sharedType != null) {
+          throw Error("for var (a, b): the names take their types from the items, so no type is written inside");
+        }
+        type = ParseType();
+      }
+      var name = ExpectIdent();
+      var item = new Node(writable ? "WritableVar" : "Var", name, name.Text);
+      if (type != null) {
+        item.Add(type);
+      }
+      list.Add(item);
+    } while (AcceptOp(","));
+    ExpectOp(")");
+    return list;
   }
 
   // switch val { 1: a, 2: b \n 3, 4, 5: { ... } \n default: c }
@@ -776,7 +814,7 @@ public sealed class Parser {
     if (first.Kind == "Discard") {
       throw ErrorAt("'_' alone is only valid as an assignment target", start);
     }
-    if (first.Kind is "Tuple" or "List" or "Map") {
+    if (first.Kind is "Tuple" or "List" or "Map" or "MapLit") {
       throw ErrorAt("a literal must be assigned, passed or returned", start);
     }
     return new Node("ExprStmt", start).Add(first);
@@ -1916,19 +1954,33 @@ public sealed class Parser {
     return args;
   }
 
-  // [a, b, c]
+  // [a, b, c], or a map literal [k: v, ...] (spec 6.3): a ':' after the first item makes it a MapLit of Entry (key, value) nodes; keys are expressions
   Node ParseListLiteral() {
     var open = Next();
     var list = new Node("List", open);
     bool saved = noBrace;
     noBrace = false;
     SkipNewlines();
+    bool? isMap = null;
     while (!IsOp("]")) {
       if (AtEnd) {
         throw ErrorAt("unclosed '['", open);
       }
-      list.Add(ParseExpr());
+      var start = Peek;
+      var item = ParseExpr();
       SkipNewlines();
+      bool entry = IsOp(":");
+      if (isMap != null && isMap != entry) {
+        throw ErrorAt("a literal holds items or key: value entries, not both", start);
+      }
+      isMap = entry;
+      if (entry) {
+        Next();
+        SkipNewlines();
+        item = new Node("Entry", start).Add(item).Add(ParseExpr());
+        SkipNewlines();
+      }
+      list.Add(item);
       if (!AcceptOp(",")) {
         break;
       }
@@ -1936,6 +1988,11 @@ public sealed class Parser {
     }
     ExpectOp("]");
     noBrace = saved;
+    if (isMap == true) {
+      var map = new Node("MapLit", open);
+      map.Children.AddRange(list.Children);
+      return map;
+    }
     return list;
   }
 

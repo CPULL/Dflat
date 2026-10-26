@@ -17,7 +17,9 @@ public sealed partial class CodeGen {
   // counts as new. A variable, a field and an item are borrowed.
   static bool StrNodeFresh(Node n, Expr e) => n.Kind switch {
     "String" or "Interp" or "Copy" => true,
-    "Call" => n.Children[0] is { Kind: "Member", Text: "toStr" } ? e.Fresh : true,
+    // a call gives a new string, except toStr and the tree_ members of a map (they say themselves: a value or a key of the map is a borrow)
+    "Call" => n.Children[0] is { Kind: "Member", Text: "toStr" } || (n.Line >= LibraryLine && n.Children[0] is { Kind: "Member", Text: string member } && member.StartsWith("tree_"))
+      ? e.Fresh : true,
     "Binary" => n.Text == "+" || (n.Text == "??" && e.Fresh),
     "Paren" or "Gift" => e.Fresh,
     _ => false
@@ -65,6 +67,11 @@ public sealed partial class CodeGen {
 
   // v = value for a string variable, field, tuple item or reference parameter; fresh is C code ("true", "false" or a flag)
   string StrAssign(LValueInfo target, string fresh, string converted) {
+    if (fresh == "false" && converted.Contains(MapBorrowMark)) {
+      // a string read in place from a map moves with its leaf (spec 6.8.4.1): the variable keeps a copy
+      converted = $"df_str_dup({converted})";
+      fresh = "true";
+    }
     if (target.Variable?.OwnFlag is string flag) {
       return $"df_str_set(&{target.Code}, &{flag}, {converted}, {fresh})";
     }

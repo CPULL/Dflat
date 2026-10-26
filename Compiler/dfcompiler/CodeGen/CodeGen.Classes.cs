@@ -645,6 +645,7 @@ public sealed partial class CodeGen {
       // the first and the last node of a list are node pointers in C (CodeGen.List.cs)
       string fieldType = IsList(cls.Name) && field.Name is "first" or "last" ? ListNode(cls.Name) + "*"
         : IsListIterator(cls.Name) && field.Name == "node" ? ListNode(cls.ParentField!.Type) + "*"
+        : IsMap(cls.Name) && field.Name == "tree" ? "df_bt"
         : field.Hidden && field.Name == "df_children" ? "df_kids*" : CType(field.Type);
       fields.Append($"  {fieldType} {field.CName};\n");
     }
@@ -755,7 +756,7 @@ public sealed partial class CodeGen {
     receiverNode.Kind == "Name" && scope.Find(receiverNode.Text!) is { ReadOnlyRef: true } variable ? variable : null;
 
   // the members of the collections of the compiler that do not change them: the only ones a read-only reference can call (spec 1.6.2)
-  static readonly HashSet<string> ReadOnlyCollectionMembers = new() { "has", "indexOf", "getIterator" };
+  static readonly HashSet<string> ReadOnlyCollectionMembers = new() { "has", "indexOf", "getIterator", "hasKey", "tryGet", "keyOf" };
 
   // spec 1.6.2: through a read-only reference (&) only the unrestricted functions (and static ones) can be called; for the collections of the compiler
   // the members that do not change them
@@ -1219,7 +1220,8 @@ public sealed partial class CodeGen {
     EmitExceptionDescriptors();
     EmitEqualsTables();
     foreach (var cls in classOrder) {
-      var all = AllInstanceFields(cls).Where(field => !field.Hidden).ToList();
+      // the tree of a map is a C struct: a map prints through MapStrFunction
+      var all = AllInstanceFields(cls).Where(field => !field.Hidden && !(IsMap(cls.Name) && field.Name == "tree")).ToList();
       var sb = classCode;
       sb.Append($"static df_string df_str_{cls.Name}(const {cls.StructName}* o) {{\n");
       sb.Append("  if (o == NULL) {\n    return df_str_lit(\"null\", 4);\n  }\n");

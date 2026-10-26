@@ -1,0 +1,182 @@
+// Maps with string keys and values (spec 6.8.4, 6.8.4.1), step 2: a string key is its sort key (the first 8 bytes) and a pointer to the
+// map's own copy; equal sort keys are compared on the full text. A string value is the map's own copy
+alias Root as r
+
+map<string, i32> ages = []
+ages["bob"] = 30
+ages["alice"] = 25
+ages["Carol"] = 40
+ages[""] = 0
+r.Console.log(ages)                                // [: 0, Carol: 40, alice: 25, bob: 30]: by bytes, "" first
+r.Console.log(ages["alice"])                       // 25
+r.Console.log(ages["nobody"])                      // 0
+string none = null
+r.Console.log(ages[none])                          // 0: a null string is ""
+r.Console.log(ages.hasKey("Carol"))                // true
+r.Console.log(ages.hasKey("carol"))                // false
+
+// keys that share their first 8 bytes: the full text decides
+map<string, i32> long = []
+long["prefix12-b"] = 2
+long["prefix12"] = 0
+long["prefix12-a"] = 1
+long["prefix12-a-longer"] = 3
+long["prefix1"] = -1
+r.Console.log(long)                                // [prefix1: -1, prefix12: 0, prefix12-a: 1, prefix12-a-longer: 3, prefix12-b: 2]
+long.removeAt("prefix12-a")
+r.Console.log(long)                                // [prefix1: -1, prefix12: 0, prefix12-a-longer: 3, prefix12-b: 2]
+r.Console.log(long["prefix12-a-longer"])           // 3
+
+// the key is the map's own copy: changing the variable later does not change the map
+string name = "dave"
+ages[name] = 50
+name += "!"
+r.Console.log(ages.hasKey("dave"))                 // true
+r.Console.log(ages.hasKey("dave!"))                // false
+
+// string values: replaced values are freed, reads borrow
+map<i32, string> words = []
+words[2] = "two"
+words[1] = "one"
+words[3] = "three"
+words[2] = "TWO"
+words[1] += "!"
+r.Console.log(words)                               // [1: one!, 2: TWO, 3: three]
+r.Console.log(words[9] == "")                      // true: a missing key reads as ""
+string got = ""
+r.Console.log(words.tryGet(3, (&)got))             // true
+r.Console.log(got)                                 // three
+r.Console.log(words.has("TWO"))                    // true
+r.Console.log(words.keyOf("three"))                // 3
+string out = ->words[3]
+r.Console.log(out)                                 // three
+r.Console.log(words)                               // [1: one!, 2: TWO]
+
+// both strings, remove and removeAll by value
+map<string, string> colors = []
+colors["sky"] = "blue"
+colors["sea"] = "blue"
+colors["grass"] = "green"
+colors["snow"] = "white"
+r.Console.log(colors.add("sun", "yellow"))         // true
+r.Console.log(colors.add("sun", "gold"))           // false: replaced
+r.Console.log(colors.keyOf("blue"))                // sea
+r.Console.log(colors.remove("green"))              // true
+r.Console.log(colors.removeAll("blue"))            // 2
+r.Console.log(colors)                              // [snow: white, sun: gold]
+colors.clear()
+r.Console.log(colors.len)                          // 0
+
+// a long key (a block string) and a key built at run time
+string big = ""
+i32 i = 0
+while i < 600 {
+  big += "0123456789"
+  i += 1
+}
+map<string, i32> sizes = []
+sizes[big] = 6000
+sizes[big + "x"] = 6001
+sizes["0123"] = 4
+r.Console.log(sizes.len)                           // 3
+r.Console.log(sizes[big])                          // 6000
+r.Console.log(sizes[big + "x"])                    // 6001
+r.Console.log(sizes.keyOf(4))                      // 0123
+
+// many string keys, random inserts and removals checked against an array, and the key order
+map<string, i32> tree = []
+arr<i32> mirror = arr<i32>[2000]
+arr<bool> present = arr<bool>[2000]
+u64 seed = 777
+i32 round = 0
+while round < 30000 {
+  seed = seed * 6364136223846793005ul + 1442695040888963407ul
+  u32 k = (u32)((seed >> 33) % 2000ul)
+  string key = $"k{k + 10000u}"
+  if (seed >> 20) % 3ul == 0ul {
+    tree.removeAt(key)
+    present[k] = false
+  } else {
+    tree[key] = round
+    mirror[k] = round
+    present[k] = true
+  }
+  round += 1
+}
+i32 wrong = 0
+u64 expectedLen = 0
+string expected = "["
+u32 n = 0
+while n < 2000 {
+  string key = $"k{n + 10000u}"
+  if present[n] {
+    if !tree.hasKey(key) || tree[key] != mirror[n] {
+      wrong += 1
+    }
+    if expectedLen > 0 {
+      expected += ", "
+    }
+    expected += $"{key}: {mirror[n]}"
+    expectedLen += 1
+  } else if tree.hasKey(key) {
+    wrong += 1
+  }
+  n += 1
+}
+expected += "]"
+r.Console.log(wrong)                               // 0
+r.Console.log(tree.len == expectedLen)             // true
+r.Console.log($"{tree}" == expected)               // true
+r.Console.log(tree.removeAll(7) <= 1u)             // true
+n = 0
+while n < 2000 {
+  tree.removeAt($"k{(n * 7919u) % 2000u + 10000u}")
+  n += 1
+}
+r.Console.log(tree.len)                            // 0
+
+// every key has the same first 8 bytes: all the comparisons go to the text, the separators of the branches point to keys
+map<string, i32> same = []
+arr<bool> inside = arr<bool>[1500]
+seed = 99
+round = 0
+while round < 20000 {
+  seed = seed * 6364136223846793005ul + 1442695040888963407ul
+  u32 k = (u32)((seed >> 33) % 1500ul)
+  string key = $"samefirst{k + 10000u}"
+  if (seed >> 20) % 2ul == 0ul {
+    same.removeAt(key)
+    inside[k] = false
+  } else {
+    same[key] = (i32)k
+    inside[k] = true
+  }
+  round += 1
+}
+wrong = 0
+expected = "["
+expectedLen = 0
+n = 0
+while n < 1500 {
+  string key = $"samefirst{n + 10000u}"
+  if inside[n] != same.hasKey(key) || (inside[n] && same[key] != (i32)n) {
+    wrong += 1
+  }
+  if inside[n] {
+    if expectedLen > 0 {
+      expected += ", "
+    }
+    expected += $"{key}: {n}"
+    expectedLen += 1
+  }
+  n += 1
+}
+expected += "]"
+r.Console.log(wrong)                               // 0
+r.Console.log($"{same}" == expected)               // true
+n = 0
+while n < 1500 {
+  same.removeAt($"samefirst{(n * 7919u) % 1500u + 10000u}")
+  n += 1
+}
+r.Console.log(same.len)                            // 0

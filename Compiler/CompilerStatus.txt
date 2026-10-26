@@ -1,7 +1,15 @@
-Compiler version 0.0.22 alpha for version 0.0.15 of the specs 2026/10/25
+Compiler version 0.0.27 alpha for version 0.0.15 of the specs 2026/10/26
 
 Changes from the previous version -----------------------
 - vec: growth policy of spec 6.8.2 (16 items first, doubles up to a 4 MB block, then by half) and the sized declaration vec<T>[n] name
+- map<K, V> (alias bmap, spec 6.8.4, B+ tree of spec 6.8.4.1), step 1: native keys (integers, bool, char, enums, reals, date, time, and the nullable ones: null is a key, it sorts first) and native values; m[k], m[k] = v, m[k] += v, add, hasKey, has, tryGet, ->m[k], removeAt, remove, removeAll, keyOf, clear, .len, .sizeof, printing in key order; map<K, V> m = [] is an empty map
+- map step 2: string keys (sorted by bytes; the first 8 bytes are the sort key, the full text decides a tie; "" and null are the same key) and string values; the map keeps its own shrunk copies and frees them
+- map step 3: for (K k, V v) in m, for (k, v) in m, for (var k, var v) in m and for var (k, v) in m, in key order (the null key first); the loop holds the counter of open iterators (a new key or a removal inside it raises ModifyingIteratedCollectionException, a new value for an existing key is allowed)
+- map step 4: m.keys and m.values (for x in m.keys, .len, .has, printing, m.keys! and m.values! as a vec); a view kept in a variable counts as open until it ends
+- map string values are inline in a 64-byte slot (up to 59 bytes; a longer one is pointed to); a variable that keeps a value read from a map gets a copy
+- map step 7: literals [k: v, ...] (spec 6.3): keys are expressions; map m = [...] and var m = [...] take their types from the literal; the same constant key twice is a compile error, a key calculated at run time that comes again keeps the later value; the old { k: v } form gives an error that shows the new one
+- a value of the wrong type for a map (m[k] = v, a literal, add, has ...) is a compile error; a function that returns a literal or a copy (x!) returns a new object
+- fixed: tryGet and keyOf of a map with string values no longer give the map's own string as a new one (a double free); ->m[k] of a string and x! held in a variable are freed
 
 Done -----------------------
 
@@ -67,7 +75,7 @@ Not yet -----------------------
 Exceptions records are released (2026-10-19: catch end, replaced by another, ignored silent; check with DF_EXC_COUNT=1). Silent operations of the language (overflow of + - * -x ++ --, casts that do not fit) are raised only where a catch of the same function handles them (2026-10-19, test silentops). Exceptions to do: static records for silent exceptions without fields, (char) with an invalid code point, (done: an unhandled non-silent exception inside atEnd is a panic), constructors that return (null, error). Library exception lists: not needed (spec 15.8). See CompilerImplementation.txt
 
 Generics: definition-time checking of bodies
-list, map, hmap, set, hset, dfoot (7c); vec is built (2026-10-20, see below)
+hmap, set, hset, dfoot (7c); vec, list and map (step 1) are built (see below)
 Ownership, move, copy, refcount
 Move parameters on non-objects, volatile references, reference parameters on constructors, (&) borrows that replace an object
 Lambdas and captures
@@ -203,6 +211,17 @@ Phase 7  Generics (spec 11.3)                                     IN PROGRESS
      the counter on arr (an arr has no header yet), the compile-time proof of a change in a loop, getIterator in Collection<Item>
      2026-10-25 (spec 0.0.15): the counter is the private field iteratorCounter of the trait Collection (executeAfter of getIterator and releaseIterator); custom
      collections get it, but no changing method of the traits carries an executeBefore yet (add, remove ... are not trait methods)
+     map step 1 DONE 2026-10-26 (spec 0.0.16: 6.8.4, 6.8.4.1; tests map, errors/map_*): class map<K, V> : MapCollection<K, V> in VecPrelude over the C B+ tree of RuntimeMap.cs;
+     native keys and values; the counter of open iterators is checked by add (new key), m[k] = v (new key), removeAt, ->m[k], remove, removeAll, clear
+     map step 2 DONE 2026-10-26 (tests mapstrings, errors/map_object_key, map_object_value, map_nullable_string_key): string keys (16-byte key slot: sort key + pointer,
+     separators that point to the keys of the leaves) and string values (an 8-byte pointer to the map's own copy, see CompilerImplementation.txt for why not inline)
+     map step 3 DONE 2026-10-26 (tests maploop, errors/map_loop*, destructure_not_map): destructuring in the for header (parser: Destructure node), only over maps
+     map step 4 DONE 2026-10-26 (tests mapviews, errors/map_keys_destructure): views mapKeys / mapValues (VecPrelude), string values inline (spec 6.8.4.1)
+     map step 7 DONE 2026-10-26 (tests mapliterals, errors/maplit_*, map_value_type): the parser reads [k: v, ...] as a MapLit of Entry nodes
+     NOT yet (map): (&) values (step 5), objects (step 6),
+     clock and lapse keys (their null is 0), swap, add(map), keys of generic sets, Keyable, a view passed to a function or used in another expression
+     without a variable (it is never ended: the same limit as c[a..b] of vec and list, see the views line above)
+     KNOWN BUG (vec, list, found 2026-10-26): a view c[a..b] that is not kept in a variable (print(v[1..3]), v[1..3].len) never ends, so the collection stays locked
 
 Decisions: operator is "fun bool ==(V o)"; only primary constructors for now; default toStr is
 "Px { a: Py{}, b: 3, c: BTree{}, ... }" (first 3 fields, one level, "..." when there are more);

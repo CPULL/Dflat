@@ -1,0 +1,1 @@
+map_one_type.df(1): error: map takes a key type and a value type: map<K, V>

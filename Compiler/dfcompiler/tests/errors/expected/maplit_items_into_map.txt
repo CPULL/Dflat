@@ -1,0 +1,1 @@
+maplit_items_into_map.df(1): error: a map literal has key: value entries: [k: v, ...] (spec 6.3)

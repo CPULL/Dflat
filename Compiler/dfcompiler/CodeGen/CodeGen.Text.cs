@@ -43,6 +43,9 @@ public sealed partial class CodeGen {
     if (needs.Contains("sort")) {
       sb.Append(RuntimeSort.Source);
     }
+    if (needs.Contains("map")) {
+      sb.Append(RuntimeMap.Source);
+    }
     if (needs.Contains("strfmt")) {
       sb.Append(RuntimeStringFormat.Source);
     }
@@ -227,6 +230,9 @@ public sealed partial class CodeGen {
     if (IsList(receiver.Type) && ListMember(receiver, name, args, scope, at) is Expr listCall) {
       return listCall;
     }
+    if (IsMap(receiver.Type) && MapMember(receiver, name, args, scope, at) is Expr mapCall) {
+      return mapCall;
+    }
     if (IsVec(receiver.Type) && VecMember(receiver, name, args, scope, at) is Expr vecCall) {
       return vecCall;
     }
@@ -337,7 +343,7 @@ public sealed partial class CodeGen {
       source.AppendLine(ExecPrelude);
     }
     // vec<T> (spec 6.8) is a generic class written in Dflat, with the collection traits (CodeGen.Vec.cs)
-    if (!userTypes.Contains("vec") && !userTypes.Contains("list") && Mentions(program, node => node.Text is "vec" or "list" or "View" or "getIterator" or "IndexIterator" or "IndexCollection" or "Iterator"
+    if (!userTypes.Contains("vec") && !userTypes.Contains("list") && !userTypes.Contains("map") && Mentions(program, node => node.Text is "vec" or "list" or "map" or "bmap" or "View" or "getIterator" or "IndexIterator" or "IndexCollection" or "MapCollection" or "Iterator"
           || (node.Kind == "Index" && node.Children.Count > 1 && node.Children[1].Kind == "Range"))) {
       // its lines are numbered from LibraryLine so that no warning of this code is shown (Warn) and the errors can be told apart
       // UNS_NONE is the largest uns of the target ("not found"); VEC_DOUBLE_LIMIT is the block size up to which a vec doubles (spec 6.8.2)

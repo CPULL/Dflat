@@ -1,0 +1,1 @@
+map_loop_key_type.df(2): error: the 'for' variable 'k' is string, but the keys are i32

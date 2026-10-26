@@ -488,6 +488,143 @@ public class list<T> : IndexCollection<T> {
     return this.node_indexOfFrom(start, amount, value)
   }
 }
+
+// the key/value collections (spec 6.7.2); a map passes its values to Collection (has(v) searches the values)
+trait MapCollection<Key, Value> : Collection<Value> {
+}
+
+// map<K, V> (spec 6.8.4): sorted by key, a B+ tree (spec 6.8.4.1). The methods check the rules (the counter of open iterators) and call the tree_
+// members, which are C emitted by the compiler (CodeGen.Map.cs). c[k] and c[k] = v are C at the call site too
+public class map<K, V> : MapCollection<K, V> {
+  u64 tree              // the tree: a df_bt in the C (CodeGen.Map.cs)
+
+  override fun uns get_len() { this.tree_len() }
+
+  override fun bool has(V value) {
+    return this.tree_hasValue(value)
+  }
+
+  public fun bool hasKey(K key) {
+    return this.tree_hasKey(key)
+  }
+
+  // adds the pair, or replaces the value of an existing key: false when it replaced (spec 6.6)
+  public fun bool add(K key, V value) {
+    if this.tree_hasKey(key) {
+      this.tree_set(key, value)
+      return false
+    }
+    checkUnlocked()
+    this.tree_set(key, value)
+    return true
+  }
+
+  public fun bool tryGet(K key, (&)V result) {
+    if !this.tree_hasKey(key) {
+      V none
+      result = none
+      return false
+    }
+    result = this.tree_get(key)
+    return true
+  }
+
+  public fun bool tryGet(K key, (&)V result, V otherwise) {
+    if !this.tree_hasKey(key) {
+      result = otherwise
+      return false
+    }
+    result = this.tree_get(key)
+    return true
+  }
+
+  // the value of key leaves the map with its entry (->m[k], spec 6.6); a missing key gives the zero value
+  public fun V takeAt(K key) {
+    checkUnlocked()
+    return this.tree_take(key)
+  }
+
+  public fun removeAt(K key) {
+    V gone = takeAt(key)
+  }
+
+  // the first entry in key order that holds the value
+  public fun bool remove(V value) {
+    checkUnlocked()
+    return this.tree_removeValue(value)
+  }
+
+  public fun uns removeAll(V value) {
+    checkUnlocked()
+    return this.tree_removeAllValues(value)
+  }
+
+  public fun K keyOf(V value) {
+    return this.tree_keyOf(value)
+  }
+
+  // all the entries go (spec 6.6): the size changes, so not while the map is iterated
+  override fun clear() {
+    checkUnlocked()
+    this.tree_clear()
+  }
+
+  // .keys and .values (spec 6.6): views that count as open while they exist (spec 6.4)
+  public fun mapKeys<K, V> get_keys() {
+    acquireIterator()
+    mapKeys<K, V> view = mapKeys<K, V>(this)
+    return ->view
+  }
+
+  public fun mapValues<K, V> get_values() {
+    acquireIterator()
+    mapValues<K, V> view = mapValues<K, V>(this)
+    return ->view
+  }
+
+  // what the views ask their map (they hold a read-only reference to it)
+  asparent fun uns viewLen() {
+    return this.tree_len()
+  }
+
+  asparent fun bool viewHasKey(K key) {
+    return this.tree_hasKey(key)
+  }
+
+  asparent fun bool viewHasValue(V value) {
+    return this.tree_hasValue(value)
+  }
+}
+
+// the keys and the values of a map (spec 6.5, 6.6): read-only views, children of their map, counted as open while they exist (spec 6.4).
+// for x in m.keys, m.keys.len, m.keys.has(x), m.keys! and printing are C over the map itself (CodeGen.Map.cs), with no view object
+public class mapKeys<K, V>(&map<K, V> collection as parent) {
+  public fun uns get_len() {
+    return collection.viewLen()
+  }
+
+  public fun bool has(K key) {
+    return collection.viewHasKey(key)
+  }
+} atEnd {
+  if collection != null {
+    collection.releaseIterator()
+  }
+}
+
+public class mapValues<K, V>(&map<K, V> collection as parent) {
+  public fun uns get_len() {
+    return collection.viewLen()
+  }
+
+  public fun bool has(V value) {
+    return collection.viewHasValue(value)
+  }
+} atEnd {
+  if collection != null {
+    collection.releaseIterator()
+  }
+}
 """;
 
   // the vec copy a type name stands for (the name of the instance of the generic class vec), or false
@@ -615,6 +752,11 @@ public class list<T> : IndexCollection<T> {
       throw Error($"'{operand.Children[0].Text}' is a read-only reference (&): its items cannot be moved out", gift);
     }
     var obj = ExprOf(operand.Children[0], scope);
+    if (IsMap(obj.Type)) {
+      // the value leaves the map with its entry; the key ends (spec 6.6)
+      var mapValue = ObjectCall(obj, "takeAt", new List<Node> { operand.Children[1] }, scope, gift) ?? throw Error("no takeAt", gift);
+      return new Expr(mapValue.Code, mapValue.Type, mapValue.Fresh || mapValue.Type == "string");
+    }
     if (IsList(obj.Type)) {
       // the item leaves the list and the node goes away (spec 6.6)
       var removed = ObjectCall(obj, "takeAt", new List<Node> { operand.Children[1] }, scope, gift) ?? throw Error("no takeAt", gift);

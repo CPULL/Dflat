@@ -1146,6 +1146,98 @@ PRIVATE STATE IN TRAITS, EXECUTEBEFORE / EXECUTEAFTER (built 2026-10-25, compile
   supertrait, two calls of its constructor with different arguments), executeBefore on the changing methods of the collection traits (add, remove ... are not
   trait methods), access through a value of a trait type (any) as in the spec (open).
 
+MAPS map<K, V>, STEP 1 (built 2026-10-26, compiler 0.0.23alpha, spec 0.0.16: 6.2, 6.6, 6.8.4, 6.8.4.1; step 1 of point 78 of the collections discussion)
+- The class map<K, V> : MapCollection<K, V> (VecPrelude, CodeGen.Vec.cs; the trait MapCollection<Key, Value> : Collection<Value> has no members yet) checks the rules and
+  calls tree_ members (tree_len, tree_hasKey, tree_get, tree_set, tree_take, tree_hasValue, tree_keyOf, tree_removeValue, tree_removeAllValues, tree_clear), answered with C
+  by MapTreeMember (CodeGen.Map.cs) for the lines of the prelude only. The field tree is declared u64 and is a df_bt in the C struct (EmitStruct); the default toStr skips it.
+  m[k] (MapIndex), m[k] = v / m[k] += v (MapIndexAssign, a missing key starts from the zero value; the lock check only when the key is new), ->m[k] (GiftIndex: takeAt),
+  printing [k: v, ...] (MapStrFunction), .sizeof (MapSizeof, df_bt_bytes), the drop (df_bt_clear) and map<K, V> m = [] (MapEmptyLiteral) are C at the call site.
+- `map` and `bmap` are resolved in ResolveType before the "not supported" table (CheckMapArgs: two type arguments, no collection as a key, the types of this step).
+  The prelude is added when the program mentions map, bmap or MapCollection.
+- RuntimeMap.cs (chunk "map"): one runtime for every map. A key is its sort key (SortKey: signed and date/time with the sign bit flipped, unsigned, bool, char and enums as
+  they are, reals with df_bt_key_real: -0.0 is +0.0, every NaN the canonical one, sorted after every number); FromSortKey gives it back. A value is vsize bytes (the C size of
+  V). Branch: 8-byte header, 15 separators, 15 children (248 bytes on 64-bit); the separator of a child is its smallest key, the first one is not read. Leaf: 8-byte header,
+  next, previous, 16 keys, 16 values (24-byte header part on 64-bit, 16 on 32-bit). Header: byte 0 marker (bit 0 leaf), bytes 1-2 count, bytes 3-4 the marks of a bulk removal.
+  df_bt_put splits a full leaf in two halves and pushes the separator up the descent path (no parent pointers); a full branch splits 8 / 8; a new root on top.
+  df_bt_remove: when the first key of a leaf goes, the separator that refers to it is updated (df_bt_fix_sep); a leaf or branch below 4 entries merges with a neighbour when
+  both fit in one node, otherwise the entries are shared half and half; a root branch with one child goes away. removeAll marks the entries (df_bt_mark) and df_bt_sweep packs
+  the others into new leaves and builds the branches once. The null key (a nullable K without value, a null date or time) is in the header (df_bt_put_null ...), first in order.
+- CHOICES: printing is [k: v, ...] in key order (the spec has no text form for maps); removeAt of a missing key does nothing (no exception, like a missing key on read);
+  remove(v) takes the first entry in key order; keyOf of a missing value gives the zero (null) key; clear() of a map is a size change, so it is refused while the map is iterated
+  (6.4 allows clear() for the index collections, where it keeps the size); clock and lapse are not keys yet because their null is 0.
+- Tests: map (the members, negative and real keys, enums, chars, nullable keys, 2000 keys with removals, removeAll on 1000 keys, 40000 random inserts and removals checked
+  against an array and against the printed order, then every key removed in a scattered order), errors/map_string_key, map_string_value, map_collection_key, map_literal_items,
+  map_key_type, map_loop, map_tree_member, map_one_type. Checked with --release and on win-x32 (same output).
+- Not done: see the map line of 7c in CompilerStatus.txt.
+
+MAPS map<K, V>, STEP 2: STRINGS (built 2026-10-26, compiler 0.0.24alpha, spec 0.0.16: 6.2, 6.8.4.1; step 2 of point 78)
+- RuntimeMap.cs now takes the shape of the tree on every call (vs, kp, cmp; MapShape in CodeGen.Map.cs): kp says that the keys have a pointer next to the sort key, cmp
+  orders two key pointers with the same sort key (df_bt_cmp_str: bytes, then length). Leaf: header, next, previous, 16 sort keys, 16 key pointers when kp, 16 values.
+  Branch: header, the separators (sort keys, then pointers when kp) and the children, 15 of each for exact keys, 10 with pointers (248 bytes on 64-bit). The marker has bit 2
+  for keys with a pointer. The separators keep the pointer of the key of the leaf (no copy): df_bt_new_min updates the separators when the first key of a leaf changes
+  (a removal, a new smallest key, a merge or a share into an empty leaf), so a separator never points to a freed key.
+- A string key: its sort key is the first 8 bytes big-endian, 0 after the end (df_bt_key_str); the map stores its own copy (df_str_dup when the key is added: MapSlot finds
+  first and copies only a new key) and frees it when the entry goes (df_bt_remove gives the key pointer back). A null string is "" (7.1): no null entry for strings.
+- A string value: the slot holds a df_string (8 bytes) that the map owns (StrItemAs on the way in, df_str_put replaces and frees the old one); m[k] reads it as a borrow,
+  ->m[k] and takeAt give it to the caller (tree_take is a moving call, CallMoves). remove, removeAll, removeAt, clear and the drop free the keys and values they take out;
+  removeAll copies its argument first (it may be one of the strings it frees).
+- DEVIATION from spec 6.8.4.1 (to decide): the spec puts a string value inline in a 64-byte slot (the first allocation of the string: class 0 or 1, or a class 13 header).
+  Spec 4.4 says the first allocation of a string never moves, and an inline value moves with every insert, split, merge and share of its leaf, so a string read with m[k]
+  (a borrow of the first allocation) would point to the wrong place. The slot is a pointer for now.
+- Tests: mapstrings (byte order, "" and null, keys with the same first 8 bytes, the map's own copy of the key, string values replaced and moved out, both strings, remove and
+  removeAll by value, a 6000-byte key, 30000 random operations against an array with the printed order, 20000 random operations on keys that all share their first 8 bytes,
+  scattered removal of everything). Checked with --release and on win-x32, and with DF_STR_TRACE: no string left alive beyond the 1 of an empty program.
+
+MAPS map<K, V>, STEP 3: FOR (K, V) IN M (built 2026-10-26, compiler 0.0.25alpha, spec 0.0.16: 6.4, 6.8.4.1; step 3 of point 78)
+- Parser (ParseFor, ParseForDestructure): after `for`, a `(` that is not the (&) marker starts a list of loop variables: a Destructure node with a Var per name (with its type,
+  `var`, or no type) or a WritableVar for (&); `for var (a, b)` gives every Var the type `var` (a type written inside is a parse error).
+- EmitForEach: a Destructure over a map declares the key and the value (the types are checked against the key and value types; `var` and no type take them); a map loop
+  without a Destructure, and a Destructure over anything else, are compile errors. The loop is wrapped like the loops over vec and list (the counter of open iterators of the
+  map, given back by the hidden atEnd on every way out) and walks a df_bt_cur: the null key first, then the leaves. The key and the value are read-only; a string key or value
+  is a borrow of the map's own string. (&) on the key is a compile error (spec 6.4), (&) on the value is "not built yet" (step 5). The same name for the key and the value is
+  a compile error.
+- Not done: the explicit iterator of a map (MapIterator, getIterator()), destructuring over other collections (tuples), the compile-time proof of a change in the loop.
+- Tests: maploop (the four forms, values changed in place, a new key and a removal inside the loop, break / continue / return, nullable keys, nested loops, 500 entries in
+  order), errors/map_loop, map_loop_key_type, map_loop_same_name, map_loop_var_typed, map_loop_writable_key, map_loop_writable_value, destructure_not_map. Checked on win-x32;
+  --release gives the panic of 6.4 at the first change inside a loop, as expected.
+
+MAPS map<K, V>, STEP 4: .KEYS AND .VALUES, STRING VALUES INLINE (built 2026-10-26, compiler 0.0.26alpha, spec 0.0.16: 6.5, 6.6, 6.8.4.1)
+- Views: mapKeys<K, V> and mapValues<K, V> (VecPrelude) are children of their map (`&map<K, V> collection as parent`) with get_len and has (through the asparent
+  viewLen / viewHasKey / viewHasValue of the map) and an atEnd that gives the counter back. map.get_keys() / get_values() count the view as open (acquireIterator) and move it
+  out. GuessOwner and ObjectTypeOf count `m.keys` / `m.values` as a new object (IsMapViewMember: only when no class of the program has a member of that name), so
+  `var held = m.keys` ends with its scope.
+- The forms that only read are C over the map, with no view object (MapViewOf): `for x in m.keys` / `m.values` (EmitForEach: mapPart, mapLoopParts; the loop holds the counter
+  of the map), `m.keys.len` (MemberValue), `m.keys.has(x)` (Call: hasKey / has), `m.keys!` / `m.values!` (Copy: MapViewCopy, a vec with copies, strings duplicated). A view held in a
+  variable: the loop walks its map (MapOfView, UsageOfDestroyedObjectException when the map ended), `!` copies from its map, printing is MapViewStrFunction. A new view given to
+  StrOf (print(m.keys)) is printed and dropped (MapViewStr). Not handled: a new view given to a function or used in another expression (never ended, see KNOWN BUG in
+  CompilerStatus.txt: the same limit as the views of vec and list).
+- String values inline (spec 6.8.4.1, decided 2026-10-26: 64 bytes is only the limit for keeping a string in the leaf): the slot is DF_BT_SVAL (64) bytes, df_bt_sval_put copies
+  a string of up to 59 bytes in as a single-block string of class 0 or 1 (and frees the given one) or writes a moved header (class 13) that points to a longer one; df_bt_sval
+  reads it in place, df_bt_sval_take gives it out (a copy of an inline one), df_bt_sval_clear frees. The runtime moves the bytes with the entries. A read in place is a borrow that
+  is valid while the leaf does not change: MapIndex marks its C with /*df_map_borrow*/ and StrAssign and the declaration of a string variable copy a marked borrow (a field,
+  an item, a tuple item and a reference parameter already copy). Arguments of a function call and the loop variables read in place (the loop holds the counter).
+- Fixes: StrNodeFresh treated every call that gives a string as a new string, including the tree_ members (tryGet and keyOf gave the map's own string to the caller, which
+  freed it: a double free that the inline slot turned into a crash); GiftIndex on a map kept the "new" flag of takeAt; GuessOwner counts x! (Copy) as a new object.
+- Tests: mapviews (keys and values in loops, len, has, printing, ! into vectors, a view in a variable that locks the map and ends with its function, a loop over a view, the
+  lock of a loop over m.keys, nullable keys, strings of 4, 59 and 62 bytes kept while their leaf moves, += and ->, removeAll, a value replaced in a loop, values! after clear),
+  errors/map_keys_destructure. Checked on win-x32 and with DF_STR_TRACE (no string left alive beyond the 1 of an empty program, in map, mapstrings, maploop and mapviews).
+
+MAPS map<K, V>, STEP 7: LITERALS [K: V] (built 2026-10-26, compiler 0.0.27alpha, spec 0.0.16: 6.3; step 7 of point 78)
+- Parser (ParseListLiteral): a ':' after the first item makes the literal a MapLit whose children are Entry (key, value) nodes; the keys are ordinary expressions. An item
+  without ':' after an entry, or the reverse, is a parse error. A MapLit alone as a statement is an error, like the other literals. The old { k: v } literal (node Map) is still
+  parsed and gives "map literals are written [k: v, ...]" (ExprOfNode).
+- MapLiteral (CodeGen.Map.cs): an empty map (VecNewEmpty), then each entry in order through MapKeyArg, MapValueItem and MapSlot (no lock check: the map is new). The type
+  comes from the expected type, or from the entries (InferMapType: CommonType of the keys and of the values, then CheckMapArgs) for `var m = [...]` and a bare `map m`
+  (ResolveDeclType). ConstantKeyText gives literals and enum entries (with a minus, in parentheses) a text that is the same for the same key (1 and 0x1, 0.0 and -0.0):
+  the same one twice is a compile error. A key calculated at run time that comes again replaces the value (it is an add).
+- Ownership: GuessOwner and ObjectTypeOf count a MapLit as a new map; ReturnKind counts a returned List, MapLit or Copy (x!) as a new object (a function that returned a literal
+  was "returns borrowed objects").
+- CheckedMapValue: the value of m[k] = v, of a literal entry, and of add, has, remove, removeAll, keyOf must be assignable to the value type (it was converted without a check).
+- Tests: mapliterals (declared, bare map and var, expressions as keys, enum and nullable keys, a calculated key twice, multi-line, empty, as an argument and as a returned value,
+  a new literal replacing a map, a long string value), errors/maplit_braces, maplit_duplicate_enum, maplit_duplicate_int, maplit_duplicate_string, maplit_duplicate_zero,
+  maplit_into_vec, maplit_mixed, maplit_value_type, maplit_items_into_map (was errors/map_literal_items), map_value_type. Checked with --release, on win-x32 and with
+  DF_STR_TRACE.
+
 VEC GROWTH AND SIZED DECLARATION (2026-10-25, spec 6.8.2, 6.3)
 - grow in VecPrelude: 16 items when the block is empty, else doubles while the block (items.sizeof minus the .sizeof of an empty arr<T>) is below
   VEC_DOUBLE_LIMIT, else grows by half; never less than what is needed. VEC_DOUBLE_LIMIT is replaced in the prelude text (AddPrelude, CodeGen.Text.cs)

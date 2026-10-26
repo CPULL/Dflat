@@ -1,0 +1,1 @@
+map_object_value.df(4): error: map values of type Dog are not built yet (this version: the native types and string)

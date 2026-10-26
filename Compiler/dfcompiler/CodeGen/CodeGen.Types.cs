@@ -327,6 +327,13 @@ public sealed partial class CodeGen {
         if (t == "T" && n.Children.Count == 0 && currentGenericT != null) {
           return currentGenericT;   // inside a copy of equals(T other)
         }
+        if (t is "map" or "bmap" && vecPrelude) {
+          // map<K, V> (spec 6.8.4), alias bmap: the copy of the generic class map
+          var mapClass = genericClasses["map"];
+          var mapArgs = TypeArgsOf(n.Children, mapClass.Params);
+          CheckMapArgs(mapArgs, n);
+          return ClassInstanceName(mapClass, mapArgs, n);
+        }
         if (TypeFeatures.TryGetValue(t, out var feature)) {
           throw NotSupported(feature, n);
         }
@@ -624,6 +631,12 @@ public sealed partial class CodeGen {
     }
     if (IsVec(e.Type)) {
       return $"{VecStrFunction(e.Type, at)}({e.Code})";   // [a, b, c], like an array
+    }
+    if (IsMap(e.Type)) {
+      return $"{MapStrFunction(e.Type, at)}({e.Code})";
+    }
+    if (MapViewKind(e.Type) != null) {
+      return MapViewStr(e, at);
     }
     if (IsList(e.Type)) {
       return $"{ListStrFunction(e.Type, at)}({e.Code})";

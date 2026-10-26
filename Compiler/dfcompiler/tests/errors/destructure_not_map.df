@@ -1,0 +1,2 @@
+vec<i32> numbers = [1, 2]
+for (i32 a, i32 b) in numbers { }

@@ -1,0 +1,1 @@
+destructure_not_map.df(2): error: for (a, b) in ... takes the (key, value) entries of a map; other collections give one item: for x in c

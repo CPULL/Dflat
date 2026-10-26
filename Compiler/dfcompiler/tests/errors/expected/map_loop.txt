@@ -1,0 +1,1 @@
+map_loop.df(2): error: a map gives (key, value) entries: for (k, v) in m, for (K k, V v) in m or for var (k, v) in m (spec 6.4)

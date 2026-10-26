@@ -1,0 +1,4 @@
+public class Dog(string name) {
+  public string name
+}
+map<i32, Dog> kennel = []

@@ -1,0 +1,1 @@
+map_value_type.df(2): error: the values of this map are bool, not i64

@@ -1,0 +1,2 @@
+map<i32, bool> flags = []
+flags.tree_clear()

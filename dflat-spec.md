@@ -1,7 +1,7 @@
 # Dflat Language
 A new language D♭ that is the same as C# but easier to write and faster to execute
 
-**Version** 0.0.15  2026/10/25 by CPU
+**Version** 0.0.16  2026/10/26 by CPU
 
 ## D♭ — Dflat Language Specification (draft)
 
@@ -93,7 +93,7 @@ i32 onlyCount, _, bool onlyActive = record       // partial, _ skips an item
 - Definite assignment: reading a variable before it is assigned on every path reads its zero value (null for objects) and gives a level 1 warning.
 - No shadowing of locals: a variable with the same name as a local of an enclosing block is a compile error.
 - `const`: read-only value and pointer, global guarantee.
-- `var`: type taken from the initializer; if it can't be decided → compile error (`var x = null`, `var l = []`). Allowed in multiple returns when the return type is known. Coexists with partial forms like `arr a = [...]` / `vec v = [...]` / `map m = {...}`.
+- `var`: type taken from the initializer; if it can't be decided → compile error (`var x = null`, `var l = []`). Allowed in multiple returns when the return type is known. Coexists with partial forms like `arr a = [...]` / `vec v = [...]` / `map m = [k: v, ...]`.
 - A tuple or literal must be assigned, passed or returned; alone it's a compile error.
 - Tuple destructuring: the items of a tuple can be unpacked into separate variables in one statement; `_` skips an item.
 
@@ -636,25 +636,59 @@ A collection holds several items in one object. Dflat has seven: `arr`, `vec`, `
 
 Applies to the keys of `map` / `hmap` and to the items of `set` / `hset`.
 
-- Types that can be keys: all the native numeric types, `bool`, `char`, `string`, `date`, `time`, `clock`, `lapse`, enums, bitfields, tuples of valid key types, and classes (except `arr` and the collections, even if they are classes). Nullable types, `arr`, the collections, tuples that contain a collection and null objects cannot be keys (compile error). A key must have a hash, an equality and a stable identity while it is inside the collection.
-- Hashed collections (`hmap`, `hset`): the key needs `==` and a hash; the hash is sized to the architecture.
-- Sorted collections (`map`, `set`): the key needs an ordering.
-- `.hash` is a mandatory property of every type, of size `uns` (2.1). The hash of the native types cannot be overridden. A class can override its hash and `equals`; `==` on class objects calls `equals` only when the class overrides it (known at compile time), and compares identity otherwise.
-- How the hash is calculated (how the hash tables use it is decided with the hash collections):
-  - A native value whose size is at most `uns` uses its own value as the hash.
-  - A value wider than `uns` (an `i256` with a 64-bit `uns`, a wide `real`) combines its parts in order: `h = (rotl(h, 5) ^ part) * K`, with `K = 0x517cc1b727220a95` for a 64-bit `uns` and `0x9e3779b9` for a 32-bit one (FxHash). Unlike a xor, the result depends on the order and `(x, x)` does not give 0.
-  - `real`: the bits of the value (transmute), then as above. A `-0.0` (or an unnormalized zero) is first turned into `+0.0`. All NaNs give the hash of the canonical NaN of the architecture.
-  - Strings: rapidhash on the bytes (a 32-bit variant for a 32-bit `uns`).
-  - Tuples: the same ordered combine over the hashes of the items.
-  - Classes: the hash of the class name and the memory address. A collection hashes like any other class. It is meant for collections only (not for `dfoot`).
-- `Root.Class` offers `get_hash()` and `equals(any?)` (11.1.3).
-- There is no `.order`. Ordering uses the trait `Comparable<T>` (11.2.1) with the mandatory method `int compareTo(T value)`, which returns -1, 0 or 1 (`int` is the signed native integer).
-- Class order when a class provides none (the default implementation of `compareTo`): the hash values are compared; two different objects with the same hash are ordered by their address.
-- Orderings: numbers, `char`, `bool` (false before true), `date` and `time` by value; enums by their numeric value (an enum can have explicit values), as `sort` does; strings by bytes (the same as code point order in UTF-8), culture-invariant for now; tuples item by item, left to right.
-- Objects as keys: the collection owns the key (6.6) and treats it as read-only: it cannot be changed through the collection, but it is not globally immutable. With the default hash and order of a class (the class name and the address) changing the fields of a key object is safe. For a class that overrides `get_hash()`, `compareTo` or `equals` with its fields, changing those fields while the object is a key gives undefined collection behavior. A key cannot vanish while it is in the collection, because the collection owns it.
-- `bool` can be a key (two possible values). Reals can be keys, except NaN: a NaN key is never stored or retrieved (no exception).
-- Maps and sets do not allow a null key (or a null item in a set). The empty string `""` is a valid key: for a `string`, `""` and null are the same value (7.1), so there is no separate null string key.
+- Types that can be keys: all the native types (the numeric types, `bool`, `char`, `string`, `date`, `time`, `clock`, `lapse`, enums, bitfields), composite types (tuples, and structs when they are defined, 11.1.5) whose components are all valid key types, classes that implement the trait `Keyable` (11.2.1), and generic sets whose members are all valid key types (11.3.6.1).
+- Types that cannot be keys (compile error): `arr` and all the other collections (also as a component of a tuple), iterators and views, and classes that do not implement `Keyable` (the error names the trait).
+- Nullable types can be keys (`i16?`), and null is a valid key; it sorts first (6.2.2). The empty string `""` is a valid key: for a `string`, `""` and null are the same value (7.1), so there is no separate null string key.
+- Keys are always read-only through the collection.
+- Sorted collections (`map`, `set`): a key is found and ordered by its sort key and `compareTo` (6.2.2, 6.8.4.1). Hashed collections (`hmap`, `hset`): the identity of a key is its hash (6.2.1).
+- `bool` can be a key (two possible values). Reals can be keys, NaN included: in `map` and `set` every NaN is the same key and sorts last (6.2.2); NaN as a key of `hmap` and `hset` is decided with the hash tables.
 - A `string` is a pointer to its first allocation, and a null pointer is the empty string (4.4): a null pointer alone cannot mark an empty slot of a hash table with string keys, because `""` is a valid key. How the hash tables handle it is decided with the hash collections.
+
+### 6.2.1 Hash
+
+- `.hash` is a property of every type, of size `uns` (2.1). The hash of the native types cannot be overridden. No hash depends on a memory address: the same content always gives the same hash, also between runs. A saved map stores its keys and values, never the hashes or the table.
+- `$` is the ordered hash combine: `h = (rotl(h, 5) ^ part) * K`, with `K = 0x517cc1b727220a95` for a 64-bit `uns` and `0x9e3779b9` for a 32-bit one (FxHash). Unlike a xor, the result depends on the order and `(x, x)` does not give 0. Collisions are accepted: the goal is that the same content always gives the same hash.
+- How the hash is calculated:
+  - A native value whose size is at most `uns` uses its own value as the hash.
+  - A value wider than `uns` (an `i256` with a 64-bit `uns`, a wide `real`) combines its parts in order with `$`.
+  - `real`: its own value after normalizing: a `-0.0` (or an unnormalized zero) becomes `+0.0`, and every NaN becomes the canonical NaN of the architecture. A `real` wider than `uns` combines its parts with `$`.
+  - Strings: rapidhash on the full text (a 32-bit variant for a 32-bit `uns`), nothing of the header (4.4), so the hash depends only on the content and is the same in every form of the string (single-block, block string, literal). A string key is its own shrunk copy (6.1) and is hashed once when it is stored; a lookup hashes its argument once.
+  - Tuples: `$` over the hashes of the components, in order. The names of the fields are not part of it.
+  - Null: a fixed constant, the same for all types, `"null".hash`. Where `uns` has spare bits beyond the width of the type (`x8?`, `x16?`, and `x32?` with a 64-bit `uns`), the constant has a bit set above the width of the value, so no real value can equal it. On microarchitectures `null.hash` is 0 and the clash with 0 is accepted. The numeric value of the constant is chosen after tests (99).
+  - Classes (the default hash, based on the content): `"ns.Class".hash $ hash of field 1 $ hash of field 2 $ ...`
+    - The class name is the fully qualified name of the class in whose definition the hash is declared, not the dynamic class of the instance. All classes have a namespace (`Root.` classes included).
+    - The fields are combined in the order they are stored in memory.
+    - A stable field gives its own hash. A field is stable when it is a native, or an owned object (an owned child included) whose members are all stable.
+    - An unstable field gives the hash of its fully qualified type name followed by the field name, with no separator: `"list<my.ns.Something>b".hash`, `"arr<i32>c".hash`, `"Root.IO.Filef".hash`. Collections, iterators, views, every sub-collection class and every reference field (an object that is not owned) are unstable: only owned objects are followed, so a cycle of references cannot make the hash recurse forever.
+    - A null field gives the null constant.
+    - The names of the fields are part of the hash of a class, not of the hash of a tuple.
+  - A collection hashes like any other class.
+- The hash of a type is the hash of its fully qualified name: `"i32".hash`, `"my.fully.namespace.Class".hash`.
+  - Built-in types (natives and the default collections) are written without namespace; all classes have a namespace (`Root.` included).
+  - Generic arguments go inside `<>`, separated by `,` with no spaces, each written by the same rule: `"list<my.ns.Something>"`.
+  - Structs: their qualified name only (not the implementation).
+  - Tuples: `(tuple,` followed by the types of the components separated by `,`, then `)`, with no field names, nested tuples included: `(i32, string, (uns, Obj))` is `"(tuple,i32,string,(tuple,uns,full.ns.Obj))".hash`.
+  - Nullable types: the name followed by `?`: `"i64?".hash`.
+- `Root.Class` offers `get_hash()` and `equals(any?)` (11.1.3). A class can override `get_hash()`, `equals` and `compareTo`; no warning is given for any of them. `==` on class objects calls `equals` only when the class overrides it (known at compile time), and compares identity otherwise.
+- Identity of a key in `hmap` and `hset`: the key is its hash. A collision (the hashes match and `equals` says that the keys differ) raises a silent exception (15.4). The collision check and the call to `equals` are emitted only where a catch for it exists, in the same scope as the call; without one, the extra code is dropped and the table works with the hash only: the keys merge and nothing is reported. A key added twice (the same key) is not a collision.
+
+### 6.2.2 Order
+
+- There is no `.order`. Ordering uses the trait `Comparable<T>` (11.2.1) with the mandatory method `int compareTo(T value)`, which returns -1, 0 or 1 (`int` is the signed native integer).
+- Orderings:
+  - numbers, `char`, `bool` (false before true), `date`, `time`, `clock` and `lapse` by value; enums by their numeric value (an enum can have explicit values), as `sort` does;
+  - `real`: NaN is greater than any number, NaN against NaN gives 0, and `-0.0` equals `+0.0`, so the order is total;
+  - strings by bytes (the same as code point order in UTF-8), culture-invariant for now;
+  - tuples item by item, left to right;
+  - null before any value (7.1);
+  - classes that provide no order (the default implementation of `compareTo`): their hashes are compared. The order is deterministic but has no meaning (it is not alphabetical); two different objects with the same hash compare as 0.
+- The only requirement of an order: consistent and total, `a < b` always gives the same answer.
+
+### 6.2.3 Stability of keys
+
+- A key must keep the same hash for its entire stay in a collection. Value types (natives, strings, tuples of them) do this by definition. A class object used as a key must implement `Keyable` (11.2.1) and must not change while it is a key. A change is not always detected: the collection recomputes the key's hash when the key is used, and raises an exception if it differs from the stored one.
+- Stable means: within one run, while the key is in the collection, `get_hash()`, `compareTo` and `equals` give the same results. The guarantee is on the user; the detection is best effort and lazy (an entry that was changed and is not used is not reported).
+- The collection owns its keys (6.6), so a key cannot vanish while it is in the collection.
 
 ## 6.3 Literals
 
@@ -664,17 +698,19 @@ var samples = [1, 2, 3]                 // arr<native integer>, 3 elements
 arr names = ["a", "b", "c"]             // arr<string>, 3 elements
 vec values = [1, 2, 3]                  // vec<native integer>
 set<string> tags = ["red", "blue"]
-map ages = { one: 1, two: 2 }           // map<string, native integer>
-map words = { 1: "one", 2: "two" }      // map<native integer, string>
+map ages = ["one": 1, "two": 2]         // map<string, native integer>
+map words = [1: "one", 2: "two"]        // map<native integer, string>
+map<string, i32> codes = [name: 1, prefix + "x": 2]  // keys are expressions
 list<arr<i32>> grid = [[1, 2], [3, 4]]  // nested literals need the full type
 ```
 
 - A literal is the right side of an assignment.
-- `[...]` can be assigned to `arr`, `vec`, `list`, `set` and `hset`; `{ key: value }` to `map` and `hmap`. Literals are arrays (`arr`) unless declared otherwise, and `{ ... }` is a `map` unless declared otherwise.
-- A duplicate value in a set literal or a duplicate key in a map literal is a compile error.
+- `[...]` can be assigned to `arr`, `vec`, `list`, `set` and `hset`; `[key: value, ...]` to `map` and `hmap`: the `:` makes it a map literal. Literals are arrays (`arr`) unless declared otherwise, and a literal with `:` is a `map` unless declared otherwise. Mixing items with and without `:` (`[1, 2: true]`) is a compile error.
+- Map keys are ordinary expressions, like the values: `"one"` is a string, `name` is the value of the variable `name`, `MyEnum.blue` is an enum value, `a.f(x)` is calculated. Parentheses are only grouping.
+- A map literal is lowered as an empty map followed by the adds, in order.
+- A duplicate value in a set literal or a duplicate key in a map literal is a compile error when they are constants (literals and enum values); in an `hmap` two different constant keys with the same hash (6.2.1) are a compile error too. With keys calculated at run time a duplicate is found only at run time, and the later value wins (as with `add`, 6.6).
 - Nested literals need the full type specification: `var` and partial forms (`arr`, `vec`, ...) are a compile error for them.
-- Types are inferred from literals; integers and reals default to the native size (1.3), mixed `[1, 2.5]` → native real; other mixes are errors; empty literals need a declared type.
-- Map keys are literals (bare names are strings); values may be any expression.
+- Types are inferred from literals; integers and reals default to the native size (1.3), mixed `[1, 2.5]` → native real; other mixes are errors; empty literals need a declared type (`map<i32, bool> flags = []` is an empty map).
 - Size or capacity on the declaration: `arr<T>[size]` is the size, `vec<T>[n]`, `hmap<K, V>[n]` and `hset<T>[n]` are the capacity (initially empty). The same form on `list`, `map` and `set` is a compile error.
 
 ## 6.4 Iteration
@@ -900,13 +936,13 @@ class ListIterator<Item>(&list<Item> collection as parent) : IndexIterator<Item>
 
 ### 6.7.2 MapCollection
 
-- Implemented by `map` and `hmap`: key/value pairs. A null key is not allowed (6.2). The keys are always read-only in a loop (6.4).
+- Implemented by `map` and `hmap`: key/value pairs. Null is a valid key (6.2). The keys are always read-only in a loop (6.4).
 - Members: `.keys`, `.values`, `c[k]` read, `c[k] = v` (replaces or adds), `add(k, v)`, `add(map)`, `hasKey`, `keyOf`, `tryGet`, `remove(v)`, `removeAll(v)`, `removeAt(k)`, `swap(key, new)`, `swap(key1, key2)`.
 - Iterator (not yet defined, first idea): `next()` returns `(Key key, Value value, bool isValid)`. The sub-traits and the cursor types of the tree `map` and of `hmap` are defined later.
 
 ### 6.7.3 SetCollection
 
-- Implemented by `set` and `hset`: each value is held once. A null item is not allowed (6.2). The items are always read-only in a loop (6.4).
+- Implemented by `set` and `hset`: each value is held once. Null is a valid item (6.2). The items are always read-only in a loop (6.4).
 - The sets are defined later: their members, the set operations and `->c[k]` on a set (the key is the item, probably valid).
 - Iterator (not yet defined): the shape of `next()` for sets is open, and so are the cursor types of the tree `set` and of `hset`.
 
@@ -989,7 +1025,7 @@ bool isValid = numbers.pop((&)last)     // false (and last = 0) when the vec is 
 ### 6.8.4 Maps `map` (`bmap`)
 
 ```
-map ages = { one: 1, two: 2 }
+map ages = ["one": 1, "two": 2]
 bool isNew = ages.add("three", 3)       // false if the value of an existing key was replaced
 ages["four"] = 4                        // adds the key and the value
 i32 age = ages["one"]
@@ -998,17 +1034,58 @@ i32 age = ages["one"]
 - `map` (alias `bmap`) is sorted by key (B-tree). Key rules: 6.2.
 - Trait: `MapCollection` (6.7.2). It has all the members of `Collection` and `MapCollection`; `add(map)` merges (the new value wins).
 - Default iterator: (key, value) tuples sorted by key. `.keys` iterates the keys and `.values` the values.
-- A missing key on read gives the null or zero value of the value type; no exception (`hasKey` and `tryGet` tell whether the key exists). A null key is not allowed (6.2).
+- A missing key on read gives the null or zero value of the value type; no exception (`hasKey` and `tryGet` tell whether the key exists). A null key is valid and sorts first (6.2).
 - No `.capacity`, `reserve`, `shrinkToFit` or `[n]` capacity form.
+
+#### 6.8.4.1 B-tree implementation
+
+The same code serves `map` and `set` (a set is a map without values).
+
+- A B+ tree with two kinds of nodes, branch and leaf. A branch holds only what is needed to descend; a leaf holds the keys and the values (or the links to them). All the leaves are at the same depth. The leaves are linked to the next and to the previous leaf, and the map holds pointers to the first and the last leaf.
+- Navigation uses a sort key, not the hash, so a `map` is sorted by key:
+  - natives: the value turned into a `uns` that keeps the order (signed: the sign bit flipped; real: the usual bit trick). Exact, no collisions. A `real` is normalized first (`-0.0` becomes `+0.0`, every NaN the canonical NaN, which sorts after every number);
+  - strings: the first 8 bytes, big-endian, the bytes beyond the length being 0 (so `"ab"` sorts before `"abc"` without reading the text); equal sort keys are resolved with `compareTo` on the full text;
+  - classes and tuples: `compareTo` (6.2.2).
+- No parent pointer: insert and delete keep the path of the descent on a small stack (the depth stays under 10 even for huge maps), so a split does not rewrite the parent of every moved child.
+- Byte 0 of every node is a marker, a bitfield: bit 0 leaf, bit 1 multi-type key (a key of a generic set type, 11.3.6.1), bit 2 key with pointer. A tree never mixes layouts, each layout has its own code, and one bit test tells a branch from a leaf.
+- Branch node: a header of 8 bytes (byte 0 the marker, bytes 1 and 2 the number of entries in use, the rest reserved), then all the separators, then all the children. About 256 bytes; the fanout is what fits after the header. A separator is the smallest key of its child (the separator of the first child is never read); the leaf resolves the exact key.
+- Leaf node: a header of 24 bytes (bytes 0 to 7: byte 0 the marker, bytes 1 and 2 the number of entries in use, the rest reserved; bytes 8 to 15 the next leaf; bytes 16 to 23 the previous leaf; 0 at the ends), then all the keys, then all the values, so a search scans only the keys. The entries are kept packed and sorted (no valid flag per entry).
+- A leaf holds 16 entries, a compiler parameter (19): its size is 24 + 16 × the size of an entry. The root leaf is a normal leaf.
+- Key slot (sizes in bytes). The leaf always keeps the keys: the pointer refers to the key object owned by the leaf, so `equals` is always possible, `.keys` gets the real key, and the key is destroyed with its entry.
+
+| Key type | Sort key exact | Leaf key slot | Comparison |
+|---|---|---|---|
+| native up to `uns` | yes | 8: sort key (the value is recovered from it) | sort key only |
+| string | no | 16: sort key + pointer | sort key; on a tie `compareTo` on the text |
+| wide native (`i256`) | no | 16: sort key (top 64 bits) + pointer (no class header, stored as an object) | sort key; on a tie the full value |
+| class, default order | yes (6.2.2) | 16: sort key (the hash) + pointer | sort key only |
+| class with its own `compareTo` | no | 16: sort key 0 + pointer | always `compareTo` |
+| tuple | no | 16: sort key of the first component (0 if it has none) + pointer | sort key; on a tie item by item |
+
+  - The pointer of a class with the default order is not used to compare: it is kept for `.keys`, `equals` and the drop.
+  - Multi-type keys (a key of a generic set type, 11.3.6.1): the tag (the hash of the type, 6.2.1) first, in 8 more bytes. All member types exact: 16 bytes (type + sort key); any member not exact: 24 bytes (type + sort key + pointer, the pointer unused for exact members).
+- A separator has the shape of the leaf key slot; its pointer refers to the key owned by the leaf (the key is not copied). When the first key of a leaf is removed, the separator that refers to it is updated to the new first key, through the descent path (O(depth)), so a separator never dangles. Entries in a 256-byte branch:
+
+| Layout | Separator | Child | Entries |
+|---|---|---|---|
+| single-type, exact | 8 | 8 | 15 |
+| single-type, with pointer | 16 | 8 | 10 |
+| multi-type, exact | 16 | 8 | 10 |
+| multi-type, with pointer | 24 | 8 | 7 |
+
+- Value slot: a value up to 64 bytes is inline, in a slot of the exact size of its type (an `i32` takes 4 bytes). A string value takes a 64-byte slot that holds the first allocation of the string: a single-block string of class 0 or 1, up to 59 bytes of text (4.4.1), or a moved string (class 13) that points to the real string (4.4.2); no extra flag. A class is never copied into the node: the slot holds a pointer. Any value above 64 bytes goes through a pointer.
+- The null key: null sorts first (6.2.2). The null entry is kept in the map header (a flag plus its value slot), outside the tree, for every key type: a full-width native (`i64?`) has no free sort key for null. Iteration gives it first (last when going backwards).
+- Deletion is relaxed: a leaf is fixed (it borrows from a neighbour or merges with it, possibly again one level up) only when it drops below 4 entries; an empty leaf is always removed. The fix is local and done in the same call. Bulk operations (`removeAll(v)`, removing a range of keys, `clear`) remove everything in one pass and rebalance once at the end.
+- Iterator: the current leaf and an index in it. Forward from the first leaf through the next links, backwards from the last leaf through the previous links; it ends where there is no next (previous) leaf, and the null entry comes first (last backwards). The counter of open iterators and views comes from the trait `Collection` (6.4): while it is above zero nothing splits, merges or shifts, so the leaf and the index stay valid. Writing a value in place with `for (&)` moves nothing and is allowed. `.keys` and `.values` use the same iterator. The order is the order of the sort keys.
 
 ### 6.8.5 Hash maps `hmap`
 
 ```
-hmap<string, i32> scores = {}
+hmap<string, i32> scores = []
 hmap<string, i32>[100] bigScores         // empty, capacity 100
 ```
 
-- `hmap` is a hash map. Key rules: 6.2.
+- `hmap` is a hash map. Key rules: 6.2; the identity of a key is its hash (6.2.1).
 - Default iterator: (key, value) tuples in an unspecified order. `.keys` iterates the keys and `.values` the values.
 - Trait: `MapCollection` (6.7.2). The members are the same as `map` (6.8.4).
 - Specific to `hmap`: `.capacity`, `reserve`, `shrinkToFit` and the `[n]` capacity form.
@@ -1358,13 +1435,20 @@ override fun bool equals(T other) {
 - `==` on class objects resolves in this order: `equals` if defined; otherwise an operator `==` overload; otherwise identity (same object).
 - `!=` is always the negation of what `==` resolves to and cannot be overloaded.
 - Defining both `equals` and an operator `==` is a level 2 warning (the overload is dead code).
-- A class with `equals` or `==` but no matching hash, used in a hash based collection (`hmap`, `hset`), is a level 1 warning.
+- The identity of a key in a hash collection comes from its hash (6.2.1), not from `equals`: overriding `equals` does not change the behavior of a map. No warning is given for an override of `get_hash()`, `equals` or `compareTo`.
 - `bool equals(T other)` is a generic function: `T` is implicit and is the type of the argument; inside a generated instance `other` has type `T`. This allows comparing with other types, and each type decides which ones it supports.
 - `T is type` checks the generic type at compile time (the branch that does not match is not emitted); `other is type` checks the value at runtime (11.1). Both can be used in the same function.
 - A more generic type can match before a more specific one, so the order of the checks matters. A branch that can never run because an earlier check always matches is a level 3 warning.
 - Every path of `equals` must return a value, otherwise it is a compile error. The upward-check warning (level 2) does not fire in generic code when a check is true for one `T` only.
 - Null is handled by the compiler before `equals` is called: the function never receives a null argument.
-- `Root.Class` offers `get_hash()` to implement the `.hash` of the object (6.2) and `equals(any?)`. Ordering is given by the trait `Comparable<T>` (11.2.1).
+- `Root.Class` offers `get_hash()` to implement the `.hash` of the object (6.2.1) and `equals(any?)`. Ordering is given by the trait `Comparable<T>` (11.2.1).
+- The default `equals` (overridable) is consistent with the default hash: equal objects have the same hash.
+  1. The classes must be exactly the same.
+  2. The native fields are compared first, the cheap ones (integers, dates, ...) before strings and composite fields; the comparison stops at the first difference.
+  3. Owned objects are compared recursively with the same default `equals`. Ownership cannot form a cycle, so the recursion ends.
+  4. Collections, iterators, views, every sub-collection class and every reference field (an object that is not owned): equal only if it is the same object (the same address); the content is never compared. Both null: equal; one null: different. Two objects that refer to different but equal objects are not equal by default; a class that needs it overrides `equals`.
+  - A clone is not necessarily equal to the original (a collection field of the clone is another object).
+  - `has`, `indexOf` and `remove(v)` use `equals`; they do not involve the identity of keys.
 
 ## 11.1.4 Fields and properties
 
@@ -1454,10 +1538,22 @@ trait IndexCollection<Item> : Collection<Item> {
 
 | Trait | Members | Description |
 |---|---|---|
-| `Comparable<T>` | `int compareTo(T value)` (mandatory) | ordering: returns -1, 0 or 1 (`int` is the signed native integer); used by the sorted collections and by `sort` (6.2, 6.6) |
+| `Comparable<T>` | `int compareTo(T value)` (mandatory) | ordering: returns -1, 0 or 1 (`int` is the signed native integer); used by the sorted collections and by `sort` (6.2.2, 6.6) |
+| `Keyable` | a private counter of the collections that hold the object as a key and the stored hash (both `uns`) | the class can be a key (6.2); checks that its hash does not change while it is a key (6.2.3) |
 
-- `Comparable<T>` replaces `.order`, which is removed. When a class provides nothing, the default order of 6.2 (compare the hashes, then the addresses) is the default implementation.
-- `.hash` is not a trait: it is a mandatory property of every type (6.2).
+- `Comparable<T>` replaces `.order`, which is removed. When a class provides nothing, the default order of 6.2.2 (compare the hashes) is the default implementation.
+- `.hash` is not a trait: it is a property of every type (6.2.1).
+- `Keyable`:
+  - A class declares it explicitly; it is never implied by the use of the class as a key type, so it cannot be derived by mistake. A class without `Keyable` used as a key type is a compile error that names the trait.
+  - It is inherited like any other trait, with no opt-out for a subclass. A custom trait can extend it, as long as the logic of `Keyable` is kept.
+  - The counter and the stored hash are one per object, shared by every collection that holds it.
+  - Two `executeAfter` blocks (11.2), on `get_hash()` and on `compareTo`, so the check runs after every override and cannot be removed. Both start from the counter: at 0 nothing is done (the object is not a key, its hash can be anything); when it goes from 0 to 1 the hash is computed and stored; above 0 the hash (`get_hash.result`, or recomputed through `get_hash()` in the block of `compareTo`) is compared with the stored one, and an exception is raised when they differ.
+  - The check runs only for `Keyable` objects: value-type keys (natives, strings, tuples of them) are never hashed again.
+  - Each use of a key by a collection runs the check. A key that is already in the collection keeps the counter as it is; a new key is checked first and, if the check passes, it is added and the counter is incremented. The counter counts entries, not uses. Reading a missing key (`m[x]`) runs the check too, without incrementing, so a problem shows up as early as possible.
+  - The stored hash is never cleared: at 0 it is overwritten at the next step from 0 to 1. Example: `Person p`, `m[p] = true`, remove `p` (counter 0), `p.age++`, `m[p] = true` (valid: technically a new key), `p.age++`, `m.tryGet(p, (&)out)` raises the exception.
+  - The exception for a changed hash is a normal exception (not a panic, not silent; its name is open, 99). It reports the problem and does not repair the collection. The object is invalid as a key (not as an object) until its hash is exactly the stored one again. After the exception the behavior of the collection is no longer deterministic.
+  - A `Keyable` class with a field of a collection, iterator or view type (owned or a reference) gets a level 1 warning (19.3): its identity can change without changing its hash.
+  - Use the trait `Keyable` on a class only if it really needs to be used as a key in a collection. It substantially increases the cost of comparing objects and of calculating their hash. The reason: a hash check is added to every `get_hash()` and `compareTo` call while the object is a key.
 
 ## 11.3 Generics
 
@@ -1583,9 +1679,33 @@ fun r64 average(Numeric first, Numeric second) { ... }
 - A set is declared at namespace level. Its visibility follows the other declarations: private by default, `public` or `internal` to expose it. Sets declared inside a class: open item (99).
 - A class member means the class and all its subclasses (the code is checked with what the class guarantees). A trait member means every type implementing it.
 - A set is used as a constraint (`<Item : Numeric>`): every use of `Item` in one call is the same type. It can also be written directly as the type of a parameter (`Numeric first, Numeric second`): each argument is independent. Only the combinations that are actually called are generated.
-- A set exists only at compile time: it names alternatives, it is not a type of values. `Box<Num>(x)` is a constructor call whose argument selects the member (11.3.9); `var b = Box<Num>(5.5)` is a `Box<r64>`.
+- As a constraint or as the type of a parameter, a set exists only at compile time: it names alternatives. `Box<Num>(x)` is a constructor call whose argument selects the member (11.3.9); `var b = Box<Num>(5.5)` is a `Box<r64>`. A set can also be the type of a value (11.3.6.1).
 - Operators and members are checked only where they are used, against every type that can reach the use. With `Generic Mixed { uns, char, string }`, the expression `first < second` in `fun Compare(Mixed first, Mixed second)` needs `<` between all combinations of the members.
 - The body of a generic class or function that receives a set is compiled once per member (or per combination); a branch that does not apply to the member is not compiled (11.3.7).
+
+#### 11.3.6.1 Generics as value types
+
+```
+Generic Nums { i32, u64, u8 }
+Generic Pets { my.ns.Dog, my.ns.Cat }
+
+Nums k = 5b                              // u8
+k = count                                // count is an i32
+if k is i32 i { print(i) }               // i is the value as i32, only in the block
+string text = k is ? { i32 x: "int", u64 x: "big", u8 x: "small" }
+map<Nums, string> names = [5: "five", 5ul: "big five"]   // compile error for 5: i32, u64 and u8 all fit
+Pets p = Puppy()                         // tag "my.ns.Dog": Puppy is a subclass of Dog
+```
+
+- A set can be the type of a variable, a field, a parameter, a return value, a key or an item of a collection. It is a closed union: every possible type is known at compile time (unlike `any`).
+- A value of a set type is the pair (tag, value). The tag is the hash of the type of the member (6.2.1): natives and the default collections without namespace (`"i32".hash`), classes fully qualified (`"my.ns.Dog".hash`), generic arguments inside `<>` (`"list<my.ns.Dog>".hash`), tuples as `(tuple,...)` (`"(tuple,i32,string)".hash`), nullable types with `?` (`"i64?".hash`). The compiler knows the tag of every member, so no other tag exists.
+- For a class member the tag is the member as it is listed in the set, never the dynamic class of the object: a `Puppy` in `Pets` has the tag of `my.ns.Dog`. Inside the case the object is still checked by its real class (`if x is Puppy y`). The tags of a set are therefore closed: one per listed member.
+- Storage: the value is inline up to `uns` size, otherwise a pointer (a native wider than `uns`, a string, an object, a tuple), owned by the value. A null value of a nullable member is the null constant (6.2.1).
+- Assignment: a value of a member type converts implicitly; any other type is a compile error. A number literal takes its default type (1.3) when the set lists it, otherwise the only listed type of the same kind (integer or real); when more than one fits it is a compile error, and the literal is written with its suffix or cast (`5b`, `(u64)5`).
+- Reading: only through `if k is T x { }` (one type; `x` exists only in the block) or `k is ? { T x: ..., ... }` (several types, with the coverage check of 11.3.7). Both compare the tag of `k` with the tag of `T`. `x` is a copy for natives and strings, a borrow for objects. A type that is not a member of the set is a compile error. No member, operator or cast works directly on `k`.
+- Equality, hash and order come from the pair: two values are equal only when both the tag and the value are equal (`'A'` and `i32 65` differ, `i32 0` and `r32 0.0` too); the hash combines the tag and the hash of the value (`$`, 6.2.1); the order compares the tags first, then the values (6.2.2). As a key of a `map` or a `set` it uses the multi-type layouts of 6.8.4.1.
+- A set used as a constraint or as the type of a parameter keeps its meaning: one generated copy per type, at compile time.
+- Not available on microarchitectures.
 
 Predefined sets:
 
@@ -2433,7 +2553,7 @@ Level 1 = most important, level 3 = least.
 | 1 | Variable read before assignment | 1.5 |
 | 1 | Array element read before fill or assignment | 6.8.1 |
 | 1 | `Root.Class` written in a class header | 11.1 |
-| 1 | Equality without hash on a key of a hash collection | 11.1.3 |
+| 1 | `Keyable` class with a field of a collection, iterator or view type | 11.2.1 |
 | 1 | `->` on a variable or field of a basic type | 12.4 |
 | 1 | Same constraint repeated inline and in `where` | 11.3.1 |
 | 2 | Cast out of range saturates | 3.5 |
@@ -2477,13 +2597,16 @@ Level 1 = most important, level 3 = least.
 - Stdlib: strings, files, time, collections extras (queue/stack)
 - Bitfields: whether `set`, `clear`, `setAs` and `toggle` modify the value in place or return a new value; nullability of bitfields (3.1.1, 7.1)
 - Functional collection members (`filter`, `map`, `reduce`)
-- Collections: the members of `MapIterator` and `SetIterator` (the three sub-traits of `Iterator` are decided, 6.7), the cursor types of the tree `map` / `set` and of `hmap` / `hset`, and the shape of `next()` for sets (the index iterator is defined, 6.7.1)
+- Collections: the members of `MapIterator` and `SetIterator` (the three sub-traits of `Iterator` are decided, 6.7), the cursor types of `hmap` / `hset` (the tree iterator is defined, 6.8.4.1), and the shape of `next()` for sets (the index iterator is defined, 6.7.1)
 - Collections: `clear()` on maps and sets now differs from `clear()` on the index collections (which keeps the size, 6.6); to be confirmed with the maps and the sets
-- Collections: how a custom class receives literals (`[...]`, `{ ... }`) and defines `|=` and `+=` (`c[k]` is decided, 6.7)
+- Collections: how a custom class receives literals (`[...]`, `[k: v]`) and defines `|=` and `+=` (`c[k]` is decided, 6.7)
 - Collections: the sets (members, operations, `swap` and `->c[k]` on sets; `c[k]` read does not exist on sets)
 - Structs: the definition (11.1.5)
 - Collections: views are read-only; revisit with tasks (6.5), the full Rust borrow model stays an option
-- Collections: hash table and B-tree implementations (several implementations chosen by target or compiler option, node size, hash function), shared C helpers against one copy per type (code size, 11.3.12), literal typing and lowering (6.3, briefing 9)
+- Collections: hash table implementation (several implementations chosen by target or compiler option), shared C helpers against one copy per type (code size, 11.3.12); the B-tree is decided (6.8.4.1)
+- Keys: the numeric value of the null hash constant `"null".hash` (6.2.1), chosen after tests
+- Keys: the names of the exceptions raised by `Keyable` for a changed hash (11.2.1) and by a key collision in `hmap` / `hset` (6.2.1)
+- Collections: the lifetime of a borrow of an item taken outside a `for` loop (`(&)c[k]`), which an insert or a delete can move
 - Collections: the other non-silent exceptions of the collection operations, to be formalized during the implementation (out of memory is decided, 6.1, 15.3)
 - Strings: borrowed strings in the advanced cases (who releases them, lifetimes across fields and collections)
 - Properties: position of `readonly` / `readwrite` / `writeonly` next to `public` and `static`, and their use together with a body (11.1.4); `override` of a property with only one half; access to a property through a trait-typed value (`any`), left to the compiler
@@ -2948,3 +3071,21 @@ Level 1 = most important, level 3 = least.
 - 6.9 The indexer of a custom collection is given by `read_pos` and `set_pos` (6.7); literals and `|=` / `+=` stay for later
 - 99 Open items: the order of enum keys removed (decided, 6.2); the custom collection item asks only for literals and `|=` / `+=`
 - 6.7 A repeated paragraph on the cursor of the iterators is removed
+
+## Changes in 0.0.16
+
+- 6.2 Keys rewritten: valid keys are the native types, composite types of valid key types and classes that implement `Keyable`; collections, iterators, views and classes without `Keyable` cannot be keys; nullable types and the null key are allowed (was: not allowed); keys are always read-only through the collection
+- 6.2.1 Hash (new): no hash depends on a memory address; `$` is the ordered combine; strings hash the full text and nothing of the header; null hashes as the constant `"null".hash` (a bit above the width of the type when `uns` has spare bits, 0 on microarchitectures); the default class hash is `"ns.Class".hash` combined with the hashes of the fields in memory order, an unstable field (collection, iterator, view, reference) giving the hash of its qualified type name plus the field name (was: the class name and the address); the hash of a type; the identity of a key in `hmap` / `hset` is its hash, a collision raises a silent exception only where a catch exists, otherwise the keys merge
+- 6.2.2 Order (new): `real` NaN is greater than any number and equal to NaN, `-0.0` equals `+0.0`; null before any value; the default order of a class compares the hashes, two objects with the same hash compare as 0 (was: then the addresses)
+- 6.2.3 Stability of keys (new): a key keeps the same hash for its stay in a collection; a class used as a key implements `Keyable`; detection is lazy (replaces "objects as keys: undefined collection behavior")
+- 6.3, 1.5, 6.8.4, 6.8.5 Map literals are `[key: value, ...]` (was `{ key: value }`); keys are ordinary expressions (was: literals, bare names are strings); lowered as an empty map plus the adds; constant duplicates (and constant keys with the same hash in an `hmap`) are compile errors, a duplicate calculated at run time keeps the later value; `map<K, V> m = []` is an empty map
+- 6.7.2, 6.7.3, 6.8.4 Null is a valid key and a valid item of a set
+- 6.8.4.1 B-tree implementation (new): B+ tree navigated by a sort key; no parent pointer; leaves linked both ways; 8-byte branch header and 24-byte leaf header with a bitfield marker; keys before values; separators are the smallest key of the child and refer to the key in the leaf; 16 entries per leaf (compiler parameter); key slots of 8 or 16 bytes; values up to 64 bytes inline; the null key in the map header; relaxed deletion; the iterator is a leaf plus an index
+- 6.8.5 The identity of an `hmap` key is its hash
+- 11.1.3 The level 1 warning for `equals` without a hash is removed; no warning for an override of `get_hash()`, `equals` or `compareTo`; the default `equals` (same class, native fields first, owned objects recursively, collections and references by address)
+- 11.2.1 New basic trait `Keyable`: explicit, inherited, a counter and a stored hash per object, `executeAfter` checks on `get_hash()` and `compareTo`, a normal exception when the hash of a key changed, a cost note
+- 19.3 New level 1 warning: `Keyable` class with a field of a collection, iterator or view type; removed the warning "Equality without hash on a key of a hash collection"
+- 99 Open items: the B-tree and the literal lowering removed (decided); new items for multi-type keys, the null hash constant, the names of the `Keyable` and collision exceptions, and the lifetime of borrows of items
+- 11.3.6.1 Generics as value types (new): a generic set can be the type of any value, a closed union stored as the pair (tag, value); the tag is the hash of the type of the member (for a class, the member as listed, never the dynamic class); implicit assignment from a member type; read with `if k is T x` or `k is ? { }`; equality, hash and order from the pair; not on microarchitectures (was: a set is not a type of values)
+- 6.2, 6.8.4.1 Keys of a generic set type use the multi-type layouts of the B-tree (was: reserved); 99: the multi-type keys item removed
+- 6.2, 6.8.4.1 NaN can be a key: in `map` and `set` every NaN is the same key and sorts last (was: a NaN key is never stored or retrieved); for `hmap` and `hset` it is decided with the hash tables

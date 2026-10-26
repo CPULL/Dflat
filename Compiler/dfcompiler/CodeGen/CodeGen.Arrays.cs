@@ -120,6 +120,9 @@ public sealed partial class CodeGen {
         && init?.Children[0].Kind == "List" && scope != null) {
       return InferListType(init.Children[0], scope, decl);
     }
+    if (typeNode is { Kind: "Type", Text: "map" or "bmap", Children.Count: 0 } && vecPrelude && init?.Children[0].Kind == "MapLit" && scope != null) {
+      return InferMapType(init.Children[0], scope, decl);   // map ages = ["one": 1]: the types come from the literal (spec 6.3)
+    }
     // var x = value: the type of the value
     if (typeNode.Kind == "Type" && typeNode.Text == "var" && typeNode.Children.Count == 0 && !typeAliases.ContainsKey("var")) {
       if (init == null || scope == null) {
@@ -145,6 +148,9 @@ public sealed partial class CodeGen {
     var obj = ExprOf(n.Children[0], scope);
     if (IsView(obj.Type)) {
       return ObjectCall(obj, "read_pos", new List<Node> { n.Children[1] }, scope, n) ?? throw Error("no read_pos", n);
+    }
+    if (IsMap(obj.Type)) {
+      return MapIndex(obj, n.Children[1], scope);
     }
     var index = ExprOf(n.Children[1], scope, "u64");
     if (obj.Type == "string") {
@@ -181,6 +187,9 @@ public sealed partial class CodeGen {
     }
     if (IsList(obj.Type) && target.Children[0].Kind != "GenericRef") {
       return ListIndexAssign(s, scope, obj, target);
+    }
+    if (IsMap(obj.Type)) {
+      return MapIndexAssign(s, scope, obj, target);
     }
     bool isVec = IsVec(obj.Type);
     if (!(IsArr(obj.Type) || isVec) || target.Children[0].Kind == "GenericRef") {
@@ -615,6 +624,7 @@ public sealed partial class CodeGen {
 
   // the for loops over a vec or a list being compiled: the C variable that points to the counter of open iterators, and the collection
   readonly Dictionary<Node, (string? Counter, Expr Collection)> countedLoops = new();
+  readonly Dictionary<Node, string> mapLoopParts = new();   // a loop over m.keys or m.values: which part (CodeGen.Map.cs)
 
   // for T item in collection { }: arrays by position, strings by character
   void EmitForEach(Node s, StringBuilder sb, Scope scope, int indent) {
@@ -622,12 +632,41 @@ public sealed partial class CodeGen {
     var varNode = s.Children[0];
     var source = s.Children[1].Children[0];
     var block = s.Children.Last();
-    var collection = countedLoops.TryGetValue(s, out var counted) ? counted.Collection : ExprOf(source, scope);
+    Expr collection;
+    // for k in m.keys, for v in m.values, and a view of a map held in a variable: the loop walks the map (CodeGen.Map.cs)
+    string? mapPart = null;
+    if (countedLoops.TryGetValue(s, out var counted)) {
+      collection = counted.Collection;
+      mapLoopParts.TryGetValue(s, out mapPart);
+    } else if (MapViewOf(source, scope) is (Expr viewMap, bool viewKeys)) {
+      collection = viewMap;
+      mapPart = viewKeys ? "keys" : "values";
+    } else {
+      collection = ExprOf(source, scope);
+      if (MapViewKind(collection.Type) is string viewKind) {
+        collection = MapOfView(collection);
+        mapPart = viewKind == "mapKeys" ? "keys" : "values";
+      }
+    }
+    if (mapPart != null) {
+      mapLoopParts[s] = mapPart;
+    }
     string elem;
+    bool overMap = IsMap(collection.Type);
+    bool destructure = varNode.Kind == "Destructure";
+    if (mapPart != null && destructure) {
+      throw Error($"m.{mapPart} gives one value at a time: for x in m.{mapPart}; for (k, v) in m gives both", s);
+    }
+    if (destructure && !overMap) {
+      throw Error("for (a, b) in ... takes the (key, value) entries of a map; other collections give one item: for x in c", s);
+    }
+    if (overMap && !destructure && mapPart == null) {
+      throw Error("a map gives (key, value) entries: for (k, v) in m, for (K k, V v) in m or for var (k, v) in m (spec 6.4)", s);
+    }
     bool overList = IsList(collection.Type);
     bool overView = IsView(collection.Type);
     bool overVec = IsVec(collection.Type) || overList;   // the list is walked through its nodes: its own loop below
-    if (overVec && counted.Counter == null) {
+    if ((overVec || overMap) && counted.Counter == null) {
       // the loop holds the counter of open iterators of the collection (spec 6.4): it is wrapped in a block whose atEnd gives it back on every
       // way out (the end, break, return, an exception)
       tempCounter++;
@@ -641,7 +680,7 @@ public sealed partial class CodeGen {
       countedLoops.Remove(s);
       return;
     }
-    string? customElem = overVec || overView ? null : CustomCollectionElem(collection.Type);
+    string? customElem = overVec || overView || overMap ? null : CustomCollectionElem(collection.Type);
     if (customElem != null && counted.Counter == null) {
       // a custom collection: the iterator is an owned variable of a block around the loop, so it ends (and gives back the counter of open
       // iterators, spec 6.4) on every way out
@@ -654,7 +693,9 @@ public sealed partial class CodeGen {
       countedLoops.Remove(s);
       return;
     }
-    if (overView) {
+    if (overMap) {
+      elem = mapPart == "values" ? MapValue(collection.Type) : MapKey(collection.Type);
+    } else if (overView) {
       elem = ViewElem(collection.Type);
     } else if (overList) {
       elem = ListElem(collection.Type);
@@ -669,18 +710,45 @@ public sealed partial class CodeGen {
     } else {
       throw Error($"cannot loop over {collection.Type} yet", s);
     }
-    string type = elem;
-    if (varNode.Children.Count > 0 && !(varNode.Children[0] is { Kind: "Type", Text: "var" })) {
-      type = ResolveType(varNode.Children[0]);
-      if (type != elem && !Assignable(type, elem)) {
-        throw Error($"the 'for' variable is {type}, but the items are {elem}", s);
+    // the loop variables: (the name, its type, the type of what it gets)
+    var loopVars = new List<(Node Node, string Type, string Elem)>();
+    if (overMap && mapPart == null) {
+      var names = varNode.Children;
+      if (names.Count != 2) {
+        throw Error("a map gives two values per entry: for (k, v) in m", s);
       }
+      if (names[0].Kind == "WritableVar") {
+        throw Error("the keys of a map are read-only: (&) on the key is not allowed (spec 6.4); to change a key, remove the entry and add it again", s);
+      }
+      if (names[1].Kind == "WritableVar") {
+        throw Error("for (k, (&)V v) in m is not built yet (writable values come with a later step)", s);
+      }
+      loopVars.Add((names[0], "", MapKey(collection.Type)));
+      loopVars.Add((names[1], "", MapValue(collection.Type)));
+    } else {
+      loopVars.Add((varNode, "", elem));
     }
-    CheckNotShadowing(varNode.Text!, scope, s);
-
     var innerScope = new Scope(scope);
-    string cname = "v_" + varNode.Text;
-    innerScope.Vars[varNode.Text!] = new VarInfo(type, cname, false) { ReadOnlyString = type == "string" };
+    for (int index = 0; index < loopVars.Count; index++) {
+      var (node, _, itemType) = loopVars[index];
+      string declared = itemType;
+      if (node.Children.Count > 0 && !(node.Children[0] is { Kind: "Type", Text: "var" })) {
+        declared = ResolveType(node.Children[0]);
+        if (declared != itemType && !Assignable(declared, itemType)) {
+          throw Error(overMap
+            ? $"the 'for' variable '{node.Text}' is {declared}, but the {(index == 0 ? "keys" : "values")} are {itemType}"
+            : $"the 'for' variable is {declared}, but the items are {itemType}", s);
+        }
+      }
+      CheckNotShadowing(node.Text!, scope, s);
+      if (overMap && index == 1 && node.Text == loopVars[0].Node.Text) {
+        throw Error($"the key and the value cannot both be called '{node.Text}'", s);
+      }
+      innerScope.Vars[node.Text!] = new VarInfo(declared, "v_" + node.Text, false) { ReadOnlyString = declared == "string" };
+      loopVars[index] = (node, declared, itemType);
+    }
+    string type = loopVars[0].Type;
+    string cname = "v_" + loopVars[0].Node.Text;
     var body = PrepareFrame(LoopStatements(block.Children), innerScope, FrameKind.LoopBody);
     bool cleanup = body.AtEnds.Count > 0;
 
@@ -697,9 +765,9 @@ public sealed partial class CodeGen {
       EmitHoists(body, sb, innerPad);
     }
     if (customElem == null) {
-      sb.Append($"{innerPad}{wholeType} {whole} = {(overVec || overView ? NullChecked(collection.Code, collection.Type) : collection.Code)};\n");
+      sb.Append($"{innerPad}{wholeType} {whole} = {(overVec || overView || overMap ? NullChecked(collection.Code, collection.Type) : collection.Code)};\n");
     }
-    if (overVec) {
+    if (overVec || overMap) {
       sb.Append($"{innerPad}{counted.Counter} = &{whole}->{VecField(collection.Type, "iteratorCounter")};\n{innerPad}*{counted.Counter} += 1;\n");
     }
     string iteration = "";
@@ -725,6 +793,11 @@ public sealed partial class CodeGen {
     } else if (customElem != null) {
       loop = "for (;;)";
       itemCode = iteration;
+    } else if (overMap) {
+      // the entries in key order: the null key first, then the leaves (spec 6.8.4.1)
+      NeedChunk("map");
+      loop = $"for (df_bt_cur {position} = df_bt_begin({MapTree(whole, collection.Type)}); df_bt_valid(&{position}); df_bt_step(&{position}))";
+      itemCode = mapPart == "values" ? ReadSlot(collection.Type, CursorValue(whole, collection.Type, position)) : CursorKey(collection.Type, position);
     } else if (overView) {
       (loop, itemCode) = ViewLoop(collection.Type, whole, position, sb, innerPad);
     } else if (overList) {
@@ -742,6 +815,10 @@ public sealed partial class CodeGen {
       sb.Append($"{innerPad}  {body.RanFlag} = true;\n");
     }
     sb.Append($"{innerPad}  {CType(type)} {cname} = {Convert(new Expr(itemCode, elem), type, s)};\n");
+    if (overMap && mapPart == null) {
+      var (valueNode, valueType, valueElem) = loopVars[1];
+      sb.Append($"{innerPad}  {CType(valueType)} v_{valueNode.Text} = {Convert(new Expr(ReadSlot(collection.Type, CursorValue(whole, collection.Type, position)), valueElem), valueType, s)};\n");
+    }
     var before = assign.Clone();
     loopDepth++;
     EmitFrameBody(body, sb, inner + 1);

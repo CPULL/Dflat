@@ -1,0 +1,39 @@
+[: 0, Carol: 40, alice: 25, bob: 30]
+25
+0
+0
+true
+false
+[prefix1: -1, prefix12: 0, prefix12-a: 1, prefix12-a-longer: 3, prefix12-b: 2]
+[prefix1: -1, prefix12: 0, prefix12-a-longer: 3, prefix12-b: 2]
+3
+true
+false
+[1: one!, 2: TWO, 3: three]
+true
+true
+three
+true
+3
+three
+[1: one!, 2: TWO]
+true
+false
+sea
+true
+2
+[snow: white, sun: gold]
+0
+3
+6000
+6001
+0123
+0
+true
+true
+true
+0
+0
+true
+0
+---- exit code 0 ----

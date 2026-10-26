@@ -1,0 +1,1 @@
+map_key_type.df(2): error: the key of this map is i32, not string

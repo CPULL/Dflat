@@ -1,0 +1,1 @@
+map_loop_same_name.df(2): error: the key and the value cannot both be called 'k'

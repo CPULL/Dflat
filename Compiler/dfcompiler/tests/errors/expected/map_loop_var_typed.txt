@@ -1,0 +1,1 @@
+map_loop_var_typed.df(2,10): error: for var (a, b): the names take their types from the items, so no type is written inside, found 'i32'

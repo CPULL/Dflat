@@ -1,0 +1,1 @@
+map_loop_writable_key.df(2): error: the keys of a map are read-only: (&) on the key is not allowed (spec 6.4); to change a key, remove the entry and add it again

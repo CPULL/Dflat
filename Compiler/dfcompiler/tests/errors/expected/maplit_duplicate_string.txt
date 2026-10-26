@@ -1,0 +1,1 @@
+maplit_duplicate_string.df(1): error: the same key is written twice in this map literal

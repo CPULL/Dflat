@@ -213,7 +213,7 @@ public sealed partial class CodeGen {
     if (typeNode == null) {
       return null;
     }
-    if (typeNode is { Kind: "Type", Text: "vec" or "list" or "map" or "bmap", Children.Count: 0 } && vecPrelude) {
+    if (typeNode is { Kind: "Type", Text: "vec" or "list" or "map" or "bmap" or "hmap", Children.Count: 0 } && vecPrelude) {
       return typeNode.Text;   // vec values = [1, 2, 3]: the type comes from the literal
     }
     if (typeNode is { Kind: "Type", Text: "var" or "arr" }) {

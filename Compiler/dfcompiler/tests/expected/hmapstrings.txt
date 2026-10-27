@@ -1,0 +1,18 @@
+25 40 0 0 4
+true false bob
+true
+7 false
+false
+false 4
+73
+85 short
+one 2 false
+2 1
+[3: short]
+0
+value
+true
+0 true
+true
+0
+---- exit code 0 ----

@@ -25,17 +25,17 @@ public sealed partial class CodeGen {
     return name;
   }
 
-  // C function that prints an array as [a, b, c]
+  // C function that prints an array as [a, b, c], or [a, b, c, ...] (37 items) (spec 6.1)
   string ArrStrFunction(string elem, Node at) {
     string name = "df_arr_str_" + Regex.Replace(Mangle(elem), @"[^A-Za-z0-9_]", "_");
     if (arrayHelpers.Add(name)) {
       string item = StrOf(new Expr("a.p[i]", elem), at);
       arrayCode.Append($"static df_string {name}({ArrCType(elem)} a) {{\n");
       arrayCode.Append("  df_string r = df_str_lit(\"[\", 1);\n");
-      arrayCode.Append("  for (df_uns i = 0; i < a.len; i++) {\n");
+      arrayCode.Append("  for (df_uns i = 0; i < a.len && i < DF_PRINT_ITEMS; i++) {\n");
       arrayCode.Append("    if (i > 0) {\n      r = df_str_catx(r, df_str_lit(\", \", 2));\n    }\n");
       arrayCode.Append($"    r = {(elem == "string" ? "df_str_cat" : "df_str_catx")}(r, {item});\n  }}\n");
-      arrayCode.Append("  return df_str_catx(r, df_str_lit(\"]\", 1));\n}\n\n");
+      arrayCode.Append("  return df_str_coll_end(r, a.len);\n}\n\n");
     }
     return name;
   }
@@ -59,6 +59,9 @@ public sealed partial class CodeGen {
     string target = generic.Children[0].Text!;
     if (target == "vec" && vecPrelude) {
       return VecNewWithCapacity(generic, sizeNode, scope);
+    }
+    if (target == "hmap" && vecPrelude) {
+      return HmapNewWithCapacity(generic, sizeNode, scope);
     }
     if (target == "list" && vecPrelude) {
       throw Error("a list has no capacity: the form list<T>[n] does not apply (spec 6.3)", generic);
@@ -120,8 +123,9 @@ public sealed partial class CodeGen {
         && init?.Children[0].Kind == "List" && scope != null) {
       return InferListType(init.Children[0], scope, decl);
     }
-    if (typeNode is { Kind: "Type", Text: "map" or "bmap", Children.Count: 0 } && vecPrelude && init?.Children[0].Kind == "MapLit" && scope != null) {
-      return InferMapType(init.Children[0], scope, decl);   // map ages = ["one": 1]: the types come from the literal (spec 6.3)
+    if (typeNode is { Kind: "Type", Text: "map" or "bmap" or "hmap", Children.Count: 0 } && vecPrelude && init?.Children[0].Kind == "MapLit" && scope != null) {
+      // map ages = ["one": 1], hmap ages = ["one": 1]: the types come from the literal (spec 6.3)
+      return InferMapType(init.Children[0], scope, decl, typeNode.Text == "hmap");
     }
     // var x = value: the type of the value
     if (typeNode.Kind == "Type" && typeNode.Text == "var" && typeNode.Children.Count == 0 && !typeAliases.ContainsKey("var")) {
@@ -409,19 +413,24 @@ public sealed partial class CodeGen {
     }
     var size = node.Children.FirstOrDefault(child => child.Kind == "Size");
     var typeNode = node.Children.FirstOrDefault(child => child.Kind == "Type");
-    if (size == null || typeNode is not { Text: "arr" or "vec", Children.Count: 1 }) {
-      return;   // the others (hmap, hset, list, ...) are not built (EmitDecl says so)
+    if (size == null || typeNode is not ({ Text: "arr" or "vec", Children.Count: 1 } or { Text: "hmap", Children.Count: 2 })) {
+      return;   // the others (hset, list, ...) are not built (EmitDecl says so)
     }
     var init = node.Children.FirstOrDefault(child => child.Kind == "Init");
     var sizeExpr = size.Children[0];
     long? declared = IntLiteralValue(sizeExpr) is System.Numerics.BigInteger value ? (long)value : null;
-    Node NewArray() => Synthetic("Index", size)
-      .Add(Synthetic("GenericRef", size).Add(Synthetic("Name", size, typeNode.Text!)).Add(typeNode.Children[0]))
-      .Add(sizeExpr);
+    Node NewArray() {
+      var generic = Synthetic("GenericRef", size).Add(Synthetic("Name", size, typeNode.Text!));
+      foreach (var argument in typeNode.Children) {
+        generic.Add(argument);
+      }
+      return Synthetic("Index", size).Add(generic).Add(sizeExpr);
+    }
     node.Children.Remove(size);
-    if (typeNode.Text == "vec") {
+    if (typeNode.Text is "vec" or "hmap") {
+      // hmap<K, V>[n] name (spec 6.3): an empty hmap with room for n entries
       if (init != null && !(init.Children[0].Kind == "List" && init.Children[0].Children.Count == 0)) {
-        throw Error("vec<T>[n] name is an empty vec with capacity n: it takes nothing or []", node);
+        throw Error($"{typeNode.Text}<{(typeNode.Text == "vec" ? "T" : "K, V")}>[n] name is an empty {typeNode.Text} with capacity n: it takes nothing or []", node);
       }
       if (init != null) {
         node.Children.Remove(init);
@@ -641,6 +650,11 @@ public sealed partial class CodeGen {
     } else if (MapViewOf(source, scope) is (Expr viewMap, bool viewKeys)) {
       collection = viewMap;
       mapPart = viewKeys ? "keys" : "values";
+    } else if (source.Kind == "List" && source.Children.Count > 0 && varNode.Kind == "Var") {
+      // for i32 k in [0, -1, 1]: an array of the type of the variable; for var k in [...]: the type of the items
+      var itemType = varNode.Children.FirstOrDefault();
+      collection = ExprOf(source, scope, itemType == null || itemType is { Kind: "Type", Text: "var", Children.Count: 0 }
+        ? InferArrayType(source, scope) : $"arr<{ResolveType(itemType)}>");
     } else {
       collection = ExprOf(source, scope);
       if (MapViewKind(collection.Type) is string viewKind) {
@@ -795,8 +809,8 @@ public sealed partial class CodeGen {
       itemCode = iteration;
     } else if (overMap) {
       // the entries in key order: the null key first, then the leaves (spec 6.8.4.1)
-      NeedChunk("map");
-      loop = $"for (df_bt_cur {position} = df_bt_begin({MapTree(whole, collection.Type)}); df_bt_valid(&{position}); df_bt_step(&{position}))";
+      NeedMapChunk(collection.Type);
+      loop = EntryLoop(whole, collection.Type, position);
       itemCode = mapPart == "values" ? ReadSlot(collection.Type, CursorValue(whole, collection.Type, position)) : CursorKey(collection.Type, position);
     } else if (overView) {
       (loop, itemCode) = ViewLoop(collection.Type, whole, position, sb, innerPad);

@@ -1,0 +1,24 @@
+null constant: 3072913169068603581
+empty: 232177599295442350
+empty variable: 232177599295442350
+a: 6457959414642172395
+abcd: 17939050396679037234
+16 bytes: 10026313190241583094
+17 bytes: 7111254350198215334
+240 bytes: 12884674966179240759
+same text, same hash: true
+i32 -1: 4294967295, i8 -1: 255, u64 max: 18446744073709551615
+true: 1, false: 0, 'A': 65
+-0.0 like 0.0: true, 1.5: 4609434218613702656, r32 1.5: 1069547520
+NaN: 9221120237041090560
+enum: 5
+null i32?: true, null i64?: true, 7 as i32?: 7, null object: true
+(1, 2): 15173113486080567242
+("a", true): 16310894421093245618
+Point 1, 2: 6549243702036270295, same content: true, get_hash(): true
+Point3 1, 2, 3: 10661986890320418089, through a Point: true
+Named: 3889790532735864812, the vec is not hashed: true
+Named with a null field: 9222093803594291378
+Tagged id 5: 1005, SubTagged id 5: 1005, through a Tagged: 1006
+vec<i32>: 7188539618202767455, same for any content: true, arr<i32>: 17641627688806969582
+---- exit code 0 ----

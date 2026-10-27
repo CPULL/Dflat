@@ -1,0 +1,16 @@
+0 72
+11
+0 true
+1000 1998 true
+0 true
+1 true one
+true
+false
+1 one true 11
+true
+11 true 10 20 2
+false
+true 0 0
+[7: seven]
+cannot reserve while walking
+---- exit code 0 ----

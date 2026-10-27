@@ -1231,6 +1231,7 @@ typedef struct df_class {
   const df_impl* impls;
   uint32_t nimpls;
   void (*drop)(void*);   /* ends the object: its atEnd, then the objects it owns */
+  df_uns (*hash)(const void*);   /* .hash (spec 6.2.1): the override of get_hash() or the default; NULL when the program uses no hash */
 } df_class;
 
 typedef struct { const df_class* cls; } df_object;
@@ -1269,7 +1270,7 @@ static df_string df_dead_str(const void* obj) {
   return df_str_lit("(destroyed)", 11);
 }
 
-static const df_class df_dead_class = { 0, "(destroyed)", NULL, NULL, df_dead_str, NULL, 0, NULL };
+static const df_class df_dead_class = { 0, "(destroyed)", NULL, NULL, df_dead_str, NULL, 0, NULL, NULL };
 
 #define DF_IS_DEAD(p) (((const df_object*)(p))->cls == &df_dead_class)
 
@@ -1406,6 +1407,18 @@ static df_string df_str_from_u64(uint64_t v) {
   char buf[32];
   snprintf(buf, sizeof buf, "%llu", (unsigned long long)v);
   return df_str_from_buf(buf);
+}
+
+/* a printed collection shows its first DF_PRINT_ITEMS items (spec 6.1): the end is "]", or ", ...] (37 items)" when there are more */
+#define DF_PRINT_ITEMS 3
+
+static df_string df_str_coll_end(df_string r, uint64_t total) {
+  if (total <= DF_PRINT_ITEMS) {
+    return df_str_catx(r, df_str_lit("]", 1));
+  }
+  char buf[48];
+  snprintf(buf, sizeof buf, ", ...] (%llu items)", (unsigned long long)total);
+  return df_str_catx(r, df_str_from_buf(buf));
 }
 
 static df_string df_str_from_bool(bool v) {

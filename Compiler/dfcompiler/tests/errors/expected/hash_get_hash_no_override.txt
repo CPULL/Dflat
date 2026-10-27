@@ -1,0 +1,1 @@
+hash_get_hash_no_override.df(3): error: get_hash is defined by Root.Class: write 'override'

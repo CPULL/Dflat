@@ -1,0 +1,1 @@
+const_global_variable.df(2): error: unknown name 'x': a top-level const is set at program start, so it can use literals, other consts, functions and statics, not variables

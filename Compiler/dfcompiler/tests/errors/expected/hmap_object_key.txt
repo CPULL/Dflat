@@ -1,0 +1,1 @@
+hmap_object_key.df(5): error: hmap keys of type Point are not built yet (this version: integers, bool, char, enums, reals, date, time, clock, lapse and string)

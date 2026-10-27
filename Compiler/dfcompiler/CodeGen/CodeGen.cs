@@ -196,6 +196,7 @@ public sealed partial class CodeGen {
     }
     RegisterClasses();
     CheckClassInstances();
+    DeclareGlobalConsts(program);
     foreach (var statement in program.Children) {
       if (statement.Kind == "Fun") {
         if (IsGenericFunNode(statement)) {
@@ -1010,6 +1011,9 @@ public sealed partial class CodeGen {
         }
         return new LValueInfo(bare.Code, bare.Type, ownField.IsConst && !initializing, null, !ownField.IsStatic);
       }
+      if (variable == null && globalConsts.TryGetValue(target.Text!, out var global)) {
+        return new LValueInfo(global.CName, global.Type, !initializing);
+      }
       if (variable == null) {
         throw Error($"unknown variable '{target.Text}'", target);
       }
@@ -1112,13 +1116,18 @@ public sealed partial class CodeGen {
         if (BareField(n.Text!, scope, n) is Expr field) {
           return field;
         }
+        if (globalConsts.TryGetValue(n.Text!, out var global)) {
+          return new Expr(global.CName, global.Type);
+        }
         if (traits.TryGetValue(n.Text!, out var viewed) && scope.Find("this") != null && IsSubtype(scope.Find("this")!.Type, viewed.Name)) {
           return new Expr("self", viewed.Name);   // TraitName.member inside a class that implements it
         }
         if (n.Text == "parent" && currentClass?.Parent != null && scope.Find("this") != null) {
           return new Expr($"(({CType(currentClass.Parent.Name)})self)", currentClass.Parent.Name);
         }
-        return BareEnumEntry(n.Text!) ?? throw Error($"unknown name '{n.Text}'", n);
+        return BareEnumEntry(n.Text!) ?? throw Error(currentFun != null && currentFun == globalConstsInit
+          ? $"unknown name '{n.Text}': a top-level const is set at program start, so it can use literals, other consts, functions and statics, not variables"
+          : $"unknown name '{n.Text}'", n);
       }
       case "Paren": {
         var e = ExprOf(n.Children[0], scope, expected);
@@ -1825,6 +1834,14 @@ public sealed partial class CodeGen {
       return args.Count == 0 ? new Expr(StrOf(value, n), "string", value.Type != "string" || value.Fresh) : FormatCall(value, args, scope, n);
     }
 
+    // x.get_hash() of a class without an override: the default of Root.Class, as x.hash (CodeGen.Hash.cs)
+    if (callee is { Kind: "Member", Text: "get_hash" } && args.Count == 0) {
+      var hashed = ExprOf(callee.Children[0], scope);
+      if (classes.TryGetValue(hashed.Type, out var hashedClass) && HashOverride(hashedClass) == null) {
+        return HashOf(hashed, n);
+      }
+    }
+
     // m.keys.has(k), m.values.has(v): the map itself, no view object (CodeGen.Map.cs)
     if (callee.Kind == "Member" && callee.Text == "has" && MapViewOf(callee.Children[0], scope) is (Expr viewMap, bool viewKeys)) {
       return ObjectCall(viewMap, viewKeys ? "hasKey" : "has", args, scope, n) ?? throw Error("no has", n);
@@ -1916,6 +1933,9 @@ public sealed partial class CodeGen {
       return MapLen(viewMap);   // m.keys.len: the map itself, no view object (CodeGen.Map.cs)
     }
     var obj = ExprOf(n.Children[0], scope);
+    if (n.Text == "hash") {
+      return HashOf(obj, n);   // every type has it, the nullable ones too (CodeGen.Hash.cs)
+    }
     if (IsNullable(obj.Type)) {
       throw Error($"'{n.Text}': the {obj.Type} may be null; use '?.'", n);
     }

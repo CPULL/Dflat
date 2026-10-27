@@ -19,6 +19,9 @@ public sealed partial class CodeGen {
     if (key == "strfmt") {
       unicodeNeeds.Add("space");
     }
+    if (key == "hmap") {
+      needs.Add("hash");   // the hash functions of the keys (RuntimeHash.cs)
+    }
   }
 
   // marks a runtime part as used and returns the code
@@ -45,6 +48,12 @@ public sealed partial class CodeGen {
     }
     if (needs.Contains("map")) {
       sb.Append(RuntimeMap.Source);
+    }
+    if (needs.Contains("hash")) {
+      sb.Append(RuntimeHash.Source);
+    }
+    if (needs.Contains("hmap")) {
+      sb.Append(RuntimeHmap.Source);
     }
     if (needs.Contains("strfmt")) {
       sb.Append(RuntimeStringFormat.Source);
@@ -209,8 +218,8 @@ public sealed partial class CodeGen {
     if (parts.Length == 2 && enums.TryGetValue(first, out var bitfield) && bitfield.Bitfield && scope.Find(first) == null) {
       return true;
     }
-    // a local variable, or a field of the class being compiled
-    return scope.Find(first) != null || (currentClass != null && FindField(currentClass, first) != null)
+    // a local variable, a field of the class being compiled, or a top-level const
+    return scope.Find(first) != null || (currentClass != null && FindField(currentClass, first) != null) || globalConsts.ContainsKey(first)
       || (traits.ContainsKey(first) && scope.Find("this") != null);
   }
 
@@ -343,11 +352,11 @@ public sealed partial class CodeGen {
       source.AppendLine(ExecPrelude);
     }
     // vec<T> (spec 6.8) is a generic class written in Dflat, with the collection traits (CodeGen.Vec.cs)
-    if (!userTypes.Contains("vec") && !userTypes.Contains("list") && !userTypes.Contains("map") && Mentions(program, node => node.Text is "vec" or "list" or "map" or "bmap" or "View" or "getIterator" or "IndexIterator" or "IndexCollection" or "MapCollection" or "Iterator"
+    if (!userTypes.Contains("vec") && !userTypes.Contains("list") && !userTypes.Contains("map") && Mentions(program, node => node.Text is "vec" or "list" or "map" or "bmap" or "hmap" or "View" or "getIterator" or "IndexIterator" or "IndexCollection" or "MapCollection" or "Iterator"
           || (node.Kind == "Index" && node.Children.Count > 1 && node.Children[1].Kind == "Range"))) {
       // its lines are numbered from LibraryLine so that no warning of this code is shown (Warn) and the errors can be told apart
       // UNS_NONE is the largest uns of the target ("not found"); VEC_DOUBLE_LIMIT is the block size up to which a vec doubles (spec 6.8.2)
-      string prelude = VecPrelude.Replace("UNS_NONE", NativeUns == "u32" ? "4294967295" : "18446744073709551615")
+      string prelude = (VecPrelude + HmapPrelude).Replace("UNS_NONE", NativeUns == "u32" ? "4294967295" : "18446744073709551615")
         .Replace("VEC_DOUBLE_LIMIT", VecDoubleGrowLimit.ToString());
       var vecLibrary = new Parser(new Lexer(prelude, LibraryLine).Tokenize()).ParseProgram();
       program.Children.InsertRange(0, vecLibrary.Children);

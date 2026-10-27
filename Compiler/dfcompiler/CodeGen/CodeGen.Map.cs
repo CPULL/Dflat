@@ -10,7 +10,8 @@ namespace dfcompiler;
 // and is a df_bt in the C struct (EmitStruct). c[k] and c[k] = v are C at the call site.
 // Steps 1 and 2 of the collections plan: keys and values of the native types and strings (objects come later).
 public sealed partial class CodeGen {
-  bool IsMap(string type) => vecPrelude && classInstanceArgs.TryGetValue(type, out var instance) && instance.Template.Name == "map";
+  // map or hmap: the two kinds share the class methods and the code at the call sites; the C helpers below choose the runtime (CodeGen.Hmap.cs)
+  bool IsMap(string type) => vecPrelude && classInstanceArgs.TryGetValue(type, out var instance) && instance.Template.Name is "map" or "hmap";
 
   string MapKey(string type) => classInstanceArgs[type].Args[0];
 
@@ -30,13 +31,23 @@ public sealed partial class CodeGen {
     return IsInt(inner) || inner is "bool" or "char" or "r32" or "r64" or "date" or "time" or "clock" or "lapse" || IsEnum(inner) || value == "string";
   }
 
-  // map<K, V> written as a type: the key and the value types this version builds (spec 6.2)
-  void CheckMapArgs(List<string> args, Node at) {
+  // map<K, V> or hmap<K, V> written as a type: the key and the value types this version builds (spec 6.2)
+  void CheckMapArgs(List<string> args, Node at, bool hashed) {
+    string kind = hashed ? "hmap" : "map";
     if (args.Count != 2) {
-      throw Error("map takes a key type and a value type: map<K, V>", at);
+      throw Error($"{kind} takes a key type and a value type: {kind}<K, V>", at);
     }
     if (IsArr(args[0]) || IsVec(args[0]) || IsList(args[0]) || IsMap(args[0]) || IsView(args[0])) {
       throw Error($"a collection cannot be a key (spec 6.2): {DisplayName(args[0])}", at);
+    }
+    if (hashed) {
+      if (!HmapKeyBuilt(args[0])) {
+        throw Error($"hmap keys of type {DisplayName(args[0])} are not built yet (this version: integers, bool, char, enums, reals, date, time, clock, lapse and string)", at);
+      }
+      if (!HmapValueBuilt(args[1])) {
+        throw Error($"hmap values of type {DisplayName(args[1])} are not built yet (this version: the native types and string)", at);
+      }
+      return;
     }
     if (!MapKeyBuilt(args[0])) {
       throw Error($"map keys of type {DisplayName(args[0])} are not built yet (this version: integers, bool, char, enums, reals, date, time and string)", at);
@@ -157,6 +168,10 @@ public sealed partial class CodeGen {
   // the C expression of the value slot of a key held in key (a pointer to the value, or NULL when the key is missing)
   string MapFind(string held, string type, string key) {
     string tree = MapTree(held, type);
+    if (IsHmap(type)) {
+      string words = NewTemp();
+      return $"({{ {HmapKeySlot(type, key, words)}df_ht_find({tree}, {words}, {HmapShape(type)}); }})";
+    }
     string find = $"df_bt_find({tree}, {SortKey(MapKey(type), key)}, {KeyPointer(type, key)}, {MapShape(type)})";
     return KeyIsNull(MapKey(type), key) is string isNull ? $"({isNull} ? df_bt_find_null({tree}) : {find})" : find;
   }
@@ -168,6 +183,14 @@ public sealed partial class CodeGen {
     string tree = MapTree(held, type);
     string added = NewTemp();
     string owned = NewTemp();
+    if (IsHmap(type)) {
+      string words = NewTemp();
+      // a new string key: the hmap keeps its own copy, with the hash already computed
+      string ownedWords = KeyHasPointer(type) ? NewTemp() : words;
+      string keyCopy = KeyHasPointer(type) ? $"df_string {owned} = df_str_dup({key}); {HmapStringKeySlot($"{words}[0].h", owned, ownedWords)}" : "";
+      return $"{HmapKeySlot(type, key, words)}{valueC}* {slot} = ({valueC}*)df_ht_find({tree}, {words}, {HmapShape(type)}); if ({slot} == NULL) {{ "
+        + $"{(check ? LockCheck(held, type) : "")}bool {added}; {keyCopy}{slot} = ({valueC}*)df_ht_put({tree}, {ownedWords}, {HmapShape(type)}, &{added}); }} ";
+    }
     string sb = $"{valueC}* {slot} = ({valueC}*){MapFind(held, type, key)}; if ({slot} == NULL) {{ {(check ? LockCheck(held, type) : "")}bool {added}; ";
     if (KeyIsNull(MapKey(type), key) is string isNull) {
       sb += $"if ({isNull}) {{ {slot} = ({valueC}*)df_bt_put_null({tree}, {MapValueSize(type)}, &{added}); }} else ";
@@ -187,6 +210,15 @@ public sealed partial class CodeGen {
     string done = NewTemp();
     bool dropValue = outPointer == "NULL" && valueType == "string";
     string target = dropValue ? gone : outPointer;
+    if (IsHmap(type)) {
+      // the key slot of the entry comes out too: a string key the hmap owned is freed
+      string words = NewTemp();
+      string head = $"({{ {HmapKeySlot(type, key, words)}{(dropValue ? $"uint8_t {gone}[DF_BT_SVAL] = {{ 0 }}; " : "")}"
+        + (KeyHasPointer(type) ? $"df_ht_skey {goneKey} = {{ 0 }}; " : "");
+      string body = $"bool {done} = df_ht_remove({tree}, {words}, {HmapShape(type)}, {target}, {(KeyHasPointer(type) ? "&" + goneKey : "NULL")}); "
+        + (KeyHasPointer(type) ? $"df_str_free({goneKey}.k.s); " : "") + (dropValue ? $"df_bt_sval_clear({gone}); " : "");
+      return head + body + $"{done}; }})";
+    }
     string sb = $"({{ {(dropValue ? $"uint8_t {gone}[DF_BT_SVAL] = {{ 0 }}; " : "")}void* {goneKey} = NULL; bool {done} = ";
     string remove = $"df_bt_remove({tree}, {SortKey(MapKey(type), key)}, {KeyPointer(type, key)}, {MapShape(type)}, {target}, &{goneKey})";
     sb += KeyIsNull(MapKey(type), key) is string isNull ? $"({isNull} ? df_bt_remove_null({tree}, {MapValueSize(type)}, {target}) : {remove}); " : $"{remove}; ";
@@ -200,25 +232,38 @@ public sealed partial class CodeGen {
   }
 
   // the key under a cursor (for a string key: the map's own string)
-  string CursorKey(string type, string cursor) => KeyHasPointer(type)
+  string CursorKey(string type, string cursor) => IsHmap(type)
+    ? HmapKeyFromSlot(type, $"df_ht_cur_key(&{cursor}, {HmapShape(type)})")
+    : KeyHasPointer(type)
     ? $"((df_string)df_bt_cur_ptr(&{cursor}))"
     : $"({cursor}.on_null ? {NullKeyValue(MapKey(type))} : {FromSortKey(MapKey(type), $"df_bt_cur_key(&{cursor})")})";
 
-  string CursorValue(string held, string type, string cursor) =>
-    $"(({SlotC(type)}*)df_bt_cur_value({MapTree(held, type)}, &{cursor}, {MapValueSize(type)}, {(KeyHasPointer(type) ? "true" : "false")}))";
+  string CursorValue(string held, string type, string cursor) => IsHmap(type)
+    ? $"(({SlotC(type)}*)df_ht_cur_value(&{cursor}, {HmapShape(type)}))"
+    : $"(({SlotC(type)}*)df_bt_cur_value({MapTree(held, type)}, &{cursor}, {MapValueSize(type)}, {(KeyHasPointer(type) ? "true" : "false")}))";
 
-  // a walk over the entries in key order: body gets the C of the value slot (a pointer) and of the cursor
+  // the header of a C loop over the entries (the key order of a map, the order of the table of an hmap) with the cursor cursor; more is added to the
+  // condition, step to the step
+  string EntryLoop(string held, string type, string cursor, string more = "", string step = "") {
+    string tree = MapTree(held, type);
+    return IsHmap(type)
+      ? $"for (df_ht_cur {cursor} = df_ht_begin({tree}); df_ht_valid(&{cursor}){more}; df_ht_step({tree}, &{cursor}){step})"
+      : $"for (df_bt_cur {cursor} = df_bt_begin({tree}); df_bt_valid(&{cursor}){more}; df_bt_step(&{cursor}){step})";
+  }
+
+  // a walk over the entries: body gets the C of the value slot (a pointer) and of the cursor
   string ForEachEntry(string held, string type, Func<string, string, string> body) {
     string cursor = NewTemp();
     string slot = NewTemp();
     string valueType = SlotC(type);
-    return $"for (df_bt_cur {cursor} = df_bt_begin({MapTree(held, type)}); df_bt_valid(&{cursor}); df_bt_step(&{cursor})) {{ "
-      + $"{valueType}* {slot} = {CursorValue(held, type, cursor)}; {body(slot, cursor)}}} ";
+    return $"{EntryLoop(held, type, cursor)} {{ {valueType}* {slot} = {CursorValue(held, type, cursor)}; {body(slot, cursor)}}} ";
   }
 
   // frees what an entry owns: its key string and its value string
   string DropEntry(string type, string slot, string cursor) =>
-    (KeyHasPointer(type) ? $"if (!{cursor}.on_null) {{ df_str_free((df_string)df_bt_cur_ptr(&{cursor})); }} " : "")
+    (!KeyHasPointer(type) ? ""
+      : IsHmap(type) ? $"df_str_free({CursorKey(type, cursor)}); "
+      : $"if (!{cursor}.on_null) {{ df_str_free((df_string)df_bt_cur_ptr(&{cursor})); }} ")
     + (MapValue(type) == "string" ? $"df_bt_sval_clear({slot}); " : "");
 
   bool MapOwnsStrings(string type) => KeyHasPointer(type) || MapValue(type) == "string";
@@ -226,12 +271,15 @@ public sealed partial class CodeGen {
   // all the entries go: what they own is freed, then the nodes
   string MapClearCode(string held, string type) {
     string drop = MapOwnsStrings(type) ? ForEachEntry(held, type, (slot, cursor) => DropEntry(type, slot, cursor)) : "";
+    if (IsHmap(type)) {
+      return $"{drop}df_ht_clear({MapTree(held, type)}); ";
+    }
     return $"{drop}df_bt_clear({MapTree(held, type)}, {(KeyHasPointer(type) ? "true" : "false")}); ";
   }
 
   // m[k]: the value, or the zero (null) value when the key is missing; no exception (spec 6.6). A string value is the map's own (a borrow)
   Expr MapIndex(Expr obj, Node keyNode, Scope scope) {
-    NeedChunk("map");
+    NeedMapChunk(obj.Type);
     string type = obj.Type;
     string held = NewTemp();
     string key = NewTemp();
@@ -246,7 +294,7 @@ public sealed partial class CodeGen {
   // m[k] = v replaces the value or adds the key (spec 6.6); adding a key changes the size, which is not allowed while the map is iterated (spec 6.4).
   // m[k] += v on a missing key starts from the zero value
   string MapIndexAssign(Node s, Scope scope, Expr obj, Node target) {
-    NeedChunk("map");
+    NeedMapChunk(obj.Type);
     string type = obj.Type;
     string valueType = MapValue(type);
     string op = s.Text!;
@@ -276,15 +324,15 @@ public sealed partial class CodeGen {
   }
 
   // the type of a map literal without a declared type: var m = [1: "one"], map m = [...] (spec 6.3)
-  string InferMapType(Node literal, Scope scope, Node at) {
+  string InferMapType(Node literal, Scope scope, Node at, bool hashed = false) {
     if (!vecPrelude) {
       throw NotSupported("Collections", at);
     }
     var keys = literal.Children.Select(entry => ExprOf(entry.Children[0], scope)).ToList();
     var values = literal.Children.Select(entry => ExprOf(entry.Children[1], scope)).ToList();
     var args = new List<string> { CommonType(keys, literal), CommonType(values, literal) };
-    CheckMapArgs(args, at);
-    return ClassInstanceName(genericClasses["map"], args, at);
+    CheckMapArgs(args, at, hashed);
+    return ClassInstanceName(genericClasses[hashed ? "hmap" : "map"], args, at);
   }
 
   // the value of a constant key written in a literal (a literal or an enum entry, a minus before a number), as a text that is the same for the same
@@ -317,7 +365,7 @@ public sealed partial class CodeGen {
   // [k: v, ...] (spec 6.3): an empty map, then the entries are added in order. Keys are expressions; two equal constant keys are a compile error,
   // a key calculated at run time that comes again keeps the later value
   Expr MapLiteral(Node literal, Scope scope, string type) {
-    NeedChunk("map");
+    NeedMapChunk(type);
     var seen = new Dictionary<string, Node>();
     foreach (var entry in literal.Children) {
       if (ConstantKeyText(entry.Children[0]) is string text && !seen.TryAdd(text, entry)) {
@@ -345,22 +393,22 @@ public sealed partial class CodeGen {
   string MapStrFunction(string mapType, Node at) {
     string name = "df_map_str_" + System.Text.RegularExpressions.Regex.Replace(mapType, @"[^A-Za-z0-9_]", "_");
     if (arrayHelpers.Add(name)) {
-      NeedChunk("map");
+      NeedMapChunk(mapType);
       string key = MapKey(mapType);
       string value = MapValue(mapType);
       string Cat(string type) => type == "string" ? "df_str_cat" : "df_str_catx";
       var sb = new StringBuilder();
       sb.Append($"static df_string {name}({CType(mapType)} v) {{\n");
       sb.Append("  if (v == NULL) {\n    return df_str_lit(\"null\", 4);\n  }\n");
-      sb.Append("  df_string r = df_str_lit(\"[\", 1);\n  bool firstItem = true;\n");
-      sb.Append($"  for (df_bt_cur c = df_bt_begin({MapTree("v", mapType)}); df_bt_valid(&c); df_bt_step(&c)) {{\n");
-      sb.Append("    if (!firstItem) {\n      r = df_str_catx(r, df_str_lit(\", \", 2));\n    }\n    firstItem = false;\n");
+      sb.Append("  df_string r = df_str_lit(\"[\", 1);\n  df_uns shown = 0;\n");
+      sb.Append($"  {EntryLoop("v", mapType, "c", " && shown < DF_PRINT_ITEMS", ", shown++")} {{\n");
+      sb.Append("    if (shown > 0) {\n      r = df_str_catx(r, df_str_lit(\", \", 2));\n    }\n");
       sb.Append($"    {CType(key)} k = {CursorKey(mapType, "c")};\n");
       sb.Append($"    {CType(value)} x = {ReadSlot(mapType, CursorValue("v", mapType, "c"))};\n");
       sb.Append($"    r = {Cat(key)}(r, {StrOf(new Expr("k", key), at)});\n");
       sb.Append("    r = df_str_catx(r, df_str_lit(\": \", 2));\n");
       sb.Append($"    r = {Cat(value)}(r, {StrOf(new Expr("x", value), at)});\n  }}\n");
-      sb.Append("  return df_str_catx(r, df_str_lit(\"]\", 1));\n}\n\n");
+      sb.Append($"  return df_str_coll_end(r, {MapTree("v", mapType)}->count);\n}}\n\n");
       arrayCode.Append(sb);
     }
     return name;
@@ -368,16 +416,17 @@ public sealed partial class CodeGen {
 
   // .sizeof of a map: the header plus the nodes of the tree and the slot of the null key, without what the keys and values own (spec 6.6)
   Expr MapSizeof(Expr obj) {
-    NeedChunk("map");
+    NeedMapChunk(obj.Type);
     string held = NewTemp();
     string header = $"sizeof(struct {ObjInfo(obj.Type).StructName})";
-    return new Expr($"({{ {CType(obj.Type)} {held} = {NullChecked(obj.Code, obj.Type)}; (df_uns)({header} + df_bt_bytes({MapTree(held, obj.Type)}, {MapValueSize(obj.Type)}, "
-      + $"{(KeyHasPointer(obj.Type) ? "true" : "false")})); }})", NativeUns);
+    string bytes = IsHmap(obj.Type) ? $"df_ht_bytes({MapTree(held, obj.Type)}, {HmapShape(obj.Type)})"
+      : $"df_bt_bytes({MapTree(held, obj.Type)}, {MapValueSize(obj.Type)}, {(KeyHasPointer(obj.Type) ? "true" : "false")})";
+    return new Expr($"({{ {CType(obj.Type)} {held} = {NullChecked(obj.Code, obj.Type)}; (df_uns)({header} + {bytes}); }})", NativeUns);
   }
 
   // the end of a map: what its entries own is freed, then its nodes
   void EmitMapDropGlue(StringBuilder sb, ClassInfo cls) {
-    NeedChunk("map");
+    NeedMapChunk(cls.Name);
     sb.Append("  ").Append(MapClearCode("self", cls.Name)).Append('\n');
   }
 
@@ -392,7 +441,7 @@ public sealed partial class CodeGen {
 
   // the tree_ members called by the methods of the class: the receiver is the object of the method
   Expr MapTreeMember(Expr map, string name, List<Node> args, Scope scope, Node at) {
-    NeedChunk("map");
+    NeedMapChunk(map.Type);
     string type = map.Type;
     string keyType = MapKey(type);
     string valueType = MapValue(type);
@@ -460,6 +509,12 @@ public sealed partial class CodeGen {
         // a string value is copied first: it may be one of the strings that are freed
         string given = valueType == "string" ? $"df_str_dup({MapValueRead(args[0], scope, valueType)})" : MapValueRead(args[0], scope, valueType);
         string release = valueType == "string" ? $"df_str_free({value}); " : "";
+        if (IsHmap(type)) {
+          // the null key is a normal entry of the table: one pass marks, then the table is built again once (spec 6.8.5.1)
+          return new Expr(head + $"{valueC} {value} = {given}; "
+            + ForEachEntry(m, type, (s, c) => $"if ({Same(s, value)}) {{ {DropEntry(type, s, c)}df_ht_mark({tree}, &{c}); }} ")
+            + $"df_uns {removed} = df_ht_sweep({tree}, {HmapShape(type)}); {release}{removed}; }})", NativeUns);
+        }
         return new Expr(head + $"{valueC} {value} = {given}; df_uns {removed} = 0; "
           + $"if ({tree}->has_null && {Same(nullSlot, value)}) {{ {(valueType == "string" ? $"df_bt_sval_clear({nullSlot}); " : "")}"
           + $"df_bt_remove_null({tree}, {MapValueSize(type)}, NULL); {removed}++; }} "
@@ -468,6 +523,14 @@ public sealed partial class CodeGen {
       }
       case "tree_clear":
         return new Expr(head + MapClearCode(m, type) + "})", "void");
+      case "tree_capacity":
+        return new Expr($"df_ht_capacity({MapTree(map.Code, type)})", NativeUns);
+      case "tree_reserve": {
+        var wanted = ExprOf(args[0], scope, NativeUns);
+        return new Expr(head + $"df_ht_reserve({MapTree(m, type)}, (df_uns)({wanted.Code}), {HmapShape(type)}); }})", "void");
+      }
+      case "tree_shrinkToFit":
+        return new Expr(head + $"df_ht_fit({MapTree(m, type)}, {HmapShape(type)}); }})", "bool");
       default:
         throw Error($"internal error: no map member {name}", at);
     }
@@ -475,9 +538,11 @@ public sealed partial class CodeGen {
 
   // ---------------------------------------------------------------- .keys and .values (spec 6.5, 6.6)
 
-  // the views of a map: mapKeys or mapValues (VecPrelude), or null
+  // the views of a map: "mapKeys" or "mapValues" (mapKeys, mapValues in VecPrelude; hmapKeys, hmapValues in HmapPrelude), or null
   string? MapViewKind(string type) =>
-    vecPrelude && classInstanceArgs.TryGetValue(type, out var instance) && instance.Template.Name is "mapKeys" or "mapValues" ? instance.Template.Name : null;
+    !vecPrelude || !classInstanceArgs.TryGetValue(type, out var instance) ? null
+    : instance.Template.Name is "mapKeys" or "hmapKeys" ? "mapKeys"
+    : instance.Template.Name is "mapValues" or "hmapValues" ? "mapValues" : null;
 
   // m.keys or m.values written on a map: (the map, true for the keys), or null. The forms that only read them (a loop, .len, .has, !) work on the map
   // directly, so no view object is made for them
@@ -511,7 +576,7 @@ public sealed partial class CodeGen {
 
   // m.keys! and m.values!: a vec<Key> or a vec<Value> with a copy of them, in key order (spec 6.6)
   Expr MapViewCopy(Expr map, bool keys, Node at) {
-    NeedChunk("map");
+    NeedMapChunk(map.Type);
     string type = map.Type;
     string elem = keys ? MapKey(type) : MapValue(type);
     string vecType = ClassInstanceName(genericClasses["vec"], new List<string> { elem }, at);
@@ -531,13 +596,13 @@ public sealed partial class CodeGen {
     return new Expr(sb.ToString(), vecType, true);
   }
 
-  // C function that prints a view of a map as [a, b] in key order
+  // C function that prints a view of a map as [a, b] in the order of the map
   string MapViewStrFunction(string viewType, Node at) {
     string name = "df_mapview_str_" + System.Text.RegularExpressions.Regex.Replace(viewType, @"[^A-Za-z0-9_]", "_");
     if (arrayHelpers.Add(name)) {
-      NeedChunk("map");
       var cls = ObjInfo(viewType);
       string mapType = cls.ParentField!.Type;
+      NeedMapChunk(mapType);
       bool keys = MapViewKind(viewType) == "mapKeys";
       string elem = keys ? MapKey(mapType) : MapValue(mapType);
       string map = $"v->{cls.ParentField.CName}";
@@ -545,13 +610,13 @@ public sealed partial class CodeGen {
       sb.Append($"static df_string {name}({CType(viewType)} v) {{\n");
       sb.Append("  if (v == NULL) {\n    return df_str_lit(\"null\", 4);\n  }\n");
       sb.Append($"  if ({map} == NULL) {{\n    return df_str_lit(\"(destroyed)\", 11);\n  }}\n");
-      sb.Append("  df_string r = df_str_lit(\"[\", 1);\n  bool firstItem = true;\n");
-      sb.Append($"  for (df_bt_cur c = df_bt_begin({MapTree(map, mapType)}); df_bt_valid(&c); df_bt_step(&c)) {{\n");
-      sb.Append("    if (!firstItem) {\n      r = df_str_catx(r, df_str_lit(\", \", 2));\n    }\n    firstItem = false;\n");
+      sb.Append("  df_string r = df_str_lit(\"[\", 1);\n  df_uns shown = 0;\n");
+      sb.Append($"  {EntryLoop(map, mapType, "c", " && shown < DF_PRINT_ITEMS", ", shown++")} {{\n");
+      sb.Append("    if (shown > 0) {\n      r = df_str_catx(r, df_str_lit(\", \", 2));\n    }\n");
       string item = keys ? CursorKey(mapType, "c") : ReadSlot(mapType, CursorValue(map, mapType, "c"));
       sb.Append($"    {CType(elem)} x = {item};\n");
       sb.Append($"    r = {(elem == "string" ? "df_str_cat" : "df_str_catx")}(r, {StrOf(new Expr("x", elem), at)});\n  }}\n");
-      sb.Append("  return df_str_catx(r, df_str_lit(\"]\", 1));\n}\n\n");
+      sb.Append($"  return df_str_coll_end(r, {MapTree(map, mapType)}->count);\n}}\n\n");
       arrayCode.Append(sb);
     }
     return name;

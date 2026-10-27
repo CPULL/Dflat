@@ -1,0 +1,15 @@
+[1: true, 2: false, 3: false]
+[one: 1, two: 2]
+[2: two, 1: one]
+[-5: 1.5, 10: 2.25]
+[carol: 40, dave: 50, carol2: 1]
+[blue: sky, red: fire]
+[null: false, 7: true, -2: true]
+[x: 2]
+3
+0
+6
+[1: made]
+[5: five, 6: six]
+68
+---- exit code 0 ----

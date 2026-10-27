@@ -1,8 +1,8 @@
-# Collections: what is left to decide and to build (updated 2026/10/26, Specs0.0.16, compiler 0.0.22alpha)
+# Collections: what is left to decide and to build (updated 2026/10/27 evening, Specs0.0.17, compiler 0.0.34alpha)
 
-You are helping me finish the design of the collections of Dflat. You have access to the approved specification: it is quoted as Specs<section> (for example Specs6.8.3 is section 6.8.3 of dflat-spec.md). The compiler is written in C# and generates C (clang). It builds `arr<T>`, `vec<T>` and `list<T>`; `map`, `hmap`, `set` and `hset` do not exist yet. Every point below has a tag that says whether it is open, decided, built or left for later, with its context. Please answer by point number.
+You are helping me finish the design of the collections of Dflat. You have access to the approved specification: it is quoted as Specs<section> (for example Specs6.8.3 is section 6.8.3 of dflat-spec.md). The compiler is written in C# and generates C (clang). It builds `arr<T>`, `vec<T>`, `list<T>`, `map<K, V>` and `hmap<K, V>` (native and string keys and values); `set` and `hset` do not exist yet. Every point below has a tag that says whether it is open, decided, built or left for later, with its context. Please answer by point number.
 
-The points tagged INSPECS are decided and written in the specification (Specs0.0.16, 2026/10/26): each keeps only a line with the sections of the spec, and its COMPILERSTATE line when something is not built. The points still tagged DECIDED are decided but not (fully) in the specification, for the reason written in them. The discussion continues with the TOBEDISCUSSED points.
+The points tagged INSPECS are decided and written in the specification (Specs0.0.16 and 0.0.17, 2026/10/26 and 2026/10/27): each keeps only a line with the sections of the spec, and its COMPILERSTATE line when something is not built. The points still tagged DECIDED are decided but not (fully) in the specification, for the reason written in them. The discussion continues with the TOBEDISCUSSED points.
 
 Tags (one per point):
 - TOBEDISCUSSED: open, needed shortly. This is what I want to discuss.
@@ -17,7 +17,16 @@ Labels inside a point:
 - COMPILERSTATE: a fact about what the compiler does or does not do today. Not a decision.
 - EXPLORED: discussed on 2026/10/26 as a possible direction, explicitly not decided.
 
-How the compiler implements the collections today (so you can judge the proposals): `vec` and `list` are generic classes written in Dflat over `arr<T>`, embedded in the compiler. The hot paths (index, length, `for`, the literal, `has`, `sort`, printing, the drop) are C that the compiler emits. The items are owned: moving an existing object in needs `->x`, a new object needs no marker, a replaced or removed item ends; a string item is always its own copy in its smallest form. The counter of open iterators and views (the private field `iteratorCounter` of the trait `Collection`) makes a changing operation raise `ModifyingIteratedCollectionException` (ID 46). In Release builds an index outside a collection and that exception are a `Panic`. Traits: `Collection<Item>` (the parent), `IndexCollection<Item>`, `IndexIterator<Item>` and `Iterator`. The language has generic traits with a generic parent trait, placeholders, a type switch, value parameters, ownership with moves, silent exceptions, a preprocessor and `uns`.
+How the compiler implements the collections today (so you can judge the proposals): `vec` and `list` are generic classes written in Dflat over `arr<T>`, embedded in the compiler. The hot paths (index, length, `for`, the literal, `has`, `sort`, printing, the drop) are C that the compiler emits. The items are owned: moving an existing object in needs `->x`, a new object needs no marker, a replaced or removed item ends; a string item is always its own copy in its smallest form. The counter of open iterators and views (the private field `iteratorCounter` of the trait `Collection`) makes a changing operation raise `ModifyingIteratedCollectionException` (ID 46). In Release builds an index outside a collection and that exception are a `Panic`. Traits: `Collection<Item>` (the parent), `IndexCollection<Item>`, `IndexIterator<Item>` and `Iterator`. The language has generic traits with a generic parent trait, placeholders, a type switch, value parameters, ownership with moves, silent exceptions, a preprocessor and `uns`. `map` and `hmap` are generic classes written in Dflat too, over a C runtime each (the B+ tree and the extendible hash table); they share the class methods and the code at the call sites. `.hash` is built for every type (point 86). A printed collection shows only its first 3 items, then `, ...] (N items)` (Specs6.1).
+
+## AGENDA FOR THE NEXT DISCUSSION (2026/10/27 evening)
+
+Everything that can be built without a new decision is built. What is left, by what it unblocks:
+1. hset and set (step 7 of point 46; Part H and Part I): the basic hset (`add`, `has`, `remove`, `.len`, `for`, literals, capacity) can be built now from the hmap code. The set operations wait for points 52 (new sets: ownership), 53 (`|=` `&=` `-=` `^=` `+=`), 55 (`add(collection)`), 56 (the iterator of a set), 57 (`->s[item]` or `take`), 58 (set literals, bare `set tags = [...]`), 60 (mixing `set` and `hset`), 61 (order of the result on an `hset`).
+2. Object keys and values (step 8 of point 46, step 6 of point 78): `Keyable` (point 79) needs the name of its exception (Specs99); the rest is compiler work (the chained `executeAfter` of point 9, the default `equals` and `compareTo` of classes, points 14 and 82).
+3. Rules shared by every collection: 83 (lifetime of a borrow of an item: needed for writable values with `(&)`), 85 (when a temporary object ends: today a view used inside an expression locks its collection for good).
+4. The members of `MapIterator` and `SetIterator` and the shape of `next()` (points 1, 50, 56; Specs99).
+5. Smaller ones: 36 (lambdas and `sort(lambda)`), 45 (code size of the generic maps), 66 (variadic parameters and an existing collection).
 
 ## PART A - Traits, iterators and the rules every collection shares
 
@@ -158,12 +167,12 @@ COMPILERSTATE: built for `vec` and `list`.
 ### 27. [INSPECS] Sized declarations vec<T>[n] name
 
 Specs6.3.
-COMPILERSTATE: built for `arr` and `vec` (2026/10/25: `vec<T>[n] name` and `vec<T>[n] name = []` give an empty `vec` with capacity `n`; any other initializer is a compile error). Missing: `hmap` and `hset`, which do not exist yet.
+COMPILERSTATE: built for `arr` and `vec` (2026/10/25: `vec<T>[n] name` and `vec<T>[n] name = []` give an empty `vec` with capacity `n`; any other initializer is a compile error) and for `hmap` (2026/10/27, compiler 0.0.33alpha). Missing: `hset`, which does not exist yet.
 
 ### 28. [INSPECS] Growth policy and capacity
 
 Specs6.8.2.
-COMPILERSTATE: built 2026/10/25: 16 items on the first allocation, doubling up to a 4mb block, then growing by half, never less than what is needed (also for `add(collection)`); `reserve(n)` and `shrinkToFit()` are exact. Missing: the compiler parameters `double-grow-limit` and `further-grow-factor` (fixed at 4mb and 1.5), and the fixed-increment option for small targets.
+COMPILERSTATE: built 2026/10/25: 16 items on the first allocation, doubling up to a 4mb block, then growing by half, never less than what is needed (also for `add(collection)`); `reserve(n)` and `shrinkToFit()` are exact; since 2026/10/27 (compiler 0.0.34alpha, Specs6.6) `reserve(n)` makes room for `n` items in all (was: `n` more), and the room stays until a shrink. Missing: the compiler parameters `double-grow-limit` and `further-grow-factor` (fixed at 4mb and 1.5), and the fixed-increment option for small targets.
 
 ## PART D - What is missing on list
 
@@ -236,7 +245,7 @@ Specs6.5, 6.6.
 ### 40. [INSPECS] Iteration over (key, value)
 
 Specs6.4.
-COMPILERSTATE: destructuring tuples in the header of a `for` is not built.
+COMPILERSTATE: `for (k, v) in m` is built for `map` and `hmap`; destructuring other tuples in the header of a `for` is not built.
 
 ### 41. [INSPECS] Reading and writing an entry
 
@@ -248,8 +257,8 @@ Specs6.6.
 
 ### 43. [INSPECS] Map literals
 
-Specs6.3. The multi-type part: point 84 (Specs11.3.6.1).
-COMPILERSTATE: built 2026-10-26 (compiler 0.0.27alpha) for native and string keys and values. Missing: object values (step 6), multi-type keys (point 84), the hash clash check of an `hmap` literal.
+Specs6.3 (no hash clash error since Specs0.0.17). The multi-type part: point 84 (Specs11.3.6.1).
+COMPILERSTATE: built 2026-10-26 (compiler 0.0.27alpha) for native and string keys and values. Missing: object values (step 6), multi-type keys (point 84).
 
 ### 44. [INSPECS] Ownership of keys and values
 
@@ -262,14 +271,24 @@ Note 2026/10/26: the four node layouts of point 38 (branch and leaf, single-type
 
 ## PART G - hmap: the hash map
 
-Specs6.8.5. Nothing is built. The settled rules: hash map, same members as `map` (Specs6.7.2), iteration in an unspecified order, capacity members `.capacity`, `reserve`, `shrinkToFit` and the capacity form `hmap<K, V>[n]`, keys need `==` and a hash.
+Specs6.8.5, 6.8.5.1. Built (steps 1 to 6 of point 46, compilers 0.0.30alpha to 0.0.34alpha) for native and string keys and values. The settled rules: hash map, same members as `map` (Specs6.7.2), iteration in an unspecified order (the same for the same content and history), capacity members `.capacity`, `reserve`, `shrinkToFit` and the capacity form `hmap<K, V>[n]`, keys need `equals` and a hash.
 
-### 46. [FUTUREVERSION] The hash table design
+### 46. [INSPECS] The hash table design
 
-Context: Specs6.1 and Specs99: open addressing, robin hood or chaining is not chosen; several implementations may exist, chosen by target architecture or compiler option (first design, preliminary). The iteration order is unspecified.
-Question: the table design, the load factor, the growth, how deletion works (tombstones or backward shift), whether the order is reproducible between runs (it helps tests), and what the capacity form `[n]` guarantees.
-PROPOSAL: open addressing with robin hood probing and backward-shift deletion, a power-of-two table, a maximum load of 7/8; a fixed seed so the order is reproducible; a small-table variant for architectures with little memory (point 74).
-Note 2026/10/26: hash tables are not under discussion yet (including NaN as a key of `hmap` and `hset`; in `map` and `set` every NaN is one key that sorts last, Specs6.2). The hash is stable across runs for value types, so a saved map stores keys and values, never the hashes or the table (the table is rebuilt on load).
+Specs6.8.5.1 (extendible hashing: directory, buckets of 16 with chains of extensions, two Fibonacci scrambles, layouts, merges, directory shrink, stuck buckets, capacity, `shrinkToFit()`, iterator), 6.2.1 (identity, null), 6.8.7 (`hset` from `hmap`). The old proposal (open addressing with robin hood probing) is dropped.
+Note 2026/10/26 (still valid): the hash is stable across runs for value types, so a saved map stores keys and values, never the hashes or the table (the table is rebuilt on load).
+COMPILERSTATE: steps 1 and 2 built 2026/10/27 (compilers 0.0.30alpha and 0.0.31alpha, tests hmap, hmapstrings): native keys and values, strings, `.keys` and `.values` (step 4, 0.0.32alpha, test hmapviews), capacity (step 5, 0.0.33alpha, test hmapcapacity), literals with the types from the entries (step 6, 0.0.34alpha, test hmapliterals); also removal and shrinking (step 3), `for (k, v)`. `.hash` is built (point 86).
+Build order (the compiler side decides), after point 86:
+  1. native keys and values - DONE (0.0.30alpha, test hmap)
+  2. strings - DONE (0.0.31alpha, test hmapstrings)
+  3. removal and shrinking - DONE with step 1
+  4. `for (k, v)`, `.keys`, `.values` - DONE (0.0.32alpha, test hmapviews)
+  5. capacity - DONE (0.0.33alpha, test hmapcapacity)
+  6. literals - DONE (0.0.34alpha, test hmapliterals)
+  7. `hset` - the basic part can be built now; the set operations wait for points 52 to 61 (see the AGENDA)
+  8. object keys, after `Keyable` (point 79)
+Compiler choices (CompilerImplementation.txt): the key slot of a native is 8 bytes also with a 32-bit `uns`; C(d) and C(d-1) are kept for every d; the directory stops at 48 bits (28 with a 32-bit `uns`).
+Open (Specs99): widening of the stuck buckets (later).
 
 ### 47. [REMOVED]
 
@@ -278,20 +297,21 @@ Note 2026/10/26: hash tables are not under discussion yet (including NaN as a ke
 
 Specs6.2.3, 11.2.1: replaced by `Keyable`.
 
-### 49. [TOBEDISCUSSED] String keys
+### 49. [INSPECS] String keys
 
-Context: Specs6.2: `""` is a valid key; a null string and `""` are the same value.
-COMPILERSTATE: the string layout is final (Specs4.4) and built: `==` compares the content, and a string stored in a collection is always its own copy in its smallest form (point 73). The hash is rapidhash over the full text (point 14).
-Question: what is left depends on the hash table design (point 46), for example how an empty slot is told apart from `""`.
+Specs6.2 (the occupancy mask, `""` is a normal key), 6.2.1 (rapidhash V3; the null string hashes as `""`), 6.8.5.1 (16-byte key slot).
+COMPILERSTATE: built for `hmap` 2026/10/27 (compiler 0.0.31alpha, test hmapstrings).
 
-### 50. [TOBEDISCUSSED] Iterator and cursor of hash collections
+### 50. [INSPECS] Iterator and cursor of hash collections
 
-Context: Specs6.7.2 and Specs99: the cursor of `hmap` and `hset` iterators is a slot of the table (a position); the sub-traits are open. See point 1 and point 3. A change of the table (rehash) during an iteration is the case of point 7.
+Specs6.8.5.1: the cursor is the directory index (`uns`), the block (`addr`) and the slot (`uns`); order the same for the same content and history.
+Still open (Specs99): the members of `MapIterator` and `SetIterator`.
+COMPILERSTATE: the cursor is built for `hmap` (the `for` loop and the views use it); there is no iterator object yet.
 
 ### 51. [INSPECS] Capacity members and the sized declaration
 
-Specs6.8.5, 6.8.7, 6.3.
-COMPILERSTATE: nothing is built (`hmap` and `hset` do not exist yet; the declaration form is built for `vec`, point 27).
+Specs6.8.5, 6.8.5.1 (capacity on the directory, n / 11 buckets, `shrinkToFit()` returns `bool`), 6.8.7, 6.6, 6.3.
+COMPILERSTATE: built for `hmap` 2026/10/27 (compiler 0.0.33alpha, test hmapcapacity): `.capacity` is 11 per directory entry, `reserve(n)` (n in all) and `hmap<K, V>[n]` split every bucket to the depth needed, `shrinkToFit()` merges what fits and returns `false` when nothing changed (after many removals it often returns `false`: the removals already merged and shrank). Missing: `hset`.
 
 ## PART H - set (bset): the sorted set
 
@@ -339,7 +359,7 @@ Specs6.2: set items follow the key rules.
 
 ## PART I - hset: the hash set
 
-Specs6.8.7. Nothing is built. The settled rules: `SetCollection<Item>`, a hash set, the same members and operations as `set`, capacity members and the capacity form `hset<T>[n]`, iteration in an unspecified order. Only the points that are different from `set` are listed.
+Specs6.8.7. Nothing is built; the basic part can be built now from the hmap code (see the AGENDA). The settled rules: `SetCollection<Item>`, a hash set, the same members and operations as `set`, capacity members and the capacity form `hset<T>[n]`, iteration in an unspecified order. Only the points that are different from `set` are listed.
 
 ### 60. [TOBEDISCUSSED] set against hset
 
@@ -352,10 +372,9 @@ PROPOSAL: an explicit conversion member in a later version; mixing stays an erro
 Context: Specs6.8.7: unspecified order. The result of `union` of two hash sets has an unspecified order too.
 PROPOSAL: nothing to specify; documented as unspecified.
 
-### 62. [TOBEDISCUSSED] Sharing the code of set and hset with map and hmap
+### 62. [INSPECS] Sharing the code of set and hset with map and hmap
 
-Context: a set is a map without values; an `hset` is an `hmap` without values.
-PROPOSAL: the compiler generates `set` and `hset` from the `map` and `hmap` code (the value type is empty), so the designs of point 38 and point 46 are decided once.
+Specs6.8.7, 6.8.4.1, 6.8.5.1: `set` is generated from the `map` code and `hset` from the `hmap` code, with an empty value type. A set holds only keys, under the key rules (point 15).
 
 ## PART J - Custom collections and related language points
 
@@ -455,6 +474,7 @@ Decision (approved by the compiler side, 2026/10/25):
   6. Object keys and values, with ownership.
   7. Literals (point 43).
 - Everything else (sets, hmap, hset) is downstream from these choices.
+- Progress 2026/10/27: `hmap` follows the same steps (point 46: steps 1 to 6 built); step 6 of both (objects) waits for `Keyable`.
 - Progress 2026/10/26: steps 1, 2, 3, 4 and 7 are built (compiler 0.0.23alpha to 0.0.27alpha; tests map, mapstrings, maploop, mapviews, mapliterals). Step 5 waits for point 83, step 6 for `Keyable` (point 79, which needs the chained `executeAfter` of point 9) and the default hash, `compareTo` and `equals` of classes (points 14, 82).
 COMPILERSTATE: also built with step 4: `.keys` and `.values` as views kept in a variable; the common forms (`for x in m.keys`, `.len`, `.has`, printing, `m.keys!`) work on the map with no view object, because of point 85.
 
@@ -467,7 +487,7 @@ COMPILERSTATE: not built. Needs the chain of `executeAfter` over a sub-trait (po
 
 ### 80. [INSPECS] Identity of a key in a map
 
-Specs6.2.1 (`hmap`, `hset`). The multi-type part: point 84 (Specs11.3.6.1).
+Specs6.2, 6.2.1 (`hmap`, `hset`: the hashes match and `equals` agrees; same-hash keys are both kept; no collision exception, since Specs0.0.17). The multi-type part: point 84 (Specs11.3.6.1).
 
 ### 81. [INSPECS] The hash of a type
 
@@ -500,13 +520,31 @@ The same happens with `v[1..3].len`, a view passed to a function, and a new map 
 COMPILERSTATE: not fixed. The view of a map given only to printing is printed and then ended.
 Question: when does a temporary object end? PROPOSAL: at the end of the statement that made it, like the temporary strings (df_tmp), unless it is kept (a variable, a field, an item, a returned value, an argument moved with ->).
 
+### 86. [INSPECS] Building .hash before hmap
+
+Specs6.2.1: natives widened with zeros (no sign extension); `real` by its normalized bit pattern; strings with rapidhash V3 (full variant, seed 0), folded `hi ^ lo` for a 32-bit `uns`, nano allowed by the architecture definition; tuples start from the hash of the first component; the null string hashes as `""`; the null constant `"null".hash` is `0x2AA52E3F0BF438BD` (64-bit `uns`) and `0x21511682` (32-bit), also for `x8?`, `x16?`, `bool?` (at least 4 bytes).
+Also Specs6.2.1 and 11.1.3: `.hash` calls `get_hash()` virtually; each class without an override has its own generated default (its own name, all fields); an inherited override is used as it is; an owned field whose class overrides `get_hash()` is stable; a collection hashes as its type name only; key identity is hash plus `equals`.
+Decision 2026/10/27: `.hash` is built before any `hmap` work. rapidhash is MIT: its copyright notice stays in the runtime chunk.
+COMPILERSTATE: built 2026/10/27 (compiler 0.0.28alpha, test hash): every case of Specs6.2.1, with `override fun uns get_hash()`. The C runtime, the compiler (for the constants) and a Python port give the same values (64 and 32 bits); none of them was checked against the reference code of rapidhash (running it was blocked). Not built: namespaces in the class names (always `Root.`), multi-type values, wide natives, `Exception` values, the `Keyable` check, the hash of a type (`i32.hash`).
+
 ## How I work
 
 I take small, explicitly approved steps. I would like your output as: the number of each point with your answer (a decision, or what is still open), the new points you find, and a proposed order of small steps, each testable on its own. Please keep the answers concrete and short, and tell me when something in the specification looks inconsistent.
 
-## Pending checks (2026/10/26 evening)
+## Pending checks
 
-- The numeric value of the null constant `"null".hash` (Specs6.2.1), chosen after tests (in Specs99).
+- The values of `"null".hash` and `"".hash` in Specs6.2.1: the C implementation gives the values of the Python port (point 86); a check against the reference code of rapidhash is still to do.
+
+## Changes in 2026/10/27
+
+- Evening: built `.hash` (0.0.28alpha), the printing rule (0.0.29alpha: the first 3 items, then `, ...] (N items)`, for every collection; Specs6.1), `hmap` steps 1 to 6 (0.0.30alpha to 0.0.34alpha), `reserve(n)` as a total on `vec` and `hmap` (0.0.34alpha; Specs6.6 and 6.8.5.1). Spec fix: the value slot of `hmap` has the exact size of its type (Specs6.8.5.1, as in `map`). New AGENDA at the top. Points 28, 40, 46, 49, 50, 51, 78, 86 and Parts G and I updated.
+- Written in Specs0.0.17: points 46, 49, 50, 51, 62 and 80 tagged INSPECS; point 43 points to the new literal rule. Agreed in the discussion: Fibonacci scrambles (bijective, so a stuck bucket means the same hash), chains of extensions, directory shrink of at most 2 bits per check, cursor (`uns`, `addr`, `uns`), `set` from `map`, nothing allocated before the first `add`, the byte layouts, capacity n / 11 buckets, `shrinkToFit()` returning `bool`.
+- New point 86: `.hash` is built before `hmap`; the details of the hash and the null constant (Specs6.2.1).
+
+- Point 46: the `hmap` design is decided (extendible hashing: a directory of bucket pointers, buckets of 16 unsorted entries with extensions, two scrambles, merges and directory shrinking, null key, capacity, iteration, `hset` from `hmap`, build order proposal); tag DECIDED, not yet in the spec.
+- Point 80: identity is hash plus `equals`; same-hash keys are both kept; the collision exception is removed. Tag back to DECIDED until the spec is updated.
+- Point 43: an `hmap` literal is an empty `hmap` plus the adds; only constant duplicates are a compile error.
+- Points 49 and 50: decided by point 46 (occupancy mask; iteration order). Point 51: meaning of `.capacity`, `[n]` and `reserve(n)`. Point 62: decided for `hset`.
 
 ## Changes in 2026/10/26
 

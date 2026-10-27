@@ -1,0 +1,5 @@
+class Point {
+  i32 x = 0
+}
+
+hmap<Point, i32> places = []

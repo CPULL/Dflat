@@ -1,0 +1,338 @@
+// Tetris for Dflat — stdlib 0.0.10
+//
+// Real time: the loop runs every 40 ms, gravity moves the piece down every few frames.
+// Every tetromino has its own character. A rotation first shows the piece turned by 45
+// degrees for a moment, the score counts up to its new value, full rows flash before they go.
+//   a d     move left / right
+//   w       rotate
+//   s       soft drop
+//   space   hard drop
+//   q       quit
+
+namespace tetris
+
+alias Root.Console as console
+
+class Tetris {
+  public static const i32 WIDTH = 10
+  public static const i32 HEIGHT = 20
+  public static const i32 FRAME = 40              // ms per frame
+  public static const i32 TILT_FRAMES = 3         // how long the 45 degree tilt stays on screen
+  public static const i32 FLASH_FRAMES = 6        // how long full rows flash
+
+  // The 7 tetrominoes as 4 cells (dx, dy) around the rotation center: I O T S Z J L
+  arr<i32> shapes = [
+    -1, 0,  0, 0,  1, 0,  2, 0,     // I
+     0, 0,  1, 0,  0, 1,  1, 1,     // O
+    -1, 0,  0, 0,  1, 0,  0, 1,     // T
+     0, 0,  1, 0, -1, 1,  0, 1,     // S
+    -1, 0,  0, 0,  0, 1,  1, 1,     // Z
+    -1, 0,  0, 0,  1, 0,  1, 1,     // J
+    -1, 0,  0, 0,  1, 0, -1, 1      // L
+  ]
+  arr<char> glyphs = ['#', '@', '%', '&', '$', '+', '*']
+
+  arr<i32> board                   // 0 = empty, else piece kind + 1; y * WIDTH + x
+  arr<i32> cells = arr<i32>[8]     // the current piece: 4 offsets (dx, dy)
+  i32 kind = 0
+  i32 nextKind = 0
+  i32 px = 0
+  i32 py = 0
+
+  bool alive = true
+  u32 score = 0
+  u32 shown = 0                    // the score on screen, it climbs toward score
+  u32 lines = 0
+  u32 level = 1
+  i32 gravity = 0                  // frames since the last fall
+
+  i32 tilt = 0                     // frames left of the 45 degree tilt
+  arr<bool> flashing = arr<bool>[(uns)HEIGHT]
+  i32 flash = 0                    // frames left of the row flash
+
+  public fun bool isRunning() { alive }
+  public fun u32 getScore() { score }
+  public fun u32 getLines() { lines }
+
+  public fun start() {
+    board = arr<i32>[(uns)(WIDTH * HEIGHT)]
+    board.fill(0)
+    flashing.fill(false)
+    nextKind = (i32)Root.Random.int(0, 6)
+    spawn()
+  }
+
+  public fun key(char k) {
+    if !alive || flash > 0 then return
+    if k == 'a' {
+      tryMove(-1, 0)
+    } else if k == 'd' {
+      tryMove(1, 0)
+    } else if k == 's' {
+      if tryMove(0, 1) then score += 1
+    } else if k == 'w' {
+      rotate()
+    } else if k == ' ' {
+      while tryMove(0, 1) { score += 2 }
+      lockPiece()
+    }
+  }
+
+  // One frame: animations, then gravity
+  public fun frame() {
+    if shown < score {
+      u32 climb = (score - shown) / 6 + 1
+      shown = shown + climb > score ? { score, shown + climb }
+    }
+    if tilt > 0 then tilt--
+    if flash > 0 {
+      flash--
+      if flash == 0 then removeFlashing()
+      return
+    }
+    if !alive then return
+
+    gravity++
+    i32 delay = 14 - (i32)level
+    if delay < 2 then delay = 2
+    if gravity >= delay {
+      gravity = 0
+      if !tryMove(0, 1) then lockPiece()
+    }
+  }
+
+  public fun bool isAnimating() { shown < score || tilt > 0 || flash > 0 }
+
+  fun spawn() {
+    kind = nextKind
+    nextKind = (i32)Root.Random.int(0, 6)
+    for i32 i = 0..8 { cells[(uns)i] = shapes[(uns)(kind * 8 + i)] }
+    px = WIDTH / 2 - 1
+    py = 0
+    if !fits(px, py, cells) then alive = false
+  }
+
+  fun bool fits(i32 x, i32 y, arr<i32> offsets) {
+    for i32 i = 0..4 {
+      i32 cx = x + offsets[(uns)(i * 2)]
+      i32 cy = y + offsets[(uns)(i * 2 + 1)]
+      if cx < 0 || cx >= WIDTH || cy >= HEIGHT then return false
+      if cy >= 0 && board[(uns)(cy * WIDTH + cx)] != 0 then return false
+    }
+    return true
+  }
+
+  fun bool tryMove(i32 dx, i32 dy) {
+    if !fits(px + dx, py + dy, cells) then return false
+    px += dx
+    py += dy
+    return true
+  }
+
+  // Clockwise: (dx, dy) becomes (-dy, dx); a wall kick of one cell either side
+  fun rotate() {
+    if kind == 1 then return        // the O does not turn
+    arr<i32> turned = arr<i32>[8]
+    for i32 i = 0..4 {
+      turned[(uns)(i * 2)] = -cells[(uns)(i * 2 + 1)]
+      turned[(uns)(i * 2 + 1)] = cells[(uns)(i * 2)]
+    }
+    arr<i32> kicks = [0, -1, 1, -2, 2]
+    for i32 kick in kicks {
+      if fits(px + kick, py, turned) {
+        px += kick
+        cells.copyFrom(0, turned, 0, 8)
+        tilt = TILT_FRAMES
+        return
+      }
+    }
+  }
+
+  fun lockPiece() {
+    for i32 i = 0..4 {
+      i32 cy = py + cells[(uns)(i * 2 + 1)]
+      if cy < 0 {
+        alive = false
+        return
+      }
+      board[(uns)(cy * WIDTH + px + cells[(uns)(i * 2)])] = kind + 1
+    }
+    tilt = 0
+
+    u32 full = 0
+    for i32 y = 0..HEIGHT {
+      bool complete = true
+      for i32 x = 0..WIDTH {
+        if board[(uns)(y * WIDTH + x)] == 0 {
+          complete = false
+          break
+        }
+      }
+      flashing[(uns)y] = complete
+      if complete then full++
+    }
+
+    if full > 0 {
+      u32 points = full ? { 1: 100, 2: 300, 3: 500, default: 800 }
+      score += points * level
+      lines += full
+      level = lines / 10 + 1
+      flash = FLASH_FRAMES
+    } else {
+      spawn()
+    }
+  }
+
+  // Drops the rows above every flashing row, then brings the next piece
+  fun removeFlashing() {
+    i32 target = HEIGHT - 1
+    for i32 row = 0..HEIGHT {
+      i32 y = HEIGHT - 1 - row
+      if flashing[(uns)y] then continue
+      if target != y {
+        for i32 x = 0..WIDTH { board[(uns)(target * WIDTH + x)] = board[(uns)(y * WIDTH + x)] }
+      }
+      target--
+    }
+    while target >= 0 {
+      for i32 x = 0..WIDTH { board[(uns)(target * WIDTH + x)] = 0 }
+      target--
+    }
+    flashing.fill(false)
+    spawn()
+  }
+
+  // The piece cell i on screen; while tilting, the offsets are turned by 45 degrees
+  // back from the new position (x' = (dx + dy) * 0.7, y' = (dy - dx) * 0.7, rounded)
+  fun i32, i32 pieceCell(i32 i) {
+    i32 dx = cells[(uns)(i * 2)]
+    i32 dy = cells[(uns)(i * 2 + 1)]
+    if tilt == 0 then return px + dx, py + dy
+    return px + half(dx + dy), py + half(dy - dx)
+  }
+
+  static fun i32 half(i32 v) {
+    i32 scaled = v * 7
+    return scaled >= 0 ? { (scaled + 5) / 10, -((-scaled + 5) / 10) }
+  }
+
+  fun char pieceAt(i32 x, i32 y) {
+    if !alive || flash > 0 then return ' '
+    for i32 i = 0..4 {
+      i32 cx, i32 cy = pieceCell(i)
+      if cx == x && cy == y then return glyphs[(uns)kind]
+    }
+    return ' '
+  }
+
+  fun i32 ghostY() {
+    i32 y = py
+    while fits(px, y + 1, cells) { y++ }
+    return y
+  }
+
+  fun string nextRow(i32 row) {
+    string text = ""
+    for i32 x = -1..3 {
+      char c = ' '
+      for i32 i = 0..4 {
+        if shapes[(uns)(nextKind * 8 + i * 2)] == x && shapes[(uns)(nextKind * 8 + i * 2 + 1)] == row {
+          c = glyphs[(uns)nextKind]
+        }
+      }
+      text += c
+      text += c
+    }
+    return text
+  }
+
+  public fun render() {
+    i32 ghost = ghostY()
+    string border = "+"
+    for i32 i = 0..WIDTH { border += "--" }
+    border += "+\n"
+
+    string screen = border
+    for i32 y = 0..HEIGHT {
+      screen += "|"
+      bool lit = flashing[(uns)y] && flash % 2 == 0
+      for i32 x = 0..WIDTH {
+        char c = ' '
+        if lit {
+          c = '='
+        } else {
+          i32 cell = board[(uns)(y * WIDTH + x)]
+          if cell != 0 then c = glyphs[(uns)(cell - 1)]
+          char p = pieceAt(x, y)
+          if p != ' ' {
+            c = p
+          } else if c == ' ' && alive && flash == 0 && tilt == 0 && ghost != py {
+            for i32 i = 0..4 {
+              if px + cells[(uns)(i * 2)] == x && ghost + cells[(uns)(i * 2 + 1)] == y then c = '.'
+            }
+          }
+        }
+        screen += c
+        screen += c
+      }
+      screen += "|"
+      screen += y ? {
+        1: "   NEXT",
+        3: "   " + nextRow(0),
+        4: "   " + nextRow(1),
+        7: $"   SCORE {shown}",
+        9: $"   LINES {lines}",
+        11: $"   LEVEL {level}",
+        15: "   a d   move",
+        16: "   w     rotate",
+        17: "   s     soft drop",
+        18: "   space hard drop",
+        19: "   q     quit",
+        default: ""
+      }
+      screen += "\n"
+    }
+    screen += border
+    console.clear()
+    console.print(screen)
+  }
+}
+
+fun int main() {
+  Tetris game = Tetris()
+  game.start()
+
+  bool quit = false
+  game.render()
+  while game.isRunning() && !quit {
+    Root.Time.sleep(Tetris.FRAME)
+
+    char? key = console.read()
+    while key != null {
+      char pressed = (key ?? '?').toLower()
+      if pressed == 'q' {
+        quit = true
+      } else {
+        game.key(pressed)
+      }
+      key = console.read()
+    }
+
+    game.frame()
+    game.render()
+  }
+
+  // Let the score finish counting up
+  while game.isAnimating() {
+    Root.Time.sleep(Tetris.FRAME)
+    game.frame()
+    game.render()
+  }
+
+  if quit {
+    console.log($"Bye. Score: {game.getScore()}")
+  } else {
+    console.log($"Game over. Score: {game.getScore()}, lines {game.getLines()}")
+  }
+  return 0
+}

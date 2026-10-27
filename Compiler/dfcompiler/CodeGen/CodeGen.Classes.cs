@@ -77,6 +77,9 @@ public sealed partial class CodeGen {
   readonly StringBuilder classGlobals = new();
   readonly StringBuilder classCode = new();
   readonly List<FieldInfo> staticOrder = new();              // statics in the order their initializers must run
+  readonly Dictionary<string, (string CName, string Type)> globalConsts = new();   // top-level const: seen by every function
+  readonly List<string> globalConstOrder = new();
+  FunSig? globalConstsInit;
   ClassInfo? currentClass;
   bool initializing;                                         // compiling a constructor or a static initializer: const fields can be set
   FunSig? currentFun;
@@ -538,6 +541,14 @@ public sealed partial class CodeGen {
           f.Visibility = ofTrait.Visibility;   // the visibility of the trait function (private: the trait and the class itself)
           f.IsAsParent = ofTrait.IsAsParent;
           f.IsUnrestricted = ofTrait.IsUnrestricted;
+        } else if (member.Text == "get_hash" && f.Params.Count == 0) {
+          // get_hash() is offered by Root.Class (spec 6.2.1, 11.1.3): the first override in a class chain
+          if (!isOverride) {
+            throw Error("get_hash is defined by Root.Class: write 'override'", member);
+          }
+          if (f.Ret != NativeUns) {
+            throw Error("get_hash returns uns", member);
+          }
         } else if (isOverride) {
           throw Error($"'{member.Text}' overrides nothing: no function with this signature in a parent class or trait", member);
         }
@@ -645,7 +656,7 @@ public sealed partial class CodeGen {
       // the first and the last node of a list are node pointers in C (CodeGen.List.cs)
       string fieldType = IsList(cls.Name) && field.Name is "first" or "last" ? ListNode(cls.Name) + "*"
         : IsListIterator(cls.Name) && field.Name == "node" ? ListNode(cls.ParentField!.Type) + "*"
-        : IsMap(cls.Name) && field.Name == "tree" ? "df_bt"
+        : IsMap(cls.Name) && field.Name == "tree" ? (IsHmap(cls.Name) ? "df_ht" : "df_bt")
         : field.Hidden && field.Name == "df_children" ? "df_kids*" : CType(field.Type);
       fields.Append($"  {fieldType} {field.CName};\n");
     }
@@ -719,11 +730,47 @@ public sealed partial class CodeGen {
     }
   }
 
+  // top-level const: C globals set at program start, in source order, before the statics (which may read them);
+  // they leave the top-level code, so their values can use literals, other consts, functions and statics only
+  void DeclareGlobalConsts(Node program) {
+    var decls = program.Children.Where(statement => statement.Kind == "Decl"
+      && statement.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ').Contains("const") == true).ToList();
+    if (decls.Count == 0) {
+      return;
+    }
+    var at = decls[0];
+    var block = Synthetic("Block", at);
+    foreach (var decl in decls) {
+      string name = decl.Text!;
+      if (globalConsts.ContainsKey(name)) {
+        throw Error($"'{name}' is already declared in this scope", decl);
+      }
+      var init = decl.Children.FirstOrDefault(child => child.Kind == "Init") ?? throw Error("a const needs a value", decl);
+      string type = ResolveDeclType(decl, null);
+      globalConsts[name] = ($"g_{name}", type);
+      globalConstOrder.Add(name);
+      classGlobals.Append($"static {CType(type)} g_{name};\n");
+      block.Add(Synthetic("Assign", decl, "=").Add(Synthetic("Name", decl, name)).Add(init.Children[0]));
+      program.Children.Remove(decl);
+    }
+    var node = Synthetic("Fun", at, "__consts").Add(Synthetic("Params", at)).Add(block);
+    globalConstsInit = new FunSig("__consts", "void", new List<ParamSig>(), node, null) { IsStaticInit = true };
+    funs[globalConstsInit.Name] = new List<FunSig> { globalConstsInit };
+  }
+
   // C statements run at program start: zero values, then the initializers in dependency order
   string StaticInitCode() {
     var sb = new StringBuilder();
+    foreach (var name in globalConstOrder) {
+      sb.Append($"  {globalConsts[name].CName} = {ZeroValue(globalConsts[name].Type)};\n");
+    }
     foreach (var field in staticOrder) {
       sb.Append($"  {field.CName} = {ZeroValue(field.Type)};\n");
+    }
+    if (globalConstsInit != null) {
+      sb.Append(PairReturn(globalConstsInit)
+        ? $"  {{\n    df_exception* error = {globalConstsInit.CName}();\n    if (error) {{\n      df_panic_unhandled(error);\n    }}\n  }}\n"
+        : $"  {globalConstsInit.CName}();\n");
     }
     foreach (var field in staticOrder.Where(field => field.StaticInit != null)) {
       if (PairReturn(field.StaticInit!)) {
@@ -1254,7 +1301,11 @@ public sealed partial class CodeGen {
       string parent = cls.Parent == null ? "NULL" : "&" + cls.Parent.Descriptor;
       string impls = EmitImpls(cls);
       EmitDropGlue(cls);
-      sb.Append($"static const df_class {cls.Descriptor} = {{ {256 + cls.Index}, \"{DisplayName(cls.Name)}\", {parent}, {slots}, df_strp_{cls.Name}, {impls}, df_dropall_{cls.Name} }};\n\n");
+      if (hashUsed) {
+        EmitHashFunction(cls, sb);
+      }
+      string hash = hashUsed ? $"df_hash_{cls.Name}" : "NULL";
+      sb.Append($"static const df_class {cls.Descriptor} = {{ {256 + cls.Index}, \"{DisplayName(cls.Name)}\", {parent}, {slots}, df_strp_{cls.Name}, {impls}, df_dropall_{cls.Name}, {hash} }};\n\n");
     }
   }
 

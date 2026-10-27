@@ -1,0 +1,1 @@
+hmap<i32, string>[10] names = [1: "one"]

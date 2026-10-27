@@ -139,11 +139,11 @@ public sealed partial class CodeGen {
       string item = StrOf(new Expr("node->value", elem), at);
       arrayCode.Append($"static df_string {name}({CType(listType)} v) {{\n");
       arrayCode.Append("  if (v == NULL) {\n    return df_str_lit(\"null\", 4);\n  }\n");
-      arrayCode.Append("  df_string r = df_str_lit(\"[\", 1);\n  bool firstItem = true;\n");
-      arrayCode.Append($"  for ({ListNode(listType)}* node = v->{VecField(listType, "first")}; node != NULL; node = node->next) {{\n");
-      arrayCode.Append("    if (!firstItem) {\n      r = df_str_catx(r, df_str_lit(\", \", 2));\n    }\n    firstItem = false;\n");
+      arrayCode.Append("  df_string r = df_str_lit(\"[\", 1);\n  df_uns shown = 0;\n");
+      arrayCode.Append($"  for ({ListNode(listType)}* node = v->{VecField(listType, "first")}; node != NULL && shown < DF_PRINT_ITEMS; node = node->next, shown++) {{\n");
+      arrayCode.Append("    if (shown > 0) {\n      r = df_str_catx(r, df_str_lit(\", \", 2));\n    }\n");
       arrayCode.Append($"    r = {(elem == "string" ? "df_str_cat" : "df_str_catx")}(r, {item});\n  }}\n");
-      arrayCode.Append("  return df_str_catx(r, df_str_lit(\"]\", 1));\n}\n\n");
+      arrayCode.Append($"  return df_str_coll_end(r, v->{VecField(listType, "count")});\n}}\n\n");
     }
     return name;
   }
@@ -457,7 +457,7 @@ public sealed partial class CodeGen {
     return ($"for (df_uns {position} = 0; {position} < {count}; {position}++, {node} = {node}->next)", $"{node}->value");
   }
 
-  // C function that prints a view as [a, b]
+  // C function that prints a view as [a, b], or [a, b, c, ...] (37 items) (spec 6.1)
   string ViewStrFunction(string viewType, Node at) {
     string name = "df_view_str_" + System.Text.RegularExpressions.Regex.Replace(viewType, @"[^A-Za-z0-9_]", "_");
     if (arrayHelpers.Add(name)) {
@@ -472,7 +472,7 @@ public sealed partial class CodeGen {
       if (ViewTemplate(viewType) == "arrView") {
         item = $"v->{FindField(cls, "items")!.CName}.p[{start} + i]";
         sb.Append("  df_string r = df_str_lit(\"[\", 1);\n");
-        sb.Append($"  for (df_uns i = 0; i < {count}; i++) {{\n");
+        sb.Append($"  for (df_uns i = 0; i < {count} && i < DF_PRINT_ITEMS; i++) {{\n");
       } else {
         string collectionType = cls.ParentField!.Type;
         string collection = $"v->{cls.ParentField.CName}";
@@ -480,17 +480,17 @@ public sealed partial class CodeGen {
         sb.Append("  df_string r = df_str_lit(\"[\", 1);\n");
         if (IsVec(collectionType)) {
           item = $"{collection}->{VecField(collectionType, "items")}.p[{start} + i]";
-          sb.Append($"  for (df_uns i = 0; i < {count}; i++) {{\n");
+          sb.Append($"  for (df_uns i = 0; i < {count} && i < DF_PRINT_ITEMS; i++) {{\n");
         } else {
           item = "node->value";
           sb.Append($"  {ListNode(collectionType)}* node = {collection}->{VecField(collectionType, "first")};\n");
           sb.Append($"  for (df_uns i = 0; i < {start}; i++) {{\n    node = node->next;\n  }}\n");
-          sb.Append($"  for (df_uns i = 0; i < {count}; i++, node = node->next) {{\n");
+          sb.Append($"  for (df_uns i = 0; i < {count} && i < DF_PRINT_ITEMS; i++, node = node->next) {{\n");
         }
       }
       sb.Append("    if (i > 0) {\n      r = df_str_catx(r, df_str_lit(\", \", 2));\n    }\n");
       sb.Append($"    r = {(elem == "string" ? "df_str_cat" : "df_str_catx")}(r, {StrOf(new Expr(item, elem), at)});\n  }}\n");
-      sb.Append("  return df_str_catx(r, df_str_lit(\"]\", 1));\n}\n\n");
+      sb.Append($"  return df_str_coll_end(r, {count});\n}}\n\n");
       arrayCode.Append(sb);
     }
     return name;

@@ -1,0 +1,78 @@
+alias Root as r
+
+// hmap step 2 (spec 6.8.5.1): string keys (the full hash and a pointer to the hmap's own copy) and string values (inline up to 59 bytes)
+hmap<string, i32> ages = ["alice": 25, "bob": 30, "": 0]
+string name = "car"
+name += "ol"
+ages[name] = 40
+r.Console.log($"{ages["alice"]} {ages["carol"]} {ages[""]} {ages["nobody"]} {ages.len}")
+r.Console.log($"{ages.hasKey("bob")} {ages.hasKey("bo")} {ages.keyOf(30)}")
+name = "changed"                                 // the hmap has its own copy of "carol"
+r.Console.log(ages.hasKey("carol"))
+string long = "a key that is longer than sixteen bytes, and then longer than one hundred and twelve bytes, to take every path of rapidhash"
+ages[long] = 7
+r.Console.log($"{ages[long]} {ages.hasKey(long + "!")}")
+r.Console.log(ages.add("alice", 26))             // false: replaced
+ages.removeAt("bob")
+r.Console.log($"{ages.hasKey("bob")} {ages.len}")
+i32 sum = 0
+for (string k, i32 v) in ages {
+  sum += v
+}
+r.Console.log(sum)                               // 26 + 40 + 0 + 7
+
+hmap<i32, string> words = [1: "one", 2: "two"]
+words[3] = "a value of more than fifty-nine bytes, so the slot points to it instead of holding it"
+string kept = words[3]                           // a copy
+words[3] = "short"
+r.Console.log($"{kept.len} {words[3]}")
+string out = ->words[1]
+r.Console.log($"{out} {words.len} {words.hasKey(1)}")
+words[4] = "two"
+r.Console.log($"{words.removeAll("two")} {words.len}")
+r.Console.log(words)
+words.clear()
+r.Console.log(words.len)
+
+hmap<string, string> pairs = ["k": "v"]
+pairs["k"] += "alue"
+r.Console.log(pairs["k"])
+r.Console.log(pairs.remove("value"))
+
+// many string keys, checked against arrays
+hmap<string, u32> table = []
+arr<u32> mirror = arr<u32>[2000]
+arr<bool> present = arr<bool>[2000]
+u64 seed = 4242
+i32 round = 0
+while round < 12000 {
+  seed = seed * 6364136223846793005ul + 1442695040888963407ul
+  u32 k = (u32)((seed >> 33) % 2000ul)
+  string key = $"key number {k}"
+  if (seed >> 20) % 3ul == 0ul {
+    table.removeAt(key)
+    present[k] = false
+  } else {
+    table[key] = (u32)round
+    mirror[k] = (u32)round
+    present[k] = true
+  }
+  round += 1
+}
+i32 wrong = 0
+u64 count = 0
+u32 n = 0
+while n < 2000 {
+  string key = $"key number {n}"
+  if present[n] != table.hasKey(key) || (present[n] && table[key] != mirror[n]) {
+    wrong += 1
+  }
+  if present[n] {
+    count += 1
+  }
+  n += 1
+}
+r.Console.log($"{wrong} {table.len == count}")
+r.Console.log(table.removeAll(5u) <= 1u)
+table.clear()
+r.Console.log(table.len)

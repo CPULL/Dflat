@@ -1,0 +1,1 @@
+hmap_sized_literal.df(1): error: hmap<K, V>[n] name is an empty hmap with capacity n: it takes nothing or []

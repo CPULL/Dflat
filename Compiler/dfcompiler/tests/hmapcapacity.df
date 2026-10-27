@@ -1,0 +1,65 @@
+alias Root as r
+
+// hmap step 5 (spec 6.8.5.1): .capacity, reserve, shrinkToFit and hmap<K, V>[n]
+hmap<i32, i32> empty = []
+r.Console.log($"{empty.capacity} {empty.sizeof}")          // nothing is allocated before the first add
+empty[1] = 1
+r.Console.log(empty.capacity)                             // 11: one bucket
+
+hmap<i32, i32>[1000] sized
+r.Console.log($"{sized.len} {sized.capacity >= 1000u}")
+i32 i = 0
+while i < 1000 {
+  sized[i] = i * 2
+  i += 1
+}
+r.Console.log($"{sized.len} {sized[999]} {sized.capacity >= 1000u}")
+var made = hmap<u8, bool>[50]
+r.Console.log($"{made.len} {made.capacity >= 50u}")
+
+// reserve(n): room for n entries in all, made now; a smaller n changes nothing
+hmap<i32, string> names = [1: "one"]
+names.reserve(500)
+uns reservedCapacity = names.capacity
+r.Console.log($"{names.len} {names.capacity >= 500u} {names[1]}")
+names.reserve(10)
+r.Console.log(names.capacity == reservedCapacity)          // true: the room stays
+
+// shrinkToFit: every merge that fits, the smallest directory; false when nothing changed
+i = 2
+while i < 500 {
+  names[i] = $"n{i}"
+  i += 1
+}
+uns full = names.sizeof
+i = 2
+while i < 500 {
+  names.removeAt(i)
+  i += 1
+}
+r.Console.log(names.shrinkToFit())                        // false: the removals already merged the buckets and shrank the directory
+r.Console.log($"{names.len} {names[1]} {names.sizeof < full} {names.capacity}")
+
+// a reserved hmap that holds few entries: shrinkToFit merges the empty buckets
+hmap<i32, i32>[5000] roomy
+roomy[1] = 10
+roomy[2] = 20
+uns reserved = roomy.sizeof
+r.Console.log(roomy.shrinkToFit())                        // true
+r.Console.log($"{roomy.capacity} {roomy.sizeof < reserved} {roomy[1]} {roomy[2]} {roomy.len}")
+r.Console.log(roomy.shrinkToFit())                        // false: nothing to do
+names.removeAt(1)
+r.Console.log($"{names.shrinkToFit()} {names.capacity} {names.len}")   // an empty hmap frees everything
+names[7] = "seven"
+r.Console.log(names)
+
+// not while the map is walked
+fun tryReserve(hmap<i32, i32> m) {
+  for (i32 k, i32 v) in m {
+    m.reserve(10)
+  }
+  catch ModifyingIteratedCollectionException {
+    r.Console.log("cannot reserve while walking")
+  }
+}
+tryReserve(sized)

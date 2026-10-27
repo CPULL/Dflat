@@ -1,0 +1,121 @@
+alias Root as r
+
+enum Color { Red, Green, Blue }
+
+// hmap step 1 (spec 6.8.5, 6.8.5.1): native keys and values
+hmap<i32, i32> ages = []
+r.Console.log(ages.len)                          // 0
+r.Console.log(ages.add(1, 10))                   // true: a new key
+r.Console.log(ages.add(1, 11))                   // false: the value was replaced
+ages[2] = 20
+ages[-3] = 30
+ages[2] += 5
+r.Console.log($"{ages[1]} {ages[2]} {ages[-3]} {ages[99]}")   // 11 25 30 0
+r.Console.log($"{ages.hasKey(2)} {ages.hasKey(99)} {ages.has(30)} {ages.has(31)}")
+i32 found = 0
+r.Console.log($"{ages.tryGet(2, (&)found)} {found}")
+r.Console.log($"{ages.tryGet(7, (&)found, -1)} {found}")
+r.Console.log(ages.keyOf(30))                    // -3
+r.Console.log(ages.len)                          // 3
+r.Console.log(ages)
+i32 taken = ->ages[2]
+r.Console.log($"taken {taken}, left {ages.len}, has 2: {ages.hasKey(2)}")
+ages.removeAt(-3)
+r.Console.log(ages)
+r.Console.log(ages.remove(11))                   // true
+r.Console.log(ages.len)                          // 0
+
+// the same value under several keys
+hmap<u8, bool> flags = [1: true, 2: false, 3: true, 4: true]
+r.Console.log(flags.removeAll(true))             // 3
+r.Console.log(flags)
+flags.clear()
+r.Console.log(flags.len)
+
+// null is a key; a full-width nullable keeps it in a second word
+hmap<i16?, i32> small = [null: 1, 0: 2, -1: 3]
+r.Console.log($"{small[null]} {small[0]} {small[-1]} {small.len}")
+hmap<i64?, i32> big = [null: 7, 0: 8]
+r.Console.log($"{big[null]} {big[0]} {big.hasKey(5)}")
+big.removeAt(null)
+r.Console.log($"{big.hasKey(null)} {big.len}")
+
+// reals: -0.0 is 0.0, every NaN is one key
+hmap<r64, i32> reals = []
+r64 zero = 0.0
+reals[0.0] = 1
+reals[-0.0] = 2
+reals[zero / zero] = 3
+reals[-(zero / zero)] = 4
+r.Console.log($"{reals.len} {reals[0.0]} {reals[zero / zero]}")
+
+// other native keys
+hmap<Color, char> colors = [Color.Red: 'r', Color.Blue: 'b']
+r.Console.log($"{colors[Color.Blue]} {colors.hasKey(Color.Green)}")
+hmap<bool, i32> truth = [true: 1, false: 0]
+r.Console.log(truth[false])
+
+// many keys: splits, doublings, merges and shrinks, checked against an array
+hmap<u32, u32> table = []
+arr<u32> mirror = arr<u32>[3000]
+arr<bool> present = arr<bool>[3000]
+u64 seed = 12345
+i32 round = 0
+while round < 20000 {
+  seed = seed * 6364136223846793005ul + 1442695040888963407ul
+  u32 k = (u32)((seed >> 33) % 3000ul)
+  if (seed >> 20) % 3ul == 0ul {
+    table.removeAt(k)
+    present[k] = false
+  } else {
+    table[k] = (u32)round
+    mirror[k] = (u32)round
+    present[k] = true
+  }
+  round += 1
+}
+i32 wrong = 0
+u64 count = 0
+u32 key = 0
+while key < 3000 {
+  if present[key] {
+    if !table.hasKey(key) || table[key] != mirror[key] {
+      wrong += 1
+    }
+    count += 1
+  } else if table.hasKey(key) {
+    wrong += 1
+  }
+  key += 1
+}
+r.Console.log(wrong)                             // 0
+r.Console.log(table.len == count)                // true
+u64 walked = 0
+u64 sum = 0
+for (u32 k, u32 v) in table {
+  walked += 1
+  if v != mirror[k] {
+    wrong += 1
+  }
+}
+r.Console.log($"{walked == count} {wrong}")      // true 0
+r.Console.log(table.sizeof > 0u)
+key = 0
+while key < 3000 {
+  table.removeAt(key)
+  key += 1
+}
+r.Console.log($"{table.len} {table.sizeof}")
+
+// a new key while the map is walked
+hmap<i32, i32> locked = [1: 1, 2: 2]
+fun tryAdd(hmap<i32, i32> m) {
+  for (i32 k, i32 v) in m {
+    m[k + 100] = v
+  }
+  catch ModifyingIteratedCollectionException {
+    r.Console.log("cannot add while walking")
+  }
+}
+tryAdd(locked)
+r.Console.log(locked.len)

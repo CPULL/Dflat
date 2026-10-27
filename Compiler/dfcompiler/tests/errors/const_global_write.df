@@ -1,0 +1,3 @@
+const i32 WIDTH = 10
+fun change() { WIDTH = 3 }
+change()

@@ -331,8 +331,15 @@ public sealed partial class CodeGen {
           // map<K, V> (spec 6.8.4), alias bmap: the copy of the generic class map
           var mapClass = genericClasses["map"];
           var mapArgs = TypeArgsOf(n.Children, mapClass.Params);
-          CheckMapArgs(mapArgs, n);
+          CheckMapArgs(mapArgs, n, false);
           return ClassInstanceName(mapClass, mapArgs, n);
+        }
+        if (t == "hmap" && vecPrelude) {
+          // hmap<K, V> (spec 6.8.5): the copy of the generic class hmap
+          var hmapClass = genericClasses["hmap"];
+          var hmapArgs = TypeArgsOf(n.Children, hmapClass.Params);
+          CheckMapArgs(hmapArgs, n, true);
+          return ClassInstanceName(hmapClass, hmapArgs, n);
         }
         if (TypeFeatures.TryGetValue(t, out var feature)) {
           throw NotSupported(feature, n);

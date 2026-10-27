@@ -213,7 +213,7 @@ Where a decision came from the spec the section is named; where I (Claude) chose
 - Which copy runs is chosen at run time by the class of the left operand, through one table per T (one entry per class).
   A trait-typed left operand compares by identity. The operator `==` is an ordinary virtual function.
 - Warnings: level 2 when a class has both equals and the operator; level 3 when a later check can never run for a T because an
-  earlier one already matched and returned. The level 1 warning for hash collections cannot happen yet (no hash collections).
+  earlier one already matched and returned.
 
 
 9. Ownership (spec 12, 12.4, 14.2) - only the first part (4a)
@@ -1244,3 +1244,124 @@ VEC GROWTH AND SIZED DECLARATION (2026-10-25, spec 6.8.2, 6.3)
   by VecDoubleGrowLimit (CodeGen.Vec.cs, 4 MB). VecReserve (add(collection)) writes the same rule in C. reserve and shrinkToFit stay exact.
 - vec<T>[n] name (= []) is rewritten by RewriteSizedArrays into vec<T>[n] name = vec<T>[n]; any other initializer is a compile error. Test vecgrowth,
   errors/vec_sized_literal. The options double-grow-limit and further-grow-factor are not built (fixed values).
+
+TOP-LEVEL CONST AND LIST LITERALS IN FOR (2026-10-26)
+- DeclareGlobalConsts (CodeGen.Classes.cs, after CheckClassInstances): every top-level Decl with const leaves program.Children and becomes a C global
+  g_NAME (globalConsts, in source order). One void function __consts (IsStaticInit, so the const can be written) assigns them all; StaticInitCode zeroes
+  them and calls it before the static initializers, so a static can read a const. A Name, an assignment target (LValue: const unless initializing) and a
+  receiver (IsValueReceiver) find them after the locals and the fields. A const does not count as top-level code, so it goes with main() too.
+  Reading a top-level variable in its value is an unknown name with a note (the variables are locals of main).
+- EmitForEach (CodeGen.Arrays.cs): a List source with a Var gets the expected type arr<T> from the type of the variable, or InferArrayType for var
+  and for an untyped variable.
+- Tests: globalconsts, errors/const_global_write, errors/const_global_variable.
+
+HASH (2026-10-27, spec 6.2.1, compiler 0.0.28alpha)
+- x.hash is MemberValue (CodeGen.cs) -> HashOf (CodeGen.Hash.cs), before the null check, so a nullable has it too; it gives a uns (NativeUns) and marks the
+  chunk "hash" (RuntimeHash.cs) and hashUsed. HashCode by type: null and a nullable without a value -> DF_HASH_NULL ("null".hash: 0x2AA52E3F0BF438BD,
+  0x21511682 with a 32-bit uns); string -> df_hash_str (rapidhash V3 of the text, full variant, compact loop, seed 0, little-endian reads on every target;
+  folded hi ^ lo for a 32-bit uns; the null string is "" because it is the empty view); bool, char, enums (their value type) and integers -> the value
+  widened with zeros through the unsigned C type of the same width; a 64-bit value with a 32-bit uns -> df_hash_w64 (the two halves combined with $,
+  the low one first: CHOICE, the spec says "the parts in order"); date, time, clock, lapse -> their null is DF_HASH_NULL, otherwise the value (the null
+  of clock and lapse is 0, so a 0 clock hashes as null); r32 / r64 -> df_hash_r32 / df_hash_r64 (-0.0 as +0.0, NaN as 0x7FC00000 / 0x7FF8000000000000);
+  tuples -> h = the first component, then df_hash_comb; arr -> the constant of its type name; objects and traits -> df_hash_obj (NULL is the null
+  constant; else the hash function of the class descriptor). Exception values and multi-type values: "feature not supported".
+- df_class has a last member hash (Runtime.cs; NULL in df_dead_class and in every descriptor when the program uses no hash). When hashUsed,
+  EmitClassTables writes df_hash_<class> before each descriptor (EmitHashFunction):
+  - the override of get_hash() that the class uses (HashOverride: its own or the nearest parent's; a failing one panics on its exception);
+  - a collection (IsCollectionLike: a copy of a library generic, so vec, list, map, their iterators and views, or a class with the trait Collection or
+    Iterator): the constant of its type name;
+  - otherwise the default: the constant of QualifiedTypeName(class) $ each field of AllInstanceFields in memory order, Hidden fields left out. A field is
+    hashed when IsStableType (natives, strings, tuples of stable types, owned objects whose class overrides get_hash() or whose fields are all stable,
+    the parent reference of a child left out of that test; a class met again inside itself counts as stable; a trait-typed field counts as stable and
+    hashes with the class of the object: CHOICE); otherwise (arr, collections, iterators, views, the parent reference, Exception, multi-type) the
+    constant of QualifiedTypeName(type) + field name.
+- QualifiedTypeName: natives as they are (uns and int are already u64 / i64 or u32 / i32 here), T? -> T + "?", tuples -> "(tuple,a,b)", arr<T>, copies
+  of generics -> template<args> with no spaces (a library template without namespace, a program one with Root.), the Root.IO and Root.ExecProcess
+  library classes and enums with their namespace, every other class and enum as Root.Name: the namespace line does not qualify names yet.
+- The constants (class and type names, unstable fields) are computed by the compiler: DfHash (Hashing.cs) is the same rapidhash and $ in C#.
+- get_hash: RegisterMethods (CodeGen.Classes.cs) accepts "override fun uns get_hash()" with nothing above it (Root.Class offers it); without
+  override it is "get_hash is defined by Root.Class: write 'override'", another return type is "get_hash returns uns". x.get_hash() on a class with no
+  override is HashOf (Call, CodeGen.cs).
+- rapidhash is MIT (Nicolas De Carli, https://github.com/Nicoshev/rapidhash): its copyright and permission notice is in the chunk, so it is in every
+  generated C file that uses a hash.
+- Tests: hash (every case above; the values were checked against an independent Python port of rapidhash V3, also with --native-int 32),
+  errors/hash_get_hash_no_override, errors/hash_get_hash_wrong_type.
+
+PRINTING A COLLECTION (2026-10-27, spec 6.1, compiler 0.0.29alpha)
+- Every print function of a collection (ArrStrFunction, which also serves vec; ListStrFunction; ViewStrFunction; MapStrFunction; MapViewStrFunction)
+  stops after DF_PRINT_ITEMS (3, Runtime.cs) items and ends with df_str_coll_end(r, total): "]", or ", ...] (N items)" when total is above 3. The
+  total is the length of the collection (a.len, the count of the list, of the view, of the tree with the null key).
+- Tests: printing; map and mapstrings check the order of all their keys with a for loop (they compared the printed map with the expected text).
+
+HMAP STEP 1 (2026-10-27, spec 6.8.5, 6.8.5.1, compiler 0.0.30alpha)
+- hmap<K, V> is the class hmap of HmapPrelude (CodeGen.Hmap.cs, appended to VecPrelude): the methods of map without the views, over the same tree_
+  members. IsMap is true for map and hmap, so the call sites (m[k], m[k] = v, ->m[k], literals, printing, .sizeof, the drop, for (k, v) in m) are the
+  code of CodeGen.Map.cs; its C helpers (MapFind, MapSlot, MapRemove, CursorKey, CursorValue, EntryLoop, ForEachEntry, MapClearCode, MapSizeof,
+  tree_removeAllValues) choose the runtime with IsHmap: df_bt (RuntimeMap.cs) or df_ht (RuntimeHmap.cs, chunk "hmap", which brings "hash").
+  The field tree is a df_ht in the C struct (EmitStruct).
+- The table (RuntimeHmap.cs) knows a key as ks bytes with a hash function and an equality (NULL: the bytes) and a value as vs bytes: df_ht_shape,
+  one static const per hmap type (HmapShape: df_hts_<type>, with its hash function df_hk_<type>). The bucket is a 32-byte header (marker, local
+  depth, occupancy mask, reserved, next extension in a union of 8 bytes on every target), 16 filter bytes, 16 key slots, 16 value slots of the exact
+  size of the value type. The hmap header of the spec (directory, d, count, C(d), C(d-1), extensions) is df_ht; the counter of open iterators is
+  the iteratorCounter of the trait Collection, as in every collection. C(d) and C(d-1) are kept up to date for every d (CHOICE: no scan for d <= 4).
+- Key slots of step 1 (HmapKeySlot, HmapKeyFromSlot): one uint64_t with the value as an unsigned of its width (reals by their normalized bits,
+  df_ht_bits_r32/r64), so the equality is the bytes; a nullable key keeps null as DF_HT_NULL_TAG (the 64-bit null constant: above the width of every
+  one-word value); a 64-bit nullable (i64?, u64?, uns?, r64?, a 64-bit enum or bitfield) takes two words: DF_HT_NULL_TAG or 0, then the value. The key
+  slot is 8 bytes also with a 32-bit uns (CHOICE: the same code everywhere; the spec gives the sizes of a 64-bit uns). The hash of a slot
+  (HmapBitsHash) is the hash of spec 6.2.1: the value, its two halves with a 32-bit uns, DF_HASH_NULL for null and for the null of date, time,
+  clock and lapse.
+- put: a full chain without extension splits when the next bit of the scrambled hash separates its entries (with the new one); at the depth of
+  the directory the directory doubles first (and the buckets with an extension are tried again: df_ht_unstick); otherwise an extension is added
+  (the bucket is marked stuck when every entry has the same scrambled hash). The split takes every entry of the chain out and puts it back into the
+  bucket or its new sibling (df_ht_place adds extensions when a side has more than 16). The depth of the directory stops at 48 (28 with a 32-bit uns).
+- remove (df_ht_tidy): empty extensions leave the chain, the last two links merge at 14 entries or fewer, two siblings without extensions merge at 8
+  or fewer, then df_ht_shrink (1 or 2 bits, a recount pass, an unstick). removeAll marks (df_ht_mark) and then builds the table again once
+  (df_ht_sweep). clear frees everything (an empty hmap allocates nothing until its next add).
+- The walk (df_ht_cur: directory index, block, slot) jumps 2^(d - L) directory entries after each chain. The loop for (k, v) in m and printing use it.
+- Tests: hmap (every member, the nullable and wide nullable keys, reals, enums, bool, 20000 random adds and removals checked against arrays, the
+  counter of open iterators); also run with --native-int 32 and --release; a stress run of 1000000 operations on 200000 keys was checked by hand.
+  errors/hmap_object_key, errors/hmap_object_value (they were hmap_string_key and hmap_string_value before step 2).
+
+HMAP STEP 2: STRINGS (2026-10-27, spec 6.8.5.1, compiler 0.0.31alpha)
+- A string key slot is a df_ht_skey (RuntimeHmap.cs): the full hash (uint64_t) and a pointer in a union of 8 bytes, so 16 bytes on every target; the
+  shape has df_ht_skey_hash (the stored hash) and df_ht_skey_eq (the hashes, then df_str_eq), and kp true. HmapKeySlot builds it from df_hash_str
+  of the key (a borrow of the caller's string, for a lookup); MapSlot, for a new key, copies the key (df_str_dup) and builds a second slot with the
+  hash already computed, which goes into the table. MapRemove takes the key slot out (df_ht_remove with a df_ht_skey) and frees its string;
+  DropEntry frees it in clear, the drop and removeAll. CursorKey gives the hmap's own string (a borrow, as in map).
+- A string value is the 64-byte slot of map (DF_BT_SVAL, df_bt_sval_*): HmapShape needs the chunk "map" for it. The slot moves with its entry
+  (memcpy in splits, merges and the rebuild of removeAll), as in a leaf of map, so the read rule of map applies unchanged (MapBorrowMark).
+- Tests: hmapstrings (keys longer than 16 and than 112 bytes, "" as a key, a value of more than 59 bytes, ->m[k] of a string, removeAll, +=
+  on a string value, 12000 random adds and removals of string keys checked against arrays); also run with --native-int 32 and --release, and with
+  DF_STR_TRACE (no string left alive beyond the 1 of an empty program, in hmap and hmapstrings).
+
+HMAP STEP 4: .keys AND .values (2026-10-27, spec 6.5, 6.6, compiler 0.0.32alpha)
+- HmapPrelude has the views hmapKeys<K, V> and hmapValues<K, V> (the same as mapKeys and mapValues: children of their hmap, a read-only reference
+  as parent, they hold the counter of open iterators until they end) and the methods get_keys, get_values, viewLen, viewHasKey, viewHasValue of hmap.
+  MapViewKind gives "mapKeys" or "mapValues" for both kinds, so the code of the map views serves them (MapViewOf, MapOfView, MapViewCopy, the loop
+  over a view); MapViewStrFunction walks with EntryLoop. The hmap struct now has the list of its children (df_kids*), as map: its .sizeof grew by a
+  pointer (test hmap).
+- Test hmapviews: the program of mapviews with hmap; its output is the one of mapviews in the order of the table (checked line by line: the same
+  keys and values, the keys and the values in the same order). Also run with --native-int 32 and with DF_STR_TRACE.
+
+HMAP STEP 5: CAPACITY (2026-10-27, spec 6.8.5.1, 6.6, compiler 0.0.33alpha)
+- hmap has get_capacity, reserve(uns wanted) and bool shrinkToFit() (HmapPrelude) over tree_capacity, tree_reserve, tree_shrinkToFit (MapTreeMember);
+  reserve and shrinkToFit check the counter of open iterators (spec 6.4).
+- df_ht_capacity: 11 << d (DF_HT_FILL, the average entries of a bucket), 0 before the first add. df_ht_reserve(t, wanted): the depth D that gives
+  ceil(wanted / 11) buckets; the directory doubles up to D, then every bucket is split down to D (the room is made now, and the removals
+  that follow do not shrink the directory at once, since every bucket is as deep as it). df_ht_fit: the chains are compacted (df_ht_compact),
+  two siblings merge when they fit in one bucket (16, not the 8 of a removal), the directory shrinks one bit at a time while C(d) = 0 (no limit of 2),
+  again until nothing changes; an empty hmap frees everything; false when nothing changed. The sibling merge and the shrink are shared with the
+  removal (df_ht_merge_sibling, df_ht_mergeable, df_ht_shrink_by).
+- hmap<K, V>[n] (ArrayNew, HmapNewWithCapacity): an empty hmap, then df_ht_reserve(n). hmap<K, V>[n] name (= []) is rewritten by RewriteSizedArrays
+  like vec<T>[n] name (any other initializer is a compile error).
+- Test hmapcapacity (also with --native-int 32). Note: after many removals shrinkToFit can return false, because the removals already merged and
+  shrank the table (the test shows it).
+
+RESERVE AS A TOTAL AND HMAP STEP 6 (2026-10-27, spec 6.6, 6.3, compiler 0.0.34alpha)
+- reserve(n) on vec (VecPrelude) and on hmap (df_ht_reserve) makes room for n items in all: the capacity becomes at least n, and nothing changes
+  when it already is (was: n more than the length). The room stays until a shrink (shrinkToFit, and on hmap the merges of the removals). Tests vec
+  and hmapcapacity check that a smaller reserve changes nothing. (The internal VecReserve of add(collection) still grows by what it adds.)
+- hmap h = [k: v] (ResolveDeclType, InferMapType with hashed): the key and value types come from the literal, as for map; var h = [k: v] stays a
+  map (spec 6.3). ObjectTypeOf counts a bare hmap with a literal as a new object.
+- Tests hmapliterals (the program of mapliterals with hmap: the same output, in the order of the table), errors/hmaplit_duplicate,
+  errors/hmap_sized_literal.

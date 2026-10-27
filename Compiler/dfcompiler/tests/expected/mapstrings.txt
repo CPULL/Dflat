@@ -1,11 +1,11 @@
-[: 0, Carol: 40, alice: 25, bob: 30]
+[: 0, Carol: 40, alice: 25, ...] (4 items)
 25
 0
 0
 true
 false
-[prefix1: -1, prefix12: 0, prefix12-a: 1, prefix12-a-longer: 3, prefix12-b: 2]
-[prefix1: -1, prefix12: 0, prefix12-a-longer: 3, prefix12-b: 2]
+[prefix1: -1, prefix12: 0, prefix12-a: 1, ...] (5 items)
+[prefix1: -1, prefix12: 0, prefix12-a-longer: 3, ...] (4 items)
 3
 true
 false

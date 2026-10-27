@@ -1,0 +1,29 @@
+// Top-level const (spec 1.5): set at program start, seen by every function and method;
+// a list literal in a for loop takes the type of the loop variable
+namespace globalconsts
+alias Root as r
+
+const i32 WIDTH = 10
+const i32 AREA = WIDTH * 2
+const string TITLE = "tetris"
+const arr<i32> KICKS = [0, -1, 1]
+
+class Board {
+  public static i32 cells = AREA + 1        // a static reads a const: the consts are set first
+  public fun i32 doubled() { WIDTH * 2 }
+}
+
+fun i32 total() { WIDTH + AREA + KICKS[1] }
+
+r.Console.log(Board().doubled())
+r.Console.log(total())
+r.Console.log(Board.cells)
+r.Console.log(TITLE.toUpper())
+r.Console.log($"{TITLE} {KICKS.len}")
+
+for i32 k in [0, -1, 1] { r.Console.print($"{k} ") }
+r.Console.log("")
+for var s in ["a", "b"] { r.Console.print(s) }
+r.Console.log("")
+for r64 x in [1, 2.5] { r.Console.print($"{x} ") }
+r.Console.log("")

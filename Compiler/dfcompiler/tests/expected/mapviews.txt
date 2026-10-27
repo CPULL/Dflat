@@ -13,13 +13,13 @@ true
 [alice, bob, carol]
 [25, 30, 40]
 4
-[alice, bob, carol, dave, eve]
-[25, 30, 40, 50]
+[alice, bob, carol, ...] (5 items)
+[25, 30, 40, ...] (4 items)
 5
 locked
 3
 30 40 50 3 true [30, 40, 50]
-[bob, carol, dave, zed]
+[bob, carol, dave, ...] (4 items)
 locked
 30
 40
@@ -34,7 +34,7 @@ true
 five!
 62
 1
-[small 0, small 1, small 2, small 4, five!, a string of exactly fifty-nine bytes, the most a slot holds]
+[small 0, small 1, small 2, ...] (6 items)
 replaced in the loop
 6
 small 0

@@ -1,7 +1,7 @@
 # Dflat Language
 A new language D♭ that is the same as C# but easier to write and faster to execute
 
-**Version** 0.0.16  2026/10/26 by CPU
+**Version** 0.0.17  2026/10/27 by CPU
 
 ## D♭ — Dflat Language Specification (draft)
 
@@ -630,6 +630,7 @@ A collection holds several items in one object. Dflat has seven: `arr`, `vec`, `
 - An owned object that loses its owner is destroyed and its `atEnd` runs: this covers `clear()` and `fill(...)` on every collection, `c[i] = v` and any other operation that drops an owned object (12).
 - Any allocation can run out of memory: a `vec` that grows, `reserve`, creating an `arr`, a `list` that adds a node. In Debug builds it raises `OutOfMemoryException` (15.3, catchable, not silent); in Release builds it is a `Panic` that ends the program (15.5). A size that does not fit (`n * size` overflowing `uns`) is reported in the same way, with no separate `OverflowException`. A literal size above the maximum is a compile error.
 - Moving an object into a collection that owns its items needs `->` when the object already exists (`list[3] = ->task`, `list.add(->task)`, `insert`, `replace`): the plain form with an existing object is a compile error, so the passage of the ownership is always visible. An object created in the same statement (`list.add(Task("a"))`) needs no marker. Basic values are copied and need no marker (12.4); a string is always copied and the copy is shrunk (4).
+- Printing (`toStr()`, string interpolation, `Root.Console.log`): a collection prints as `[a, b, c]`, a map as `[k1: v1, k2: v2]`. Only the first 3 items are printed; when there are more, `, ...]` and the number of items in parentheses follow: `[k1: v1, k2: v2, k3: v3, ...] (37 items)`. The rule is the same for every collection, its views and `.keys` / `.values`, and for a collection inside another one (`[[1, 2, 3, ...] (4 items), [5]]`). A null collection prints `null`.
 - The members are listed in 6.6; each collection has its own section for the details (6.8).
 
 ## 6.2 Keys
@@ -640,37 +641,37 @@ Applies to the keys of `map` / `hmap` and to the items of `set` / `hset`.
 - Types that cannot be keys (compile error): `arr` and all the other collections (also as a component of a tuple), iterators and views, and classes that do not implement `Keyable` (the error names the trait).
 - Nullable types can be keys (`i16?`), and null is a valid key; it sorts first (6.2.2). The empty string `""` is a valid key: for a `string`, `""` and null are the same value (7.1), so there is no separate null string key.
 - Keys are always read-only through the collection.
-- Sorted collections (`map`, `set`): a key is found and ordered by its sort key and `compareTo` (6.2.2, 6.8.4.1). Hashed collections (`hmap`, `hset`): the identity of a key is its hash (6.2.1).
-- `bool` can be a key (two possible values). Reals can be keys, NaN included: in `map` and `set` every NaN is the same key and sorts last (6.2.2); NaN as a key of `hmap` and `hset` is decided with the hash tables.
-- A `string` is a pointer to its first allocation, and a null pointer is the empty string (4.4): a null pointer alone cannot mark an empty slot of a hash table with string keys, because `""` is a valid key. How the hash tables handle it is decided with the hash collections.
+- Sorted collections (`map`, `set`): a key is found and ordered by its sort key and `compareTo` (6.2.2, 6.8.4.1). Hashed collections (`hmap`, `hset`): the hash chooses where to look, and two keys are the same when the hashes match and `equals` agrees (6.2.1, 6.8.5.1).
+- `bool` can be a key (two possible values). Reals can be keys, NaN included: in `map` and `set` every NaN is the same key and sorts last (6.2.2); in `hmap` and `hset` every NaN is the same key too. In all four `-0.0` and `+0.0` are the same key.
+- A `string` is a pointer to its first allocation, and a null pointer is the empty string (4.4): a null pointer alone cannot mark an empty slot of a hash table with string keys, because `""` is a valid key. The hash tables mark the used slots in a separate mask (6.8.5.1), so `""` is a normal key.
 
 ### 6.2.1 Hash
 
 - `.hash` is a property of every type, of size `uns` (2.1). The hash of the native types cannot be overridden. No hash depends on a memory address: the same content always gives the same hash, also between runs. A saved map stores its keys and values, never the hashes or the table.
 - `$` is the ordered hash combine: `h = (rotl(h, 5) ^ part) * K`, with `K = 0x517cc1b727220a95` for a 64-bit `uns` and `0x9e3779b9` for a 32-bit one (FxHash). Unlike a xor, the result depends on the order and `(x, x)` does not give 0. Collisions are accepted: the goal is that the same content always gives the same hash.
 - How the hash is calculated:
-  - A native value whose size is at most `uns` uses its own value as the hash.
+  - A native value whose size is at most `uns` uses its own value as the hash, widened with zeros: a signed value is not sign-extended (an `i32` of -1 gives `0x00000000FFFFFFFF` with a 64-bit `uns`), so no value has a bit set above its width.
   - A value wider than `uns` (an `i256` with a 64-bit `uns`, a wide `real`) combines its parts in order with `$`.
-  - `real`: its own value after normalizing: a `-0.0` (or an unnormalized zero) becomes `+0.0`, and every NaN becomes the canonical NaN of the architecture. A `real` wider than `uns` combines its parts with `$`.
-  - Strings: rapidhash on the full text (a 32-bit variant for a 32-bit `uns`), nothing of the header (4.4), so the hash depends only on the content and is the same in every form of the string (single-block, block string, literal). A string key is its own shrunk copy (6.1) and is hashed once when it is stored; a lookup hashes its argument once.
-  - Tuples: `$` over the hashes of the components, in order. The names of the fields are not part of it.
-  - Null: a fixed constant, the same for all types, `"null".hash`. Where `uns` has spare bits beyond the width of the type (`x8?`, `x16?`, and `x32?` with a 64-bit `uns`), the constant has a bit set above the width of the value, so no real value can equal it. On microarchitectures `null.hash` is 0 and the clash with 0 is accepted. The numeric value of the constant is chosen after tests (99).
+  - `real`: its bit pattern after normalizing (not a numeric conversion), widened with zeros (an `r32` with a 64-bit `uns`): a `-0.0` (or an unnormalized zero) becomes `+0.0`, and every NaN becomes the canonical NaN of the architecture. A `real` wider than `uns` combines its parts with `$`.
+  - Strings: rapidhash V3 (the full variant, seed 0) on the full text, nothing of the header (4.4), so the hash depends only on the content and is the same in every form of the string (single-block, block string, literal). With a 32-bit `uns` the 64-bit result is folded: `hi ^ lo`. An architecture definition can choose rapidhash nano (low power targets); up to 16 bytes of text the two give the same result. A string key is its own shrunk copy (6.1) and is hashed once when it is stored; a lookup hashes its argument once. A null string is `""` (7.1) and hashes as `""`: `0x0338DC4BE2CECDAE` with a 64-bit `uns`, `0xE1F611E5` with a 32-bit one.
+  - Tuples: `$` over the hashes of the components, in order: `h` starts as the hash of the first component, then `h = h $ next`. A tuple of one component has the hash of that component. The names of the fields are not part of it.
+  - Null: a fixed constant, the same for all types, `"null".hash`: `0x2AA52E3F0BF438BD` with a 64-bit `uns`, `0x21511682` with a 32-bit one. It has a bit set above the width of every type that `uns` holds with spare bits (`x8?`, `x16?`, `bool?`, and `x32?` with a 64-bit `uns`), so no real value can equal it; `x8?`, `x16?` and `bool?` always take at least 4 bytes, so with a 32-bit `uns` the 32-bit constant serves them. A full-width nullable native (`x64?` and `uns?` with a 64-bit `uns`, `x32?` with a 32-bit one) has no spare bit: in a hash table its key slot holds two `uns`, the null constant as tag and 0 (6.8.5.1). On microarchitectures `null.hash` is 0 and the clash with 0 is accepted.
   - Classes (the default hash, based on the content): `"ns.Class".hash $ hash of field 1 $ hash of field 2 $ ...`
-    - The class name is the fully qualified name of the class in whose definition the hash is declared, not the dynamic class of the instance. All classes have a namespace (`Root.` classes included).
+    - Every class that does not override `get_hash()` gets its own generated default, with its own fully qualified name and all its fields, the inherited ones included: for `B : A`, the default of `B` starts from `"ns.B".hash`. A class that inherits an override uses that code as it is: if `A` overrides `get_hash()` and `B` does not, a `B` hashes with the code of `A`. All classes have a namespace (`Root.` classes included).
     - The fields are combined in the order they are stored in memory.
-    - A stable field gives its own hash. A field is stable when it is a native, or an owned object (an owned child included) whose members are all stable.
+    - A stable field gives its own hash. A field is stable when it is a native, an owned object (an owned child included) whose members are all stable, or an owned object whose class overrides `get_hash()` (its `get_hash()` gives the hash, whatever its members are).
     - An unstable field gives the hash of its fully qualified type name followed by the field name, with no separator: `"list<my.ns.Something>b".hash`, `"arr<i32>c".hash`, `"Root.IO.Filef".hash`. Collections, iterators, views, every sub-collection class and every reference field (an object that is not owned) are unstable: only owned objects are followed, so a cycle of references cannot make the hash recurse forever.
     - A null field gives the null constant.
     - The names of the fields are part of the hash of a class, not of the hash of a tuple.
-  - A collection hashes like any other class.
+  - A collection (the default ones and the custom ones that do not override `get_hash()`) hashes as the hash of its type name only: `"vec<i32>".hash`. All its fields would be unstable, so this is the value the class rule gives, without depending on how the collection is built. The content is never hashed.
 - The hash of a type is the hash of its fully qualified name: `"i32".hash`, `"my.fully.namespace.Class".hash`.
   - Built-in types (natives and the default collections) are written without namespace; all classes have a namespace (`Root.` included).
   - Generic arguments go inside `<>`, separated by `,` with no spaces, each written by the same rule: `"list<my.ns.Something>"`.
   - Structs: their qualified name only (not the implementation).
   - Tuples: `(tuple,` followed by the types of the components separated by `,`, then `)`, with no field names, nested tuples included: `(i32, string, (uns, Obj))` is `"(tuple,i32,string,(tuple,uns,full.ns.Obj))".hash`.
   - Nullable types: the name followed by `?`: `"i64?".hash`.
-- `Root.Class` offers `get_hash()` and `equals(any?)` (11.1.3). A class can override `get_hash()`, `equals` and `compareTo`; no warning is given for any of them. `==` on class objects calls `equals` only when the class overrides it (known at compile time), and compares identity otherwise.
-- Identity of a key in `hmap` and `hset`: the key is its hash. A collision (the hashes match and `equals` says that the keys differ) raises a silent exception (15.4). The collision check and the call to `equals` are emitted only where a catch for it exists, in the same scope as the call; without one, the extra code is dropped and the table works with the hash only: the keys merge and nothing is reported. A key added twice (the same key) is not a collision.
+- `Root.Class` offers `get_hash()` and `equals(any?)` (11.1.3). A class can override `get_hash()`, `equals` and `compareTo`; no warning is given for any of them. `.hash` on an object always calls `get_hash()` through the virtual dispatch: the override of the dynamic class runs, also through a variable of a parent type. `==` on class objects calls `equals` only when the class overrides it (known at compile time), and compares identity otherwise.
+- Identity of a key in `hmap` and `hset`: the hash chooses where to look; two keys are the same when the hashes match and `equals` agrees. For the natives up to `uns` the hash is the value, so a match of the hash is enough. Two different keys with the same hash are both kept; the same key replaces the value (`add` returns `false`). There is no collision exception.
 
 ### 6.2.2 Order
 
@@ -708,7 +709,7 @@ list<arr<i32>> grid = [[1, 2], [3, 4]]  // nested literals need the full type
 - `[...]` can be assigned to `arr`, `vec`, `list`, `set` and `hset`; `[key: value, ...]` to `map` and `hmap`: the `:` makes it a map literal. Literals are arrays (`arr`) unless declared otherwise, and a literal with `:` is a `map` unless declared otherwise. Mixing items with and without `:` (`[1, 2: true]`) is a compile error.
 - Map keys are ordinary expressions, like the values: `"one"` is a string, `name` is the value of the variable `name`, `MyEnum.blue` is an enum value, `a.f(x)` is calculated. Parentheses are only grouping.
 - A map literal is lowered as an empty map followed by the adds, in order.
-- A duplicate value in a set literal or a duplicate key in a map literal is a compile error when they are constants (literals and enum values); in an `hmap` two different constant keys with the same hash (6.2.1) are a compile error too. With keys calculated at run time a duplicate is found only at run time, and the later value wins (as with `add`, 6.6).
+- A duplicate value in a set literal or a duplicate key in a map literal is a compile error when they are constants (literals and enum values); two different keys with the same hash are not an error (6.2.1). With keys calculated at run time a duplicate is found only at run time, and the later value wins (as with `add`, 6.6).
 - Nested literals need the full type specification: `var` and partial forms (`arr`, `vec`, ...) are a compile error for them.
 - Types are inferred from literals; integers and reals default to the native size (1.3), mixed `[1, 2.5]` → native real; other mixes are errors; empty literals need a declared type (`map<i32, bool> flags = []` is an empty map).
 - Size or capacity on the declaration: `arr<T>[size]` is the size, `vec<T>[n]`, `hmap<K, V>[n]` and `hset<T>[n]` are the capacity (initially empty). The same form on `list`, `map` and `set` is a compile error.
@@ -798,7 +799,7 @@ arr<i32> middle = scores[2..5]!       // copy
 A member marked `–` is a compile error on that collection (for example `hasKey` on a `vec`). The trait that provides each member is in 6.7.
 
 - `.len`: count of items. `.sizeof`: bytes to store the object itself; it exists on every type, natives included (6.7). For a collection it is the header plus the allocated block of items (the capacity, not the length), without what the items own; for a `list` it is the header plus all the nodes.
-- `.capacity`: items that fit without growing. `reserve(n)` makes room for at least `n` more items; `shrinkToFit()` lowers the capacity to the length.
+- `.capacity`: items that fit without growing. `reserve(n)` makes room for at least `n` items in all (the capacity becomes at least `n`; nothing changes when it already is), and the room stays until a shrink; `shrinkToFit()` lowers the capacity to the length. On `hmap` and `hset` the capacity is counted on the directory and `shrinkToFit()` returns a `bool` (6.8.5.1).
 - `.keys`: keys of a map (`map`, `hmap`). `.values`: values of a map. Both are views (6.5): read-only, they increment the counter of open iterators and views of the map (6.4), they have `len`, `has` and an iterator, and they can be stored and passed. `ages.keys!` makes a `vec<Key>` and `ages.values!` a `vec<Value>`. Keys are never writable; values can be changed in a loop with `(&)` (6.4). To walk the positions of `arr`, `vec` and `list` use a range (`0..list.len`, 6.4).
 - `c[k] = v`: on `arr`, `vec` and `list` it replaces an existing item only; an index past the end raises `IndexOutOfRangeException` (not silent). On `map` and `hmap` it replaces the value, or adds the key and the value when the key is missing.
 - Reading a missing map key gives the null or zero value of the value type; no exception. Use `hasKey` or `tryGet` to know whether the key exists. With objects as values the result is null, so `map["a"].name` raises `NullPointerException` like any other access through null.
@@ -938,7 +939,7 @@ class ListIterator<Item>(&list<Item> collection as parent) : IndexIterator<Item>
 
 - Implemented by `map` and `hmap`: key/value pairs. Null is a valid key (6.2). The keys are always read-only in a loop (6.4).
 - Members: `.keys`, `.values`, `c[k]` read, `c[k] = v` (replaces or adds), `add(k, v)`, `add(map)`, `hasKey`, `keyOf`, `tryGet`, `remove(v)`, `removeAll(v)`, `removeAt(k)`, `swap(key, new)`, `swap(key1, key2)`.
-- Iterator (not yet defined, first idea): `next()` returns `(Key key, Value value, bool isValid)`. The sub-traits and the cursor types of the tree `map` and of `hmap` are defined later.
+- Iterator (not yet defined, first idea): `next()` returns `(Key key, Value value, bool isValid)`. The sub-traits are defined later; the cursors are in 6.8.4.1 (`map`) and 6.8.5.1 (`hmap`).
 
 ### 6.7.3 SetCollection
 
@@ -1085,10 +1086,67 @@ hmap<string, i32> scores = []
 hmap<string, i32>[100] bigScores         // empty, capacity 100
 ```
 
-- `hmap` is a hash map. Key rules: 6.2; the identity of a key is its hash (6.2.1).
-- Default iterator: (key, value) tuples in an unspecified order. `.keys` iterates the keys and `.values` the values.
+- `hmap` is a hash map. Key rules: 6.2; the identity of a key is its hash plus `equals` (6.2.1).
+- Default iterator: (key, value) tuples in an unspecified order, the same for the same content and history (6.8.5.1). `.keys` iterates the keys and `.values` the values.
 - Trait: `MapCollection` (6.7.2). The members are the same as `map` (6.8.4).
 - Specific to `hmap`: `.capacity`, `reserve`, `shrinkToFit` and the `[n]` capacity form.
+- Which targets have `hmap` is decided by each architecture definition. A target with `hmap` and `null.hash` = 0 must handle the clash of null with the key 0.
+
+#### 6.8.5.1 Hash table implementation
+
+The same code serves `hmap` and `hset` (a hash set is a hash map with an empty value type). The table is an extendible hash: a directory of pointers to buckets, which split and merge one at a time, so the table never rehashes as a whole. The sizes below are for a 64-bit `uns`.
+
+- Directory: a `vec` of bucket pointers, 2^d entries, where d is the global depth. It is indexed by the top d bits of the scrambled hash. A bucket of local depth L is pointed to by 2^(d−L) consecutive entries.
+- Bucket: up to 16 entries, unsorted. A full bucket splits only if the next bit of the scrambled hash separates its entries; otherwise it takes an extension (a block with the same layout, linked by the next pointer). A bucket can have a chain of extensions. No data is ever dropped.
+- Directory doubling: each pointer is copied twice, then the bucket splits. There is no rehash, because the full hash is stored in the key slot. The cost spike is accepted: it happens a logarithmic number of times.
+- An empty `hmap` allocates nothing. The first `add` creates the directory with d = 0 and one bucket.
+- Scrambles: `.hash` is not changed. The bucket index uses the top bits of `hash * 0x9E3779B97F4A7C15` (Fibonacci hashing); the filter uses the top 8 bits of `hash * 0xC2B2AE3D27D4EB4F`. Both multipliers are odd, so each scramble is a bijection: two different hashes never give the same scrambled hash. A multi-type key (11.3.6.1) XORs the hash of its type with the hash of its value before scrambling.
+- Filter: 8 bits per entry, inside a bucket only. A lookup compares the filter first, then the full hash, then `equals` (6.2.1).
+- Header of the `hmap` (48 bytes):
+
+| Offset | Content |
+|---|---|
+| 0 | the directory (`addr`) |
+| 8 | d (`u8`), then 7 bytes reserved |
+| 16 | the number of items (`uns`) |
+| 24 | the counter of open iterators and views (`uns`, 6.4) |
+| 32 | C(d) and C(d−1), 4 bytes each |
+| 40 | the number of extensions (`uns`) |
+
+- Bucket and extension (the same layout):
+
+| Offset | Content |
+|---|---|
+| 0 | marker, a bitfield: bit 0 extension, bit 1 stuck, bit 2 key with pointer, bit 3 multi-type key |
+| 1 | local depth (`u8`; an extension copies the one of its bucket) |
+| 2 | occupancy mask (`u16`, one bit per slot) |
+| 4 | 4 bytes reserved |
+| 8 | the next extension (`addr`, 0 for none) |
+| 16 | 16 filter bytes |
+| 32 | 16 key slots of K bytes |
+| 32 + 16 × K | 16 value slots of V bytes |
+
+- Key slot (K, in bytes). The bucket always keeps the keys: the pointer refers to the key object owned by the bucket.
+
+| Key type | K | Content |
+|---|---|---|
+| native up to `uns`, nullable with spare bits (6.2.1) | 8 | the value (the hash is the value) |
+| string, wide native, tuple, class | 16 | the full hash + a pointer to the key |
+| full-width nullable native (`i64?`, `u64?`, `uns?`) | 16 | tag + value; the null key is the null constant + 0 |
+| multi-type, all members exact | 16 | the hash of the type + the value |
+| multi-type, any member not exact | 24 | the hash of the type + the full hash + a pointer |
+
+- Value slot (V): as in `map` (6.8.4.1): the exact size of its type (an `i32` takes 4 bytes), inline up to 64 bytes; a string takes 64 bytes (up to 59 bytes of text inline, otherwise a moved string), a class is a pointer, any value above 64 bytes goes through a pointer. The read rule of the values that move with their node is the same as in `map`. `hset` has V = 0. Example: an `hmap<i64, i64>` bucket is 32 + 128 + 128 = 288 bytes.
+- Each combination of key layout and value type has its own copy of the code (11.3.12).
+- The null key is a normal entry with the null hash (6.2.1); all the nulls are the same key.
+- Merges:
+  - an extension goes back into the block before it (the last two links of a chain) when their used slots are at most 14 (the capacity minus 2);
+  - two sibling buckets merge when their used slots together are 8 or fewer.
+- Directory shrink, checked after a merge: C(k) is the number of distinct buckets with local depth k. The directory shrinks by 1 bit when C(d) = 0, by 2 bits when C(d) = 0 and C(d−1) = 0, never by more in one check; then the counts are recomputed with one pass. The header keeps C(d) and C(d−1) when d ≥ 5; for d ≤ 4 the buckets are scanned directly.
+- Unsticking (splitting a bucket that has extensions) is tried on a directory doubling and on a shrink attempt, only when the number of extensions is above 0.
+- A stuck bucket holds more than 16 keys with the same hash (since the scramble is a bijection): it is marked with bit 1 of the marker and skipped by the scans, and it blocks a shrink below its depth. Widening it may be added later (99).
+- Capacity: `.capacity` is the number of entries held without growing the directory. `hmap<K, V>[n]` and `reserve(n)` (for `n` entries in all, 6.6) size the directory and split its buckets so that they fit without a doubling, assuming a well spread hash: n / 11 buckets (a split bucket is about 69% full), rounded up to a power of two. `shrinkToFit()` does every merge that is possible (extensions and siblings) and shrinks the directory as far as the counts allow, without the 2-bit limit of a check; it returns `false` when nothing changed.
+- Iterator: three fields: the index in the directory (`uns`), the block (`addr`, the bucket or one of its extensions) and the slot (`uns`). It walks the directory in order, each bucket and then its extensions, following the occupancy mask; after a bucket of local depth L it jumps to the index + 2^(d−L), so each bucket is visited once. The order is unspecified but the same for the same content and history. The counter of open iterators and views blocks the changes (6.4); `for (&)` changes the values in place.
 
 ### 6.8.6 Sets `set` (`bset`)
 
@@ -1114,7 +1172,8 @@ tags -= "red"
 
 - Trait: `SetCollection` (6.7.3). `hset` is a hash set. The members and the operations are the same as `set` (6.8.6).
 - Specific to `hset`: `.capacity`, `reserve`, `shrinkToFit` and the `[n]` capacity form.
-- Iteration (`for T item in tags`): in an unspecified order.
+- Iteration (`for T item in tags`): in an unspecified order, the same for the same content and history.
+- Implementation: the code of `hmap` with an empty value type (6.8.5.1). Likewise `set` is generated from the code of `map` (6.8.4.1).
 
 ## 6.9 Custom collections (partial)
 
@@ -1435,7 +1494,7 @@ override fun bool equals(T other) {
 - `==` on class objects resolves in this order: `equals` if defined; otherwise an operator `==` overload; otherwise identity (same object).
 - `!=` is always the negation of what `==` resolves to and cannot be overloaded.
 - Defining both `equals` and an operator `==` is a level 2 warning (the overload is dead code).
-- The identity of a key in a hash collection comes from its hash (6.2.1), not from `equals`: overriding `equals` does not change the behavior of a map. No warning is given for an override of `get_hash()`, `equals` or `compareTo`.
+- The identity of a key in a hash collection: two keys are the same when the hashes match and `equals` agrees (6.2.1). A class that overrides `equals` should keep equal objects with the same hash, otherwise equal keys can be stored twice. No warning is given for an override of `get_hash()`, `equals` or `compareTo`.
 - `bool equals(T other)` is a generic function: `T` is implicit and is the type of the argument; inside a generated instance `other` has type `T`. This allows comparing with other types, and each type decides which ones it supports.
 - `T is type` checks the generic type at compile time (the branch that does not match is not emitted); `other is type` checks the value at runtime (11.1). Both can be used in the same function.
 - A more generic type can match before a more specific one, so the order of the checks matters. A branch that can never run because an earlier check always matches is a level 3 warning.
@@ -2597,15 +2656,15 @@ Level 1 = most important, level 3 = least.
 - Stdlib: strings, files, time, collections extras (queue/stack)
 - Bitfields: whether `set`, `clear`, `setAs` and `toggle` modify the value in place or return a new value; nullability of bitfields (3.1.1, 7.1)
 - Functional collection members (`filter`, `map`, `reduce`)
-- Collections: the members of `MapIterator` and `SetIterator` (the three sub-traits of `Iterator` are decided, 6.7), the cursor types of `hmap` / `hset` (the tree iterator is defined, 6.8.4.1), and the shape of `next()` for sets (the index iterator is defined, 6.7.1)
+- Collections: the members of `MapIterator` and `SetIterator` (the three sub-traits of `Iterator` are decided, 6.7), and the shape of `next()` for sets (the index iterator is defined, 6.7.1)
 - Collections: `clear()` on maps and sets now differs from `clear()` on the index collections (which keeps the size, 6.6); to be confirmed with the maps and the sets
 - Collections: how a custom class receives literals (`[...]`, `[k: v]`) and defines `|=` and `+=` (`c[k]` is decided, 6.7)
 - Collections: the sets (members, operations, `swap` and `->c[k]` on sets; `c[k]` read does not exist on sets)
 - Structs: the definition (11.1.5)
 - Collections: views are read-only; revisit with tasks (6.5), the full Rust borrow model stays an option
-- Collections: hash table implementation (several implementations chosen by target or compiler option), shared C helpers against one copy per type (code size, 11.3.12); the B-tree is decided (6.8.4.1)
-- Keys: the numeric value of the null hash constant `"null".hash` (6.2.1), chosen after tests
-- Keys: the names of the exceptions raised by `Keyable` for a changed hash (11.2.1) and by a key collision in `hmap` / `hset` (6.2.1)
+- Collections: shared C helpers against one copy per type (code size, 11.3.12); the B-tree (6.8.4.1) and the hash table (6.8.5.1) are decided
+- Collections: widening of the stuck buckets of `hmap` / `hset` (6.8.5.1)
+- Keys: the name of the exception raised by `Keyable` for a changed hash (11.2.1)
 - Collections: the lifetime of a borrow of an item taken outside a `for` loop (`(&)c[k]`), which an insert or a delete can move
 - Collections: the other non-silent exceptions of the collection operations, to be formalized during the implementation (out of memory is decided, 6.1, 15.3)
 - Strings: borrowed strings in the advanced cases (who releases them, lifetimes across fields and collections)
@@ -3089,3 +3148,18 @@ Level 1 = most important, level 3 = least.
 - 11.3.6.1 Generics as value types (new): a generic set can be the type of any value, a closed union stored as the pair (tag, value); the tag is the hash of the type of the member (for a class, the member as listed, never the dynamic class); implicit assignment from a member type; read with `if k is T x` or `k is ? { }`; equality, hash and order from the pair; not on microarchitectures (was: a set is not a type of values)
 - 6.2, 6.8.4.1 Keys of a generic set type use the multi-type layouts of the B-tree (was: reserved); 99: the multi-type keys item removed
 - 6.2, 6.8.4.1 NaN can be a key: in `map` and `set` every NaN is the same key and sorts last (was: a NaN key is never stored or retrieved); for `hmap` and `hset` it is decided with the hash tables
+
+## Changes in 0.0.17
+
+- 6.2.1 Hash: natives are widened with zeros (no sign extension); `real` hashes its normalized bit pattern; strings use rapidhash V3 (full variant, seed 0), folded `hi ^ lo` for a 32-bit `uns`, nano allowed by the architecture definition; a tuple starts from the hash of its first component; the null string hashes as `""`; the null constant is fixed: `0x2AA52E3F0BF438BD` (64-bit `uns`), `0x21511682` (32-bit), used also by `x8?`, `x16?` and `bool?`; full-width nullable natives use a two-`uns` key slot
+- 6.2, 6.2.1, 6.8.5 Identity of a key in `hmap` / `hset`: the hashes match and `equals` agrees; different keys with the same hash are both kept (was: the key is its hash, a collision raises a silent exception, the keys merge without a catch); NaN is one key and `-0.0` equals `+0.0`; `""` is a normal key (the used slots are in a mask)
+- 6.2.1 `.hash` on an object calls `get_hash()` virtually; every class without an override gets its own generated default (its own name, all its fields), an inherited override is used as it is (was: the class in whose definition the hash is declared); an owned field whose class overrides `get_hash()` is stable; a collection hashes as its type name only (was: like any other class)
+- 11.1.3 The identity of a key in a hash collection is the hash plus `equals` (was: the hash only, `equals` does not change a map)
+- 6.6, 6.8.5.1 `reserve(n)` makes room for `n` items in all (was: `n` more items)
+- 6.1 Printing a collection (new): only the first 3 items, then `, ...]` and the number of items in parentheses, for every collection, view and `.keys` / `.values`
+- 6.3 Two different constant keys with the same hash in an `hmap` literal are no longer a compile error
+- 6.6 On `hmap` and `hset` the capacity is counted on the directory and `shrinkToFit()` returns a `bool`
+- 6.8.5.1 Hash table implementation (new): extendible hashing; a directory of 2^d bucket pointers indexed by the top bits of the scrambled hash; buckets of 16 unsorted entries with chains of extensions; doubling without rehash; nothing allocated before the first `add`; two Fibonacci scrambles (index and 8-bit filter); header, bucket and key slot layouts; merges (extension at 14, siblings at 8); directory shrink by at most 2 bits per check using C(d) and C(d−1); unsticking; stuck buckets; capacity sizing n / 11 buckets; `shrinkToFit()`; the iterator (directory index, block, slot); targets decide whether they have `hmap`
+- 6.8.7 `hset` is generated from the `hmap` code and `set` from the `map` code
+- 6.7.2 The cursors of `map` and `hmap` are defined (6.8.4.1, 6.8.5.1)
+- 99 Open items: the hash table implementation, the null hash constant and the collision exception removed; the widening of stuck buckets added

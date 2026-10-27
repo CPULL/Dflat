@@ -1,20 +1,20 @@
-[1, 2, 3, 4]
-[1, 2, 3, 4]
-2 [1, 20, 3, 4]
-[1, 20, 3, 4, 7]
-[0, 1, 4, 5, 6, 7, 8, 9]
-[4, 5, 6, 7, 8, 9]
-[4, 5, 6, 7]
+[1, 2, 3, ...] (4 items)
+[1, 2, 3, ...] (4 items)
+2 [1, 20, 3, ...] (4 items)
+[1, 20, 3, ...] (5 items)
+[0, 1, 4, ...] (8 items)
+[4, 5, 6, ...] (6 items)
+[4, 5, 6, ...] (4 items)
 [5, 6, 7]
-[5, 6, 7, 100]
+[5, 6, 7, ...] (4 items)
 false
-[1, 2, 3, 4, 5, 6] [5, 6]
+[1, 2, 3, ...] (6 items) [5, 6]
 the same list
 3 b true
 4 c
 [0, 7, 8]
-[0, 7, 8, 9, 10]
-[5, 6, 8, 9, 10]
+[0, 7, 8, ...] (5 items)
+[5, 6, 8, ...] (5 items)
 false
 [3, 1, 2] 0
 [3, 1, 2] true
@@ -24,8 +24,8 @@ false
 true
 true
 true
-[apple, date, fig, kiwi, pear]
-[zucchini, pear, kiwi, fig, date, apple]
+[apple, date, fig, ...] (5 items)
+[zucchini, pear, kiwi, ...] (6 items)
 banana 7
 true 100000
 added
@@ -34,7 +34,7 @@ added
 caught
 added
 locked;locked;locked;locked;locked;locked;
-[3, 4, 3, 3, 3, 3] added
+[3, 4, 3, ...] (6 items) added
 sort is locked
 copyFrom is locked
 [1, 2, 3]

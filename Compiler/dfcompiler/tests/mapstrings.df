@@ -126,7 +126,15 @@ while n < 2000 {
 expected += "]"
 r.Console.log(wrong)                               // 0
 r.Console.log(tree.len == expectedLen)             // true
-r.Console.log($"{tree}" == expected)               // true
+string walked = "["
+for (walkedKey, walkedValue) in tree {
+  if walked.len > 1 {
+    walked += ", "
+  }
+  walked += $"{walkedKey}: {walkedValue}"
+}
+walked += "]"
+r.Console.log(walked == expected)               // true
 r.Console.log(tree.removeAll(7) <= 1u)             // true
 n = 0
 while n < 2000 {
@@ -173,7 +181,15 @@ while n < 1500 {
 }
 expected += "]"
 r.Console.log(wrong)                               // 0
-r.Console.log($"{same}" == expected)               // true
+string walkedSame = "["
+for (walkedSameKey, walkedSameValue) in same {
+  if walkedSame.len > 1 {
+    walkedSame += ", "
+  }
+  walkedSame += $"{walkedSameKey}: {walkedSameValue}"
+}
+walkedSame += "]"
+r.Console.log(walkedSame == expected)           // true
 n = 0
 while n < 1500 {
   same.removeAt($"samefirst{(n * 7919u) % 1500u + 10000u}")

@@ -1,0 +1,20 @@
+alias Root as r
+
+// spec 6.1: a printed collection shows its first 3 items, then ", ...] (N items)"
+arr<i32> none = arr<i32>[0]
+arr<i32> three = [1, 2, 3]
+arr<i32> four = [1, 2, 3, 4]
+r.Console.log($"{none} {three} {four}")
+vec<i32> big = []
+for i32 i in 0..65000 {
+  big.add(i)
+}
+r.Console.log(big)
+list<string> words = ["a", "b", "c", "d", "e"]
+r.Console.log(words)
+vec<vec<i32>> nested = [[1, 2, 3, 4], [5], [6, 7], [8, 9, 10]]
+r.Console.log(nested)
+r.Console.log(big[10..20])
+map<i32, string> names = [1: "one", 2: "two", 3: "three", 4: "four"]
+r.Console.log(names)
+r.Console.log(names.keys)

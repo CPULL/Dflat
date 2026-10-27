@@ -1,0 +1,9 @@
+20
+29
+21
+TETRIS
+tetris 3
+0 -1 1 
+ab
+1 2.5 
+---- exit code 0 ----

@@ -328,10 +328,11 @@ public class vec<T> : IndexCollection<T> {
     }
   }
 
-  public fun reserve(uns extra) {
+  // room for wanted items in all (spec 6.6): nothing changes when the capacity is already enough
+  public fun reserve(uns wanted) {
     checkUnlocked()
-    if count + extra > items.len {
-      resizeStorage(count + extra)
+    if wanted > items.len {
+      resizeStorage(wanted)
     }
   }
 

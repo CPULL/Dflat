@@ -1,10 +1,10 @@
 [first, source] [one, source] [source, lit] source!
-10 [zero, source, source+, w0, w1, w3, w4, w5, w6, w7]
-10 [ONE, between, source, c0+, c2, c3, c4, c5, c6, c7]
-same! same! [ONE, between, source, c0+, c2, c3, c4, c5, c6, c7, x, x, x] [filled, filled]
+10 [zero, source, source+, ...] (10 items)
+10 [ONE, between, source, ...] (10 items)
+same! same! [ONE, between, source, ...] (13 items) [filled, filled]
 [, ]
 true cc a bb [, new]
-[r, q, r, p]
-[m1*, m2] [t, a1, a2, g1, g2] [a1#, a2, a3]
+[r, q, r, ...] (4 items)
+[m1*, m2] [t, a1, a2, ...] (5 items) [a1#, a2, a3]
 5000 tiny 5001
 ---- exit code 0 ----

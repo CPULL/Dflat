@@ -9,6 +9,6 @@ half 1001 2000
 joined 3 16
 joined 43 43
 parts 0 50
-few [1, 2, 3, 4] 4 6
+few [1, 2, 3, ...] (4 items) 4 6
 computed 0 14
 ---- exit code 0 ----

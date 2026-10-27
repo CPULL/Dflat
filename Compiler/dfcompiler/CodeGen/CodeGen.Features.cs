@@ -53,7 +53,6 @@ public sealed partial class CodeGen {
 
   static readonly Dictionary<string, string> TypeFeatures = new() {
     ["map"] = "Collections",
-    ["hmap"] = "Collections",
     ["dfoot"] = "Collections",
     ["var"] = "var",
     ["i128"] = "i128",

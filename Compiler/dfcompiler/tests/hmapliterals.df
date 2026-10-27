@@ -1,0 +1,56 @@
+// hmap literals [k: v, ...] (spec 6.3), step 6 of the hmap plan: the program of mapliterals with hmap; var still gives a map (spec 6.3)
+alias Root as r
+enum Color { red, green, blue }
+
+hmap<i32, bool> flags = [1: true, 2: false, 3: false]
+r.Console.log(flags)                                 // [1: true, 2: false, 3: false]
+hmap ages = ["one": 1, "two": 2]                      // hmap<string, native integer>
+r.Console.log(ages)                                  // [one: 1, two: 2]
+hmap words = [2: "two", 1: "one"]                     // hmap<native integer, string>: in the order of the table
+r.Console.log(words)                                 // [1: one, 2: two]
+var scores = [-5: 1.5, 10: 2.25]                     // var: a map<native integer, native real>
+r.Console.log(scores)                                // [-5: 1.5, 10: 2.25]
+
+// keys are ordinary expressions: a variable, an enum value, a calculated value
+string name = "carol"
+i32 base = 40
+hmap<string, i32> people = [name: base, "dave": base + 10, name + "2": 1]
+r.Console.log(people)                                // [carol: 40, carol2: 1, dave: 50]
+hmap<Color, string> paints = [Color.blue: "sky", Color.red: "fire"]
+r.Console.log(paints)                                // [red: fire, blue: sky]
+hmap<i16?, bool> maybe = [null: false, 7: true, -2: true]
+r.Console.log(maybe)                                 // [null: false, -2: true, 7: true]
+
+// a key calculated at run time that comes again keeps the later value
+string again = "x"
+hmap<string, i32> repeated = [again: 1, "x": 2]
+r.Console.log(repeated)                              // [x: 2]
+
+// multi-line literals, an empty literal, a literal passed to a function and returned
+hmap<string, string> capitals = [
+  "France": "Paris",
+  "Italy": "Rome",
+  "Japan": "Tokyo"
+]
+r.Console.log(capitals.len)                          // 3
+hmap<string, i32> none = []
+r.Console.log(none.len)                              // 0
+fun i32 sum(hmap<string, i32> m) {
+  i32 total = 0
+  for (string k, i32 v) in m {
+    total += v
+  }
+  return total
+}
+r.Console.log(sum(["a": 1, "b": 2, "c": 3]))         // 6
+fun hmap<i32, string> make() {
+  return [1: "made"]
+}
+hmap<i32, string> made = make()
+r.Console.log(made)                                  // [1: made]
+made = [5: "five", 6: "six"]                         // a new hmap replaces the old one
+r.Console.log(made)                                  // [5: five, 6: six]
+
+// long string values in a literal
+hmap<i32, string> long = [1: "a value that is longer than the fifty-nine bytes a slot holds inline"]
+r.Console.log(long[1].len)                           // 68

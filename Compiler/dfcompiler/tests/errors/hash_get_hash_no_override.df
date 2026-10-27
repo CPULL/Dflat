@@ -1,0 +1,8 @@
+class Tagged {
+  i32 id = 5
+  fun uns get_hash() {
+    return 7
+  }
+}
+
+Tagged t = Tagged()

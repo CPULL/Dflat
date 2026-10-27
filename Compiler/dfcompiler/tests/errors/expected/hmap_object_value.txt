@@ -1,0 +1,1 @@
+hmap_object_value.df(5): error: hmap values of type Point are not built yet (this version: the native types and string)

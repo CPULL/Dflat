@@ -1,0 +1,3 @@
+i32 x = 4
+const i32 Y = x * 2
+Root.Console.log(Y)

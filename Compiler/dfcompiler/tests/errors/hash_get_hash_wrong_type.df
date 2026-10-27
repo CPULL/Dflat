@@ -1,0 +1,8 @@
+class Tagged {
+  i32 id = 5
+  override fun i32 get_hash() {
+    return 7
+  }
+}
+
+Tagged t = Tagged()

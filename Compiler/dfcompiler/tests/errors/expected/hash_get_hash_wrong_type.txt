@@ -1,0 +1,1 @@
+hash_get_hash_wrong_type.df(3): error: get_hash returns uns

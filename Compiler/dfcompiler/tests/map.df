@@ -190,7 +190,15 @@ while key < 3000 {
 expected += "]"
 r.Console.log(wrong)                     // 0
 r.Console.log(tree.len == expectedLen)   // true
-r.Console.log($"{tree}" == expected)     // true: the entries come in key order
+string walked = "["
+for (walkedKey, walkedValue) in tree {
+  if walked.len > 1 {
+    walked += ", "
+  }
+  walked += $"{walkedKey}: {walkedValue}"
+}
+walked += "]"
+r.Console.log(walked == expected)        // true: the entries come in key order (a loop walks them all: printing shows the first 3)
 
 // every key goes, in a scattered order, checked on the way
 wrong = 0

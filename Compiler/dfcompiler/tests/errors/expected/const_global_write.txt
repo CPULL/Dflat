@@ -1,0 +1,1 @@
+const_global_write.df(2): error: 'WIDTH' is const

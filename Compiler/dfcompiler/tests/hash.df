@@ -1,0 +1,103 @@
+alias Root as r
+
+enum Color { Red, Green: 5 }
+
+class Point {
+  public i32 x = 1
+  public i32 y = 2
+}
+
+class Named(string name, ->Point where) {
+  public vec<i32> items = []
+}
+
+class Tagged {
+  public i32 id = 5
+  override fun uns get_hash() {
+    return 1000 + (uns)id
+  }
+}
+
+class SubTagged : Tagged {
+  public i32 extra = 9
+}
+
+class Point3 : Point {
+  public i32 z = 3
+}
+
+// strings: rapidhash V3, seed 0
+r.Console.log($"null constant: {"null".hash}")
+r.Console.log($"empty: {"".hash}")
+string nothing = ""
+r.Console.log($"empty variable: {nothing.hash}")
+r.Console.log($"a: {"a".hash}")
+r.Console.log($"abcd: {"abcd".hash}")
+r.Console.log($"16 bytes: {"0123456789abcdef".hash}")
+r.Console.log($"17 bytes: {"0123456789abcdefg".hash}")
+string long = ""
+for i32 i in 0..30 {
+  long += "abcdefgh"
+}
+r.Console.log($"240 bytes: {long.hash}")
+string built = "ab"
+built += "cd"
+r.Console.log($"same text, same hash: {built.hash == "abcd".hash}")
+
+// natives: the value widened with zeros
+i32 minus = -1
+i8 small = -1
+u64 big = 18446744073709551615
+r.Console.log($"i32 -1: {minus.hash}, i8 -1: {small.hash}, u64 max: {big.hash}")
+bool yes = true
+char letter = 'A'
+r.Console.log($"true: {yes.hash}, false: {false.hash}, 'A': {letter.hash}")
+r64 zero = 0.0
+r64 negativeZero = -0.0
+r64 half = 1.5
+r32 halfShort = 1.5
+r.Console.log($"-0.0 like 0.0: {negativeZero.hash == zero.hash}, 1.5: {half.hash}, r32 1.5: {halfShort.hash}")
+r64 nan = zero / zero
+r.Console.log($"NaN: {nan.hash}")
+Color c = Color.Green
+r.Console.log($"enum: {c.hash}")
+
+// null: the constant, for every type
+i32? missing = null
+i64? wide = null
+i32? present = 7
+Point noPoint = null
+r.Console.log($"null i32?: {missing.hash == "null".hash}, null i64?: {wide.hash == "null".hash}, 7 as i32?: {present.hash}, null object: {noPoint.hash == "null".hash}")
+
+// tuples: $ over the components
+(i32, i32) pair = (1, 2)
+r.Console.log($"(1, 2): {pair.hash}")
+(string, bool) mixed = ("a", true)
+r.Console.log($"(\"a\", true): {mixed.hash}")
+
+// classes: the default
+Point p = Point()
+Point q = Point()
+r.Console.log($"Point 1, 2: {p.hash}, same content: {p.hash == q.hash}, get_hash(): {p.get_hash() == p.hash}")
+Point3 p3 = Point3()
+Point asPoint = Point3()
+r.Console.log($"Point3 1, 2, 3: {p3.hash}, through a Point: {asPoint.hash == p3.hash}")
+Named n = Named("ada", Point())
+Named other = Named("ada", Point())
+other.items.add(5)
+r.Console.log($"Named: {n.hash}, the vec is not hashed: {n.hash == other.hash}")
+Named lonely = Named("ada", null)
+r.Console.log($"Named with a null field: {lonely.hash}")
+
+// get_hash() overridden, and inherited as it is
+Tagged t = Tagged()
+SubTagged s = SubTagged()
+Tagged asTagged = SubTagged()
+asTagged.id = 6
+r.Console.log($"Tagged id 5: {t.hash}, SubTagged id 5: {s.hash}, through a Tagged: {asTagged.hash}")
+
+// collections: the type name only
+vec<i32> v = [1, 2, 3]
+vec<i32> w = []
+arr<i32> a = [1, 2]
+r.Console.log($"vec<i32>: {v.hash}, same for any content: {v.hash == w.hash}, arr<i32>: {a.hash}")

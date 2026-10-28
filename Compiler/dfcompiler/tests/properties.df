@@ -1,0 +1,45 @@
+// Properties with accessor blocks (spec 11.1.4): R: and W:, field and value, defaults, readwrite, private W:, start values, field groups, ++ / += / multiple assignment
+namespace properties
+alias Root as r
+
+class P {
+  public i32 myFieldProperty = 3
+  public i32 mySecondProperty { R: { field + 1 } W: { field = value - 1 } } = 3
+  public readwrite i32 myProp { R: { field * 2 } }
+  public i32 level { R: { field } private W: { field = 0 } }
+  public i32 pushes
+  public readwrite pos { r32 x { W: { field = value; pushes++ } }, r32 y { W: { field = value; pushes++ } } }
+  public i32 computed { R: { pushes * 10 } }
+  public string name { R: { "<" + field + ">" } W: { field = value.trim() } } = "  start "
+  public fun reset() { level = 5 }
+  public fun i32 twiceLevel() { level * 2 }
+}
+
+var p = P()
+r.Console.log(p.mySecondProperty)
+p.mySecondProperty = 10
+r.Console.log(p.mySecondProperty)
+p.myProp = 4
+r.Console.log(p.myProp)
+p.myProp += 1
+r.Console.log(p.myProp)
+r.Console.log(p.level)
+p.reset()
+r.Console.log(p.twiceLevel())
+p.pos.x++
+r.Console.log(p.pushes)
+p.pos = (5.0, 6.0)
+r.Console.log(p.pushes)
+p.pos.x += 2.5
+r.Console.log(p.pos.x)
+r.Console.log(p.pushes)
+r.Console.log(p.computed)
+r.Console.log(p.name)
+p.name = "  dflat  "
+r.Console.log(p.name)
+i32 a, string b = 7, " multi "
+p.myProp, p.name = a, b
+r.Console.log(p.myProp)
+r.Console.log(p.name)
+r.Console.log(p.myProp++)
+r.Console.log(p.myProp)

@@ -1365,3 +1365,206 @@ RESERVE AS A TOTAL AND HMAP STEP 6 (2026-10-27, spec 6.6, 6.3, compiler 0.0.34al
   map (spec 6.3). ObjectTypeOf counts a bare hmap with a literal as a new object.
 - Tests hmapliterals (the program of mapliterals with hmap: the same output, in the order of the table), errors/hmaplit_duplicate,
   errors/hmap_sized_literal.
+
+MAP OPERATORS += AND -= (2026-10-28, spec 6.6, 6.7.2, compiler 0.0.35alpha; step 1 of the sets plan, To_discuss point 53)
+- add(map) is new in the map and hmap preludes (VecPrelude, HmapPrelude): a for (k, v) over the other map with add(k, v) for each entry, so the new
+  value wins and the other map is unchanged. The same map as source: every key is already there, only the values are set (no exception).
+- m += (k, v), m += pair (a tuple variable, read as pair.0 and pair.1), m += other and m -= key (MapOperatorCall, CodeGen.Map.cs): the operators
+  call the members, so EmitStmt compiles them as the call written out (m.add(k, v), m.add(other), m.removeAt(key)); one implementation, a custom
+  map gets them from its members. Mixing map and hmap is a compile error with its own message (the overload error would not say why).
+- The flow of the exceptions runs before the types: FlowNode takes m += x and m -= x for a call to ?.add / ?.removeAt only when FlowTargetIsMap
+  finds the target declared as a map (a parameter, a local Decl with a map type or var with a map literal, a field). Otherwise a number += in any
+  program with maps would look like a call to add, and its function would no longer be pure. Without this a ModifyingIteratedCollectionException
+  raised by m += inside a function did not reach the caller's catch (it was a panic).
+- Not yet: a map literal as the argument of the overloaded add (m.add([k: v]) and m += [k: v]: overload resolution does not type a literal),
+  m += ->other (the moving form), m -= set (step 5).
+- Tests mapoperators, errors/mapop_mixed_kinds, errors/mapop_tuple_three.
+
+HSET (2026-10-28, spec 6.8.7, 6.3, 6.6, compiler 0.0.36alpha; step 2 of the sets plan)
+- class hset<T> : SetCollection<T> in HmapPrelude (trait SetCollection<Item> : Collection<Item> is new in VecPrelude, empty like MapCollection): add
+  (true when new; checkUnlocked only then), has, remove, takeAt (->s[item]), clear, get_capacity, reserve, shrinkToFit, over tree_ members.
+- The C is the one of hmap with values of 0 bytes (CodeGen.Hset.cs): IsHmap is true for an hset too (the kinds over the hash table), MapKey is the
+  item type, MapValue is "" and MapValueSize "0", so MapFind, MapSlot, MapRemove, EntryLoop, CursorKey, MapClearCode, HmapShape and MapSizeof work
+  unchanged. RuntimeHmap needed no change (a value slot of 0 bytes is a valid pointer; memcpy of 0 bytes). SetTreeMember: tree_has, tree_add,
+  tree_remove, tree_take (a string item is the set's own copy, given away through the key_out of df_ht_remove instead of freed), tree_clear and the
+  capacity members.
+- for x in s walks the table like m.keys (mapPart "keys"); for (a, b) in s is an error. Printing: SetStrFunction ([a, b, c, ...] (N items)).
+- Literals: hset<T> s = [...] (SetLiteral: an empty set plus the adds; two equal constant items are a compile error, ConstantKeyText, so 0.0 and
+  -0.0 are the same), hset s = [...] (InferSetType), hset<T>[n] and hset<T>[n] name (HmapNewWithCapacity takes the kind).
+- s[k] and s[k] = v give an error that names has, ->s[item] and add. for (&)T x in s has its error in the loop code, but the parser does not
+  accept for (&)T x yet (any collection).
+- Tests hset, errors/hset_index, hset_object_item, hset_sized_literal, hset_wrong_item, hsetlit_duplicate.
+
+SET (2026-10-28, spec 6.8.6, 6.3, 6.6, compiler 0.0.37alpha; step 3 of the sets plan)
+- class set<T> : SetCollection<T> at the end of VecPrelude: the members of hset without the capacity ones. set and bset resolve to it.
+- The C is the one of map with values of 0 bytes: MapValue is "" for any set (IsSet: set or hset; IsHset only for the hash kind). RuntimeMap needed
+  no change: the null item is kept in the header as for map (df_alloc(0) gives a block), so null sorts first. CodeGen.Hset.cs became
+  CodeGen.Sets.cs: CheckSetArgs and InferSetType take the kind (MapKeyBuilt for set, HmapKeyBuilt for hset); tree_take of a string item takes the
+  set's own string out of df_bt_remove (goneKey) instead of freeing it. The hooks of step 2 test IsSet.
+- set<T>[n] and set<T>[n] name are errors (no capacity); the parser now reads the sized form for set and bset too (Parser.cs, two places), so
+  the error is the one of the compiler. The prelude is loaded for a Type node set / bset only (not for the word set alone: bitfields have set).
+- Tests set, errors/set_capacity, set_index_assign, set_loop_pair, set_object_item, set_sized_declaration, setlit_duplicate.
+
+SET OPERATORS += AND -= AND ADD(COLLECTION) (2026-10-28, spec 6.6, 6.8.6, compiler 0.0.38alpha; step 4 of the sets plan)
+- add(collection) on set and hset: five overloads in each class (arr<T>, vec<T>, list<T>, set<T>, hset<T>), a for over the other with add(item),
+  returning the number added. The same set as source: every item is already there, so nothing changes and no exception. COST: an instance of set
+  or hset makes the instances of vec, list and the other set kind of the same item type (and the hash runtime), even when unused.
+- CollectionOperator (CodeGen.Map.cs) replaces MapOperatorCall as the hook of EmitStmt: maps as in step 1, sets with SetOperator (CodeGen.Sets.cs):
+  s += x is s.add(x) (an item or a collection, by overload); s -= item is s.remove(item); s -= other (a variable or a field whose type is arr, vec,
+  list, set or hset) is a synthetic for loop of s.remove(item); s -= s is s.clear(); a literal [a, b] on the right is one add or remove per item
+  (so s += [1, 2] works although a literal argument does not select an overload). A collection of another item type is an error that says so.
+- ResolveOverload (CodeGen.Features.cs): a call with one argument that fits no overload of a set member says "the items of this set are T, not U"
+  (with the overloads of add, the conversion error of the single method was lost).
+- The flow of the exceptions: FlowTargetIsMap became FlowTargetIsCollection (maps and sets); -= counts as a call to ?.removeAt and ?.remove.
+- Tests setoperators, errors/setop_wrong_items; errors/hset_wrong_item has the new message.
+
+MAP -= SET (2026-10-28, spec 6.6, compiler 0.0.39alpha; step 5 of the sets plan)
+- MapKeysToRemove (CodeGen.Map.cs), called by CollectionOperator for m -= x: when x is a variable or a field whose type is a set or an hset, the
+  statement is a synthetic for loop over x that calls m.removeAt(key) (each value ends with its key; a key that is not there does nothing). The
+  item type of the set must be the key type of the map (an error says so). Any other x stays m.removeAt(x). The flow pass already counts -= on a
+  map as a call to ?.removeAt.
+- Tests mapminusset, errors/mapop_set_wrong_keys.
+
+SET OPERATIONS (2026-10-28, spec 6.8.6, compiler 0.0.40alpha; step 6 of the sets plan)
+- union, intersection, difference, symmetricDifference, isSubsetOf, isSupersetOf, isDisjointFrom are Dflat methods of the classes set and hset,
+  each with two overloads (other: set<T> or hset<T>), so the kinds mix. A new set has the kind of the class (the left operand): an empty one plus
+  add, returned with ->result; its strings are its own copies (add). The loops over this and other hold their counters, so both sets are unchanged
+  and locked while the method runs. No C was needed. The two classes have the same text for these members:
+  a change goes in both.
+- Test setoperations.
+
+NAMES AND THE WEAK MARKER (2026-10-28, spec 1.1, 12, compiler 0.0.41alpha)
+- '_' is its own token (discard, _=, the weak capture _x of a lambda). Parser.CheckUnderscoreName, called by ExpectIdent, before the "expected end
+  of statement" error and at the start of a statement: '_' touching a name is "a name cannot start with '_'"; '_' touching a name followed by
+  another name on the line is a weak declaration (_Texture2D t), "not built yet". Lexer.ReadSuffix: a number followed by more letters or digits
+  than a suffix is "a name must start with a letter, not a digit".
+- Weak declarations themselves: see WEAK DECLARATIONS below (the "not built yet" error is gone).
+- Tests errors/name_underscore_variable, name_underscore_field, name_underscore_parameter, name_starts_with_digit.
+
+MULTIPLE FILES, NAMESPACES AND IMPORT (2026-10-28, spec 16, Compiler_Options.md "Libraries", compiler 0.0.41alpha; step 1a of the Gfx plan)
+- Sources.cs: SourceLoader reads the root file and every file it reaches through import, and merges them into one Program node for CodeGen
+  (the imported files first, in the order of a depth-first visit, the root file last; the Import nodes are dropped). CodeGen did not change.
+- SourceMap: the files share one line numbering, file i starts at i * 100000 (file 0 is the root file, so a one-file program keeps its line
+  numbers and every old test is the same). A node knows its file through its line: SourceMap.Where(line) gives "file(line)" for the errors and
+  SourceMap.Fix rewrites the warnings "(line): ...". LibraryLine (the lines of the compiler's own Dflat code) moved from 900000 to 2000000000,
+  above every file. A file can have at most 99998 lines. The messages "defined in line N" of the generics use SourceMap.RealLine.
+- One Preprocessor per file (the ##define of a file do not leak into another); the project variables are the same for all.
+- Roots: the folder of the root file (its namespace line; a single file may have none and then has the namespace "", which never overlaps
+  and is matched last; in a multi-file project a root file without a namespace line is an error), each include= folder (lib.df at its top declares the namespace; namespace local is an error there),
+  and the stdlib as "root". Two named roots with the same namespace or one inside the other are an error, the stdlib included.
+- import a.b: the root with the longest namespace that starts the path, then one folder per remaining segment (matched case-insensitively; two
+  folders that differ only by case are an error), then every *.df of that folder, sorted by name. import Root... loads nothing. A file is
+  parsed once (by full path) and visited once, so cycles are fine.
+- Each file of a folder: one namespace line, which is the root namespace plus the folder path (in full, any case, or namespace local); none, or
+  another one, is an error. Only the root file has top-level code: elsewhere only Fun, Alias, Enum, Class, Trait, GenericSet, const Decl,
+  Namespace and Import; main elsewhere is an error.
+- Multi-file compilation: a project file whose source= is main.df, program.df or lib.df. Otherwise (a .df given directly, or another source=)
+  it is a single-file compilation: the include= lines are ignored with a level 2 warning, and only the program root and the stdlib exist.
+- Not built (step 1b): names qualified by their namespace and the internal visibility. Until then a top-level name declared in two namespaces
+  is an error that says so.
+- The other *.df files of the folder of the root file (its siblings) are compiled without an import in a multi-file project, sorted by name and
+  visited before the root file, with the namespace of the root; a single-file compilation ignores them (so the test and example folders, full of
+  independent programs, keep working).
+- Tests: tests\projects\multifile (a sibling of main.df, a program folder, a const, a class, an enum, a library with a subfolder written as
+  SHAPES.Extra) and tests\projects\errors\ns_* (wrong folder namespace, no namespace line, top-level code, main outside the root, missing
+  namespace, a library inside Root, the same name in two namespaces, a multi-file root file without a namespace). run-tests.ps1 builds the project folders: tests\projects\<name>\ with projects\expected\<name>.txt,
+  and tests\projects\errors\<name>\ with projects\errors\expected\<name>.txt (error lines with the paths relative to the project, / separators).
+
+READONLY FIELDS AND FIELD GROUPS (2026-10-28, spec 11.1.4, 11.1.4.1, compiler 0.0.41alpha; step 2 of the Gfx plan)
+- readonly is a modifier only in front of a declaration (Parser.ParseModifiers: the word readonly followed by a name or a keyword), so it is not a
+  reserved word. FieldInfo.IsReadOnly; CheckReadOnlyWrite in ClassLValue (instance and static fields, so =, ++, += and the other compound
+  assignments): the class and its subclasses write it (the rule of private), anyone else gets "'x' is readonly: only A can change it". The
+  reader keeps the visibility of the field. readonly on a function is an error; in a trait it is "not supported" (there it means a property the
+  class must provide, spec 11.2).
+- Field groups: Parser.ParseFieldGroup, in a class or trait body, for "name {": a FieldGroup node with one Decl per field, named "group.field".
+  CodeGen.FieldGroups.cs (LowerFieldGroups, first thing in Generate) lowers the tree before every other pass, so the rest of the compiler only
+  sees fields named "pos.x" (C name m_pos__x, FieldInfo.CName):
+  - the Decl nodes replace the FieldGroup, each with a copy of the Mods of the group;
+  - s.pos.x (also s?.pos.x) becomes the member "pos.x" of s; pos.x inside the methods of the class becomes the name "pos.x";
+  - s.pos = (a, b) becomes the multiple assignment s.pos.x, s.pos.y = a, b (right side first); s.pos = other.pos too (the right side is read
+    as a tuple first); s.pos = p for a tuple variable becomes s.pos.x, s.pos.y = p.x, p.y (by the names of the fields: CHOICE, until tuples
+    can be indexed, which is "not supported: Collections" today; the spec says by position);
+  - s.pos read as a value becomes the tuple (s.pos.x, s.pos.y) (without names, as tuple literals have none).
+- Limits (the lowering knows names, not types): a group name cannot also be a plain field, method or header parameter of any class (an error
+  says so); a group name used by two classes with different fields can be used only field by field; a local tuple with the name of a group of
+  the class and an item with the name of one of its fields is read as the group; the bare names work only in the class that declares the group
+  (a subclass writes this.pos.x); static groups and groups in traits are not supported; the whole group is assigned only through a name or a
+  chain of members (s.pos, a.b.pos), and from a tuple literal or a variable.
+- Tests fieldgroups, errors/readonly_write, readonly_fun, fieldgroup_tuple_size, fieldgroup_name_clash.
+
+WEAK DECLARATIONS _T name (2026-10-28, spec 12, compiler 0.0.41alpha; step 2 of the Gfx plan)
+- Parser.IsWeakMarker: '_' touching a type that is followed by a name on the same line. TryParseDecl gives a Decl with a Weak child; ParseParams
+  gives a Param with a Weak child (with &, (&), -> or ... it is an error). The kind of the parameter stays Param, so nothing that looks at the
+  kinds changed.
+- LowerWeakDecls (CodeGen.Ownership.cs, right after LowerFieldGroups) rewrites every weak Decl into the form that existed: _T x is T x _= null,
+  _T x = y is T x _= y with the level 3 warning. The ownership passes, the hoisting and the declarations already handled WeakInit.
+- Variables and parameters: VarInfo.IsWeak (ParamSig.IsWeak for the parameters). Reading one outside enforce is the old error.
+- Fields: FieldInfo.IsWeak, from a body Decl with the Weak child or a header parameter _T name (a weak header parameter is allowed for an
+  object without ->). The constructor sets them with _= (Assignment(..., weak)). They are left out of OwnedObjectFields (the holder does not end
+  them), of the hash (like the parent reference) and stay in the default toStr. Static weak fields are not supported.
+- Assignment: LValueInfo.IsWeakField. "=" into a weak variable, parameter or field becomes "_=" with the level 3 warning (AssignCode).
+  WeakAssign accepts variables and fields; its value comes from WeakSource: any existing object, a weak variable copied as it is, or a weak
+  field (weakReadAllowed lets the reads of CheckWeakFieldRead through). A new object is an error (nobody would own it). The same WeakSource is
+  used for a weak declaration and for an argument given to a weak parameter, so a weak reference can be passed on without enforce.
+- Reading a weak field (CheckWeakFieldRead, in the Name and Member reads of ExprOfNode): an error outside enforce. enforce takes a bare weak
+  field of the class (EmitEnforce: the condition is not null and not dead, the block sees it as a plain borrow under the same name). Through
+  another object (h.c) the error says to copy it into a weak variable first (enforce takes only names).
+- The objects are never freed today (a dead object keeps its memory and is marked), so a weak reference to a destroyed object reads the dead
+  mark safely. When objects are freed, the weak references will need a real mechanism (a generation, a table, or a counted control block).
+- Tests weak (fields, header parameter, parameters, variables, enforce, copies, the holder ending, = with the warning), errors/weak_field_read,
+  weak_bare_read, weak_not_object, weak_new_object; errors/weak_declaration removed (it compiles now).
+
+EXTERN C FUNCTIONS AND ADDR (2026-10-28, spec 15.9, 2.3, Compiler_Options.md "C files", compiler 0.0.41alpha; step 3 of the Gfx plan)
+- extern is a modifier only in front of fun (Parser.ParseModifiers), so it is not a reserved word. The function has no body (NoBody).
+- RegisterFun: FunSig.IsExtern; CheckExtern (CodeGen.Extern.cs): top level only (in a class the error comes from the method loop), no body, plain
+  parameters (no &, (&), ->, ..., _T), parameter types numbers / bool / addr / string / arr of numbers or bool, return number / bool / addr / none,
+  one function per name (C has no overloads). CanEmitSilent is false and FindFailingFunctions does not walk it: it never returns an error.
+- Generation: no Dflat body. ExternDeclarations writes the C prototype (extern RET name(...)) and the wrapper static RET dfx_<name>(the Dflat
+  values), which is FunSig.CName, so every call site is the ordinary call. In the wrapper a string goes through df_view_keep (a 0-ended view;
+  the copy of a block string is freed after the call) and an arr gives .p and (size_t).len; the C function can change the items of the array,
+  since .p is the array's own storage. The prototype is written by Dflat and the C file is compiled apart, so the C side can use compatible
+  types (const uint8_t*, int, ...).
+- addr: a known type (IsKnownType), C type void*, zero value and null are NULL; == and != with another addr or null (EqualsCode), anything else
+  is "cannot compare". Not yet: arithmetic through pointer methods, printing as hex, transmute, the native size option.
+- csource=<file.c> in the project file (Settings.CSources, paths relative to the project): each file goes to clang after the generated C. A
+  missing file is an error before clang runs. Temporary until step 4 (the libraries bring their C files and link libraries).
+- Tests: tests\projects\externc (a native.c with a handle, strings, arrays read and written, reals, bool, a null addr), errors/extern_body,
+  extern_in_class, extern_string_return, extern_object_param, extern_overload, addr_compare.
+
+NATIVE PART OF THE GFX LIBRARY (2026-10-28, Compiler_Options.md "Native libraries", compiler 0.0.41alpha; step 4 of the Gfx plan)
+- Hardcoded (the user's choice until libraries describe their native needs): NativeLibraries.cs. SourceLoader.ImportedLibraries records the
+  libraries an import really reached (root namespace -> folder); when "gfx" is among them, Collect gives clang: -I<gfx>/Src, the Vulkan and GLFW
+  flags, the *.c of <gfx>/Src (sorted), and user32 gdi32 shell32 (Windows) or dl pthread (Linux). These go after the generated C and the csource=
+  files. Only for a real build: --emit-c does not look for them.
+- Vulkan SDK: vulkan-sdk= of the project (a folder relative to it), else VULKAN_SDK, else the newest C:\VulkanSDK\<version> (Windows). A folder
+  counts when it has Include\vulkan\vulkan.h (or include/) and Lib (or lib): -I, -L, -lvulkan-1 (Windows) or -lvulkan. On Linux, without a folder,
+  /usr/include/vulkan/vulkan.h means the system package (-lvulkan).
+- GLFW: glfw= of the project, else GLFW_DIR. A folder counts when it has include\GLFW\glfw3.h and a lib folder: on Windows the newest lib-vc<year>
+  with glfw3_mt.lib (built for the static C runtime that clang uses by default: CHOICE) or glfw3.lib; on Linux a lib* folder with libglfw3.a or
+  libglfw.so. On Linux, without a folder, /usr/include/GLFW/glfw3.h means the system package (-lglfw).
+- A folder of the project file wins; nothing found is an error that names the missing part and the key. macOS: an error (MoltenVK later).
+- Checked with stand-in folders (the errors, and the flags reaching the linker); not yet with a real SDK and GLFW, which this machine does not
+  have (2026-10-28). No test in the suite: the result depends on what the machine has installed.
+
+PROPERTIES WITH ACCESSOR BLOCKS (2026-10-28, spec 11.1.4, compiler 0.0.41alpha; for step 6 of the Gfx plan)
+- Parser: in a class or trait body (Parser.classMember, set by ParseStatementCore) a declaration may be followed by { [visibility] R: { } [visibility]
+  W: { } } (ParseAccessors: an Accessors node with a Getter and / or a Setter, each with its Block and its Mods), also on the fields of a field
+  group, then = start value. readwrite and writeonly are modifiers only in front of a declaration, like readonly.
+- LowerAccessors (CodeGen.Accessors.cs, after LowerFieldGroups and LowerWeakDecls): each property gets the methods get_<name> and set_<name>(value)
+  (a group field pos.x gives get_pos__x), from its blocks or the defaults { field } and { field = value }. Which exist: none written means both;
+  otherwise R: or W: written, plus readwrite for the missing default; readonly forbids W:, writeonly forbids R:. The visibility of a method is the
+  one written before its block, else the one of the property. In the blocks the name field becomes a RawField node (the storage, self->m_x);
+  value is the parameter of the setter. The Decl keeps a Property child ("r", "w", "rw"): FieldInfo.HasAccessors, CanRead, CanWrite.
+- Storage: always there (CHOICE; the spec says only when an accessor uses field: a computed property still takes its memory today).
+- Reads: a bare name in the class (ExprOfNode, Name) and o.x (the member read) call the getter. Writes: AssignCode (=, and op= as
+  setter(getter op value)), IncDec (getter, setter(getter +- 1), the old or the new value) and AssignTarget of a multiple assignment (a CValue node
+  carries the computed value to the setter) call the setter. PropertyTarget finds the object: this for a bare name, or a receiver that is a name or a
+  chain of members (not a class name: Shape.count is a static), evaluated once more for op= and ++. A private R: or W: used from outside is "cannot
+  be read / assigned here: its W: is private".
+- The start value goes through the setter in the constructor; a property without W: gets it straight in its storage (BuildConstructor).
+- FunSig.IsAccessor: no error part (PairReturn, the failing set, the shared groups and CanEmitSilent leave them out, as the atEnd of a class), so
+  what an accessor lets out is a Panic.
+- Not yet: static properties, accessor blocks in traits (both "not supported"), _= and ??= on a property, override of an accessor, an object-typed
+  property with the default W: (the setter takes a borrowed value, so the owning field refuses it: write the W: yourself).
+- Tests properties (the examples of 11.1.4 and more), propertypanic, errors/property_private_setter, property_no_setter, property_writeonly,
+  property_readonly_setter, property_field_outside.

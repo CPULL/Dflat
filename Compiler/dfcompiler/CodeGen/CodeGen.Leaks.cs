@@ -152,6 +152,9 @@ public sealed partial class CodeGen {
       case "Assign":
         if (!ctx.InCatchBody && node.Text is "/=" or "%=") {
           ctx.Flow.Raises.Add((StandardExceptions["DivisionByZeroException"], ctx.Cover));
+        } else if (!ctx.InCatchBody && node.Text is "+=" or "-=" && FlowTargetIsCollection(node.Children[0], currentFlowFun)) {
+          // c += x calls add, c -= x calls removeAt on a map and remove on a set (CollectionOperator)
+          ctx.Flow.Calls.Add((node.Text == "+=" ? new HashSet<string> { "?.add" } : new HashSet<string> { "?.removeAt", "?.remove" }, ctx.Cover));
         }
         break;
       case "Index":
@@ -247,7 +250,7 @@ public sealed partial class CodeGen {
     foreach (var fun in allFuns) {
       var flow = new FunFlow();
       currentFlowFun = fun;
-      if (!fun.IsAbstract) {
+      if (!fun.IsAbstract && !fun.IsExtern) {
         FlowNode(fun.Node, new FlowContext(flow, Cover.None, false));
       }
       flows[fun] = flow;
@@ -321,7 +324,7 @@ public sealed partial class CodeGen {
       }
       // functions of classes and traits with the same name and parameters can be called through the same pointer (virtual slots,
       // trait functions): they must all return their exception or none: they share what they let out
-      foreach (var group in allFuns.Where(f => f.Class != null && !f.IsStatic && !f.IsCtor && !f.IsInit && !f.IsDtor)
+      foreach (var group in allFuns.Where(f => f.Class != null && !f.IsStatic && !f.IsCtor && !f.IsInit && !f.IsDtor && !f.IsAccessor)
           .GroupBy(f => (f.Name[(f.Name.LastIndexOf('.') + 1)..], string.Join(",", f.Params.Select(p => p.Type))))
           .Concat(allFuns.Where(f => f.Class != null && !f.IsStatic && !f.IsCtor && !f.IsInit && !f.IsDtor && f.Slot >= 0 && f.Root.GroupSize > 0)
             .GroupBy(f => (f.Root.Name, "slot")))) {
@@ -337,7 +340,7 @@ public sealed partial class CodeGen {
     }
     failingFuns.Clear();
     foreach (var fun in allFuns) {
-      if (leaks[fun].Count > 0 && !fun.IsDtor) {   // a destructor is an atEnd of a class: what it raises is a panic
+      if (leaks[fun].Count > 0 && !fun.IsDtor && !fun.IsAccessor) {   // a destructor (an atEnd of a class) and an accessor: what they raise is a panic
         failingFuns.Add(fun);
       }
     }

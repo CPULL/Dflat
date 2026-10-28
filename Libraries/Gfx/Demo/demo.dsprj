@@ -1,0 +1,3 @@
+; the gfx demo: a program that imports the gfx library one folder up
+source=main.df
+include=..

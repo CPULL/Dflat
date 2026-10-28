@@ -1,0 +1,1 @@
+set_sized_declaration.df(1): error: a set has no capacity: the form set<T>[n] name does not apply (spec 6.3); hset<T>[n] has one

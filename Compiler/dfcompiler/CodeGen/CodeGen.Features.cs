@@ -62,7 +62,6 @@ public sealed partial class CodeGen {
     ["r16"] = "r16",
     ["r128"] = "r128",
     ["dec"] = "dec",
-    ["addr"] = "addr",
     ["real"] = "real"
   };
 
@@ -228,6 +227,11 @@ public sealed partial class CodeGen {
       }
     }
     if (applicable.Count == 0) {
+      if (candidates[0].Class is ClassInfo owner && IsSet(owner.Name) && args.Count == 1 && args[0].Kind != "Named") {
+        // add and its overloads for collections (CodeGen.Sets.cs): say what the set takes
+        string given = DisplayName(ExprOf(args[0], scope).Type);
+        throw Error($"the items of this set are {DisplayName(MapKey(owner.Name))}, not {given}", at);
+      }
       throw Error($"no '{candidates[0].Name}' matches these arguments", at);
     }
     bool Dominates((FunSig Fun, int[] Costs) better, (FunSig Fun, int[] Costs) worse) {

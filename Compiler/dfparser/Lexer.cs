@@ -298,6 +298,9 @@ public sealed class Lexer {
     while (char.IsLetter(Cur)) {
       char s = char.ToLowerInvariant(Cur);
       if (!allowed.Contains(s) || seen.Contains(s) || seen.Count == 2) {
+        if (char.IsLetterOrDigit(At(1)) || At(1) == '_') {
+          throw Error("a name must start with a letter, not a digit (spec 1.1)", l, c);   // 9lives
+        }
         throw Error($"invalid number suffix '{Cur}'", line, col);
       }
       seen.Add(s);

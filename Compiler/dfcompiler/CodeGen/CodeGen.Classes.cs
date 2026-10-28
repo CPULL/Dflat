@@ -28,9 +28,16 @@ sealed class FieldInfo {
   public bool IsParentRef { get; set; }      // &Parent name as parent (spec 12.5): a reference, not owned
   public bool ReadOnlyRef { get; set; }      // declared with & (not (&)): only unrestricted and asparent functions are called through it
   public bool Hidden { get; set; }           // a field of the compiler (the children of a parent, the slot of a child)
+  public bool IsReadOnly { get; set; }       // readonly (spec 11.1.4): read with its visibility, written only by the class
+  public bool IsWeak { get; set; }           // _T name (spec 12): does not own its object, read through enforce, set with _=
+  public bool HasAccessors { get; set; }     // a property with R: / W: blocks (spec 11.1.4): read and written through get_ and set_
+  public bool CanRead { get; set; } = true;
+  public bool CanWrite { get; set; } = true;
   public Node? Init { get; set; }
   public FunSig? StaticInit { get; set; }
-  public string CName => IsStatic ? $"s_{Owner.Name}_{Name}" : Owner.IsTrait ? $"t_{Owner.Name}_{Name}" : $"m_{Name}";
+  // a field of a group is named "group.field" (spec 11.1.4.1): "__" in C
+  string CBase => Name.Replace(".", "__");
+  public string CName => IsStatic ? $"s_{Owner.Name}_{CBase}" : Owner.IsTrait ? $"t_{Owner.Name}_{CBase}" : $"m_{CBase}";
 }
 
 sealed class ClassInfo {
@@ -287,12 +294,16 @@ public sealed partial class CodeGen {
         if (p.Kind is "RefParam" or "WritableRefParam") {
           throw NotSupported("Reference parameters on constructors", p);
         }
-        if (IsClass(type) && p.Kind != "GiftParam") {
-          throw Error($"the object '{p.Text}' goes into a field of {cls.Name}, which owns it: write ->{type} {p.Text}", p);
+        bool weakParam = p.Children.Any(child => child.Kind == "Weak");
+        if (weakParam && !IsClass(type)) {
+          throw Error("only objects have weak references", p);
         }
-        cls.PrimaryParams.Add(new ParamSig(p.Text!, type, def?.Children[0]) { IsGift = p.Kind == "GiftParam" && (IsClass(type) || type == "string") });
+        if (IsClass(type) && p.Kind != "GiftParam" && !weakParam) {
+          throw Error($"the object '{p.Text}' goes into a field of {cls.Name}, which owns it: write ->{type} {p.Text} (or _{type} {p.Text} for a weak reference)", p);
+        }
+        cls.PrimaryParams.Add(new ParamSig(p.Text!, type, def?.Children[0]) { IsGift = p.Kind == "GiftParam" && (IsClass(type) || type == "string"), IsWeak = weakParam });
         CheckFieldName(cls, p.Text!, p);
-        cls.Fields.Add(new FieldInfo(p.Text!, type, cls, p) { FromParam = true });
+        cls.Fields.Add(new FieldInfo(p.Text!, type, cls, p) { FromParam = true, IsWeak = weakParam });
       }
     }
 
@@ -311,8 +322,9 @@ public sealed partial class CodeGen {
             throw NotSupported("Sized declarations (arr<T>[n] name)", member);
           }
           var init = member.Children.FirstOrDefault(child => child.Kind is "Init" or "WeakInit");
-          if (init?.Kind == "WeakInit") {
-            throw NotSupported("Ownership", init);
+          bool weakField = member.Children.Any(child => child.Kind == "Weak");
+          if (init?.Kind == "WeakInit" && !weakField) {
+            throw Error($"a weak field is declared with _ before its type: _Type {member.Text}", init);
           }
           var typeNode = member.Children.First(child => TypeNodeKinds.Contains(child.Kind));
           if (typeNode is { Kind: "Type", Text: "var" }) {
@@ -326,7 +338,8 @@ public sealed partial class CodeGen {
               throw Error($"'{member.Text}' is declared with the type {existing.Type} in the header", member);
             }
             existing.Visibility = visibility;
-            if (init != null) {
+            existing.IsReadOnly = ModsOf(member).Contains("readonly");
+            if (init != null && !(init.Kind == "WeakInit" && init.Text == "default")) {   // the null start of _T name is not written
               Warn($"the header parameter '{member.Text}' has an initializer in the body; the body value wins", member, 3);
               existing.Init = init.Children[0];
             }
@@ -337,8 +350,21 @@ public sealed partial class CodeGen {
             Visibility = visibility,
             IsStatic = isStatic,
             IsConst = isConst,
+            IsReadOnly = ModsOf(member).Contains("readonly"),
+            IsWeak = weakField,
             Init = init?.Children[0]
           };
+          if (member.Children.FirstOrDefault(child => child.Kind == "Property") is Node property) {
+            field.HasAccessors = true;
+            field.CanRead = property.Text!.Contains('r');
+            field.CanWrite = property.Text!.Contains('w');
+          }
+          if (weakField && !IsClass(type)) {
+            throw Error("only objects have weak references", member);
+          }
+          if (weakField && isStatic) {
+            throw NotSupported("Static weak fields", member);
+          }
           if (isConst && !isStatic) {
             throw Error("'const' on a field needs 'static'", member);
           }
@@ -469,6 +495,12 @@ public sealed partial class CodeGen {
       if (isConst) {
         throw Error("'const' applies to static fields", member);
       }
+      if (ModsOf(member).Contains("readonly")) {
+        throw Error("'readonly' applies to fields", member);
+      }
+      if (ModsOf(member).Contains("extern")) {
+        throw Error("an extern function is declared at the top level, not in a class or an enum", member);
+      }
       if (IsGenericEquals(member)) {
         RegisterEquals(cls, member);
         continue;
@@ -491,6 +523,7 @@ public sealed partial class CodeGen {
       }
       var f = RegisterFun(member, null, cls)!;
       f.Class = cls;
+      f.IsAccessor = member.Children.Any(child => child.Kind == "AccessorFun");
       f.IsStatic = isStatic;
       f.IsOverride = isOverride;
       f.Visibility = visibility;
@@ -590,10 +623,15 @@ public sealed partial class CodeGen {
       if (cls.PrimaryParams.First(param => param.Name == field.Name).IsGift) {
         source = Synthetic("Gift", at).Add(source);   // the object moves from the parameter into the field
       }
-      block.Add(Assignment(field.Name, source, at, false));
+      block.Add(Assignment(field.Name, source, at, false, field.IsWeak));
     }
     foreach (var field in ctorFields.Where(field => field.Init != null)) {
-      block.Add(Assignment(field.Name, field.Init!, at, false));
+      if (field.HasAccessors && !field.CanWrite) {
+        // a start value goes through W: (spec 11.1.4); without one, straight into the storage
+        block.Add(Synthetic("Assign", at, "=").Add(Synthetic("RawField", at, field.Name)).Add(field.Init!));
+        continue;
+      }
+      block.Add(Assignment(field.Name, field.Init!, at, false, field.IsWeak));
     }
     var initNode = Synthetic("Fun", at, "__init").Add(Synthetic("Params", at)).Add(block);
 
@@ -641,12 +679,12 @@ public sealed partial class CodeGen {
     }
   }
 
-  // this.name = value for an instance field, name = value for a static one
-  static Node Assignment(string field, Node value, Node at, bool isStatic) {
+  // this.name = value for an instance field, name = value for a static one; _= for a weak field
+  static Node Assignment(string field, Node value, Node at, bool isStatic, bool weak = false) {
     Node target = isStatic
       ? Synthetic("Name", at, field)
       : Synthetic("Member", at, field).Add(Synthetic("Name", at, "this"));
-    return Synthetic("Assign", at, "=").Add(target).Add(value);
+    return Synthetic("Assign", at, weak ? "_=" : "=").Add(target).Add(value);
   }
 
   // struct, descriptor and storage of statics
@@ -656,7 +694,7 @@ public sealed partial class CodeGen {
       // the first and the last node of a list are node pointers in C (CodeGen.List.cs)
       string fieldType = IsList(cls.Name) && field.Name is "first" or "last" ? ListNode(cls.Name) + "*"
         : IsListIterator(cls.Name) && field.Name == "node" ? ListNode(cls.ParentField!.Type) + "*"
-        : IsMap(cls.Name) && field.Name == "tree" ? (IsHmap(cls.Name) ? "df_ht" : "df_bt")
+        : (IsMap(cls.Name) || IsSet(cls.Name)) && field.Name == "tree" ? (IsHmap(cls.Name) ? "df_ht" : "df_bt")
         : field.Hidden && field.Name == "df_children" ? "df_kids*" : CType(field.Type);
       fields.Append($"  {fieldType} {field.CName};\n");
     }
@@ -865,6 +903,13 @@ public sealed partial class CodeGen {
     throw Error($"'{what}' is private in {owner.Name}", at);
   }
 
+  // readonly (spec 11.1.4): the class (and its subclasses, as for private) writes the field, everyone else only reads it
+  void CheckReadOnlyWrite(FieldInfo field, Node at) {
+    if (field.IsReadOnly && !(currentClass != null && (currentClass == field.Owner || IsSubclass(currentClass.Name, field.Owner.Name)))) {
+      throw Error($"'{field.Name}' is readonly: only {field.Owner.Name} can change it", at);
+    }
+  }
+
   // the code of the collections of the compiler (VecPrelude) uses the private members of the collection traits
   bool LibraryCode => currentFun != null && currentFun.Node.Line >= LibraryLine;
 
@@ -938,7 +983,8 @@ public sealed partial class CodeGen {
         throw Error($"'{parts[1]}' is an instance field: it needs an object", target);
       }
       CheckAccess(field.Visibility, field.Owner, parts[1], target);
-      return new LValueInfo(field.CName, field.Type, field.IsConst && !initializing);   // a static: not tracked
+      CheckReadOnlyWrite(field, target);
+      return new LValueInfo(field.CName, field.Type, field.IsConst && !initializing, null, false, field.IsWeak);   // a static: not tracked
     }
     var owner = ExprOf(target.Children[0], scope);
     if (!IsClass(owner.Type)) {
@@ -953,11 +999,12 @@ public sealed partial class CodeGen {
     var instance = ObjectField(owner, target.Text!, target);
     var info = FindField(ObjInfo(owner.Type), target.Text!)!;
     CheckTraitFieldWrite(info, target);
+    CheckReadOnlyWrite(info, target);
     if (info.IsParentRef) {
       // the reference to the parent: set once, by the constructor
       return initializing ? new LValueInfo(instance.Code, instance.Type, false) : throw Error($"'{target.Text}' is the reference to the parent: only the constructor sets it", target);
     }
-    return new LValueInfo(instance.Code, instance.Type, info.IsConst && !initializing, null, true);
+    return new LValueInfo(instance.Code, instance.Type, info.IsConst && !initializing, null, true, info.IsWeak);
   }
 
   // ---------------------------------------------------------------- calls
@@ -1082,7 +1129,11 @@ public sealed partial class CodeGen {
     } else if (arg.Kind == "WritableAddressOf") {
       throw Error($"'{param.Name}' is not a (&) parameter: remove the (&)", arg);
     }
-    var value = ExprOf(arg, scope, param.Type);
+    // a weak parameter takes any existing object, also another weak reference (spec 12)
+    var value = param.IsWeak ? WeakSource(arg, scope, param.Type) : ExprOf(arg, scope, param.Type);
+    if (param.IsWeak && value.Fresh) {
+      throw Error($"'{param.Name}' is a weak reference: a new object needs an owner", arg);
+    }
     if (param.Type == "string") {
       string converted = Convert(value, param.Type, arg);
       return param.IsGift ? StrOwnedAs(value, "string", converted) : StrRead(new Expr(converted, "string", FreshCode(value, converted) == "true" && !IsStaticStr(converted)));
@@ -1268,7 +1319,7 @@ public sealed partial class CodeGen {
     EmitEqualsTables();
     foreach (var cls in classOrder) {
       // the tree of a map is a C struct: a map prints through MapStrFunction
-      var all = AllInstanceFields(cls).Where(field => !field.Hidden && !(IsMap(cls.Name) && field.Name == "tree")).ToList();
+      var all = AllInstanceFields(cls).Where(field => !field.Hidden && !((IsMap(cls.Name) || IsSet(cls.Name)) && field.Name == "tree")).ToList();
       var sb = classCode;
       sb.Append($"static df_string df_str_{cls.Name}(const {cls.StructName}* o) {{\n");
       sb.Append("  if (o == NULL) {\n    return df_str_lit(\"null\", 4);\n  }\n");

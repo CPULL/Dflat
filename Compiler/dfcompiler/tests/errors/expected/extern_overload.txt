@@ -1,0 +1,1 @@
+extern_overload.df(3): error: 'f' is an extern C function: C has no overloads, so the name can be used once

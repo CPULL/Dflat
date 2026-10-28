@@ -1,0 +1,3 @@
+set<i32> s = [1]
+vec<string> names = ["a"]
+s += names

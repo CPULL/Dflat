@@ -1,0 +1,5 @@
+namespace property_field_outside
+class P {
+  public i32 c
+  public fun i32 f() { field }
+}

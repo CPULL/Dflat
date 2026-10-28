@@ -1,0 +1,1 @@
+fieldgroup_tuple_size.df(6): error: the field group 'pos' has 2 fields, the tuple 3 items

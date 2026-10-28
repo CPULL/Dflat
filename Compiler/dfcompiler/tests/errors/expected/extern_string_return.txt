@@ -1,0 +1,1 @@
+extern_string_return.df(2): error: an extern function returns a number, bool or addr, not string (spec 15.9)

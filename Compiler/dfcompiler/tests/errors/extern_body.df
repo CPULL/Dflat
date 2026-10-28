@@ -1,0 +1,2 @@
+namespace extern_body
+extern fun i32 f() { 1 }

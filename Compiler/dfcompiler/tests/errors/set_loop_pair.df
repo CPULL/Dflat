@@ -1,0 +1,2 @@
+set<i32> s = [1]
+for (i32 a, i32 b) in s { }

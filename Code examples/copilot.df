@@ -1,0 +1,20 @@
+namespace tests
+
+alias Root.Console as console
+
+class Program {
+
+    public static fun i32, i32, i32 values() {
+        return 10, 20, 30
+    }
+}
+
+fun int main() {
+
+    i32 a, _, i32 c = Program.values()
+
+    console.log($"a={a}")
+    console.log($"c={c}")
+
+    return 0
+}

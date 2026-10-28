@@ -1,7 +1,8 @@
-Root.Console.log("Hello, what is your name?")
-string name = Root.Console.readLine()
-if name.len < 2 { // Sadly we cannot remove the newline yet
-  Root.Console.log("Are you shy?")
-	name = "<shy person>"
+alias Root.Console as c
+c.log("Hello, what is your name?")
+string name = c.readLine()
+if name.trim().len < 2 {
+  c.log("Are you shy?")
+  name = "<shy person>"
 }
-Root.Console.print($"Hello {name}")
+c.print($"Hello {name}")

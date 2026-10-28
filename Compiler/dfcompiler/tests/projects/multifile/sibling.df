@@ -1,0 +1,4 @@
+namespace app
+
+// a file next to main.df: compiled without an import in a multi-file project
+fun string greeting() { "hello from a sibling" }

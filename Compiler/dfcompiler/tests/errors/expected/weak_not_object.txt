@@ -1,0 +1,1 @@
+weak_not_object.df(2): error: only objects have weak references

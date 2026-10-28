@@ -512,12 +512,12 @@ public sealed partial class CodeGen {
       throw new CompileException($"internal error: the generic class instance {mangled} was not created", at.Line);
     }
     if (seeds.Classes.Count(seed => seed.Template == key) >= MaxCopies) {
-      throw Error($"Generic {generic.Name} defined in line {generic.Node.Line} was used with more than {MaxCopies} instances"
+      throw Error($"Generic {generic.Name} defined in line {SourceMap.RealLine(generic.Node.Line)} was used with more than {MaxCopies} instances"
         + $" in {(currentFun != null ? "function " + currentFun.Name : "the program")}", at);
     }
     int nesting = args.Max(NestingOf);
     if (nesting + 1 > MaxChainDepth) {
-      throw Error($"Generic {generic.Name} defined in line {generic.Node.Line} is nested more than {MaxChainDepth} levels deep", at);
+      throw Error($"Generic {generic.Name} defined in line {SourceMap.RealLine(generic.Node.Line)} is nested more than {MaxChainDepth} levels deep", at);
     }
     seeds.Classes.Add((key, args));
     throw new NeedInstanceException();
@@ -728,12 +728,12 @@ public sealed partial class CodeGen {
     }
     string where = currentFun != null ? "function " + currentFun.Name : "the program";
     if (generic.Copies >= MaxCopies) {
-      throw Error($"Generic {generic.Name} defined in line {generic.Node.Line} was used with more than {MaxCopies} instances in {where}", at);
+      throw Error($"Generic {generic.Name} defined in line {SourceMap.RealLine(generic.Node.Line)} was used with more than {MaxCopies} instances in {where}", at);
     }
     int depth = (currentFun?.InstanceDepth ?? 0) + 1;
     string chain = currentFun != null ? currentFun.InstanceChain + " -> " + mangled : mangled;
     if (depth > MaxChainDepth) {
-      throw Error($"Generic {generic.Name} defined in line {generic.Node.Line}: more than {MaxChainDepth} nested instantiations ({chain})", at);
+      throw Error($"Generic {generic.Name} defined in line {SourceMap.RealLine(generic.Node.Line)}: more than {MaxChainDepth} nested instantiations ({chain})", at);
     }
     CheckConstraints(generic.Params, args, at, generic.Name);
     var map = generic.Params.Zip(args).ToDictionary(pair => pair.First.Name, pair => pair.Second);

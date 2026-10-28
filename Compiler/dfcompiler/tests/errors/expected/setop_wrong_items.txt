@@ -1,0 +1,1 @@
+setop_wrong_items.df(3): error: the items of this set are i32, not string: += takes a collection with the same item type (spec 6.6)

@@ -4,7 +4,7 @@ using dfparser;
 namespace dfcompiler;
 
 public static class Program {
-  public const string Version = "0.0.34alpha";
+  public const string Version = "0.0.41alpha";
 
   // the version of the specification this compiler was built for: the variable `version` of the preprocessor (spec 19.1)
   public const string LanguageVersion = "0.0.15";
@@ -45,6 +45,10 @@ public static class Program {
     public string? Build { get; set; }
     public bool Run { get; set; }
     public List<string> ProgramArgs { get; } = new();
+    public List<string> Includes { get; } = new();   // include= of the project file: the folders of the libraries
+    public List<string> CSources { get; } = new();   // csource= of the project file: C files compiled with the program (temporary, spec 15.9)
+    public string? VulkanSdk { get; set; }           // vulkan-sdk= and glfw= of the project file: the folders the gfx library needs
+    public string? Glfw { get; set; }
   }
 
   sealed class UsageException : Exception {
@@ -172,6 +176,7 @@ public static class Program {
     string cPath = Path.Combine(sourceDir, ".compilation", name + ".c");
     output ??= Path.Combine(sourceDir, "build." + effective, forWindows ? name + ".exe" : name);
 
+    var importedLibraries = new Dictionary<string, string>();
     try {
       // the preprocessor (spec 19.1) builds the code that is compiled; its variables come from the options
       var variables = PpVariables.Build(os, cpu, nativeInt, build, optLevel, optMode, LanguageVersion);
@@ -182,28 +187,47 @@ public static class Program {
         Console.Error.WriteLine($"{projectFile}: error: {ex.Message}");
         return 1;
       }
-      string text = preprocessor.Process(File.ReadAllText(path));
-      var lexer = new Lexer(text);
-      var tokens = lexer.Tokenize();
-      var parser = new Parser(tokens);
-      var tree = parser.ParseProgram();
+      // the root file and the files it imports (spec 16), merged into one program
+      var loader = new SourceLoader(variables, projectVariables);
+      bool multiFile = SourceLoader.IsMultiFile(projectFile, path);
+      Node tree;
+      try {
+        tree = loader.Load(path, multiFile, project.Includes, projectFile);
+        importedLibraries = loader.ImportedLibraries;
+      } finally {
+        foreach (var warning in loader.Warnings) {
+          Console.Error.WriteLine(warning);
+        }
+      }
       var (c, genWarnings) = CodeGen.Compile(tree, build == "release", nativeInt);
-      foreach (var warning in preprocessor.Warnings.Concat(lexer.Warnings).Concat(parser.Warnings).Concat(genWarnings)) {
-        Console.Error.WriteLine(path + warning);
+      foreach (var warning in genWarnings) {
+        Console.Error.WriteLine(SourceMap.Fix(warning));
       }
       Directory.CreateDirectory(Path.GetDirectoryName(cPath)!);
       File.WriteAllText(cPath, c);
     } catch (DfException ex) {
-      Console.Error.WriteLine($"{path}({ex.Line},{ex.Col}): error: {ex.Message}");
+      Console.Error.WriteLine($"{SourceMap.Where(ex.Line, ex.Col)}: error: {ex.Message}");
       return 1;
     } catch (CompileException ex) {
-      Console.Error.WriteLine($"{path}({ex.Line}): error: {ex.Message}");
+      Console.Error.WriteLine($"{SourceMap.Where(ex.Line)}: error: {ex.Message}");
+      return 1;
+    } catch (SourceException ex) {
+      Console.Error.WriteLine(ex.Message);
       return 1;
     }
 
     Console.WriteLine($"C code: {cPath}");
     if (emitOnly) {
       return 0;
+    }
+
+    // the C side of the imported libraries (hardcoded for gfx: its C files, the Vulkan SDK and GLFW)
+    NativeLibraries.NativeArgs native;
+    try {
+      native = NativeLibraries.Collect(importedLibraries, os, project.VulkanSdk, project.Glfw, projectFile);
+    } catch (NativeLibraries.NativeException ex) {
+      Console.Error.WriteLine(ex.Message);
+      return 1;
     }
 
     string? clang = FindClang(cc);
@@ -218,6 +242,14 @@ public static class Program {
       "-std=c11", optimization, "-fwrapv", "-Wno-unused-function",
       "-Wno-parentheses-equality", "-Wno-tautological-compare", "-o", output, cPath
     };
+    foreach (string cSource in project.CSources) {
+      if (!File.Exists(cSource)) {
+        Console.Error.WriteLine($"{projectFile}: error: the C file {cSource} does not exist");
+        return 1;
+      }
+      ccArgs.Add(cSource);   // the C functions declared with extern fun (spec 15.9)
+    }
+    ccArgs.AddRange(native.Args);
     if (build == "release") {
       ccArgs.Insert(0, "-DDF_RELEASE");   // an index outside a collection is a panic (spec 6.1)
     }
@@ -410,6 +442,18 @@ public static class Program {
             break;
           case "compilervar":
             DefineVariable(value, variables);
+            break;
+          case "include":
+            settings.Includes.Add(Path.Combine(folder, value));
+            break;
+          case "csource":
+            settings.CSources.Add(Path.GetFullPath(Path.Combine(folder, value)));
+            break;
+          case "vulkan-sdk":
+            settings.VulkanSdk = Path.GetFullPath(Path.Combine(folder, value));
+            break;
+          case "glfw":
+            settings.Glfw = Path.GetFullPath(Path.Combine(folder, value));
             break;
           case "run":
           case "version":

@@ -1,0 +1,58 @@
+// step 6 of the sets plan (spec 6.8.6): union, intersection, difference, symmetricDifference give a new set of the kind of the left one; isSubsetOf,
+// isSupersetOf, isDisjointFrom; set and hset mixed, the two sets unchanged
+alias Root as r
+
+set<i32> a = [1, 2, 3, 4]
+set<i32> b = [3, 4, 5]
+r.Console.log(a.union(b))                            // [1, 2, 3, ...] (5 items)
+r.Console.log(a.intersection(b))                     // [3, 4]
+r.Console.log(a.difference(b))                       // [1, 2]
+r.Console.log(b.difference(a))                       // [5]
+r.Console.log(a.symmetricDifference(b))              // [1, 2, 5]
+r.Console.log(a)                                     // [1, 2, 3, ...] (4 items): unchanged
+r.Console.log(b)                                     // [3, 4, 5]: unchanged
+
+// kept in variables; an hset on the left gives an hset
+set<i32> both = a.intersection(b)
+both.add(10)
+r.Console.log(both)                                  // [3, 4, 10]
+hset<i32> h = [4, 5, 6]
+hset<i32> hu = h.union(a)                            // an hset with a set
+r.Console.log(hu.len)                                // 6
+set<i32> su = a.union(h)                             // a set with an hset: sorted
+r.Console.log(su)                                    // [1, 2, 3, ...] (6 items)
+r.Console.log(h.intersection(a).len)                 // 1
+r.Console.log(h.difference(b).has(6))                // true
+r.Console.log(h.symmetricDifference(b).len)          // 2: 3 and 6
+
+// the tests
+set<i32> small = [3, 4]
+r.Console.log(small.isSubsetOf(a))                   // true
+r.Console.log(a.isSubsetOf(small))                   // false
+r.Console.log(a.isSupersetOf(small))                 // true
+r.Console.log(small.isSubsetOf(small))               // true
+r.Console.log(a.isDisjointFrom(b))                   // false
+hset<i32> far = [100, 200]
+r.Console.log(a.isDisjointFrom(far))                 // true
+r.Console.log(far.isDisjointFrom(a))                 // true
+set<i32> empty = []
+r.Console.log(empty.isSubsetOf(a))                   // true
+r.Console.log(a.union(empty).len)                    // 4
+r.Console.log(a.intersection(empty).len)             // 0
+
+// strings: the new set has its own copies
+set<string> x = ["red", "green"]
+hset<string> y = ["green", "blue"]
+set<string> all = x.union(y)
+r.Console.log(all)                                   // [blue, green, red]
+x.clear()
+r.Console.log(all)                                   // [blue, green, red]
+r.Console.log(y.difference(all).len)                 // 0
+
+// a new set made in a function
+fun set<string> common(set<string> p, hset<string> q) {
+  return p.intersection(q)
+}
+set<string> p = ["a", "b", "c"]
+hset<string> q = ["c", "a", "z"]
+r.Console.log(common(p, q))                          // [a, c]

@@ -60,11 +60,14 @@ public sealed partial class CodeGen {
     if (target == "vec" && vecPrelude) {
       return VecNewWithCapacity(generic, sizeNode, scope);
     }
-    if (target == "hmap" && vecPrelude) {
+    if (target is "hmap" or "hset" && vecPrelude) {
       return HmapNewWithCapacity(generic, sizeNode, scope);
     }
     if (target == "list" && vecPrelude) {
       throw Error("a list has no capacity: the form list<T>[n] does not apply (spec 6.3)", generic);
+    }
+    if (target is "set" or "bset" && vecPrelude) {
+      throw Error("a set has no capacity: the form set<T>[n] does not apply (spec 6.3); hset<T>[n] has one", generic);
     }
     if (target != "arr") {
       throw NotSupported("Collections", generic);
@@ -127,6 +130,10 @@ public sealed partial class CodeGen {
       // map ages = ["one": 1], hmap ages = ["one": 1]: the types come from the literal (spec 6.3)
       return InferMapType(init.Children[0], scope, decl, typeNode.Text == "hmap");
     }
+    if (typeNode is { Kind: "Type", Text: "set" or "bset" or "hset", Children.Count: 0 } && vecPrelude && init?.Children[0].Kind == "List" && scope != null) {
+      // set tags = ["red", "blue"], hset tags = [...]: the item type comes from the literal (spec 6.3)
+      return InferSetType(init.Children[0], scope, decl, typeNode.Text == "hset");
+    }
     // var x = value: the type of the value
     if (typeNode.Kind == "Type" && typeNode.Text == "var" && typeNode.Children.Count == 0 && !typeAliases.ContainsKey("var")) {
       if (init == null || scope == null) {
@@ -167,6 +174,9 @@ public sealed partial class CodeGen {
     if (IsList(obj.Type)) {
       return ListIndex(obj, index, n);
     }
+    if (IsSet(obj.Type)) {
+      throw Error("a set has no s[k]: has(item) tells whether an item is there, ->s[item] takes it out (spec 6.6)", n);
+    }
     if (!IsArr(obj.Type)) {
       throw NotSupported("Collections", n);
     }
@@ -194,6 +204,9 @@ public sealed partial class CodeGen {
     }
     if (IsMap(obj.Type)) {
       return MapIndexAssign(s, scope, obj, target);
+    }
+    if (IsSet(obj.Type)) {
+      throw Error("a set has no s[k] = v: add(item) adds an item (spec 6.6)", s);
     }
     bool isVec = IsVec(obj.Type);
     if (!(IsArr(obj.Type) || isVec) || target.Children[0].Kind == "GenericRef") {
@@ -413,7 +426,10 @@ public sealed partial class CodeGen {
     }
     var size = node.Children.FirstOrDefault(child => child.Kind == "Size");
     var typeNode = node.Children.FirstOrDefault(child => child.Kind == "Type");
-    if (size == null || typeNode is not ({ Text: "arr" or "vec", Children.Count: 1 } or { Text: "hmap", Children.Count: 2 })) {
+    if (size != null && typeNode is { Text: "set" or "bset" } && vecPrelude) {
+      throw Error("a set has no capacity: the form set<T>[n] name does not apply (spec 6.3); hset<T>[n] has one", node);
+    }
+    if (size == null || typeNode is not ({ Text: "arr" or "vec" or "hset", Children.Count: 1 } or { Text: "hmap", Children.Count: 2 })) {
       return;   // the others (hset, list, ...) are not built (EmitDecl says so)
     }
     var init = node.Children.FirstOrDefault(child => child.Kind == "Init");
@@ -427,10 +443,10 @@ public sealed partial class CodeGen {
       return Synthetic("Index", size).Add(generic).Add(sizeExpr);
     }
     node.Children.Remove(size);
-    if (typeNode.Text is "vec" or "hmap") {
-      // hmap<K, V>[n] name (spec 6.3): an empty hmap with room for n entries
+    if (typeNode.Text is "vec" or "hmap" or "hset") {
+      // hmap<K, V>[n] name, hset<T>[n] name (spec 6.3): an empty hmap or hset with room for n entries
       if (init != null && !(init.Children[0].Kind == "List" && init.Children[0].Children.Count == 0)) {
-        throw Error($"{typeNode.Text}<{(typeNode.Text == "vec" ? "T" : "K, V")}>[n] name is an empty {typeNode.Text} with capacity n: it takes nothing or []", node);
+        throw Error($"{typeNode.Text}<{(typeNode.Text == "hmap" ? "K, V" : "T")}>[n] name is an empty {typeNode.Text} with capacity n: it takes nothing or []", node);
       }
       if (init != null) {
         node.Children.Remove(init);
@@ -662,12 +678,22 @@ public sealed partial class CodeGen {
         mapPart = viewKind == "mapKeys" ? "keys" : "values";
       }
     }
+    bool destructure = varNode.Kind == "Destructure";
+    if (IsSet(collection.Type)) {
+      // a set is walked like the keys of its table (CodeGen.Hset.cs); its items are read-only (spec 6.4)
+      if (destructure) {
+        throw Error("a set gives one item at a time: for x in s", s);
+      }
+      if (varNode.Kind == "WritableVar") {
+        throw Error("the items of a set are read-only: (&) is not allowed (spec 6.4); to change an item, remove it and add the new one", s);
+      }
+      mapPart = "keys";
+    }
     if (mapPart != null) {
       mapLoopParts[s] = mapPart;
     }
     string elem;
-    bool overMap = IsMap(collection.Type);
-    bool destructure = varNode.Kind == "Destructure";
+    bool overMap = IsMap(collection.Type) || IsSet(collection.Type);
     if (mapPart != null && destructure) {
       throw Error($"m.{mapPart} gives one value at a time: for x in m.{mapPart}; for (k, v) in m gives both", s);
     }

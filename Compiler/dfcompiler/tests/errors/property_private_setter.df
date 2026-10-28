@@ -1,0 +1,6 @@
+namespace property_private_setter
+class P {
+  public i32 level { R: { field } private W: { field = 0 } }
+}
+var p = P()
+p.level = 3

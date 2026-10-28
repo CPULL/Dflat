@@ -1,0 +1,1 @@
+extern_in_class.df(3): error: an extern function is declared at the top level, not in a class or an enum

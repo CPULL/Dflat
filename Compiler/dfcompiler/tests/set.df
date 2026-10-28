@@ -1,0 +1,98 @@
+// set<T> (spec 6.8.6), alias bset, step 3 of the sets plan: the B+ tree of map with an empty value, so the items are sorted. Native and string items;
+// add, has, remove, ->s[item], clear, .len, .sizeof, for, printing and literals (no capacity)
+alias Root as r
+enum Color { red, green, blue }
+
+set<i32> numbers = [3, -1, 2]
+r.Console.log(numbers)                               // [-1, 2, 3]
+r.Console.log(numbers.add(10))                       // true
+r.Console.log(numbers.add(2))                        // false: already there
+r.Console.log(numbers.has(10))                       // true
+r.Console.log(numbers.has(9))                        // false
+r.Console.log(numbers.remove(-1))                    // true
+r.Console.log(numbers.remove(-1))                    // false
+r.Console.log(numbers)                               // [2, 3, 10]
+for i32 n in numbers {
+  r.Console.log(n)                                   // 2, 3, 10: sorted
+}
+
+// the item type from the literal; strings are the set's own copies, sorted by bytes
+set tags = ["red", "blue"]
+string green = "gr"
+green += "een"
+tags.add(green)
+green = "changed"
+r.Console.log(tags)                                  // [blue, green, red]
+r.Console.log(tags.has("changed"))                   // false
+string taken = ->tags["blue"]
+r.Console.log(taken)                                 // blue
+r.Console.log(tags)                                  // [green, red]
+string missing = ->tags["nothing"]
+r.Console.log($"[{missing}]")                        // []
+bset<string> words = ["b", "a"]
+r.Console.log(words)                                 // [a, b]
+
+// an empty set, enums, reals, nullables (null is an item and sorts first)
+set<string> empty = []
+r.Console.log(empty.len)                             // 0
+r.Console.log(empty)                                 // []
+set<Color> colors = [Color.blue, Color.red]
+colors.add(Color.blue)
+r.Console.log(colors)                                // [red, blue]
+set<r64> reals = [2.5, 0.0, -1.5]
+r64 zero = 0.0
+r.Console.log(reals.add(-zero))                      // false: -0.0 is 0.0
+r.Console.log(reals)                                 // [-1.5, 0, 2.5]
+set<i16?> maybe = [7, null, -2]
+r.Console.log(maybe)                                 // [null, -2, 7]
+r.Console.log(maybe.has(null))                       // true
+i16? first = ->maybe[null]
+r.Console.log(maybe)                                 // [-2, 7]
+i32 ten = ->numbers[10]
+r.Console.log(ten)                                   // 10
+r.Console.log(numbers.len)                           // 2
+
+// printing: the first 3 items, then the count
+set<i32> many = []
+for i32 i = 0..10 {
+  many.add(100 - i)
+}
+r.Console.log(many)                                  // [91, 92, 93, ...] (10 items)
+r.Console.log(many.sizeof > 0)                       // true
+
+// clear, a parameter, a field
+many.clear()
+r.Console.log(many.len)                              // 0
+fun string joined(set<string> s) {
+  string all = ""
+  for string item in s {
+    all += item
+  }
+  return all
+}
+r.Console.log(joined(tags))                          // greenred
+class Visited {
+  public set<i32> ids = []
+}
+Visited v = Visited()
+v.ids.add(5)
+v.ids.add(1)
+v.ids.add(5)
+r.Console.log(v.ids)                                 // [1, 5]
+
+// not while it is walked (spec 6.4)
+fun string grow(set<i32> s) {
+  for i32 n in s {
+    s.add(n + 100)
+  }
+  return "grew"
+  catch ModifyingIteratedCollectionException { return "locked" }
+}
+r.Console.log(grow(numbers))                         // locked
+fun string again(set<i32> s) {
+  for i32 n in s {
+    s.add(n)                                         // already there: the size does not change
+  }
+  return "same size"
+}
+r.Console.log(again(numbers))                        // same size

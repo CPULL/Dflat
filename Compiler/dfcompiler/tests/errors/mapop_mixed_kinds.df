@@ -1,0 +1,3 @@
+map<i32, string> sorted = [1: "one"]
+hmap<i32, string> hashed = [2: "two"]
+sorted += hashed

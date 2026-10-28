@@ -1,0 +1,17 @@
+[ann: 31, bob: 40]
+[ann: 31, bob: 40, cid: 50]
+[ann: 31, cid: 50]
+[ann: 31, cid: 51, dan: 60]
+[cid: 51, dan: 60]
+4
+4
+[1: uno, 2: two]
+3
+dos
+[3: three]
+[7: true]
+12 ab
+locked
+locked too
+[1: 10, 2: 20]
+---- exit code 0 ----

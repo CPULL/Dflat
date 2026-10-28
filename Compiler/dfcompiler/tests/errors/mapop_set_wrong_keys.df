@@ -1,0 +1,3 @@
+map<string, i32> ages = ["a": 1]
+set<i32> ids = [1]
+ages -= ids

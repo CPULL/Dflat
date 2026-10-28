@@ -1,0 +1,50 @@
+// Weak references declared with _T (spec 12): fields, header parameters, parameters, variables; enforce; the holder does not own
+namespace weak
+alias Root as r
+
+class Context {
+  public i32 id = 7
+}
+
+class Handle(_Context context) {
+  public _Context other
+  public fun i32 read() {
+    enforce context { return context.id }
+    return -1
+  }
+  public fun link(_Context c) { other _= c }
+  public fun bool hasOther() {
+    enforce other { return true }
+    return false
+  }
+}
+
+fun string probe(_Context c) {
+  enforce c { return "alive" }
+  return "gone"
+}
+
+var ctx = Context()
+var h = Handle(ctx)
+r.Console.log(h.read())
+r.Console.log(h.hasOther())
+h.link(ctx)
+r.Console.log(h.hasOther())
+_Context w
+r.Console.log(probe(ctx))
+w _= ctx
+enforce w { r.Console.log(w.id) } else { r.Console.log("none") }
+_Context copy _= h.other
+enforce copy { r.Console.log("copy ok") } else { r.Console.log("copy none") }
+ctx is atEnd.
+r.Console.log(h.read())
+r.Console.log(h.hasOther())
+enforce w { r.Console.log(w.id) } else { r.Console.log("w gone") }
+r.Console.log(h)
+// a weak field does not end with its holder; = into a weak reference works as _= (level 3 warning)
+var ctx2 = Context()
+var h2 = Handle(ctx2)
+h2 is atEnd.
+r.Console.log(ctx2.id)
+_Context plain = ctx2
+r.Console.log(probe(plain))

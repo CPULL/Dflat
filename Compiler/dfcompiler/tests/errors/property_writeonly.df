@@ -1,0 +1,6 @@
+namespace property_writeonly
+class P {
+  public writeonly i32 c { W: { field = value } }
+}
+var p = P()
+Root.Console.log(p.c)

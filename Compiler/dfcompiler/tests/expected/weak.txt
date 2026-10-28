@@ -1,0 +1,13 @@
+7
+false
+true
+alive
+7
+copy ok
+-1
+false
+w gone
+Handle { context: Context{}, other: Context{} }
+7
+alive
+---- exit code 0 ----

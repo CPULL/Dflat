@@ -1,0 +1,1 @@
+property_no_setter.df(6): error: 'c' cannot be assigned: it has no W:

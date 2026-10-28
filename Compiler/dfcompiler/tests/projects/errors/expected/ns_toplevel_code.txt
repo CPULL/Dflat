@@ -1,0 +1,1 @@
+util/one.df(4): error: only the root file can have top-level code: this file can have only declarations

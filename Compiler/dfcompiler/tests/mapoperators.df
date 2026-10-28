@@ -1,0 +1,84 @@
+// += and -= on map and hmap (spec 6.6): m += (k, v) is m.add(k, v), m += other is m.add(other), m -= key is m.removeAt(key); also add(map) itself
+alias Root as r
+
+map<string, i32> ages = ["ann": 30]
+ages += ("bob", 40)                                  // a new key
+ages += ("ann", 31)                                  // the new value wins
+r.Console.log(ages)                                  // [ann: 31, bob: 40]
+(string, i32) pair = ("cid", 50)
+ages += pair                                         // a tuple variable
+r.Console.log(ages)                                  // [ann: 31, bob: 40, cid: 50]
+ages -= "bob"
+ages -= "nobody"                                     // a missing key: nothing happens
+r.Console.log(ages)                                  // [ann: 31, cid: 50]
+
+map<string, i32> more = ["cid": 51, "dan": 60]
+ages += more                                         // merge: the new value wins, more is unchanged
+r.Console.log(ages)                                  // [ann: 31, cid: 51, dan: 60]
+r.Console.log(more)                                  // [cid: 51, dan: 60]
+map<string, i32> last = ["eve": 70]
+ages.add(last)                                       // add(map) called by name
+r.Console.log(ages.len)                              // 4
+ages += ages                                         // the same map: every key is already there
+r.Console.log(ages.len)                              // 4
+
+hmap<i32, string> names = [1: "one"]
+names += (2, "two")
+names += (1, "uno")
+names -= 3
+r.Console.log(names)                                 // [1: uno, 2: two]
+hmap<i32, string> others = [3: "three", 2: "dos"]
+names += others
+r.Console.log(names.len)                             // 3
+r.Console.log(names[2])                              // dos
+names -= 1
+names -= 2
+r.Console.log(names)                                 // [3: three]
+
+// a map field of a class
+class Registry {
+  public map<i32, bool> seen = []
+  public fun mark(i32 id) {
+    seen += (id, true)
+  }
+}
+Registry reg = Registry()
+reg.mark(5)
+reg.mark(7)
+reg.seen -= 5
+r.Console.log(reg.seen)                              // [7: true]
+
+// numbers and strings keep their own += and -=
+i32 total = 10
+total += 5
+total -= 3
+string text = "a"
+text += "b"
+r.Console.log($"{total} {text}")                      // 12 ab
+
+// changing the size while the map is iterated: ModifyingIteratedCollectionException (spec 6.4)
+map<i32, i32> counts = [1: 1, 2: 2]
+fun string grow(map<i32, i32> m) {
+  for (i32 k, i32 v) in m {
+    m += (k + 10, v)
+  }
+  return "grew"
+  catch ModifyingIteratedCollectionException { return "locked" }
+}
+r.Console.log(grow(counts))                          // locked
+// the exception leaves a function that does not catch it
+fun shrink(hmap<i32, string> m) {
+  for (i32 k, string v) in m {
+    m -= k
+  }
+}
+fun string tryShrink(hmap<i32, string> m) {
+  shrink(m)
+  return "shrank"
+  catch ModifyingIteratedCollectionException { return "locked too" }
+}
+r.Console.log(tryShrink(names))                      // locked too
+for (i32 k, i32 v) in counts {
+  counts += (k, v * 10)                              // replacing a value does not change the size
+}
+r.Console.log(counts)                                // [1: 10, 2: 20]

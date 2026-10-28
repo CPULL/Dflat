@@ -1,0 +1,1 @@
+util/one.df(1): error: the namespace of this file is the one of its folder: app.util, not app.other

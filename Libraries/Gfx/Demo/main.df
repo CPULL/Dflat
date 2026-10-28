@@ -1,0 +1,87 @@
+// gfx demo: a window, a texture made in code, a moving and rotating sprite, labels with the font of the library (3 seconds)
+namespace demo
+import gfx
+alias Root as r
+
+r.Console.log($"available: {Gfx.isAvailable()}")
+var displays = Gfx.getDisplays()
+r.Console.log($"displays: {displays.len}")
+
+Context ctx = Gfx.createContext()
+Window win = ctx.createWindow(640, 360)
+win.resizeMode = ResizeMode.Fit
+ctx.clearColor = (0.1, 0.1, 0.15, 1.0)
+
+// a 64 x 64 checkerboard
+arr<u8> pixels = arr<u8>[64 * 64 * 4]
+for i32 y in 0..64 {
+  for i32 x in 0..64 {
+    i32 p = (y * 64 + x) * 4
+    bool on = (x / 8 + y / 8) % 2 == 0
+    u8 warm = 40
+    u8 green = 40
+    u8 blue = 200
+    if on {
+      warm = 255
+      green = 160
+      blue = 0
+    }
+    pixels[p] = warm
+    pixels[p + 1] = green
+    pixels[p + 2] = blue
+    pixels[p + 3] = 255
+  }
+}
+Texture2D tex = ctx.createTexture(pixels, 64, 64)
+
+// the font: Font.png of the library as raw RGBA (png_to_rgba.ps1), 12 x 8 cells of 38 x 64, ASCII 32..126
+string fontPath = ""
+for string candidate in ["../Font.rgba", "../../Font.rgba", "Font.rgba", "Libraries/Gfx/Font.rgba"] {
+  if fontPath == "" && File(candidate).exists() {
+    fontPath = candidate
+  }
+}
+if fontPath == "" {
+  r.Console.log("Font.rgba not found: run the demo from its folder")
+  r.exit(1)
+}
+TextureFont font = ctx.createTextureFont(ctx.createTexture(File(fontPath).readAll(), 456, 512, filter: FilteringMode.Linear), 38, 64)
+Label label = ctx.createLabel(font, "Hello Dflat\nfrom gfx")
+label.pos = (20.0, 20.0)
+label.scale = (0.5, 0.5)
+label.color = (1.0, 1.0, 0.3, 1.0)
+label.order = 5
+Label counter = ctx.createLabel(font, "frame 0")
+counter.pos = (20.0, 320.0)
+counter.scale = (0.4, 0.4)
+counter.order = 5
+
+Sprite s = ctx.createSprite(tex)
+s.offset = (32.0, 32.0)
+s.scale = (2.0, 2.0)
+s.pos.y = 180.0
+s.order = 1
+
+i32 frames = 0
+while ctx.update() && frames < 180 {
+  s.pos.x = 100.0 + (r32)frames * 2.0
+  s.rotation += 0.05
+  frames++
+  counter.text = $"frame {frames}"
+}
+r.Console.log($"frames: {frames}, viewport {win.width} x {win.height}")
+_Texture2D shown _= s.texture
+bool hasTexture = false
+enforce shown {
+  hasTexture = shown.width == 64
+}
+r.Console.log($"sprite texture: {hasTexture}, first display {displays[0].width} x {displays[0].height} {displays[0].name}")
+
+// a second window on the same context is refused
+{
+  Window other = ctx.createWindow(320, 200)
+  r.Console.log("second window: created")
+  catch ImpossibleToCreateWindowException {
+    r.Console.log("second window: refused")
+  }
+}

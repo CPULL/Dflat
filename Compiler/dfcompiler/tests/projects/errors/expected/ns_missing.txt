@@ -1,0 +1,1 @@
+main.df(2): error: cannot find the namespace 'app.nothing'

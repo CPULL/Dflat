@@ -11,6 +11,10 @@
 #    of the compiler (so it ends with the exit code line). They are compiled and run with no input (an empty standard input).
 #  * tests\errors\*.df are programs that must NOT compile. The expected result is errors\expected\<name>.txt: the error lines of the
 #    compiler ("name.df(line): error: message", with no folder). A program that compiles is a failure.
+#  * tests\projects\<name>\ are programs of several files (spec 16), each folder with its .dsprj: the expected output is
+#    projects\expected\<name>.txt, as for the programs.
+#  * tests\projects\errors\<name>\ are projects that must NOT compile: projects\errors\expected\<name>.txt holds the error lines,
+#    with the paths relative to the folder of the project and / as the separator.
 # A test is "new" when it has no expected file yet: it is run and reported, and saved only with -Update.
 # Exit code of this script: 0 when everything matches, 1 otherwise, 2 when the compiler is missing.
 
@@ -88,6 +92,19 @@ function Invoke-ErrorProgram([string]$file) {
   return @{ Ok = $true; Text = ($lines -join "`n") }
 }
 
+# a project that must not compile: the error lines, with the paths relative to its folder
+function Invoke-ErrorProject([string]$folder) {
+  $run = Start-Compiler $folder '--emit-c'
+  if ($null -eq $run) { return @{ Ok = $false; Text = "TIMEOUT after $TimeoutSeconds seconds" } }
+  $all = $run.Out + "`n" + $run.Err
+  $lines = @()
+  foreach ($line in ($all -split "`r?`n")) {
+    if ($line -match 'error: ') { $lines += ($line.Replace($folder + '\', '').Replace($folder, '').Replace('\', '/')).Trim() }
+  }
+  if ($lines.Count -eq 0) { return @{ Ok = $false; Text = 'NO ERROR (the project compiled)' } }
+  return @{ Ok = $true; Text = ($lines -join "`n") }
+}
+
 $passed = 0; $failed = @(); $new = @(); $saved = 0
 
 function Test-One([string]$name, [hashtable]$result, [string]$expectedFile) {
@@ -138,9 +155,20 @@ $errorPrograms = @()
 if (Test-Path (Join-Path $testsFolder 'errors')) {
   $errorPrograms = Get-ChildItem (Join-Path $testsFolder 'errors') -Filter '*.df' | Sort-Object Name
 }
+$projectsFolder = Join-Path $testsFolder 'projects'
+$projects = @()
+$errorProjects = @()
+if (Test-Path $projectsFolder) {
+  $projects = Get-ChildItem $projectsFolder -Directory | Where-Object { $_.Name -notin @('errors', 'expected') } | Sort-Object Name
+  if (Test-Path (Join-Path $projectsFolder 'errors')) {
+    $errorProjects = Get-ChildItem (Join-Path $projectsFolder 'errors') -Directory | Where-Object { $_.Name -ne 'expected' } | Sort-Object Name
+  }
+}
 if ($Only.Count -gt 0) {
   $programs = $programs | Where-Object { $Only -contains $_.BaseName }
   $errorPrograms = $errorPrograms | Where-Object { $Only -contains $_.BaseName }
+  $projects = $projects | Where-Object { $Only -contains $_.Name }
+  $errorProjects = $errorProjects | Where-Object { $Only -contains $_.Name }
 }
 
 foreach ($test in $programs) {
@@ -148,6 +176,12 @@ foreach ($test in $programs) {
 }
 foreach ($test in $errorPrograms) {
   Test-One ('errors/' + $test.BaseName) (Invoke-ErrorProgram $test.FullName) (Join-Path $testsFolder ('errors\expected\' + $test.BaseName + '.txt'))
+}
+foreach ($test in $projects) {
+  Test-One ('projects/' + $test.Name) (Invoke-Program $test.FullName) (Join-Path $projectsFolder ('expected\' + $test.Name + '.txt'))
+}
+foreach ($test in $errorProjects) {
+  Test-One ('projects/errors/' + $test.Name) (Invoke-ErrorProject $test.FullName) (Join-Path $projectsFolder ('errors\expected\' + $test.Name + '.txt'))
 }
 
 Write-Host ''

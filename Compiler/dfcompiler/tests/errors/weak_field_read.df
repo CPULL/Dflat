@@ -1,0 +1,9 @@
+namespace weak_field_read
+class C {
+  public i32 id
+}
+class H {
+  public _C c
+}
+var h = H()
+Root.Console.log(h.c.id)

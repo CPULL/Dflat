@@ -1,0 +1,89 @@
+// step 4 of the sets plan (spec 6.6, 6.8.6): add(collection), s += v, s += other, s -= v and s -= other on set and hset, the two kinds mixed
+alias Root as r
+
+set<i32> sorted = [5, 1]
+sorted += 3                                          // add(3)
+sorted += 3                                          // already there
+r.Console.log(sorted)                                // [1, 3, 5]
+sorted -= 1                                          // remove(1)
+sorted -= 99                                         // not there: nothing happens
+r.Console.log(sorted)                                // [3, 5]
+
+// add(collection) returns the number actually added; any collection with the same item type
+arr<i32> a = [5, 6, 7]
+r.Console.log(sorted.add(a))                         // 2: 5 was there
+vec<i32> v = [8, 8, 9]
+r.Console.log(sorted.add(v))                         // 2: 8 comes twice
+list<i32> l = [10]
+r.Console.log(sorted.add(l))                         // 1
+hset<i32> hashed = [11, 3]
+r.Console.log(sorted.add(hashed))                    // 1: an hset into a set
+r.Console.log(sorted)                                // [3, 5, 6, ...] (8 items)
+r.Console.log(sorted.add(sorted))                    // 0: the same set
+r.Console.log(a)                                     // [5, 6, 7]: the source is unchanged
+
+// += and -= with collections and literals
+set<i32> small = [1, 2]
+small += [3, 4]                                      // a literal: one add per item
+small += hashed                                      // add(hashed)
+r.Console.log(small)                                 // [1, 2, 3, ...] (5 items)
+small -= [1, 2]                                      // one remove per item
+small -= v                                           // removes every item of v that is there
+small -= hashed
+r.Console.log(small)                                 // [4]
+hset<i32> other = [4, 20]
+hset<i32> mixed = [1]
+mixed += sorted                                      // a set into an hset
+r.Console.log(mixed.len)                             // 9
+mixed -= other
+r.Console.log(mixed.has(4))                          // false
+mixed -= mixed                                       // the same set: empty
+r.Console.log(mixed.len)                             // 0
+
+// strings
+hset<string> words = ["a"]
+vec<string> more = ["b", "c", "a"]
+words += more
+r.Console.log(words.len)                             // 3
+set<string> sortedWords = []
+sortedWords += words
+r.Console.log(sortedWords)                           // [a, b, c]
+sortedWords -= ["a", "c"]
+r.Console.log(sortedWords)                           // [b]
+
+// a field, a parameter
+class Bag {
+  public set<i32> items = []
+}
+Bag bag = Bag()
+bag.items += 4
+bag.items += [2, 6]
+bag.items -= 6
+r.Console.log(bag.items)                             // [2, 4]
+fun fill(hset<i32> s, vec<i32> from) {
+  s += from
+}
+hset<i32> filled = []
+fill(filled, v)
+r.Console.log(filled.len)                            // 2
+
+// not while it is walked; the exception leaves a function that does not catch it (spec 6.4)
+fun shrink(set<i32> s) {
+  for i32 n in s {
+    s -= n
+  }
+}
+fun string tryShrink(set<i32> s) {
+  shrink(s)
+  return "shrank"
+  catch ModifyingIteratedCollectionException { return "locked" }
+}
+r.Console.log(tryShrink(sorted))                     // locked
+fun string grow(hset<i32> s, arr<i32> from) {
+  for i32 n in s {
+    s += from
+  }
+  return "grew"
+  catch ModifyingIteratedCollectionException { return "locked" }
+}
+r.Console.log(grow(hashed, [100]))                   // locked

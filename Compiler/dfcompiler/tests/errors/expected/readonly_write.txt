@@ -1,0 +1,1 @@
+readonly_write.df(6): error: 'hits' is readonly: only A can change it

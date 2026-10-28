@@ -1,0 +1,1 @@
+property_field_outside.df(4): error: 'field' exists only inside the accessor blocks of a property (R: and W:, spec 11.1.4)

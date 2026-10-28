@@ -1,4 +1,4 @@
-Compiler version 0.0.34 alpha for version 0.0.15 of the specs 2026/10/27
+Compiler version 0.0.41 alpha for version 0.0.15 of the specs 2026/10/28
 
 Changes from the previous version -----------------------
 - vec: growth policy of spec 6.8.2 (16 items first, doubles up to a 4 MB block, then by half) and the sized declaration vec<T>[n] name
@@ -20,6 +20,22 @@ Changes from the previous version -----------------------
 - hmap step 5: .capacity, reserve(n), shrinkToFit() (returns false when nothing changed), hmap<K, V>[n] and the sized declaration hmap<K, V>[n] name
 - reserve(n) on vec and hmap makes room for n items in all (was: n more); nothing changes when the capacity is already enough (spec 6.6)
 - hmap step 6: hmap h = [k: v] takes its key and value types from the literal (var h = [...] stays a map, spec 6.3)
+- map and hmap: add(map) merges another map of the same kind; m += (k, v), m += other and m -= key call add and removeAt (spec 6.6)
+- hset<T> (spec 6.8.7): native and string items; add, has, remove, ->s[item], clear, .len, .sizeof, .capacity, reserve, shrinkToFit, for, printing, literals (hset s = [...] takes the item type), hset<T>[n]
+- set<T> (alias bset, spec 6.8.6): sorted; native and string items (null sorts first); the same members as hset without the capacity ones; set<T>[n] is an error
+- sets: add(collection) from arr, vec, list, set or hset (returns the number added); s += v, s += other, s -= v, s -= other, set and hset mixed
+- map and hmap: m -= s removes every key of a set or hset s, with its value (spec 6.6)
+- sets: union, intersection, difference, symmetricDifference (a new set of the kind of the left one), isSubsetOf, isSupersetOf, isDisjointFrom; set and hset mixed
+- a name that starts with _ or with a digit gets a clear error (spec 1.1)
+- multiple files (spec 16): import, include= libraries in the .dsprj, folder namespaces checked, top-level code only in the root file; a multi-file project also compiles the siblings of its root file and needs its namespace line; names are not qualified yet
+- readonly fields (spec 11.1.4): read with their visibility, written only by the class and its subclasses
+- weak declarations (spec 12): _T name for fields, header parameters, parameters and variables (null at the start, set with _=, = with a level 3 warning, read through enforce, also a bare weak field); a weak field does not end with its holder
+- extern C functions (spec 15.9): extern fun at the top level, numbers / bool / addr / string / arr of numbers as parameters, number / bool / addr returns; csource= in the .dsprj adds C files (temporary); addr: stored, passed, returned, compared with addr and null
+- importing the gfx library adds its C files, the Vulkan SDK and GLFW to the build (hardcoded; vulkan-sdk= and glfw= in the .dsprj, else VULKAN_SDK / C:\VulkanSDK / GLFW_DIR / the Linux system, else an error); not tested with a real SDK yet
+- properties with accessor blocks (spec 11.1.4): R: and W: with field and value, the defaults, readwrite / readonly / writeonly, a visibility on R: or W:, the start value through W:, accessors on the fields of a field group; reads, =, op=, ++ / -- and multiple assignments go through them; what leaves an accessor is a Panic. Not yet: static properties, accessors in traits
+- an addr prints as hex in groups of 4 digits (spec 2.3); readonly / readwrite / writeonly also in front of a weak type (_T); a weak header parameter redeclared in the body keeps the value of the constructor
+- the gfx library (Libraries/Gfx/lib.df) and its demo (Libraries/Gfx/Demo) compile and run: window, textures, sprites, label, 180 frames, clean under the Vulkan validation layer
+- field groups (spec 11.1.4.1): pos { r32 x, r32 y } in classes; s.pos.x read, assigned, ++, +=; s.pos = (a, b), s.pos = other.pos, s.pos = a named tuple variable; s.pos read as a tuple
 
 Done -----------------------
 
@@ -79,25 +95,25 @@ Silent exceptions: library calls (date(string), time(...), (time)n) raise them o
 Strings: layout of spec 4.4 (single-block classes 0-7, literals class 11, moved class 13 read only); ownership and freeing (step b); changes in place (step c); block strings (step d; the iterator counter of the root is not used yet, the functions that are not block-aware read a flat copy). Still leaking (never a double free): the items of arrays (arrays are never freed), strings in tuples, var declarations of strings, a for-in over a new string left with return. Missing: the compile error for an owner that ends or is assigned again while a borrow is alive
 Parsing: date.parse, time.parse and <integer or real type>.parse(text, default, format) (all of section 9 for numbers); tryParse for integers, reals, date and time with (&)variable (a library form, not general (&) parameters); no dec
 Formatting: dates and times (8.4), integers and reals (8.1, 8.2) and strings (8.3), all as toStr(format) and {x:format}; the other types (char, bool ...) ignore a spec with a warning
-Namespaces: the namespace line is accepted, names are not qualified
+Namespaces and imports (spec 16, 2026-10-28): multi-file projects (source= main.df, program.df or lib.df), import of a folder of the program or of an include= library, the namespace of each file checked against its folder (case-insensitive, or namespace local), overlapping roots and libraries inside Root are errors, top-level code and main only in the root file, errors and warnings name their file. Missing: names qualified by their namespace and internal (a name declared in two namespaces is an error for now)
 Time zones: dates are UTC; z prints +0 and parses an offset
 
 Not yet -----------------------
 Exceptions records are released (2026-10-19: catch end, replaced by another, ignored silent; check with DF_EXC_COUNT=1). Silent operations of the language (overflow of + - * -x ++ --, casts that do not fit) are raised only where a catch of the same function handles them (2026-10-19, test silentops). Exceptions to do: static records for silent exceptions without fields, (char) with an invalid code point, (done: an unhandled non-silent exception inside atEnd is a panic), constructors that return (null, error). Library exception lists: not needed (spec 15.8). See CompilerImplementation.txt
 
 Generics: definition-time checking of bodies
-hmap, set, hset, dfoot (7c); vec, list and map (step 1) are built (see below)
+dfoot (7c); vec, list, map, hmap, set and hset are built in part (see below)
 Ownership, move, copy, refcount
 Move parameters on non-objects, volatile references, reference parameters on constructors, (&) borrows that replace an object
 Lambdas and captures
-Pointers, addr, alignment, volatile (the pointer types *T and (*)T)
+Pointers, alignment, volatile (the pointer types *T and (*)T); addr is built only as the opaque handle of spec 15.9 (no arithmetic, no printing)
 Custom exception classes, catch by trait
 Class atEnd
 128/256-bit ints, r16/r128
 dec
 real (native size), --native-real, --native-addr; --native-int with 8, 16, 128, 256; the cpus of spec 19.1 other than x86, x64, arm64 (int and uns are done: native size, main may return int and gives an i32 exit code)
 parse of dec
-Imports, multiple files
+Compiled libraries (spec 15.8)
 TextStream, MemoryStream, ConsoleStream, async read / write, array views as buffers
 DateTime library (CalendarDate, ZonedDateTime)
 Runtime without C library
@@ -160,7 +176,7 @@ Phase 4  Ownership                                                 IN PROGRESS
   ending it twice is a Panic ("Double free"); a destructor that throws propagates from the end of the scope like any exception
   x is atEnd. (owners only: a borrowed or weak variable is an error), ->x and ->a.c (the source becomes null; only owners move),
   ->T parameters (the callee owns; the call writes ->x), ->T in the header of a class (the object moves into the field)
-  weak references: T w _= x, used only through enforce w { } else { } (the object must be alive)
+  weak references: T w _= x and _T w (fields, parameters, variables; 2026-10-28), used only through enforce w { } else { } (the object must be alive)
   atEnd after a function (final cleanup, runs before the objects of the function end), atEnd of a, b { } (as a scope atEnd)
   a result that nobody keeps (a call used as a statement) ends at once
   not yet in 4a: temporaries inside an expression (they are never destroyed), objects in arrays and tuples (not owned,
@@ -238,7 +254,14 @@ Phase 7  Generics (spec 11.3)                                     IN PROGRESS
      Step 4 DONE 2026-10-27 (test hmapviews): .keys and .values as views (hmapKeys, hmapValues).
      Step 5 DONE 2026-10-27 (test hmapcapacity): .capacity, reserve, shrinkToFit, hmap<K, V>[n].
      Step 6 DONE 2026-10-27 (tests hmapliterals, errors/hmaplit_duplicate, hmap_sized_literal): hmap h = [k: v] with the types from the literal.
-     NOT yet (hmap): hset (step 7), object keys (step 8)
+     Sets plan step 1 DONE 2026-10-28 (spec 0.0.18: 6.6; tests mapoperators, errors/mapop_*): add(map), m += (k, v), m += other, m -= key on map and hmap.
+     Sets plan step 2 DONE 2026-10-28 (tests hset, errors/hset_*, hsetlit_duplicate): class hset<T> : SetCollection<T> in HmapPrelude, the table of hmap with values of 0 bytes (CodeGen.Sets.cs).
+     Sets plan step 3 DONE 2026-10-28 (tests set, errors/set_*, setlit_duplicate): class set<T> : SetCollection<T> in VecPrelude, the B+ tree of map with values of 0 bytes.
+     Sets plan step 4 DONE 2026-10-28 (tests setoperators, errors/setop_wrong_items): add(collection) overloads, s += / -= with a value, a collection or a literal.
+     Sets plan step 5 DONE 2026-10-28 (tests mapminusset, errors/mapop_set_wrong_keys): m -= s.
+     NOT yet (hmap): object keys (step 8); m += [k: v] and m.add([k: v]) (a literal argument), m += ->other.
+     Sets plan step 6 DONE 2026-10-28 (test setoperations): the new sets and the tests, in Dflat in the classes set and hset.
+     NOT yet (set, hset): sets plan step 7 (object items). KNOWN COST: the add(collection) overloads make every set instance bring vec, list and hset of its item type
      KNOWN BUG (vec, list, found 2026-10-26): a view c[a..b] that is not kept in a variable (print(v[1..3]), v[1..3].len) never ends, so the collection stays locked
 
 Decisions: operator is "fun bool ==(V o)"; only primary constructors for now; default toStr is

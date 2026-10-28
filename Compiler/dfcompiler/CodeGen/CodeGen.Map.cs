@@ -13,9 +13,116 @@ public sealed partial class CodeGen {
   // map or hmap: the two kinds share the class methods and the code at the call sites; the C helpers below choose the runtime (CodeGen.Hmap.cs)
   bool IsMap(string type) => vecPrelude && classInstanceArgs.TryGetValue(type, out var instance) && instance.Template.Name is "map" or "hmap";
 
+  // += and -= on maps and sets (spec 6.6): the operators call the members, so they are compiled as the statements written out; null when the target
+  // is neither a map nor a set
+  Node? CollectionOperator(Node s, Scope scope) {
+    Node target = s.Children[0];
+    if (s.Text is not ("+=" or "-=") || target.Kind is not ("Name" or "Member")) {
+      return null;
+    }
+    string type = LValue(target, scope).Type;
+    if (IsMap(type) && s.Text == "-=" && MapKeysToRemove(s, scope, type) is Node loop) {
+      return loop;
+    }
+    return IsMap(type) ? Synthetic("ExprStmt", s).Add(MapOperatorCall(s, scope)) : IsSet(type) ? SetOperator(s, scope) : null;
+  }
+
+  // m -= s with s a set or an hset of the key type (a variable or a field, spec 6.6): a loop over s that calls m.removeAt(key), so every key of s
+  // goes with its value; null when the right side is not a set
+  Node? MapKeysToRemove(Node s, Scope scope, string mapType) {
+    Node target = s.Children[0], value = s.Children[1];
+    if (value.Kind is not ("Name" or "Member")) {
+      return null;
+    }
+    string setType;
+    try {
+      setType = LValue(value, scope).Type;
+    } catch (CompileException) {
+      return null;   // not a variable or a field: a key
+    }
+    if (!IsSet(setType)) {
+      return null;
+    }
+    if (MapKey(setType) != MapKey(mapType)) {
+      throw Error($"the keys of this map are {DisplayName(MapKey(mapType))}, not {DisplayName(MapKey(setType))}: m -= s takes a set of keys (spec 6.6)", value);
+    }
+    string key = "__key" + ++tempCounter;
+    var body = Synthetic("Block", s).Add(Synthetic("ExprStmt", s).Add(MemberCall(s, target, "removeAt", Synthetic("Name", s, key))));
+    return Synthetic("For", s).Add(Synthetic("Var", s, key)).Add(Synthetic("In", s).Add(value)).Add(body);
+  }
+
+  // a call of a member on the target of s: target.name(args)
+  static Node MemberCall(Node s, Node target, string name, params Node[] args) {
+    var list = Synthetic("Args", s);
+    foreach (var arg in args) {
+      list.Add(arg);
+    }
+    return Synthetic("Call", s).Add(Synthetic("Member", s, name).Add(target)).Add(list);
+  }
+
+  // m += (k, v), m += other and m -= key on map and hmap: m.add(k, v), m.add(other), m.removeAt(key)
+  Node MapOperatorCall(Node s, Scope scope) {
+    Node target = s.Children[0], value = s.Children[1];
+    var args = Synthetic("Args", s);
+    if (s.Text == "-=") {
+      args.Add(value);
+    } else if (value.Kind == "Tuple") {
+      if (value.Children.Count != 2) {
+        throw Error("m += (key, value): the tuple has two items, the key and the value", value);
+      }
+      args.Add(value.Children[0]).Add(value.Children[1]);
+    } else if (value.Kind == "Name" && scope.Find(value.Text!) is VarInfo other && IsMap(other.Type) && IsHmap(other.Type) != IsHmap(LValue(target, scope).Type)) {
+      throw Error("a map and an hmap cannot be mixed: add(map) takes a map of the same kind (spec 6.6)", value);
+    } else if (value.Kind == "Name" && scope.Find(value.Text!) is VarInfo pair && IsTuple(pair.Type)) {
+      if (TupleElems(pair.Type).Count != 2) {
+        throw Error("m += pair: the tuple has two items, the key and the value", value);
+      }
+      args.Add(Synthetic("Member", value, "0").Add(value));
+      args.Add(Synthetic("Member", value, "1").Add(value));
+    } else {
+      args.Add(value);
+    }
+    return Synthetic("Call", s).Add(Synthetic("Member", s, s.Text == "+=" ? "add" : "removeAt").Add(target)).Add(args);
+  }
+
+  // the flow of the exceptions (CodeGen.Leaks.cs) runs before the types: it takes m += x and m -= x for the calls they are when the target is
+  // declared as a map or a set (a parameter, a local of the function, a field); other targets keep the arithmetic, so a number += does not look
+  // like a call to add
+  bool FlowTargetIsCollection(Node target, FunSig? fun) {
+    static bool CollectionTypeNode(Node? type) => type is { Kind: "Type", Text: "map" or "hmap" or "bmap" or "set" or "bset" or "hset" };
+    bool IsKept(string type) => IsMap(type) || IsSet(type);
+    if (target.Kind == "Member") {
+      return classes.Values.Any(cls => cls.Fields.Any(field => field.Name == target.Text && IsKept(field.Type)));
+    }
+    if (target.Kind != "Name" || fun == null) {
+      return false;
+    }
+    string name = target.Text!;
+    if (fun.Params.FirstOrDefault(p => p.Name == name) is ParamSig param) {
+      return IsKept(param.Type);
+    }
+    bool found = false;
+    void Walk(Node node) {
+      if (node.Kind == "Decl" && node.Text == name) {
+        var type = node.Children.FirstOrDefault();
+        var init = node.Children.FirstOrDefault(c => c.Kind == "Init");
+        found |= CollectionTypeNode(type) || (type is { Kind: "Type", Text: "var" } && init?.Children[0].Kind == "MapLit");
+      }
+      foreach (var child in node.Children) {
+        Walk(child);
+      }
+    }
+    Walk(fun.Node);
+    if (!found && fun.Class != null) {
+      found = classes.Values.Any(cls => cls.Fields.Any(field => field.Name == name && IsKept(field.Type)));
+    }
+    return found;
+  }
+
   string MapKey(string type) => classInstanceArgs[type].Args[0];
 
-  string MapValue(string type) => classInstanceArgs[type].Args[1];
+  // the value type of a map; "" for a set, which keeps values of 0 bytes (CodeGen.Hset.cs)
+  string MapValue(string type) => IsSet(type) ? "" : classInstanceArgs[type].Args[1];
 
   // the types a map takes in this version: the natives whose sort key is exact, and strings (spec 6.8.4.1)
   bool MapKeyBuilt(string key) {
@@ -37,7 +144,7 @@ public sealed partial class CodeGen {
     if (args.Count != 2) {
       throw Error($"{kind} takes a key type and a value type: {kind}<K, V>", at);
     }
-    if (IsArr(args[0]) || IsVec(args[0]) || IsList(args[0]) || IsMap(args[0]) || IsView(args[0])) {
+    if (IsArr(args[0]) || IsVec(args[0]) || IsList(args[0]) || IsMap(args[0]) || IsSet(args[0]) || IsView(args[0])) {
       throw Error($"a collection cannot be a key (spec 6.2): {DisplayName(args[0])}", at);
     }
     if (hashed) {
@@ -59,10 +166,14 @@ public sealed partial class CodeGen {
 
   string MapTree(string held, string type) => $"(&{held}->{VecField(type, "tree")})";
 
-  string MapValueSize(string type) => MapValue(type) == "string" ? "DF_BT_SVAL" : $"sizeof({CType(MapValue(type))})";
+  string MapValueSize(string type) => MapValue(type) switch {
+    "string" => "DF_BT_SVAL",
+    "" => "0",
+    var value => $"sizeof({CType(value)})"
+  };
 
-  // the C type of a value slot: a string value is inline, 64 bytes (spec 6.8.4.1, df_bt_sval in RuntimeMap.cs)
-  string SlotC(string type) => MapValue(type) == "string" ? "uint8_t" : CType(MapValue(type));
+  // the C type of a value slot: a string value is inline, 64 bytes (spec 6.8.4.1, df_bt_sval in RuntimeMap.cs); a set has none
+  string SlotC(string type) => MapValue(type) is "string" or "" ? "uint8_t" : CType(MapValue(type));
 
   // the value in a slot (a pointer): a string is read in place, a borrow that is valid while the tree does not change
   string ReadSlot(string type, string slot) => MapValue(type) == "string" ? $"df_bt_sval({slot})" : $"(*{slot})";
@@ -127,10 +238,11 @@ public sealed partial class CodeGen {
   string NullKeyValue(string keyType) => IsNullable(keyType) ? $"(({CType(keyType)}){{ false }})" : keyType is "date" or "time" ? NullCode(keyType) : ZeroValue(keyType);
 
   // the key of a map operation, converted to the key type, in a C variable; a string is only read here (the map keeps its own copy when it adds it)
-  string MapKeyArg(Node node, Scope scope, string keyType, string variable) {
+  string MapKeyArg(Node node, Scope scope, string keyType, string variable, bool ofSet = false) {
     var key = ExprOf(node, scope, keyType);
     if (!Assignable(keyType, key.Type) && key.Type != keyType) {
-      throw Error($"the key of this map is {DisplayName(keyType)}, not {DisplayName(key.Type)}", node);
+      throw Error(ofSet ? $"the items of this set are {DisplayName(keyType)}, not {DisplayName(key.Type)}"
+        : $"the key of this map is {DisplayName(keyType)}, not {DisplayName(key.Type)}", node);
     }
     string converted = Convert(key, keyType, node);
     if (keyType == "string") {

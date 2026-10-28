@@ -1,0 +1,6 @@
+namespace property_no_setter
+class P {
+  public i32 c { R: { 4 } }
+}
+var p = P()
+p.c = 1

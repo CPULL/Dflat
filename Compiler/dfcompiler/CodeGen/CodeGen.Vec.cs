@@ -12,7 +12,7 @@ namespace dfcompiler;
 // Not built yet: Collection<Item> (needs a generic parent trait), the other collections, views, ownership of the items (the items are not dropped).
 public sealed partial class CodeGen {
   bool vecPrelude;
-  const int LibraryLine = 900000;   // the lines of the Dflat code the compiler adds for its collections
+  const int LibraryLine = 2000000000;   // the lines of the Dflat code the compiler adds for its collections (above the lines of every file, SourceMap)
 
   const string VecPrelude = """
 trait Iterator { }
@@ -494,6 +494,9 @@ public class list<T> : IndexCollection<T> {
 trait MapCollection<Key, Value> : Collection<Value> {
 }
 
+trait SetCollection<Item> : Collection<Item> {
+}
+
 // map<K, V> (spec 6.8.4): sorted by key, a B+ tree (spec 6.8.4.1). The methods check the rules (the counter of open iterators) and call the tree_
 // members, which are C emitted by the compiler (CodeGen.Map.cs). c[k] and c[k] = v are C at the call site too
 public class map<K, V> : MapCollection<K, V> {
@@ -518,6 +521,13 @@ public class map<K, V> : MapCollection<K, V> {
     checkUnlocked()
     this.tree_set(key, value)
     return true
+  }
+
+  // merges another map of the same kind: the new value wins (spec 6.6); the entries are copied, other is unchanged
+  public fun add(map<K, V> other) {
+    for (K key, V value) in other {
+      add(key, value)
+    }
   }
 
   public fun bool tryGet(K key, (&)V result) {
@@ -624,6 +634,242 @@ public class mapValues<K, V>(&map<K, V> collection as parent) {
 } atEnd {
   if collection != null {
     collection.releaseIterator()
+  }
+}
+
+// set<T> (spec 6.8.6), alias bset: sorted, the B+ tree of map with an empty value (spec 6.8.4.1); the tree_ members are C emitted by the compiler
+// (CodeGen.Sets.cs)
+public class set<T> : SetCollection<T> {
+  u64 tree              // the tree: a df_bt in the C, values of 0 bytes
+
+  override fun uns get_len() { this.tree_len() }
+
+  override fun bool has(T item) {
+    return this.tree_has(item)
+  }
+
+  // true when the item is new; an item already there is left as it is (spec 6.6)
+  public fun bool add(T item) {
+    if this.tree_has(item) {
+      return false
+    }
+    checkUnlocked()
+    this.tree_add(item)
+    return true
+  }
+
+  // adds the items of another collection with the same item type, set and hset mixed: the number actually added (spec 6.6)
+  public fun uns add(arr<T> other) {
+    uns added = 0
+    for T item in other {
+      if add(item) {
+        added += 1
+      }
+    }
+    return added
+  }
+
+  public fun uns add(vec<T> other) {
+    uns added = 0
+    for T item in other {
+      if add(item) {
+        added += 1
+      }
+    }
+    return added
+  }
+
+  public fun uns add(list<T> other) {
+    uns added = 0
+    for T item in other {
+      if add(item) {
+        added += 1
+      }
+    }
+    return added
+  }
+
+  public fun uns add(set<T> other) {
+    uns added = 0
+    for T item in other {
+      if add(item) {
+        added += 1
+      }
+    }
+    return added
+  }
+
+  public fun uns add(hset<T> other) {
+    uns added = 0
+    for T item in other {
+      if add(item) {
+        added += 1
+      }
+    }
+    return added
+  }
+  public fun bool remove(T item) {
+    checkUnlocked()
+    return this.tree_remove(item)
+  }
+
+  // the new sets (spec 6.8.6): a set of the kind of this one; other can be a set or an hset. The items are copied, both sets are unchanged
+  public fun set<T> union(set<T> other) {
+    set<T> result = []
+    for T item in this {
+      result.add(item)
+    }
+    for T item in other {
+      result.add(item)
+    }
+    return ->result
+  }
+
+  public fun set<T> intersection(set<T> other) {
+    set<T> result = []
+    for T item in this {
+      if other.has(item) {
+        result.add(item)
+      }
+    }
+    return ->result
+  }
+
+  public fun set<T> difference(set<T> other) {
+    set<T> result = []
+    for T item in this {
+      if !other.has(item) {
+        result.add(item)
+      }
+    }
+    return ->result
+  }
+
+  public fun set<T> symmetricDifference(set<T> other) {
+    set<T> result = []
+    for T item in this {
+      if !other.has(item) {
+        result.add(item)
+      }
+    }
+    for T item in other {
+      if !this.has(item) {
+        result.add(item)
+      }
+    }
+    return ->result
+  }
+
+  public fun set<T> union(hset<T> other) {
+    set<T> result = []
+    for T item in this {
+      result.add(item)
+    }
+    for T item in other {
+      result.add(item)
+    }
+    return ->result
+  }
+
+  public fun set<T> intersection(hset<T> other) {
+    set<T> result = []
+    for T item in this {
+      if other.has(item) {
+        result.add(item)
+      }
+    }
+    return ->result
+  }
+
+  public fun set<T> difference(hset<T> other) {
+    set<T> result = []
+    for T item in this {
+      if !other.has(item) {
+        result.add(item)
+      }
+    }
+    return ->result
+  }
+
+  public fun set<T> symmetricDifference(hset<T> other) {
+    set<T> result = []
+    for T item in this {
+      if !other.has(item) {
+        result.add(item)
+      }
+    }
+    for T item in other {
+      if !this.has(item) {
+        result.add(item)
+      }
+    }
+    return ->result
+  }
+
+  // the tests (spec 6.8.6): every item of this set is in other; every item of other is in this set; no item in common
+  public fun bool isSubsetOf(set<T> other) {
+    for T item in this {
+      if !other.has(item) {
+        return false
+      }
+    }
+    return true
+  }
+
+  public fun bool isSupersetOf(set<T> other) {
+    for T item in other {
+      if !this.has(item) {
+        return false
+      }
+    }
+    return true
+  }
+
+  public fun bool isDisjointFrom(set<T> other) {
+    for T item in this {
+      if other.has(item) {
+        return false
+      }
+    }
+    return true
+  }
+
+  public fun bool isSubsetOf(hset<T> other) {
+    for T item in this {
+      if !other.has(item) {
+        return false
+      }
+    }
+    return true
+  }
+
+  public fun bool isSupersetOf(hset<T> other) {
+    for T item in other {
+      if !this.has(item) {
+        return false
+      }
+    }
+    return true
+  }
+
+  public fun bool isDisjointFrom(hset<T> other) {
+    for T item in this {
+      if other.has(item) {
+        return false
+      }
+    }
+    return true
+  }
+
+  // the item leaves the set (->s[item], spec 6.6); a missing item gives the zero value
+  public fun T takeAt(T item) {
+    checkUnlocked()
+    return this.tree_take(item)
+  }
+
+  override fun clear() {
+    checkUnlocked()
+    this.tree_clear()
   }
 }
 """;
@@ -753,8 +999,8 @@ public class mapValues<K, V>(&map<K, V> collection as parent) {
       throw Error($"'{operand.Children[0].Text}' is a read-only reference (&): its items cannot be moved out", gift);
     }
     var obj = ExprOf(operand.Children[0], scope);
-    if (IsMap(obj.Type)) {
-      // the value leaves the map with its entry; the key ends (spec 6.6)
+    if (IsMap(obj.Type) || IsSet(obj.Type)) {
+      // the value leaves the map with its entry, the key ends; the item leaves a set (spec 6.6)
       var mapValue = ObjectCall(obj, "takeAt", new List<Node> { operand.Children[1] }, scope, gift) ?? throw Error("no takeAt", gift);
       return new Expr(mapValue.Code, mapValue.Type, mapValue.Fresh || mapValue.Type == "string");
     }

@@ -145,6 +145,9 @@ public sealed partial class CodeGen {
           if (isStatic || isConst || isOverride) {
             throw Error("a trait property cannot be static, const or override", member);
           }
+          if (ModsOf(member).Contains("readonly")) {
+            throw NotSupported("readonly in traits (a property the class must provide, read only)", member);
+          }
           if (ModsOf(member).Any(mod => mod is "asparent" or "unrestricted")) {
             throw Error("'asparent' and 'unrestricted' apply to functions", member);
           }

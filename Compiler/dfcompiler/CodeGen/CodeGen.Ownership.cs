@@ -213,7 +213,7 @@ public sealed partial class CodeGen {
     if (typeNode == null) {
       return null;
     }
-    if (typeNode is { Kind: "Type", Text: "vec" or "list" or "map" or "bmap" or "hmap", Children.Count: 0 } && vecPrelude) {
+    if (typeNode is { Kind: "Type", Text: "vec" or "list" or "map" or "bmap" or "hmap" or "set" or "bset" or "hset", Children.Count: 0 } && vecPrelude) {
       return typeNode.Text;   // vec values = [1, 2, 3]: the type comes from the literal
     }
     if (typeNode is { Kind: "Type", Text: "var" or "arr" }) {
@@ -417,17 +417,59 @@ public sealed partial class CodeGen {
     return CheckRaise(code, "void");
   }
 
-  // w _= x
-  string WeakAssign(LValueInfo target, Node targetNode, Node source, Scope scope, Node at) {
-    if (target.Variable is not { IsWeak: true }) {
-      throw Error($"'{targetNode.Text}' is not a weak reference: declare it with 'Type name _= value'", at);
+  // _T x is T x _= null; _T x = y is _T x _= y with a level 3 warning (spec 12). Done on the whole tree before the other passes,
+  // so all of them see the weak declarations as T x _= y.
+  void LowerWeakDecls(Node node) {
+    if (node.Kind == "Decl" && node.Children.Any(child => child.Kind == "Weak")) {
+      var init = node.Children.FirstOrDefault(child => child.Kind is "Init" or "WeakInit");
+      if (init == null) {
+        node.Add(Synthetic("WeakInit", node, "default").Add(Synthetic("Null", node)));   // "default": not written, see RegisterClasses
+      } else if (init.Kind == "Init") {
+        Warn($"'{node.Text}' is a weak reference: _= is expected", init, 3);
+        init.Kind = "WeakInit";
+      }
     }
-    var value = ExprOf(source, scope, target.Type);
+    foreach (var child in node.Children) {
+      LowerWeakDecls(child);
+    }
+  }
+
+  // w _= x, for a weak variable, parameter or field
+  string WeakAssign(LValueInfo target, Node targetNode, Node source, Scope scope, Node at) {
+    if (target.Variable is not { IsWeak: true } && !target.IsWeakField) {
+      throw Error($"'{targetNode.Text}' is not a weak reference: declare it with _{target.Type} {targetNode.Text}", at);
+    }
+    var value = WeakSource(source, scope, target.Type);
     if (value.Fresh) {
       throw Error("a weak reference needs an existing object: nobody would own a new one", at);
     }
     MarkAssigned(target.Variable);
     return $"{target.Code} = {Convert(value, target.Type, at)}";
+  }
+
+  // the value given to a weak reference: any object, also another weak reference (copied without enforce)
+  Expr WeakSource(Node source, Scope scope, string type) {
+    if (source.Kind == "Name" && scope.Find(source.Text!) is VarInfo { IsWeak: true } weak) {
+      return new Expr(weak.CName, weak.Type);
+    }
+    bool saved = weakReadAllowed;
+    weakReadAllowed = true;
+    try {
+      return ExprOf(source, scope, type);
+    } finally {
+      weakReadAllowed = saved;
+    }
+  }
+
+  bool weakReadAllowed;
+
+  // a weak field is read through enforce, or copied into another weak reference
+  void CheckWeakFieldRead(FieldInfo? field, Node at) {
+    if (field is { IsWeak: true } && !weakReadAllowed) {
+      throw at.Kind == "Member"
+        ? Error($"'{field.Name}' is a weak reference: copy it into a weak variable (_{field.Type} {field.Name} _= ...) and use that through enforce", at)
+        : Error($"'{field.Name}' is a weak reference: use it through enforce {at.Text} {{ }} else {{ }}", at);
+    }
   }
 
   // ---------------------------------------------------------------- returns
@@ -465,7 +507,7 @@ public sealed partial class CodeGen {
 
   List<FieldInfo> OwnedObjectFields(ClassInfo cls) {
     return IntroducedTraits(cls).SelectMany(trait => trait.Fields).Concat(cls.Fields)
-      .Where(field => !field.IsStatic && IsClass(field.Type) && !field.IsParentRef).ToList();
+      .Where(field => !field.IsStatic && IsClass(field.Type) && !field.IsParentRef && !field.IsWeak).ToList();
   }
 
   void EmitDropGlue(ClassInfo cls) {
@@ -495,7 +537,7 @@ public sealed partial class CodeGen {
     if (IsList(cls.Name)) {
       EmitListDropGlue(sb, cls);
     }
-    if (IsMap(cls.Name)) {
+    if (IsMap(cls.Name) || IsSet(cls.Name)) {
       EmitMapDropGlue(sb, cls);
     }
     sb.Append("}\n");

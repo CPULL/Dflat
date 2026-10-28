@@ -1,0 +1,2 @@
+map<i32, string> names = [1: "one"]
+names += (2, "two", "dos")

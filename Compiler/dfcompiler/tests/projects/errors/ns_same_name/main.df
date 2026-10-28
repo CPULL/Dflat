@@ -1,0 +1,5 @@
+namespace app
+import mylib
+
+fun i32 one() { 2 }
+Root.Console.log(one())

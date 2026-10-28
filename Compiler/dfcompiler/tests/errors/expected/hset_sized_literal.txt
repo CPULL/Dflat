@@ -1,0 +1,1 @@
+hset_sized_literal.df(1): error: hset<T>[n] name is an empty hset with capacity n: it takes nothing or []

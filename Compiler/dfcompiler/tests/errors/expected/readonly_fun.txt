@@ -1,0 +1,1 @@
+readonly_fun.df(3): error: 'readonly' applies to fields

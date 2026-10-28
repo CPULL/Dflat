@@ -1,0 +1,1 @@
+mapop_set_wrong_keys.df(3): error: the keys of this map are string, not i32: m -= s takes a set of keys (spec 6.6)

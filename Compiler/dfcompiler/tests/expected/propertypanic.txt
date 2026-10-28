@@ -1,0 +1,4 @@
+ok
+negative
+Panic -1000
+---- exit code -1000 ----

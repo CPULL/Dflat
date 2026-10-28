@@ -1,0 +1,166 @@
+
+namespace Minesweeper
+
+alias Root.Console as console
+
+class Game {
+  public static const i32 W = 8
+  public static const i32 H = 8
+  public static const i32 MINES = 10
+
+  arr<bool> mines
+  arr<bool> shown
+  arr<bool> flagged
+  arr<i32> around
+
+  public bool alive = true
+  public bool won = false
+  i32 opened = 0
+
+  public fun bool isRunning() { alive && !won }
+
+  public fun start() {
+    for i32 i = 0..64 {
+      mines[i] = false
+      shown[i] = false
+      flagged[i] = false
+      around[i] = 0
+    }
+
+    mines[5] = true
+    mines[12] = true
+    mines[19] = true
+    mines[26] = true
+    mines[33] = true
+    mines[40] = true
+    mines[47] = true
+    mines[54] = true
+    mines[61] = true
+    mines[63] = true
+
+    for i32 y = 0..8 {
+      for i32 x = 0..8 {
+        i32 idx = y * W + x
+        i32 count = 0
+
+        for i32 dy = -1..2 {
+          for i32 dx = -1..2 {
+            i32 nx = x + dx
+            i32 ny = y + dy
+
+            if nx >= 0 && nx < W && ny >= 0 && ny < H {
+              if mines[ny * W + nx] { count++ }
+            }
+          }
+        }
+
+        around[idx] = count
+      }
+    }
+  }
+
+  public fun reveal(i32 x, i32 y) {
+    if x < 0 || x >= W || y < 0 || y >= H { return }
+
+    i32 idx = y * W + x
+    if shown[idx] || flagged[idx] { return }
+
+    shown[idx] = true
+    opened++
+
+    if mines[idx] {
+      alive = false
+      return
+    }
+
+    if opened >= W * H - MINES { won = true }
+  }
+
+  public fun toggleFlag(i32 x, i32 y) {
+    if x < 0 || x >= W || y < 0 || y >= H { return }
+
+    i32 idx = y * W + x
+    if !shown[idx] {
+      flagged[idx] = !flagged[idx]
+    }
+  }
+
+  public fun render() {
+    string screen = "    0 1 2 3 4 5 6 7\n"
+    screen += "   -----------------\n"
+
+    for i32 y = 0..8 {
+      screen += $"{y} | "
+
+      for i32 x = 0..8 {
+        i32 idx = y * W + x
+        char c = '#'
+
+        if flagged[idx] {
+          c = 'F'
+        }
+
+        if shown[idx] {
+          if mines[idx] {
+            c = '*'
+          } else if around[idx] == 0 {
+            c = '.'
+          } else if around[idx] == 1 {
+            c = '1'
+          } else if around[idx] == 2 {
+            c = '2'
+          } else if around[idx] == 3 {
+            c = '3'
+          } else if around[idx] == 4 {
+            c = '4'
+          } else if around[idx] == 5 {
+            c = '5'
+          } else if around[idx] == 6 {
+            c = '6'
+          } else if around[idx] == 7 {
+            c = '7'
+          } else {
+            c = '8'
+          }
+        }
+
+        screen += $"{c} "
+      }
+
+      screen += "\n"
+    }
+
+    screen += "\nCommands: r x y = reveal, f x y = flag, q = quit\n"
+    console.clear()
+    console.print(screen)
+  }
+}
+
+fun int main() {
+  console.log("Minesweeper - Dflat")
+
+  Game g = Game()
+  g.start()
+
+  while g.isRunning() {
+    g.render()
+
+    string command = console.readLine()
+
+    if command == "q" {
+      break
+    }
+
+    console.log("Enter r x y or f x y (input parser to be added).")
+  }
+
+  g.render()
+
+  if g.won {
+    console.log("You win!")
+  } else if !g.alive {
+    console.log("Game over!")
+  }
+
+  return 0
+}

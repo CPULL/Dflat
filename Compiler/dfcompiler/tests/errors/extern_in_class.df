@@ -1,0 +1,4 @@
+namespace extern_in_class
+class A {
+  extern fun i32 f()
+}

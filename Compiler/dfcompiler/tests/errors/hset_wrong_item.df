@@ -1,0 +1,2 @@
+hset<i32> s = [1, 2]
+s.add("three")

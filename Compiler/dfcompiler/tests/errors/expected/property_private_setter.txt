@@ -1,0 +1,1 @@
+property_private_setter.df(6): error: 'level' cannot be assigned here: its W: is private

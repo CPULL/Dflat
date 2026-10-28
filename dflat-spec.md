@@ -1,7 +1,7 @@
 # Dflat Language
 A new language D♭ that is the same as C# but easier to write and faster to execute
 
-**Version** 0.0.17  2026/10/27 by CPU
+**Version** 0.0.18  2026/10/28 by CPU
 
 ## D♭ — Dflat Language Specification (draft)
 
@@ -25,7 +25,7 @@ Status: design in progress. Decisions below reflect the latest choices; earlier 
 
 - **Comments**: `// line` and `/* block */`.
 - **Statement end**: JavaScript rules. A line break ends a statement when the statement can end there; `;` is needed only for several statements on one line. Is not a syntax error to add `;` when not needed.
-- **Identifiers**: have to start with a letter and can be composed of letters, numbers, and underscores. They are case sensitive. Cannot start with `_` (underscores inside names are fine).
+- **Identifiers**: have to start with a letter and can be composed of letters, numbers, and underscores. They are case sensitive. A name that starts with `_` or with a digit is a compile error (`string _secret`, `i32 9lives`); underscores inside names are fine. A `_` written before a type is the weak marker (`_Texture2D texture`, 12), never part of a name.
 - **Naming rules**:
   - Built in types (`i32`, `string`, `arr`) are lowercase
   - Types (classes, traits, enums): PascalCase; otherwise level 2 warning
@@ -93,7 +93,7 @@ i32 onlyCount, _, bool onlyActive = record       // partial, _ skips an item
 - Definite assignment: reading a variable before it is assigned on every path reads its zero value (null for objects) and gives a level 1 warning.
 - No shadowing of locals: a variable with the same name as a local of an enclosing block is a compile error.
 - `const`: read-only value and pointer, global guarantee.
-- `var`: type taken from the initializer; if it can't be decided → compile error (`var x = null`, `var l = []`). Allowed in multiple returns when the return type is known. Coexists with partial forms like `arr a = [...]` / `vec v = [...]` / `map m = [k: v, ...]`.
+- `var`: type taken from the initializer; if it can't be decided → compile error (`var x = null`, `var l = []`). Allowed in multiple returns when the return type is known. Coexists with partial forms like `arr a = [...]` / `vec v = [...]` / `map m = [k: v, ...]` / `hmap h = [k: v, ...]` / `set s = [...]` / `hset s = [...]`.
 - A tuple or literal must be assigned, passed or returned; alone it's a compile error.
 - Tuple destructuring: the items of a tuple can be unpacked into separate variables in one statement; `_` skips an item.
 
@@ -699,6 +699,7 @@ var samples = [1, 2, 3]                 // arr<native integer>, 3 elements
 arr names = ["a", "b", "c"]             // arr<string>, 3 elements
 vec values = [1, 2, 3]                  // vec<native integer>
 set<string> tags = ["red", "blue"]
+hset colors = ["red", "blue"]          // hset<string>
 map ages = ["one": 1, "two": 2]         // map<string, native integer>
 map words = [1: "one", 2: "two"]        // map<native integer, string>
 map<string, i32> codes = [name: 1, prefix + "x": 2]  // keys are expressions
@@ -708,7 +709,7 @@ list<arr<i32>> grid = [[1, 2], [3, 4]]  // nested literals need the full type
 - A literal is the right side of an assignment.
 - `[...]` can be assigned to `arr`, `vec`, `list`, `set` and `hset`; `[key: value, ...]` to `map` and `hmap`: the `:` makes it a map literal. Literals are arrays (`arr`) unless declared otherwise, and a literal with `:` is a `map` unless declared otherwise. Mixing items with and without `:` (`[1, 2: true]`) is a compile error.
 - Map keys are ordinary expressions, like the values: `"one"` is a string, `name` is the value of the variable `name`, `MyEnum.blue` is an enum value, `a.f(x)` is calculated. Parentheses are only grouping.
-- A map literal is lowered as an empty map followed by the adds, in order.
+- A map literal is lowered as an empty map followed by the adds, in order; a set literal as an empty set followed by the adds.
 - A duplicate value in a set literal or a duplicate key in a map literal is a compile error when they are constants (literals and enum values); two different keys with the same hash are not an error (6.2.1). With keys calculated at run time a duplicate is found only at run time, and the later value wins (as with `add`, 6.6).
 - Nested literals need the full type specification: `var` and partial forms (`arr`, `vec`, ...) are a compile error for them.
 - Types are inferred from literals; integers and reals default to the native size (1.3), mixed `[1, 2.5]` → native real; other mixes are errors; empty literals need a declared type (`map<i32, bool> flags = []` is an empty map).
@@ -794,6 +795,8 @@ arr<i32> middle = scores[2..5]!       // copy
 | `sort`, `sortUnstable`, `reverse` | ✓ | ✓ | ✓ | – | – | – | – |
 | `copyFrom` | ✓ | ✓ | ✓ | – | – | – | – |
 | `transformTo<Kind>()` | ✓ | ✓ | ✓ | – | – | – | – |
+| `+=` | – | – | – | `add` | `add` | `add` | `add` |
+| `-=` | – | – | – | `removeAt`, a set of keys | `removeAt`, a set of keys | `remove`, a collection | `remove`, a collection |
 | set operations and tests | – | – | – | – | – | ✓ | ✓ |
 
 A member marked `–` is a compile error on that collection (for example `hasKey` on a `vec`). The trait that provides each member is in 6.7.
@@ -808,6 +811,7 @@ A member marked `–` is a compile error on that collection (for example `hasKey
 - `add(collection)`: appends the items of another collection to `vec` and `list`; on maps it merges another map (the new value wins, no return value); on sets it returns the number of items actually added.
   - On `vec` and `list`: items of basic types are copied. Objects are moved with `v.add(->other)`: the items move, the other collection ends and its variable becomes null (12); a plain `v.add(other)` clones the items, with the rules of `other!` (12.6), and leaves `other` unchanged. The same collection as source and target raises `ModifyingProtectedSourceException`.
   - On maps: only a map of the same kind (`map` with `map`, `hmap` with `hmap`); mixing them is a compile error. `m.add(other)` clones the entries (12.6) and leaves `other` unchanged; `m.add(->other)` moves them.
+  - On sets: any collection with the same item type (`set` and `hset` mixed included). Basic items and strings are copied, objects are cloned (12.6) and `other` is unchanged; `s.add(->other)` moves them.
 - `insert(index, value)`: `index` goes from `0` to `.len` (`.len` appends); a larger index raises `IndexOutOfRangeException`.
 - `pop((&)out)`: removes the last item of a `vec` and moves it into `out` (the ownership passes to `out`); it returns `true` (the `isValid` of the result). On an empty `vec` it returns `false` and `out` gets the default value of its type (null for objects, `0` for numbers, `""` for `string`). There is no other form of `pop` and no `tryPop`; no exception is raised. The previous value of `out` is dropped.
 - `has(v)`: true if the value is present (on maps, searches the values). `hasKey(k)`: true if the key exists.
@@ -823,7 +827,10 @@ A member marked `–` is a compile error on that collection (for example `hasKey
   - `sequence.swap(posA, posB)` only exchanges two items of `arr`, `vec` or `list`; no ownership changes. There is no `swap(position, new)` form (use `replace`).
   - `Item old = map.swap(Key key, Item new)`: the item in the map is replaced by `new`; the ownership of the old item moves to the caller and the map owns `new`. A missing key adds the pair and returns a null (default) item. The `swap` forms of maps are confirmed with the maps.
   - `map.swap(key1, key2)` exchanges the two values: if both keys exist the values are exchanged; if only one exists its value moves to the missing key and the original key is removed; if both are missing nothing happens.
-- `->c[k]` moves the item out of the collection (ownership passes to the receiver; a basic value type is copied). The slot is zeroed (null for objects, `0` for numbers) in `arr` and `vec`, and the item is removed in `list`, `map`, `hmap`, `set` and `hset`. On maps `->m[k]` gives only the value and the key ends with the entry; `(key, value) = ->m[k]` is a compile error.
+- `->c[k]` moves the item out of the collection (ownership passes to the receiver; a basic value type is copied). The slot is zeroed (null for objects, `0` for numbers) in `arr` and `vec`, and the item is removed in `list`, `map`, `hmap`, `set` and `hset`. On maps `->m[k]` gives only the value and the key ends with the entry; `(key, value) = ->m[k]` is a compile error. On sets the key is the item: `->s[item]` removes the item equal to `item` and gives it.
+- `+=` and `-=` on maps and sets call the members, so they follow the same rules (a custom collection gets them from its members); `|=`, `&=` and `^=` are not defined on collections:
+  - maps: `m += (key, value)` (a tuple) calls `add(key, value)`; `m += other` calls `add(other)`; `m -= key` calls `removeAt(key)`; `m -= s`, with `s` a `set` or an `hset` of the key type, removes every key of `s` with its value.
+  - sets: `s += v` calls `add(v)` and `s += other` calls `add(other)`; `s -= v` calls `remove(v)`; `s -= other` removes every item of `other`, a collection with the same item type (the in-place difference).
 - `clear()`: on `arr`, `vec` and `list` it cleans up the values: every item is set to the default value and the size is kept (the objects dropped end, 6.1). On maps and sets it removes all items. To remove all the items of a `vec` or a `list`, use `truncate(0)`.
 - `fill(value)`: sets every item up to the current `.len` (the whole array for `arr`; on an empty `list` it does nothing). `fillAtCapacity(value)` (`vec`): fills the whole capacity and sets `.len` to the capacity.
 - The value of `fill` can be any value: basic values, strings (each item gets its own copy, shrunk, 4), dates, times and every other type that is not a class. `null` is allowed: every item becomes null and the objects they held are no longer owned by the collection (they end, running their `atEnd` if they have one). A class instance is a compile error (the items would share one object).
@@ -899,7 +906,7 @@ trait IndexIterator<Item> : Iterator {
 - The cursor is internal to each iterator and cannot be reached from outside, so the trait does not specify it: the trait fixes only the methods. Iterators are specific to a collection type, so the reference to the collection (used to check the end and to release the counter of 6.4) lives in each concrete iterator class, not in the trait. The collection is the parent of its iterators: the class declares it with `as parent` on a reference parameter (at most one per class). When the collection ends, it nulls their reference to it (12.5).
 - `next()` returns a tuple whose last item is the bool `isValid`; `writableNext()` returns the same tuple with the item as a writable borrow `(&)` (3.2; the one `for (&)` uses). When `isValid` is `false` the other items of the tuple are not valid (the iteration is over), so null values and items are not a problem for the iteration.
 - The iterators follow a contract written with the trait. First rule: an iterator returns each element of the collection once and only once.
-- Only the iterator of the index collections is defined in this version; the members of `MapIterator` and `SetIterator` come later.
+- The iterators of the index collections (6.7.1) and of the sets (6.7.3) are defined; the members of `MapIterator` come later.
 - The collections of the compiler do not build an iterator object: the `for` is emitted as a direct loop in C (6.4).
 - The methods behind the properties and the operators: each trait defines a set of non-public methods for its properties and its operators. They can be virtual, and every class that implements the trait must implement them. They are internal: only someone writing a custom collection needs them. They are snake_case (1.1, provisional). When the argument type of an operator is not given (`->c[k]`), it is the generic form valid for all collections; each kind of collection fixes the argument type (`uns` for `IndexCollection`, `Key` for `MapCollection`, and the same for the sets). More methods will be added with the maps and the sets.
 
@@ -910,6 +917,7 @@ trait IndexIterator<Item> : Iterator {
 | `->c[k]` | `move_out(k)` (generic form) | `Collection` |
 | `->c[uns k]` | `move_out(uns k)` | `IndexCollection` |
 | `->c[Key k]` | `move_out(Key k)` | `MapCollection` (later) |
+| `->c[Item k]` | `move_out(Item k)` | `SetCollection` |
 | `c[k]` (read) | `read_pos(uns k)` | `IndexCollection` |
 | `c[k] = value` | `set_pos(uns k, value)` | `IndexCollection` |
 | `c[a..b]`, `c[..b]`, `c[a..]` | `get_view(uns? a, uns? b)`, returns `View<C>`; a missing bound is null (6.5) | `IndexCollection` |
@@ -938,14 +946,20 @@ class ListIterator<Item>(&list<Item> collection as parent) : IndexIterator<Item>
 ### 6.7.2 MapCollection
 
 - Implemented by `map` and `hmap`: key/value pairs. Null is a valid key (6.2). The keys are always read-only in a loop (6.4).
-- Members: `.keys`, `.values`, `c[k]` read, `c[k] = v` (replaces or adds), `add(k, v)`, `add(map)`, `hasKey`, `keyOf`, `tryGet`, `remove(v)`, `removeAll(v)`, `removeAt(k)`, `swap(key, new)`, `swap(key1, key2)`.
+- Members: `.keys`, `.values`, `c[k]` read, `c[k] = v` (replaces or adds), `add(k, v)`, `add(map)`, `hasKey`, `keyOf`, `tryGet`, `remove(v)`, `removeAll(v)`, `removeAt(k)`, `swap(key, new)`, `swap(key1, key2)`, `+=` and `-=` (6.6).
 - Iterator (not yet defined, first idea): `next()` returns `(Key key, Value value, bool isValid)`. The sub-traits are defined later; the cursors are in 6.8.4.1 (`map`) and 6.8.5.1 (`hmap`).
 
 ### 6.7.3 SetCollection
 
 - Implemented by `set` and `hset`: each value is held once. Null is a valid item (6.2). The items are always read-only in a loop (6.4).
-- The sets are defined later: their members, the set operations and `->c[k]` on a set (the key is the item, probably valid).
-- Iterator (not yet defined): the shape of `next()` for sets is open, and so are the cursor types of the tree `set` and of `hset`.
+- Members: 6.6 and 6.8.6. `->s[item]` moves the item out (the key is the item); `swap` is not defined on sets.
+- Iterator: `SetIterator<Item>`; `next()` returns `(Item value, bool isValid)`. There is no `writableNext()`: the items are read-only. The cursors are those of `map` (6.8.4.1) and `hmap` (6.8.5.1), whose code the sets use.
+
+```
+trait SetIterator<Item> : Iterator {
+  public fun (Item value, bool isValid) next()
+}
+```
 
 ## 6.8 Default collections
 
@@ -1155,16 +1169,18 @@ set<string> tags = []
 bool added = tags.add("red")                 // false if already there
 u64 count = tags.add(otherTags)              // number actually added
 set<string> both = tags.intersection(otherTags)
-tags |= otherTags
-tags -= "red"
+tags += otherTags                            // tags.add(otherTags)
+tags -= "red"                                // tags.remove("red")
+Dog rex = ->dogs[rexToFind]                  // takes the item out of the set
 ```
 
-- Trait: `SetCollection` (6.7.3). The sets are defined later; what follows is the first design.
+- Trait: `SetCollection` (6.7.3).
 - `set` (alias `bset`) is sorted (B-tree). A value is held once; adding a duplicate is ignored. Key rules: 6.2.
-- `add(val)` → `bool` (true if added); `add(collection)` → number actually added; `has(val)` → `bool`; `remove(val)` → `bool`; `clear()`; `.len`. No `.capacity`, `reserve`, `shrinkToFit` or `[n]` capacity form.
-- Operations take two sets of the same kind: `set` with `set` and `hset` with `hset`; mixing them is a compile error.
-- New sets: `union(other)`, `intersection(other)`, `difference(other)` (items of this set not in `other`), `symmetricDifference(other)` (items in one set only).
-- In place: `|=` (union), `&=` (intersection), `-=` (difference), `^=` (symmetric difference); `+=` is the same as `|=`. With a single value, `|=` / `+=` add it and `-=` removes it. No operators that return a new set (`set1 | set2` is not defined).
+- `add(val)` → `bool` (true if added); `add(collection)` → number actually added (any collection with the same item type, 6.6); `has(val)` → `bool`; `remove(val)` → `bool`; `->s[item]`; `clear()`; `.len`. No `.capacity`, `reserve`, `shrinkToFit` or `[n]` capacity form.
+- Literal: `[...]`, lowered as an empty set plus the adds; `set tags = [...]` takes the item type from the literal (6.3).
+- `set` and `hset` differ only in the implementation: they can be mixed in every operation (`add(collection)`, `+=`, `-=`, the new sets and the tests). A result has the kind of the left operand (the set the member is called on). Maps of different kinds stay a compile error (6.6).
+- New sets: `union(other)`, `intersection(other)`, `difference(other)` (items of this set not in `other`), `symmetricDifference(other)` (items in one set only). Basic items and strings are copied, objects are cloned (12.6); both originals are unchanged. These members exist on sets only.
+- In place: `+=` and `-=` (6.6): `+=` adds a value or a collection (the union), `-=` removes a value or the items of a collection (the difference). `|=`, `&=` and `^=` are not defined. No operators that return a new set (`set1 | set2` is not defined).
 - Tests: `isSubsetOf(other)` (every item of this set is in `other`), `isSupersetOf(other)`, `isDisjointFrom(other)` → `bool`.
 - Iteration (`for T item in tags`): sorted.
 
@@ -1172,7 +1188,7 @@ tags -= "red"
 
 - Trait: `SetCollection` (6.7.3). `hset` is a hash set. The members and the operations are the same as `set` (6.8.6).
 - Specific to `hset`: `.capacity`, `reserve`, `shrinkToFit` and the `[n]` capacity form.
-- Iteration (`for T item in tags`): in an unspecified order, the same for the same content and history.
+- Iteration (`for T item in tags`): in an unspecified order, the same for the same content and history. A new set with an `hset` on the left is an `hset`, so its order is unspecified too.
 - Implementation: the code of `hmap` with an empty value type (6.8.5.1). Likewise `set` is generated from the code of `map` (6.8.4.1).
 
 ## 6.9 Custom collections (partial)
@@ -1180,7 +1196,7 @@ tags -= "red"
 Users can write their own collection classes in Dflat. A custom collection either implements the traits of 6.7 (`Collection` and one of its three sub-traits), or is a subclass of one of the default collections. This section stays vague for now: everything in it is a first design.
 
 - A collection trait takes the item type as a generic argument, and the class that implements it passes its own type parameter: `class MyCollection<Item> : IndexCollection<Item> { }`. There is no reserved type name; a generic parameter is always declared in the header (11.3).
-- A class that implements `Collection` gives a read-only `len` (11.1.4, through `get_len()`, 6.7) and the methods behind the properties and the operators of its trait (6.7). A class that implements a sub-trait gives the `getIterator()` of that sub-trait, which returns an iterator. Only the iterator of the index collections is defined in this version (6.7); the members of the iterators of maps and sets come later.
+- A class that implements `Collection` gives a read-only `len` (11.1.4, through `get_len()`, 6.7) and the methods behind the properties and the operators of its trait (6.7). A class that implements a sub-trait gives the `getIterator()` of that sub-trait, which returns an iterator. The iterators of the index collections and of the sets are defined (6.7); the members of the iterator of maps come later.
 - `next()` returns a tuple whose last item is the bool `isValid`: `(Item value, bool isValid)`; `writableNext()` returns the item as a writable borrow.
 - The cursor and the reference to the collection belong to the iterator class, not to the trait (6.7): each iterator keeps them as private fields, and the collection is declared as its parent with `as parent`.
 
@@ -1208,7 +1224,8 @@ trait MapIterator<Key, Value> : Iterator {
 - While the iterator exists the collection cannot change its size (6.4). The counter and its checks come from the trait `Collection` through `executeAfter` blocks (11.2), so a custom collection gets them without writing them.
 - Open point for classes: whether the default collections (`vec`, `list`, `map`, `hmap`, `set`, `hset`) can be subclassed, and how the overridden methods are dispatched. `arr` cannot be subclassed.
 - The indexer `c[k]` of a custom collection is given by the methods `read_pos` and `set_pos` of its trait (6.7).
-- For a later version: how a custom class receives the literals and defines `|=` and `+=`, subclassing of the default collections, and lists of pointers and references (with the pointers work).
+- `+=` and `-=` call the public members (`add`, `remove`, `removeAt`, 6.6), so a custom map or set gets them from its members.
+- For a later version: how a custom class receives the literals, subclassing of the default collections, and lists of pointers and references (with the pointers work).
 
 ---
 
@@ -1520,6 +1537,7 @@ public i32 level { R: { field } private W: { field = 0 } }    // private writer
 ```
 
 - Access: a property is read/write by default. The access `readonly`, `readwrite` or `writeonly` is written when the body is not defined and must be provided by the class (trait members, 11.2). When blocks are written they say what is allowed. Reading a property that cannot be read, or writing one that cannot be written, is a compile error.
+- In a class, `readonly` on a field without accessor blocks is a shorthand for a public reader and a private writer: `public readonly i32 width` is the same as `public i32 width { R: { field } private W: { field = value } }`. The class can still assign it; from outside it can only be read. In a trait, `readonly` keeps the meaning above.
 - Accessor blocks: `R: { ... }` calculates and returns the value (as in any function, the last expression is the result); `W: { ... }` runs when the property is assigned and gets the new value in `value`. A block that is not written gets its default: `R` is `{ field }` and `W` is `{ field = value }`.
 - `field` is the stored value of the property and `value` the incoming value of `W`. Both exist only inside the accessor blocks. Outside the accessors the name of the property always goes through them, so there is no recursion.
 - The storage exists only when an accessor uses `field` (the default accessors do). A purely computed property takes no memory.
@@ -1529,6 +1547,25 @@ public i32 level { R: { field } private W: { field = 0 } }    // private writer
 - Primary constructor parameters (11.1.1) become fields with the default accessibility rules. They can be redeclared in the body of the class or trait when they need something more specific.
 - Static properties work in the same way, but their accessors can use only static functions and other static fields or properties (11.1.2).
 - Moving a property out with `->`: 12.4.
+
+### 11.1.4.1 Field groups
+
+```
+public class Sprite {
+  public pos { r32 x, r32 y }
+  public scale { r32 x = 1.0, r32 y = 1.0 }
+}
+
+s.pos.x++                      // a plain field of the sprite
+s.pos = (10.0, 20.0)           // sets pos.x and pos.y in order
+var p = s.pos                  // a tuple copy: (r32 x, r32 y)
+```
+
+- A field group is a name that organizes fields inside a class. It is not a struct and not a tuple: it is not a value of its own.
+- It is written as the name of the group followed by the fields in braces, separated by `,`. It has no type before the name, so it is not confused with a property and its accessor blocks.
+- Each field of a group is a field of the class (`s.pos.x`), with the rules of 11.1.4: start values and accessor blocks. The visibility of the group applies to all its fields.
+- The group alone cannot be passed, returned, stored or referenced (`&s.pos` is a compile error).
+- Assigning a tuple to the group (`s.pos = (10.0, 20.0)`) sets its fields in order; the tuple must have the same number of items, each convertible to its field. Reading the group as an expression gives a tuple copy with the names and types of its fields.
 
 ## 11.1.5 Structs (to be defined)
 
@@ -1917,6 +1954,7 @@ Rust model, Dflat syntax.
 | `b = a` | same object, no ownership change (compiler checks lifetimes) |
 | `->a` | ownership moves: `Item b = ->a`, `f(->a)`, `list.add(->a)` |
 | `b _= a` | weak reference |
+| `_T name` | a weak reference declared: a field, a variable or a parameter (`public _Texture2D texture`) |
 | `a!` | copy: a shortcut for `a.clone()` (12.6) |
 | `.clone()` | method: a deep copy that follows the kind of each field (12.6); overridable |
 | `.tryClone()` | method: like `.clone()`, raises `ObjectNotClonableException` when the object cannot be cloned (12.6) |
@@ -1932,6 +1970,7 @@ Rust model, Dflat syntax.
 - Iterators and views: if not given away, they live only inside the scope that created them; when moved or borrowed they follow the rules of this section, and their collection becomes changeable again only when the last holder ends (6.5).
 - Switching an object between the two counting kinds → `ChangingRefCountTypeException`.
 - Weak references are used through `enforce w { } else { }`; inside the block the object is kept alive.
+- A weak reference is declared with `_` before its type (`_Texture2D texture`), like `&T` (borrowed) and `*T` (pointer); it does not own the object and starts as null. It is set with `_=`; a plain `=` into a weak reference is allowed with a level 3 warning (the weak link is not visible where it is made).
 - `.asRefCount` / `.asSharedRefCount` / `.isRC` are built-in operations, not methods.
 
 ## 12.1 Pointers
@@ -2071,7 +2110,7 @@ public notclonable class File { }
 | owned child (an object that has a parent, 12.5) | null: a child is never duplicated, a new one comes from the functions of its parent |
 | reference counted object | another reference: the object gets one more owner |
 | borrowed (`&`, `(&)`) | null |
-| weak reference | another reference to the same object; remapped when it points into the object's own parts |
+| weak reference (`_T`) | another reference to the same object; remapped when it points into the object's own parts |
 
 - Any field that cannot be duplicated, for any reason, becomes null in the clone.
 - Remapping: a weak reference that points to an object owned by the clone tree (the object itself or something it owns) points to the copy of that object in the clone, not to the original. The clone keeps a table from originals to copies only while `clone()` runs, and only for classes that have weak fields; the other classes are a plain recursive copy.
@@ -2475,6 +2514,31 @@ typedef struct DfException {
 - Standard library functions implemented by the runtime in C report an exception in a temporary slot between their return and the wrapper that the compiler generates at the call site; the wrapper moves it into `error`. The temporary slot is never visible to the program and is empty between statements.
 - A standard library function written in Dflat follows the same rules as any other function. A silent exception that its specification documents for it must be thrown by the public function the user calls, or caught and thrown again there (15.4); a helper that throws for its caller is not enough.
 
+### 15.9 C functions (minimal)
+
+```
+extern fun addr gfx_create()
+extern fun bool gfx_window_open(addr ctx, i32 width, i32 height)
+extern fun gfx_texture_set_data(addr tex, arr<byte> data)
+```
+
+- `extern fun` declares a function of a C library: no body, and the Dflat name is the C name. `extern` is a word only in front of `fun`.
+- It is declared at the top level, never in a class or an enum. C has no overloads, so the name is used once.
+- It never returns an error (15.8); a crash inside it is a `Panic`. A library usually keeps it non-public and wraps it in its classes.
+- Types:
+
+| Dflat | C |
+|---|---|
+| `i8` … `i64`, `u8` … `u64`, `int`, `uns` | `int8_t` … `uint64_t` (`int` and `uns` with their native size) |
+| `r32`, `r64` | `float`, `double` |
+| `bool` | `bool` |
+| `addr` | `void*`: an opaque address (2.3), stored, passed, returned and compared with another `addr` or with `null` |
+| `string` (parameter) | `const char*`: UTF-8 ended by a 0, valid only during the call |
+| `arr<T>` of numbers or `bool` (parameter) | two C parameters, `T*` and `size_t` (the length); the C function can change the items |
+
+- A return is a number, `bool`, `addr` or nothing. Not yet: structs, callbacks, returned strings or arrays, varargs, objects.
+- Where the C code comes from: Compiler_Options.md (`csource=`, temporary until the libraries bring their own C files).
+
 ---
 
 # 16 Namespaces, imports, aliases
@@ -2488,9 +2552,16 @@ alias Root.Console as console
 alias u8 as byte8
 ```
 
-- The root file declares its namespace explicitly; `local` = root namespace + folder path.
-- Namespaces are case-insensitive. Namespaces declared in code can use any Unicode letter.
-- `import` takes the full namespace path of what it brings in; a bare name is not enough.
+- The root file declares its namespace explicitly; `local` = root namespace + folder path. In a multi-file compilation a root file without a namespace line is a compile error; a single-file compilation does not need one.
+- The root file: a file compiled on its own (given directly, or named by `source=` in a project file) is the root whatever its name; this is a single-file compilation. A program of several files has `main.df` or `program.df` as its root file, and a library has `lib.df`, at the top of its folder. A `source=` that names one of these files makes a multi-file compilation; any other name makes a single-file compilation.
+- Only the root file can have top-level code (when `main()` is not needed). Every other file has only declarations (classes, traits, enums, functions, constants, aliases); top-level code or a `main` there is a compile error.
+- Every other file must be in the namespace of its folder: the root namespace plus the folder path from the root. It can be written in full or as `local`; any other namespace is a compile error. So no file can add a class to a namespace outside its own folder (for example a program cannot add `gfx.MyContext` to a library) and reach its protected members.
+- Namespaces are case-insensitive, and so is the match with the folder names (`Gfx/` is `gfx`). The folders of a namespace use the ASCII rule below.
+- `import` takes the full namespace path of what it brings in; a bare name is not enough. It brings in all the files of the folder of that namespace.
+- Where an import is looked for: the stdlib (`Root`), the folders of the program, and the libraries listed with `include=` in the project file (Compiler_Options.md). Each library is a root folder whose root file declares its root namespace. The import goes to the root whose namespace starts its path, then down the folders of the rest of the path.
+- What is compiled: the root file, what it reaches through imports and, in a multi-file compilation, the other `.df` files of the folder of the root file (without an import). A single-file compilation ignores the other files of its folder. Any other `.df` file is ignored.
+- Two roots with the same namespace, or a root whose namespace is inside the namespace of another root, are a compile error. The stdlib counts as a root: no library can declare a namespace inside `Root`, because `internal` members are visible to the sub-namespaces (1.6.1).
+- A single-file compilation can import only its own subfolders and the stdlib; `include=` lines of its project file are ignored with a warning (until compiled libraries exist).
 - Folder names used for `local` namespaces must be ASCII letters, digits and `_` only, no exceptions; any other folder is ignored by the build (level 3 warning). Two folders whose names differ only by case are a compile error.
 - `alias <original> as <new>`; aliases are pure aliases (interchangeable with the original). They can also go to members and functions: `alias Root.Console as c` and `alias Root.Console.Log as log`
 
@@ -2630,6 +2701,7 @@ Level 1 = most important, level 3 = least.
 | 3 | Primary parameter redeclared with an initializer | 11.1.1 |
 | 3 | Unreachable branch of a generic check | 11.1.3 |
 | 3 | `uns` smaller than the cpu size (limits the length of the collections and the size of `.hash`) | 2.1 |
+| 3 | `=` into a weak reference (`_=` is expected) | 12 |
 
 ---
 
@@ -2656,10 +2728,9 @@ Level 1 = most important, level 3 = least.
 - Stdlib: strings, files, time, collections extras (queue/stack)
 - Bitfields: whether `set`, `clear`, `setAs` and `toggle` modify the value in place or return a new value; nullability of bitfields (3.1.1, 7.1)
 - Functional collection members (`filter`, `map`, `reduce`)
-- Collections: the members of `MapIterator` and `SetIterator` (the three sub-traits of `Iterator` are decided, 6.7), and the shape of `next()` for sets (the index iterator is defined, 6.7.1)
+- Collections: the members of `MapIterator` (the three sub-traits of `Iterator` are decided, 6.7; the index and set iterators are defined, 6.7.1, 6.7.3)
 - Collections: `clear()` on maps and sets now differs from `clear()` on the index collections (which keeps the size, 6.6); to be confirmed with the maps and the sets
-- Collections: how a custom class receives literals (`[...]`, `[k: v]`) and defines `|=` and `+=` (`c[k]` is decided, 6.7)
-- Collections: the sets (members, operations, `swap` and `->c[k]` on sets; `c[k]` read does not exist on sets)
+- Collections: how a custom class receives literals (`[...]`, `[k: v]`) (`c[k]` is decided, 6.7; `+=` and `-=` call the members, 6.6)
 - Structs: the definition (11.1.5)
 - Collections: views are read-only; revisit with tasks (6.5), the full Rust borrow model stays an option
 - Collections: shared C helpers against one copy per type (code size, 11.3.12); the B-tree (6.8.4.1) and the hash table (6.8.5.1) are decided
@@ -2675,7 +2746,7 @@ Level 1 = most important, level 3 = least.
 - `addr` in `dfoot` (fixed memory maps ok, runtime addresses problematic)
 - Safe / unsafe logic
 - Function pointers (objects); C function tables (COM vtables, Vulkan dispatch tables)
-- C interop: declaring external functions, struct layout, calling conventions, callbacks, strings (UTF-8 / UTF-16), ownership across the boundary, errors, unions, bit flags, varargs
+- C interop: struct layout, calling conventions, callbacks, returned strings and arrays, UTF-16 strings, ownership across the boundary, unions, bit flags, varargs (the minimal extern fun is in 15.9)
 - Deferred: async/await, locks/atomics, tasks, SIMD, EF syntax, Vulkan, shaders
 - Pointers: the exact way to convert `*T` to `(*)T` in unsafe code, the syntax of the `unsafe` block and what it allows, handling of null pointers in safe code, which cases the compiler can prove valid, pointer equality, `.hash` and `toStr()`, and pointers in generics
 
@@ -3163,3 +3234,20 @@ Level 1 = most important, level 3 = least.
 - 6.8.7 `hset` is generated from the `hmap` code and `set` from the `map` code
 - 6.7.2 The cursors of `map` and `hmap` are defined (6.8.4.1, 6.8.5.1)
 - 99 Open items: the hash table implementation, the null hash constant and the collision exception removed; the widening of stuck buckets added
+
+## Changes in 0.0.18
+
+- 6.6, 6.7.2, 6.8.6 `+=` and `-=` on every map and set, calling the members: maps `m += (key, value)`, `m += other`, `m -= key` (`removeAt`), `m -= s` (a set of keys, removed with their values); sets `s += v` / `s += other` (`add`), `s -= v` (`remove`), `s -= other` (in-place difference); `|=`, `&=` and `^=` removed
+- 6.8.6 `set` and `hset` can be mixed in every set operation; the result has the kind of the left operand (was: same kind only, a compile error); maps of different kinds stay a compile error
+- 6.8.6 New sets (`union`, `intersection`, `difference`, `symmetricDifference`) copy basic items and strings and clone objects; sets only
+- 6.6, 6.8.6 `add(collection)` on sets takes any collection with the same item type; objects cloned, or moved with `->other`
+- 6.6, 6.7, 6.7.3 `->s[item]` on sets is valid (`move_out(Item k)`); `swap` is not defined on sets
+- 6.7, 6.7.3 `SetIterator<Item>`: `next()` returns `(Item value, bool isValid)`, no `writableNext()`; the cursors of `map` and `hmap`
+- 1, 6.3, 6.8.6 Set literals are an empty set plus the adds; `set s = [...]`, `hset s = [...]` and `hmap h = [k: v]` take their types from the literal
+- 6.9, 99 `+=` and `-=` of a custom collection come from its members; the open items on the sets and on `|=` / `+=` removed
+- 1.1 A name that starts with `_` or with a digit is a compile error (stated explicitly); `_` before a type is the weak marker
+- 12, 12.6, 19.3 Weak declarations (new): `_T name` declares a weak field, variable or parameter (was: only `b _= a` made a weak reference); it starts as null, is set with `_=`, and a plain `=` into it is a level 3 warning
+- 16 Namespaces: every file is in the namespace of its folder (root namespace + folder path, written in full or as `local`; was: any explicit namespace); folder names match case-insensitively; `import` brings in the files of the folder of the namespace, looked for in the stdlib, the program and the libraries listed with `include=` in the project file; only the files reached through imports are compiled, plus, in a multi-file compilation, the other files of the folder of the root file (a single file ignores them); the root file of a multi-file compilation needs its namespace line; overlapping roots are a compile error, the stdlib included (no library inside `Root`); root files: a single file is its own root, a program has `main.df` or `program.df`, a library `lib.df`; only the root file has top-level code; a single-file compilation imports only its subfolders and the stdlib, and ignores `include=` with a warning
+- 15.9 C functions (new, minimal): `extern fun` with no body at the top level; numbers, `bool` and `addr` as they are, `string` as `const char*` during the call, `arr<T>` as `T*` and a length; returns a number, `bool`, `addr` or nothing; never an error; 99 C interop item narrowed
+- 11.1.4 `readonly` on a class field without accessor blocks is a shorthand for a public reader and a private writer
+- 11.1.4.1 Field groups (new): `pos { r32 x, r32 y }` organizes fields inside a class; `s.pos.x` is a plain field (so `s.pos.x++` works); the group is not a value; a tuple can be assigned to it, and reading it gives a tuple copy

@@ -153,6 +153,10 @@ public sealed partial class CodeGen {
     if (target.Kind == "Discard" || value == null) {
       return;
     }
+    if (PropertyTarget(target, scope) is var (propertyObj, property)) {
+      sb.Append(pad).Append(PropertySet(propertyObj, property, CValue(value.Value, target), scope, target).Code).Append(";\n");   // the setter
+      return;
+    }
     if (target.Kind == "Decl") {
       string type = ResolveType(target.Children.First(child => TypeNodeKinds.Contains(child.Kind)));
       if (scope.Vars.ContainsKey(target.Text!)) {

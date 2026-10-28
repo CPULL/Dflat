@@ -1,0 +1,244 @@
+namespace demo
+
+alias Root.Console as console
+
+class World {
+  public static const i32 ROOMS = 5
+  arr<string> names = arr<string>[(uns)ROOMS]
+  arr<string> descs = arr<string>[(uns)ROOMS]
+  arr<string> north = arr<string>[(uns)ROOMS]
+  arr<string> south = arr<string>[(uns)ROOMS]
+  arr<string> east = arr<string>[(uns)ROOMS]
+  arr<string> west = arr<string>[(uns)ROOMS]
+  arr<string> item = arr<string>[(uns)ROOMS]
+
+  hmap<string, i32> index = []
+  hmap<string, i32> inv = []
+
+  public i32 current = 0
+  public bool hasWon = false
+
+  public fun start() {
+    names[(uns)0] = "shire"
+    names[(uns)1] = "forest"
+    names[(uns)2] = "trollcave"
+    names[(uns)3] = "mountain"
+    names[(uns)4] = "dragonlair"
+
+    descs[(uns)0] = "You are in the Shire. Smoke rises. A path north to forest. A shiny ring here."
+    descs[(uns)1] = "Dark forest. Cold. North to troll cave, south to shire, east to mountain."
+    descs[(uns)2] = "Troll cave. Bones. A rusty sword here. South to forest. Trolls sleep."
+    descs[(uns)3] = "Lonely mountain. Wind. West to forest, north to dragon lair."
+    descs[(uns)4] = "Dragon lair! Dragon sleeps on gold. South to mountain. Needs ring and sword."
+
+    north[(uns)0] = "forest"
+    south[(uns)1] = "shire"
+    north[(uns)1] = "trollcave"
+    south[(uns)2] = "forest"
+    east[(uns)1] = "mountain"
+    west[(uns)3] = "forest"
+    north[(uns)3] = "dragonlair"
+    south[(uns)4] = "mountain"
+
+    item[(uns)0] = "ring"
+    item[(uns)2] = "sword"
+
+    index["shire"] = 0
+    index["forest"] = 1
+    index["trollcave"] = 2
+    index["mountain"] = 3
+    index["dragonlair"] = 4
+
+    current = 0
+    hasWon = false
+    inv = []
+  }
+
+  fun i32 roomId(string name) {
+    if index.hasKey(name) {
+      return index[name]
+    }
+    return -1
+  }
+
+  public fun look() {
+    string d = descs[(uns)current]
+    console.log(d)
+    string it = item[(uns)current]
+    if it.len > 0 {
+      console.log($"You see {it} here. 'take {it}'")
+    }
+    string exits = "Exits:"
+    if north[(uns)current].len > 0 {
+      exits += $" north to {north[(uns)current]}"
+    }
+    if south[(uns)current].len > 0 {
+      exits += $" south to {south[(uns)current]}"
+    }
+    if east[(uns)current].len > 0 {
+      exits += $" east to {east[(uns)current]}"
+    }
+    if west[(uns)current].len > 0 {
+      exits += $" west to {west[(uns)current]}"
+    }
+    console.log(exits)
+  }
+
+  public fun go(string dir) {
+    string dest = ""
+    if dir == "north" {
+      dest = north[(uns)current]
+    } else if dir == "south" {
+      dest = south[(uns)current]
+    } else if dir == "east" {
+      dest = east[(uns)current]
+    } else if dir == "west" {
+      dest = west[(uns)current]
+    }
+    if dest.len == 0 {
+      console.log("No exit that way")
+      return
+    }
+    i32 id = roomId(dest)
+    if id < 0 {
+      console.log("Unknown room")
+      return
+    }
+    current = id
+    if current == 4 {
+      if inv.hasKey("ring") && inv.hasKey("sword") {
+        console.log("You have ring and sword! Dragon flees! You win!")
+        hasWon = true
+      } else {
+        console.log("Dragon wakes! You need ring and sword! Run south!")
+      }
+    }
+    look()
+  }
+
+  public fun take() {
+    string it = item[(uns)current]
+    if it.len == 0 {
+      console.log("Nothing to take")
+      return
+    }
+    inv[it] = 1
+    console.log($"Taken {it}")
+    item[(uns)current] = ""
+  }
+
+  public fun invList() {
+    if inv.len == 0 {
+      console.log("Inventory empty")
+      return
+    }
+    console.log($"Inventory keys {inv.keys} len {inv.len}")
+    for (string k, i32 v) in inv {
+      console.log($"  {k}")
+    }
+  }
+
+  public fun render() {
+    string s = ""
+    s += $"== {names[(uns)current]} ==\n"
+    s += $"{descs[(uns)current]}\n"
+    s += $"Exits: "
+    if north[(uns)current].len > 0 { s += "north " }
+    if south[(uns)current].len > 0 { s += "south " }
+    if east[(uns)current].len > 0 { s += "east " }
+    if west[(uns)current].len > 0 { s += "west " }
+    s += "\n"
+    string it = item[(uns)current]
+    if it.len > 0 { s += $"Item here: {it}\n" }
+    s += $"Inv: {inv.keys}\n"
+    s += "Commands: go north/south/east/west, n/s/e/w, take, inv, look, q\n"
+    console.clear()
+    console.print(s)
+  }
+}
+
+fun int main() {
+  console.log("Hobbit RPG - Db stress test")
+  atEnd {
+    console.log("atEnd 1 - last")
+  }
+  atEnd {
+    console.log("atEnd 2 - first")
+  }
+
+  World w = World()
+  w.start()
+  w.render()
+  w.look()
+
+  hmap<string, i32> big = []
+  for i32 i = 0..80 {
+    string k = $"k{i}"
+    big[k] = i
+  }
+  string src = "".padLeft(5000, '.')
+  src[100] = 'X'
+  string moved = ->src
+  console.log($"big len {big.len} k10 {big["k10"]} block moved len {moved.len} src after {src.len}")
+
+  while !w.hasWon {
+    string line = console.readLine()
+    if line.len == 0 { continue }
+    line = line.trim().toLower()
+    if line == "q" { break }
+    if line == "look" || line == "l" {
+      w.look()
+      continue
+    }
+    if line == "inv" || line == "i" {
+      w.invList()
+      continue
+    }
+    if line == "take" || line == "t" {
+      w.take()
+      w.render()
+      continue
+    }
+    arr<string> parts = line.split(" ")
+    if parts.len == 0 { continue }
+    string a = parts[0]
+    if a == "go" && parts.len >= 2 {
+      w.go(parts[1])
+      w.render()
+      continue
+    }
+    if a == "n" {
+      w.go("north")
+      w.render()
+      continue
+    }
+    if a == "s" {
+      w.go("south")
+      w.render()
+      continue
+    }
+    if a == "e" {
+      w.go("east")
+      w.render()
+      continue
+    }
+    if a == "w" {
+      w.go("west")
+      w.render()
+      continue
+    }
+    if a == "north" || a == "south" || a == "east" || a == "west" {
+      w.go(a)
+      w.render()
+      continue
+    }
+    console.log("I don't understand. Try north south east west take inv look q")
+  }
+
+  if w.hasWon {
+    console.log("You won Hobbit! Dragon fled!")
+  } else {
+    console.log("Game quit")
+  }
+  return 0
+}

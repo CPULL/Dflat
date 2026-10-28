@@ -1,0 +1,113 @@
+// hset<T> (spec 6.8.7), step 2 of the sets plan: the table of hmap with an empty value. Native and string items; add, has, remove, ->s[item], clear,
+// .len, .sizeof, the capacity members, for, printing and literals. The order of the items is the order of the table
+alias Root as r
+enum Color { red, green, blue }
+
+hset<i32> numbers = [3, 1, 2]
+r.Console.log(numbers.len)                           // 3
+r.Console.log(numbers.add(4))                        // true
+r.Console.log(numbers.add(2))                        // false: already there
+r.Console.log(numbers.has(4))                        // true
+r.Console.log(numbers.has(9))                        // false
+r.Console.log(numbers.remove(1))                     // true
+r.Console.log(numbers.remove(1))                     // false
+r.Console.log(numbers.len)                           // 3
+i32 total = 0
+for i32 n in numbers {
+  total += n
+}
+r.Console.log(total)                                 // 9
+
+// the item type from the literal; strings are the set's own copies
+hset tags = ["red", "blue"]
+string green = "gr"
+green += "een"
+tags.add(green)
+green = "changed"
+r.Console.log(tags.has("green"))                     // true
+r.Console.log(tags.has("changed"))                   // false
+r.Console.log(tags.len)                              // 3
+string taken = ->tags["blue"]
+r.Console.log(taken)                                 // blue
+r.Console.log(tags.has("blue"))                      // false
+string missing = ->tags["nothing"]
+r.Console.log($"[{missing}]")                        // []
+for var tag in tags {
+  r.Console.log(tag.len > 0)                         // true (twice)
+}
+
+// an empty set, a set of enums, of reals, of nullables (null is an item)
+hset<string> empty = []
+r.Console.log(empty.len)                             // 0
+r.Console.log(empty)                                 // []
+hset<Color> colors = [Color.blue, Color.red]
+colors.add(Color.blue)
+r.Console.log(colors.len)                            // 2
+hset<r64> reals = [0.0, 1.5]
+r64 zero = 0.0
+r.Console.log(reals.add(-zero))                      // false: -0.0 is 0.0
+r.Console.log(reals.len)                             // 2
+hset<i16?> maybe = [null, 7]
+r.Console.log(maybe.has(null))                       // true
+maybe.remove(null)
+r.Console.log(maybe)                                 // [7]
+i32 seven = ->numbers[4]
+r.Console.log(seven)                                 // 4
+
+// printing: the first 3 items, then the count
+hset<i32> many = []
+for i32 i = 0..10 {
+  many.add(i * i)
+}
+r.Console.log(many.len)                              // 10
+string printed = $"{many}"
+r.Console.log(printed.endsWith("(10 items)"))        // true
+
+// capacity
+hset<u32>[100] sized
+r.Console.log(sized.capacity >= 100)                 // true
+r.Console.log(sized.len)                             // 0
+hset<u32> grown = hset<u32>[50]
+grown.reserve(200)
+r.Console.log(grown.capacity >= 200)                 // true
+grown.add(1)
+r.Console.log(grown.shrinkToFit())                   // true
+r.Console.log(grown.sizeof > 0)                      // true
+
+// clear, a parameter, a field
+many.clear()
+r.Console.log(many.len)                              // 0
+fun i32 count(hset<string> s, string wanted) {
+  i32 found = 0
+  for string item in s {
+    if item == wanted {
+      found += 1
+    }
+  }
+  return found
+}
+r.Console.log(count(tags, "red"))                    // 1
+class Visited {
+  public hset<i32> ids = []
+}
+Visited v = Visited()
+v.ids.add(5)
+v.ids.add(5)
+r.Console.log(v.ids)                                 // [5]
+
+// not while it is walked (spec 6.4)
+fun string grow(hset<i32> s) {
+  for i32 n in s {
+    s.add(n + 100)
+  }
+  return "grew"
+  catch ModifyingIteratedCollectionException { return "locked" }
+}
+r.Console.log(grow(numbers))                         // locked
+fun string again(hset<i32> s) {
+  for i32 n in s {
+    s.add(n)                                         // already there: the size does not change
+  }
+  return "same size"
+}
+r.Console.log(again(numbers))                        // same size

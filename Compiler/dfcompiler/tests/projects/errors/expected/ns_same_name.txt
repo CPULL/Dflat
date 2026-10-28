@@ -1,0 +1,1 @@
+mylib/lib.df(3): error: 'one' is declared in the namespace 'app' and in 'mylib': names qualified by their namespace are not built yet, so a name can be used in one namespace only

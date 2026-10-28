@@ -1,0 +1,13 @@
+// Multi-file program (spec 16): the root file imports a folder of the program and a library
+namespace app
+import app.util
+import shapes
+import shapes.extra
+alias Root as r
+
+r.Console.log(twice(LIMIT))
+r.Console.log(area(3, 4))
+r.Console.log(Kind.Square)
+r.Console.log(Counter(5).next())
+r.Console.log(perimeter(3, 4))
+r.Console.log(greeting())

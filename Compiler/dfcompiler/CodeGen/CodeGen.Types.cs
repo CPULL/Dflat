@@ -65,7 +65,7 @@ public sealed partial class CodeGen {
 
   bool IsKnownType(string t) {
     return SignedTypes.Contains(t) || UnsignedTypes.Contains(t) || RealTypes.Contains(t)
-      || t is "bool" or "char" or "string" or "byte" or "uns" or "int" or "date" or "time" or "clock" or "lapse" or "Exception" || IsEnum(t) || IsClass(t);
+      || t is "bool" or "char" or "string" or "byte" or "uns" or "int" or "date" or "time" or "clock" or "lapse" or "Exception" or "addr" || IsEnum(t) || IsClass(t);
   }
 
   // the native integer types (spec 2.1): int and uns, and the unsuffixed integer literals; the size of the cpu or of --native-int, set
@@ -177,6 +177,7 @@ public sealed partial class CodeGen {
       "clock" => "uint64_t",
       "lapse" => "int64_t",
       "void" => "void",
+      "addr" => "void*",            // an opaque address (spec 2.3): stored, passed, compared, never dereferenced
       _ => throw new InvalidOperationException(t)
     };
   }
@@ -265,7 +266,7 @@ public sealed partial class CodeGen {
     if (IsArr(type)) {
       return $"(({CType(type)}){{0}})";
     }
-    if (IsClass(type)) {
+    if (IsClass(type) || type == "addr") {
       return "NULL";
     }
     if (IsTuple(type) || IsMulti(type)) {
@@ -340,6 +341,14 @@ public sealed partial class CodeGen {
           var hmapArgs = TypeArgsOf(n.Children, hmapClass.Params);
           CheckMapArgs(hmapArgs, n, true);
           return ClassInstanceName(hmapClass, hmapArgs, n);
+        }
+        if (t is "set" or "bset" or "hset" && vecPrelude) {
+          // set<T> (spec 6.8.6), alias bset, and hset<T> (spec 6.8.7): the copy of the generic class set or hset
+          bool hashed = t == "hset";
+          var setClass = genericClasses[hashed ? "hset" : "set"];
+          var setArgs = TypeArgsOf(n.Children, setClass.Params);
+          CheckSetArgs(setArgs, n, hashed);
+          return ClassInstanceName(setClass, setArgs, n);
         }
         if (TypeFeatures.TryGetValue(t, out var feature)) {
           throw NotSupported(feature, n);
@@ -467,7 +476,7 @@ public sealed partial class CodeGen {
       if (IsTimeType(to)) {
         return NullCode(to);
       }
-      if (IsArr(to) || IsClass(to)) {
+      if (IsArr(to) || IsClass(to) || to == "addr") {
         return ZeroValue(to);
       }
       if (to == "Exception") {
@@ -642,6 +651,9 @@ public sealed partial class CodeGen {
     if (IsMap(e.Type)) {
       return $"{MapStrFunction(e.Type, at)}({e.Code})";
     }
+    if (IsSet(e.Type)) {
+      return $"{SetStrFunction(e.Type, at)}({e.Code})";
+    }
     if (MapViewKind(e.Type) != null) {
       return MapViewStr(e, at);
     }
@@ -672,6 +684,7 @@ public sealed partial class CodeGen {
       "time" => Need("date", $"df_str_from_time({e.Code})"),
       "clock" => $"df_str_from_clock({e.Code})",
       "lapse" => $"df_str_from_lapse({e.Code})",
+      "addr" => $"df_str_from_addr({e.Code})",
       _ => throw Error($"{e.Type} cannot be converted to a string yet", at)
     };
   }
@@ -697,6 +710,13 @@ public sealed partial class CodeGen {
     }
     if (IsClass(l.Type)) {
       return ObjectEquals(l, r, at);   // equals, the operator ==, or identity (11.1.3)
+    }
+    if (l.Type == "addr" || r.Type == "addr") {
+      // addr (spec 2.3): compared with another addr or with null (address 0)
+      if (!(l.Type == "addr" && r.Type is "addr" or "null")) {
+        throw Error($"cannot compare {l.Type} and {r.Type}", at);
+      }
+      return r.Type == "null" ? $"(({l.Code}) == NULL)" : $"(({l.Code}) == ({r.Code}))";
     }
     if (IsArr(l.Type) && (IsArr(r.Type) || r.Type == "null")) {
       // collections compare by identity (spec 6.1)

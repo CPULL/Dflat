@@ -1,0 +1,2 @@
+string _myPrivateField = "a"
+Root.Console.log(_myPrivateField)

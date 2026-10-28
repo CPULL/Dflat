@@ -1,0 +1,7 @@
+namespace app.util
+
+fun i32 twice(i32 x) { x * 2 }
+
+class Counter(i32 start) {
+  public fun i32 next() { start + 1 }
+}

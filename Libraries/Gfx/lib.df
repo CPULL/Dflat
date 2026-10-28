@@ -1,0 +1,281 @@
+// gfx: a minimal 2D graphics library (spec dflat-gfx_spec.md, version 0.0.1). The Dflat classes over the C core in Src (gfx.h), called
+// through extern fun (Dflat spec 15.9). Every object is a handle: a weak reference to its context and the handle of the C side.
+namespace gfx
+
+// ---------------------------------------------------------------- the C core
+
+extern fun bool gfx_is_available()
+extern fun i32 gfx_display_count()
+extern fun i32 gfx_display_x(i32 index)
+extern fun i32 gfx_display_y(i32 index)
+extern fun i32 gfx_display_width(i32 index)
+extern fun i32 gfx_display_height(i32 index)
+extern fun bool gfx_display_primary(i32 index)
+extern fun i32 gfx_display_name(i32 index, arr<u8> buffer)
+
+extern fun addr gfx_context_create()
+extern fun gfx_context_destroy(addr ctx)
+extern fun bool gfx_valid(addr ctx, u64 handle)
+extern fun gfx_release(addr ctx, u64 handle)
+extern fun gfx_set_clear_color(addr ctx, r32 r, r32 g, r32 b, r32 a)
+extern fun bool gfx_update(addr ctx)
+
+extern fun u64 gfx_window_create(addr ctx, i32 width, i32 height)
+extern fun i32 gfx_window_width(addr ctx, u64 window)
+extern fun i32 gfx_window_height(addr ctx, u64 window)
+extern fun gfx_window_set_resize_mode(addr ctx, u64 window, i32 mode)
+extern fun gfx_window_set_integer_scale(addr ctx, u64 window, bool integerScale)
+
+extern fun u64 gfx_texture_create(addr ctx, arr<u8> data, i32 width, i32 height, i32 format, i32 filter)
+extern fun bool gfx_texture_set_data(addr ctx, u64 texture, arr<u8> data)
+extern fun gfx_texture_set_filter(addr ctx, u64 texture, i32 filter)
+
+extern fun u64 gfx_sprite_create(addr ctx, u64 texture)
+extern fun gfx_sprite_set_texture(addr ctx, u64 sprite, u64 texture)
+extern fun gfx_sprite_set_state(addr ctx, u64 sprite, r32 posX, r32 posY, r32 offsetX, r32 offsetY, r32 scaleX, r32 scaleY, r32 rotation,
+                                i32 order, r32 tlX, r32 tlY, r32 brX, r32 brY, bool visible)
+
+extern fun u64 gfx_font_create(addr ctx, u64 texture, i32 glyphWidth, i32 glyphHeight)
+
+extern fun u64 gfx_label_create(addr ctx, u64 font, string text)
+extern fun gfx_label_set_text(addr ctx, u64 label, string text)
+extern fun gfx_label_set_font(addr ctx, u64 label, u64 font)
+extern fun gfx_label_set_state(addr ctx, u64 label, r32 posX, r32 posY, r32 offsetX, r32 offsetY, r32 scaleX, r32 scaleY, r32 rotation,
+                               i32 order, bool visible, r32 r, r32 g, r32 b, r32 a)
+
+// ---------------------------------------------------------------- enums and exceptions
+
+public enum PixelFormat { RGBA8 }
+public enum FilteringMode { Nearest, Linear }
+public enum ResizeMode { None, KeepPixelSize, Stretch, Fit, FitWidth, FitHeight }
+
+public class VulkanNotAvailableException : Exception { }
+public class InvalidTextureDefinitionException : Exception { }
+public class UsageOfStaleResourceException : Exception, SilentException { }
+public class ImpossibleToCreateWindowException : Exception { }
+
+// ---------------------------------------------------------------- Gfx
+
+public class Gfx {
+  public static readonly string version = "0.0.1"
+
+  public static fun bool isAvailable() { gfx_is_available() }
+
+  public static fun Context createContext() {
+    addr ptr = gfx_context_create()
+    if ptr == null {
+      throw VulkanNotAvailableException("Vulkan or a usable GPU is not present")
+    }
+    return Context(ptr)
+  }
+
+  public static fun arr<(i32 x, i32 y, i32 width, i32 height, bool primary, string name)> getDisplays() {
+    i32 count = gfx_display_count()
+    arr<(i32 x, i32 y, i32 width, i32 height, bool primary, string name)> displays = arr<(i32 x, i32 y, i32 width, i32 height, bool primary, string name)>[count]
+    arr<u8> buffer = arr<u8>[256]
+    for i32 i in 0..count {
+      i32 length = gfx_display_name(i, buffer)
+      string name = ""
+      for i32 k in 0..length {
+        name += (char)buffer[k]
+      }
+      displays[i] = (gfx_display_x(i), gfx_display_y(i), gfx_display_width(i), gfx_display_height(i), gfx_display_primary(i), name)
+    }
+    return displays
+  }
+}
+
+// ---------------------------------------------------------------- Context
+
+public class Context(addr ptr) {
+  internal addr ptr
+  public readwrite clearColor {
+    r32 r { W: { field = value; pushClear() } } = 0.0,
+    r32 g { W: { field = value; pushClear() } } = 0.0,
+    r32 b { W: { field = value; pushClear() } } = 0.0,
+    r32 a { W: { field = value; pushClear() } } = 1.0
+  }
+
+  fun pushClear() {
+    if ptr != null {
+      gfx_set_clear_color(ptr, clearColor.r, clearColor.g, clearColor.b, clearColor.a)
+    }
+  }
+
+  public fun Window createWindow(i32 width, i32 height) {
+    u64 handle = gfx_window_create(ptr, width, height)
+    if handle == 0 {
+      throw ImpossibleToCreateWindowException("the window cannot be created (a second window, a size <= 0, or the system refused it)")
+    }
+    return Window(this, handle, width, height)
+  }
+
+  public fun Texture2D createTexture(arr<u8> data, i32 width, i32 height,
+                                     PixelFormat format = PixelFormat.RGBA8, FilteringMode filter = FilteringMode.Nearest) {
+    if width <= 0 || height <= 0 || (i64)data.len < (i64)width * (i64)height * 4 {
+      throw InvalidTextureDefinitionException("a texture needs width and height above 0 and width * height * 4 bytes")
+    }
+    u64 handle = gfx_texture_create(ptr, data, width, height, (i32)format, (i32)filter)
+    return Texture2D(this, handle, width, height, format, filter)
+  }
+
+  public fun Sprite createSprite(Texture2D texture) {
+    return Sprite(this, gfx_sprite_create(ptr, texture.handle), texture)
+  }
+
+  public fun TextureFont createTextureFont(Texture2D texture, i32 glyphWidth, i32 glyphHeight) {
+    return TextureFont(this, gfx_font_create(ptr, texture.handle, glyphWidth, glyphHeight), texture, glyphWidth, glyphHeight)
+  }
+
+  public fun Label createLabel(TextureFont font, string text) {
+    return Label(this, gfx_label_create(ptr, font.handle, text), font, text)
+  }
+
+  public fun bool update() {
+    if ptr == null {
+      return false
+    }
+    return gfx_update(ptr)
+  }
+
+  public fun close() {
+    if ptr != null {
+      gfx_context_destroy(ptr)
+      ptr = null
+    }
+  }
+} atEnd {
+  close()
+}
+
+// ---------------------------------------------------------------- the handles
+
+public class Window(_Context context, u64 handle, i32 worldWidth, i32 worldHeight) {
+  internal u64 handle
+  public i32 width { R: { viewport(true) } }
+  public i32 height { R: { viewport(false) } }
+  public readwrite ResizeMode resizeMode { W: { field = value; enforce context { gfx_window_set_resize_mode(context.ptr, handle, (i32)value) } } } = ResizeMode.KeepPixelSize
+  public readwrite bool integerScale { W: { field = value; enforce context { gfx_window_set_integer_scale(context.ptr, handle, value) } } }
+
+  fun i32 viewport(bool wide) {
+    enforce context {
+      if !gfx_valid(context.ptr, handle) {
+        throw UsageOfStaleResourceException("the window was released")
+      }
+      if wide {
+        return gfx_window_width(context.ptr, handle)
+      }
+      return gfx_window_height(context.ptr, handle)
+    }
+    throw UsageOfStaleResourceException("the context of the window ended")
+  }
+
+  public fun release() {
+    enforce context { gfx_release(context.ptr, handle) }
+  }
+}
+
+public class Texture2D(_Context context, u64 handle, i32 width, i32 height, PixelFormat pixelFormat, FilteringMode filter) {
+  internal u64 handle
+  public readonly i32 width
+  public readonly i32 height
+  public readonly PixelFormat pixelFormat
+  public readwrite FilteringMode filtering { W: { field = value; enforce context { gfx_texture_set_filter(context.ptr, handle, (i32)value) } } } = filter
+
+  public fun setData(arr<u8> data) {
+    if (i64)data.len < (i64)width * (i64)height * 4 {
+      throw InvalidTextureDefinitionException("the data is shorter than width * height * 4 bytes")
+    }
+    enforce context {
+      if !gfx_texture_set_data(context.ptr, handle, data) {
+        throw UsageOfStaleResourceException("the texture was released")
+      }
+      return
+    }
+    throw UsageOfStaleResourceException("the context of the texture ended")
+  }
+
+  public fun release() {
+    enforce context { gfx_release(context.ptr, handle) }
+  }
+}
+
+public class TextureFont(_Context context, u64 handle, _Texture2D texture, i32 glyphWidth, i32 glyphHeight) {
+  internal u64 handle
+  public readonly _Texture2D texture
+  public readonly i32 glyphWidth
+  public readonly i32 glyphHeight
+
+  public fun release() {
+    enforce context { gfx_release(context.ptr, handle) }
+  }
+}
+
+public class Sprite(_Context context, u64 handle, _Texture2D texture) {
+  internal u64 handle
+  public readonly _Texture2D texture
+  public readwrite pos { r32 x { W: { field = value; push() } }, r32 y { W: { field = value; push() } } }
+  public readwrite offset { r32 x { W: { field = value; push() } }, r32 y { W: { field = value; push() } } }
+  public readwrite scale { r32 x { W: { field = value; push() } } = 1.0, r32 y { W: { field = value; push() } } = 1.0 }
+  public readwrite r32 rotation { W: { field = value; push() } }
+  public readwrite i32 order { W: { field = value; push() } }
+  public readwrite tl { r32 x { W: { field = value; push() } } = 0.0, r32 y { W: { field = value; push() } } = 0.0 }
+  public readwrite br { r32 x { W: { field = value; push() } } = 1.0, r32 y { W: { field = value; push() } } = 1.0 }
+  public readwrite bool visible { W: { field = value; push() } } = true
+
+  // every change goes to the C side at once
+  fun push() {
+    enforce context {
+      if !gfx_valid(context.ptr, handle) {
+        throw UsageOfStaleResourceException("the sprite was released")
+      }
+      gfx_sprite_set_state(context.ptr, handle, pos.x, pos.y, offset.x, offset.y, scale.x, scale.y, rotation, order,
+                           tl.x, tl.y, br.x, br.y, visible)
+    }
+  }
+
+  public fun setTexture(Texture2D newTexture) {
+    texture _= newTexture
+    enforce context { gfx_sprite_set_texture(context.ptr, handle, newTexture.handle) }
+  }
+
+  public fun release() {
+    enforce context { gfx_release(context.ptr, handle) }
+  }
+}
+
+public class Label(_Context context, u64 handle, _TextureFont font, string start) {
+  internal u64 handle
+  public readwrite pos { r32 x { W: { field = value; push() } }, r32 y { W: { field = value; push() } } }
+  public readwrite offset { r32 x { W: { field = value; push() } }, r32 y { W: { field = value; push() } } }
+  public readwrite scale { r32 x { W: { field = value; push() } } = 1.0, r32 y { W: { field = value; push() } } = 1.0 }
+  public readwrite r32 rotation { W: { field = value; push() } }
+  public readwrite i32 order { W: { field = value; push() } }
+  public readwrite bool visible { W: { field = value; push() } } = true
+  public readwrite string text { W: { field = value; enforce context { gfx_label_set_text(context.ptr, handle, value) } } } = start
+  public readwrite color {
+    r32 r { W: { field = value; push() } } = 1.0,
+    r32 g { W: { field = value; push() } } = 1.0,
+    r32 b { W: { field = value; push() } } = 1.0,
+    r32 a { W: { field = value; push() } } = 1.0
+  }
+
+  fun push() {
+    enforce context {
+      if !gfx_valid(context.ptr, handle) {
+        throw UsageOfStaleResourceException("the label was released")
+      }
+      gfx_label_set_state(context.ptr, handle, pos.x, pos.y, offset.x, offset.y, scale.x, scale.y, rotation, order, visible,
+                          color.r, color.g, color.b, color.a)
+    }
+  }
+
+  public fun setFont(TextureFont newFont) {
+    font _= newFont
+    enforce context { gfx_label_set_font(context.ptr, handle, newFont.handle) }
+  }
+
+  public fun release() {
+    enforce context { gfx_release(context.ptr, handle) }
+  }
+}

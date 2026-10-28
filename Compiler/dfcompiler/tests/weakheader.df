@@ -1,0 +1,21 @@
+// a weak header parameter redeclared as public readonly keeps the value given to the constructor; an addr prints as hex (spec 2.3)
+namespace weakheader
+alias Root as r
+
+class C {
+  public i32 id = 9
+}
+
+class H(_C c) {
+  public readonly _C c
+  public fun i32 read() {
+    enforce c { return c.id }
+    return -1
+  }
+}
+
+var ctx = C()
+var h = H(ctx)
+r.Console.log(h.read())
+addr a = null
+r.Console.log(a)

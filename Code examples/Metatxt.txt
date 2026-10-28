@@ -1,0 +1,81 @@
+
+namespace DbIntegrationTest
+
+alias Root.Console as console
+
+class Product {
+  public string name
+  public i32 quantity
+  public u32 id
+
+  public fun Product(string n, i32 q, u32 i) {
+    name = n
+    quantity = q
+    id = i
+  }
+
+  public fun string toString() {
+    $"Product({name}, qty={quantity}, id={id})"
+  }
+}
+
+fun bool earlyReturnTest() {
+  atEnd { console.log("early: inner cleanup") }
+  atEnd { console.log("early: outer cleanup") }
+
+  console.log("early: returning now")
+  return true
+}
+
+fun int main() {
+  console.log("=== D♭ integration test ===")
+
+  // Test 1: Unicode strings and interpolation
+  string ascii = "hello"
+  string accented = "café"
+  string emoji = "game 😀"
+
+  console.log($"ASCII: {ascii}")
+  console.log($"Accented: {accented}")
+  console.log($"Emoji: {emoji}")
+
+  // Test 2: Generic function
+  Product p = Product("Crème 😀", 7, 42)
+  console.log(p.toString())
+
+  // Test 3: atEnd LIFO ordering
+  {
+    atEnd { console.log("scope: first registered") }
+    atEnd { console.log("scope: second registered") }
+    console.log("scope: leaving block")
+  }
+
+  // Test 4: atEnd on early return
+  earlyReturnTest()
+
+  // Test 5: map ordering
+  map<string, i32> inventory
+  inventory["zebra"] = 3
+  inventory["apple"] = 5
+  inventory["café"] = 8
+  inventory["😀"] = 13
+
+  console.log("map iteration:")
+  for string key in inventory.keys {
+    console.log($"{key} = {inventory[key]}")
+  }
+
+  // Test 6: hmap lookup
+  hmap<string, i32> fastInventory
+  fastInventory["zebra"] = 3
+  fastInventory["apple"] = 5
+  fastInventory["café"] = 8
+  fastInventory["😀"] = 13
+
+  console.log($"hmap apple = {fastInventory["apple"]}")
+  console.log($"hmap café = {fastInventory["café"]}")
+  console.log($"hmap emoji = {fastInventory["😀"]}")
+
+  console.log("=== tests reached end ===")
+  return 0
+}

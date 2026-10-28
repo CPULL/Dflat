@@ -1,0 +1,9 @@
+[ann: 30, cid: 50]
+[bob, dan, nobody]
+[2: two]
+0
+2
+[y: 2]
+[1: true]
+locked
+---- exit code 0 ----

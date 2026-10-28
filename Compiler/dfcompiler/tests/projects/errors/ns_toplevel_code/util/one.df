@@ -1,0 +1,4 @@
+namespace local
+
+fun i32 one() { 1 }
+Root.Console.log("not allowed")

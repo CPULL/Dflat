@@ -1,8 +1,8 @@
-# Collections: what is left to decide and to build (updated 2026/10/27 evening, Specs0.0.17, compiler 0.0.34alpha)
+# Collections: what is left to decide and to build (updated 2026/10/28, Specs0.0.18, compiler 0.0.34alpha)
 
 You are helping me finish the design of the collections of Dflat. You have access to the approved specification: it is quoted as Specs<section> (for example Specs6.8.3 is section 6.8.3 of dflat-spec.md). The compiler is written in C# and generates C (clang). It builds `arr<T>`, `vec<T>`, `list<T>`, `map<K, V>` and `hmap<K, V>` (native and string keys and values); `set` and `hset` do not exist yet. Every point below has a tag that says whether it is open, decided, built or left for later, with its context. Please answer by point number.
 
-The points tagged INSPECS are decided and written in the specification (Specs0.0.16 and 0.0.17, 2026/10/26 and 2026/10/27): each keeps only a line with the sections of the spec, and its COMPILERSTATE line when something is not built. The points still tagged DECIDED are decided but not (fully) in the specification, for the reason written in them. The discussion continues with the TOBEDISCUSSED points.
+The points tagged INSPECS are decided and written in the specification (Specs0.0.16, 0.0.17 and 0.0.18, 2026/10/26 to 2026/10/28): each keeps only a line with the sections of the spec, and its COMPILERSTATE line when something is not built. The points still tagged DECIDED are decided but not (fully) in the specification, for the reason written in them. The discussion continues with the TOBEDISCUSSED points.
 
 Tags (one per point):
 - TOBEDISCUSSED: open, needed shortly. This is what I want to discuss.
@@ -19,13 +19,13 @@ Labels inside a point:
 
 How the compiler implements the collections today (so you can judge the proposals): `vec` and `list` are generic classes written in Dflat over `arr<T>`, embedded in the compiler. The hot paths (index, length, `for`, the literal, `has`, `sort`, printing, the drop) are C that the compiler emits. The items are owned: moving an existing object in needs `->x`, a new object needs no marker, a replaced or removed item ends; a string item is always its own copy in its smallest form. The counter of open iterators and views (the private field `iteratorCounter` of the trait `Collection`) makes a changing operation raise `ModifyingIteratedCollectionException` (ID 46). In Release builds an index outside a collection and that exception are a `Panic`. Traits: `Collection<Item>` (the parent), `IndexCollection<Item>`, `IndexIterator<Item>` and `Iterator`. The language has generic traits with a generic parent trait, placeholders, a type switch, value parameters, ownership with moves, silent exceptions, a preprocessor and `uns`. `map` and `hmap` are generic classes written in Dflat too, over a C runtime each (the B+ tree and the extendible hash table); they share the class methods and the code at the call sites. `.hash` is built for every type (point 86). A printed collection shows only its first 3 items, then `, ...] (N items)` (Specs6.1).
 
-## AGENDA FOR THE NEXT DISCUSSION (2026/10/27 evening)
+## AGENDA FOR THE NEXT DISCUSSION (2026/10/28)
 
 Everything that can be built without a new decision is built. What is left, by what it unblocks:
-1. hset and set (step 7 of point 46; Part H and Part I): the basic hset (`add`, `has`, `remove`, `.len`, `for`, literals, capacity) can be built now from the hmap code. The set operations wait for points 52 (new sets: ownership), 53 (`|=` `&=` `-=` `^=` `+=`), 55 (`add(collection)`), 56 (the iterator of a set), 57 (`->s[item]` or `take`), 58 (set literals, bare `set tags = [...]`), 60 (mixing `set` and `hset`), 61 (order of the result on an `hset`).
+1. hset and set (step 7 of point 46; Part H and Part I): everything is decided and in Specs0.0.18 (points 52 to 61). Agreed build order: (1) DONE 2026/10/28 (0.0.35alpha): `+=` and `-=` on `map` and `hmap` (`m += (k, v)`, `m += other`, `m -= key`); (2) DONE 2026/10/28 (0.0.36alpha): basic `hset` from the hmap code (`add`, `has`, `remove`, `.len`, `for`, printing, capacity, literals, `->s[item]`; native and string items); (3) DONE 2026/10/28 (0.0.37alpha): basic `set` from the map code; (4) DONE 2026/10/28 (0.0.38alpha): `add(collection)`, `s += v / coll`, `s -= v / coll`, `set` and `hset` mixed; (5) DONE 2026/10/28 (0.0.39alpha): `m -= s`; (6) DONE 2026/10/28 (0.0.40alpha): `union`, `intersection`, `difference`, `symmetricDifference`, `isSubsetOf`, `isSupersetOf`, `isDisjointFrom`; (7) objects as items (waits for `Keyable` and clone, ownership step 4b; the usual warning until then).
 2. Object keys and values (step 8 of point 46, step 6 of point 78): `Keyable` (point 79) needs the name of its exception (Specs99); the rest is compiler work (the chained `executeAfter` of point 9, the default `equals` and `compareTo` of classes, points 14 and 82).
 3. Rules shared by every collection: 83 (lifetime of a borrow of an item: needed for writable values with `(&)`), 85 (when a temporary object ends: today a view used inside an expression locks its collection for good).
-4. The members of `MapIterator` and `SetIterator` and the shape of `next()` (points 1, 50, 56; Specs99).
+4. The members of `MapIterator` and the shape of its `next()` (points 1, 50; Specs99). `SetIterator` is decided (point 56).
 5. Smaller ones: 36 (lambdas and `sort(lambda)`), 45 (code size of the generic maps), 66 (variadic parameters and an existing collection).
 
 ## PART A - Traits, iterators and the rules every collection shares
@@ -35,7 +35,7 @@ The traits are in Specs6.7 and Specs6.9, the iteration rules in Specs6.4. The co
 ### 1. [INSPECS] The Iterator trait hierarchy
 
 Specs6.7: `Iterator` marker trait with `IndexIterator`, `MapIterator`, `SetIterator`.
-COMPILERSTATE: `Iterator` is an empty marker trait, `IndexIterator<Item> : Iterator` with `next()`. Missing: `MapIterator`, `SetIterator` and `writableNext()`.
+COMPILERSTATE: `Iterator` is an empty marker trait, `IndexIterator<Item> : Iterator` with `next()`. Missing: `MapIterator`, `SetIterator` (decided, Specs6.7.3) and `writableNext()`.
 
 ### 2. [INSPECS] getIterator() in the Collection sub-traits
 
@@ -167,7 +167,7 @@ COMPILERSTATE: built for `vec` and `list`.
 ### 27. [INSPECS] Sized declarations vec<T>[n] name
 
 Specs6.3.
-COMPILERSTATE: built for `arr` and `vec` (2026/10/25: `vec<T>[n] name` and `vec<T>[n] name = []` give an empty `vec` with capacity `n`; any other initializer is a compile error) and for `hmap` (2026/10/27, compiler 0.0.33alpha). Missing: `hset`, which does not exist yet.
+COMPILERSTATE: built for `arr` and `vec` (2026/10/25: `vec<T>[n] name` and `vec<T>[n] name = []` give an empty `vec` with capacity `n`; any other initializer is a compile error), for `hmap` (2026/10/27, compiler 0.0.33alpha) and for `hset` (2026/10/28, compiler 0.0.36alpha).
 
 ### 28. [INSPECS] Growth policy and capacity
 
@@ -305,53 +305,51 @@ COMPILERSTATE: built for `hmap` 2026/10/27 (compiler 0.0.31alpha, test hmapstrin
 ### 50. [INSPECS] Iterator and cursor of hash collections
 
 Specs6.8.5.1: the cursor is the directory index (`uns`), the block (`addr`) and the slot (`uns`); order the same for the same content and history.
-Still open (Specs99): the members of `MapIterator` and `SetIterator`.
+Still open (Specs99): the members of `MapIterator`. `SetIterator`: point 56.
 COMPILERSTATE: the cursor is built for `hmap` (the `for` loop and the views use it); there is no iterator object yet.
 
 ### 51. [INSPECS] Capacity members and the sized declaration
 
 Specs6.8.5, 6.8.5.1 (capacity on the directory, n / 11 buckets, `shrinkToFit()` returns `bool`), 6.8.7, 6.6, 6.3.
-COMPILERSTATE: built for `hmap` 2026/10/27 (compiler 0.0.33alpha, test hmapcapacity): `.capacity` is 11 per directory entry, `reserve(n)` (n in all) and `hmap<K, V>[n]` split every bucket to the depth needed, `shrinkToFit()` merges what fits and returns `false` when nothing changed (after many removals it often returns `false`: the removals already merged and shrank). Missing: `hset`.
+COMPILERSTATE: built for `hmap` 2026/10/27 (compiler 0.0.33alpha, test hmapcapacity): `.capacity` is 11 per directory entry, `reserve(n)` (n in all) and `hmap<K, V>[n]` split every bucket to the depth needed, `shrinkToFit()` merges what fits and returns `false` when nothing changed (after many removals it often returns `false`: the removals already merged and shrank). Built for `hset` 2026/10/28 (compiler 0.0.36alpha, test hset).
 
 ## PART H - set (bset): the sorted set
 
-Specs6.8.6, Specs6.7.3. Nothing is built, and the spec says "the sets are defined later; what follows is the first design". The settled rules: sorted (B-tree), alias `bset`, `SetCollection<Item>`, a value is held once, no capacity, items are read-only in loops, iteration sorted. (2026/10/26: a null item is no longer excluded, same rules as the keys, point 15.)
+Specs6.8.6, Specs6.7.3. COMPILERSTATE: the basic part is built 2026/10/28 (compiler 0.0.37alpha, test set): native and string items (null sorts first), `add`, `has`, `remove`, `->s[item]`, `clear`, `.len`, `.sizeof`, `for` (sorted), printing, literals (`set s = [...]` included); `set<T>[n]` is an error. Missing: steps 4 to 7 of the AGENDA. The design is complete in Specs0.0.18. The settled rules: sorted (B-tree), alias `bset`, `SetCollection<Item>`, a value is held once, no capacity, items are read-only in loops, iteration sorted. (2026/10/26: a null item is no longer excluded, same rules as the keys, point 15.)
 
-### 52. [TOBEDISCUSSED] The operations that return a new set
+### 52. [INSPECS] The operations that return a new set
 
-Context: Specs6.8.6: `union(other)`, `intersection(other)`, `difference(other)`, `symmetricDifference(other)` return new sets; the two sets must be of the same kind (`set` with `set`, `hset` with `hset`).
-Question: ownership. The new set holds items of the two sets; items are objects that the originals own. Cloned (point 35)? A compile error for sets of objects? Moved (which leaves the originals empty)?
-PROPOSAL: basic items, strings and other value types are copied; for objects the operation is a compile error until cloning exists.
+Specs6.8.6: basic items and strings are copied, objects are cloned (12.6); both originals are unchanged; `union`, `intersection`, `difference`, `symmetricDifference` exist on sets only.
+COMPILERSTATE: built 2026/10/28 (compiler 0.0.40alpha, test setoperations) for native and string items, `set` and `hset` mixed. Objects need clone (ownership step 4b): the usual warning until then.
 
-### 53. [TOBEDISCUSSED] The in-place operators |=, &=, -=, ^= and +=
+### 53. [INSPECS] The in-place operators += and -=
 
-Context: Specs6.8.6: `|=` (union), `&=` (intersection), `-=` (difference), `^=` (symmetric difference), `+=` as `|=`; with a single value `|=`/`+=` add it and `-=` removes it; no operator returns a new set (`set1 | set2` is not defined).
-COMPILERSTATE: compound operators on collections are not built; the compiler has operators only for numbers, strings and their kinds.
-Question: are these operators defined by the traits (operator overloading for `SetCollection`) or special cases of the compiler for the default sets? A custom set class: can it provide them? Which of `|=` with a single value and with a collection is chosen when the item type is itself a set?
-PROPOSAL: special cases of the compiler for the default sets in this version; operator overloading with the custom collections (point 63).
+Specs6.6, 6.7.2, 6.8.6: only `+=` and `-=`, on every map and set; they call the members (no special case of the compiler, one implementation; a custom collection gets them from its members, Specs6.9). Maps: `m += (key, value)` (`add(k, v)`), `m += other` (`add(map)`), `m -= key` (`removeAt`), `m -= s` (a `set` or `hset` of the key type: every key removed with its value). Sets: `s += v` / `s += other` (`add`), `s -= v` (`remove`), `s -= other` (in-place difference). `|=`, `&=` and `^=` are removed.
+COMPILERSTATE: built for maps 2026/10/28 (compiler 0.0.35alpha, test mapoperators): `add(map)`, `m += (k, v)`, `m += pair`, `m += other`, `m -= key` on `map` and `hmap`. Built 2026/10/28 (0.0.38alpha / 0.0.39alpha): the sets and `m -= set` (test mapminusset). Missing: `m += ->other`, and a map literal as the argument (`m += [k: v]`, `m.add([k: v])`: the overload resolution does not type a literal).
 
 ### 54. [INSPECS] isSubsetOf, isSupersetOf, isDisjointFrom
 
 Specs6.8.6.
 
-### 55. [TOBEDISCUSSED] add(collection) and has on sets
+### 55. [INSPECS] add(collection) and has on sets
 
-Context: Specs6.8.6: `add(val)` returns `true` if the value was added; `add(collection)` returns the number of items actually added; a duplicate is ignored.
-Question: the source of `add(collection)` (any collection of the right item type? a `vec`, an `arr`?) and the ownership of its items (point 24, point 35).
+Specs6.6, 6.8.6: any collection with the same item type (`set` and `hset` mixed); basic items and strings copied, objects cloned, `add(->other)` moves.
+COMPILERSTATE: built 2026/10/28 (compiler 0.0.38alpha, test setoperators) for native and string items: `add(arr / vec / list / set / hset)`, `s += v / coll / [literal]`, `s -= v / coll / [literal]`. Missing: objects (the usual warning until clone is built), a view or a call result as the collection of `-=`. Cost: every `set` / `hset` instance brings `vec`, `list` and the other set kind of its item type (the overloads of `add`).
 
-### 56. [TOBEDISCUSSED] The iterator of a set
+### 56. [INSPECS] The iterator of a set
 
-Context: Specs6.7.3 and Specs99: the shape of `next()` for sets is open (`(Item value, bool isValid)`?), and so are the cursor types. See point 1, point 3. Items are read-only in a loop (`(&)` is a compile error).
+Specs6.7, 6.7.3: `SetIterator<Item>`, `next()` returns `(Item value, bool isValid)`; no `writableNext()` (read-only items); the cursors of `map` and `hmap`.
+COMPILERSTATE: not built.
 
-### 57. [TOBEDISCUSSED] ->c[k] and swap on sets
+### 57. [INSPECS] ->c[k] and swap on sets
 
-Context: Specs6.6 and Specs6.7.3: a set has no `c[k]` read; `->c[k]` is "probably valid, the key being the item"; `swap` is not defined for sets.
-Question: the form (`->set[item]` removes the item and gives it; or `set.take(item)`?). The reason is that `has` tells whether an item is present and `remove(v)` ends it, so a way to take an object out is needed.
+Specs6.6, 6.7, 6.7.3: `->s[item]` (`move_out(Item k)`) removes the item and gives it; `swap` is not defined on sets. `item = s.remove(item)` was rejected: `remove` returns `bool`.
+COMPILERSTATE: not built.
 
-### 58. [TOBEDISCUSSED] Set literals
+### 58. [INSPECS] Set literals
 
-Context: Specs6.3: `[...]` can be assigned to `set` and `hset`; a duplicate value in a set literal is a compile error; the empty literal needs a declared type (`set<string> tags = []`).
-Question: the lowering (an empty set plus the adds) and the type of a bare `set tags = [...]`.
+Specs1, 6.3, 6.8.6: an empty set plus the adds; `set tags = [...]` and `hset tags = [...]` take the item type from the literal (as `hmap h = [k: v]`).
+COMPILERSTATE: not built.
 
 ### 59. [INSPECS] Sets and maps as items
 
@@ -359,18 +357,15 @@ Specs6.2: set items follow the key rules.
 
 ## PART I - hset: the hash set
 
-Specs6.8.7. Nothing is built; the basic part can be built now from the hmap code (see the AGENDA). The settled rules: `SetCollection<Item>`, a hash set, the same members and operations as `set`, capacity members and the capacity form `hset<T>[n]`, iteration in an unspecified order. Only the points that are different from `set` are listed.
+Specs6.8.7. COMPILERSTATE: the basic part is built 2026/10/28 (compiler 0.0.36alpha, test hset): native and string items, `add`, `has`, `remove`, `->s[item]`, `clear`, `.len`, `.sizeof`, the capacity members, `for`, printing, literals (`hset s = [...]` included), `hset<T>[n]`. Missing: steps 4 to 7 of the AGENDA. The settled rules: `SetCollection<Item>`, a hash set, the same members and operations as `set`, capacity members and the capacity form `hset<T>[n]`, iteration in an unspecified order. Only the points that are different from `set` are listed.
 
-### 60. [TOBEDISCUSSED] set against hset
+### 60. [INSPECS] set against hset
 
-Context: Specs6.8.6: the operations take two sets of the same kind; mixing `set` and `hset` is a compile error.
-Question: is there a conversion (`hset<T> h = s.toHash()`)? Would you rather allow the operation and choose the result's kind from the left operand?
-PROPOSAL: an explicit conversion member in a later version; mixing stays an error.
+Specs6.8.6: `set` and `hset` mix in every set operation; the result has the kind of the left operand. For sets the b / h kind is only an implementation difference; maps of different kinds stay a compile error.
 
-### 61. [TOBEDISCUSSED] Order of the result of set operations on an hset
+### 61. [INSPECS] Order of the result of set operations on an hset
 
-Context: Specs6.8.7: unspecified order. The result of `union` of two hash sets has an unspecified order too.
-PROPOSAL: nothing to specify; documented as unspecified.
+Specs6.8.7: the result has the kind of the left operand, so it is sorted for a `set` and unspecified for an `hset`.
 
 ### 62. [INSPECS] Sharing the code of set and hset with map and hmap
 
@@ -383,9 +378,9 @@ Specs6.9 (custom collections, partial). A custom collection implements the trait
 ### 63. [FUTUREVERSION] The indexer, literals and operators of custom classes
 
 Context: Specs6.9: how a custom class provides `c[k]` (read and write) and the literals `[...]` and `{ ... }` is open (Specs99); `c[k]` is not an operator the language lets a class define.
-COMPILERSTATE: not built; a custom class cannot be indexed, cannot receive a literal, and cannot define `|=` or `+=`.
-Already decided: `c[k]` and `c[k] = v` are implemented by the non-public methods `read_pos` and `set_pos` of the trait (point 11).
-Question: how a custom class receives the literals `[...]` and `{ ... }` and defines `|=` and `+=`.
+COMPILERSTATE: not built; a custom class cannot be indexed and cannot receive a literal.
+Already decided: `c[k]` and `c[k] = v` are implemented by the non-public methods `read_pos` and `set_pos` of the trait (point 11); `+=` and `-=` call the public members (point 53, Specs6.9).
+Question: how a custom class receives the literals `[...]` and `{ ... }`.
 
 ### 64. [FUTUREVERSION] Subclassing the default collections
 
@@ -534,6 +529,10 @@ I take small, explicitly approved steps. I would like your output as: the number
 ## Pending checks
 
 - The values of `"null".hash` and `"".hash` in Specs6.2.1: the C implementation gives the values of the Python port (point 86); a check against the reference code of rapidhash is still to do.
+
+## Changes in 2026/10/28
+
+- Points 52, 53, 55, 56, 57, 58, 60 and 61 decided and written in Specs0.0.18 (tag INSPECS): new sets copy or clone; only `+=` and `-=`, on every map and set, calling the members (`|=`, `&=`, `^=` removed); `m += (k, v)`, `m -= key`, `m -= set`; `add(collection)` from any collection of the item type; `SetIterator` with `next()` only; `->s[item]`; set literals with the type from the literal; `set` and `hset` mix, the result takes the kind of the left operand. Points 1, 50 and 63 and the AGENDA (with the build order) updated.
 
 ## Changes in 2026/10/27
 

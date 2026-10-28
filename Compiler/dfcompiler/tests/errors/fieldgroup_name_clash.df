@@ -1,0 +1,7 @@
+namespace fieldgroup_name_clash
+class A {
+  public pos { r32 x, r32 y }
+}
+class B {
+  public i32 pos
+}

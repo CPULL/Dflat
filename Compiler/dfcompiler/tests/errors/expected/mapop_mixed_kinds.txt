@@ -1,0 +1,1 @@
+mapop_mixed_kinds.df(3): error: a map and an hmap cannot be mixed: add(map) takes a map of the same kind (spec 6.6)

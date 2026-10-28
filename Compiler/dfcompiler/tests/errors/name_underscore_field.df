@@ -1,0 +1,4 @@
+class Box {
+  string _secret = "a"
+}
+Box b = Box()

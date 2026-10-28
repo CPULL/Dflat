@@ -1409,6 +1409,22 @@ static df_string df_str_from_u64(uint64_t v) {
   return df_str_from_buf(buf);
 }
 
+/* an addr prints as hex in groups of 4 digits separated by spaces (spec 2.3): 16 digits on 64 bits, 8 on 32 */
+static df_string df_str_from_addr(void* v) {
+  uint64_t a = (uint64_t)(uintptr_t)v;
+  int digits = (int)sizeof(void*) * 2;
+  char buf[48];
+  int n = 0;
+  for (int i = digits - 1; i >= 0; i--) {
+    buf[n++] = "0123456789ABCDEF"[(a >> (i * 4)) & 0xF];
+    if (i > 0 && i % 4 == 0) {
+      buf[n++] = ' ';
+    }
+  }
+  buf[n] = 0;
+  return df_str_from_buf(buf);
+}
+
 /* a printed collection shows its first DF_PRINT_ITEMS items (spec 6.1): the end is "]", or ", ...] (37 items)" when there are more */
 #define DF_PRINT_ITEMS 3
 

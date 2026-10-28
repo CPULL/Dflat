@@ -173,7 +173,17 @@ public sealed partial class CodeGen {
     var conditions = new List<string>();
     var unwrapped = new Scope(scope);
     foreach (var name in s.Children.Where(child => child.Kind == "Name")) {
-      var variable = scope.Find(name.Text!) ?? throw Error($"unknown variable '{name.Text}'", name);
+      var variable = scope.Find(name.Text!);
+      if (variable == null && currentClass != null && FindField(currentClass, name.Text!, name) is { IsWeak: true } weakField
+          && BareField(name.Text!, scope, name) is Expr bare) {
+        // a weak field of the class (spec 12): the object must still be alive; inside the block it is a plain borrow
+        conditions.Add($"({bare.Code} != NULL && !DF_IS_DEAD({bare.Code}))");
+        unwrapped.Vars[name.Text!] = new VarInfo(weakField.Type, bare.Code, false);
+        continue;
+      }
+      if (variable == null) {
+        throw Error($"unknown variable '{name.Text}'", name);
+      }
       if (variable.IsWeak) {
         // a weak reference: the object must still be alive; inside the block it is a plain borrow
         conditions.Add($"({variable.CName} != NULL && !DF_IS_DEAD({variable.CName}))");

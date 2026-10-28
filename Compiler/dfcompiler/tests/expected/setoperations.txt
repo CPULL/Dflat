@@ -1,0 +1,28 @@
+[1, 2, 3, ...] (5 items)
+[3, 4]
+[1, 2]
+[5]
+[1, 2, 5]
+[1, 2, 3, ...] (4 items)
+[3, 4, 5]
+[3, 4, 10]
+6
+[1, 2, 3, ...] (6 items)
+1
+true
+2
+true
+false
+true
+true
+false
+true
+true
+true
+4
+0
+[blue, green, red]
+[blue, green, red]
+0
+[a, c]
+---- exit code 0 ----

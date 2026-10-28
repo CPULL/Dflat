@@ -1,0 +1,1 @@
+hset_index.df(2): error: a set has no s[k]: has(item) tells whether an item is there, ->s[item] takes it out (spec 6.6)

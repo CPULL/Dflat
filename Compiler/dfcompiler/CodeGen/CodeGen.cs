@@ -25,7 +25,9 @@ sealed class FunSig {
 
   public string Name { get; }
   public int OverloadIndex { get; set; }
-  public string CName => "f_" + Name.Replace('.', '_').Replace("==", "op_eq") + (OverloadIndex > 0 ? "_" + OverloadIndex : "");
+  // an extern C function is called through its wrapper dfx_<name>, which converts strings and arrays (spec 15.9)
+  public string CName => IsExtern ? "dfx_" + Name : "f_" + Name.Replace('.', '_').Replace("==", "op_eq") + (OverloadIndex > 0 ? "_" + OverloadIndex : "");
+  public bool IsExtern { get; init; }       // extern fun: a C function of a library, no body, never returns an error (spec 15.8, 15.9)
   public string Ret { get; }
   public List<ParamSig> Params { get; }
   public Node Node { get; }
@@ -43,9 +45,10 @@ sealed class FunSig {
   public bool ReturnsOwned { get; set; }      // returns new or moved objects (false: borrowed ones)
   public bool ReturnsOwnedSet { get; set; }
   public bool IsDtor { get; set; }            // the atEnd of a class
+  public bool IsAccessor { get; set; }        // get_ / set_ of a property with accessor blocks: no error part, what it lets out is a Panic (spec 11.1.4)
   // can a silent throw leave this function? Constructors, init functions, destructors, == operators and the entry point never return
   // a silent exception (spec 15.7.6): there it is seen only by a catch of the same function and otherwise does nothing
-  public bool CanEmitSilent => !IsCtor && !IsInit && !IsStaticInit && !IsDtor && !IsAbstract && GenericT == null && !Name.EndsWith(".==") && Name != "main";
+  public bool CanEmitSilent => !IsCtor && !IsInit && !IsStaticInit && !IsDtor && !IsAccessor && !IsAbstract && !IsExtern && GenericT == null && !Name.EndsWith(".==") && Name != "main";
   public bool IsAbstract { get; set; }   // a trait function without a body
   public bool IsAsParent { get; set; }   // asparent: called only by the children of the object, through their parent reference (spec 12.5)
   public bool IsUnrestricted { get; set; }   // unrestricted: public, and also callable through a read-only reference (spec 12.5)
@@ -70,6 +73,7 @@ sealed class ParamSig {
   public bool IsVariadic { get; init; }   // T name...: an arr<T> filled from the extra arguments
   public bool IsGift { get; init; }       // ->T name: the function owns the object it is given
   public int Ref { get; init; }           // 0 a copy, 1 &T name (read-only reference), 2 (&)T name (writable reference, the call writes (&)x)
+  public bool IsWeak { get; init; }       // _T name (spec 12): a weak reference, used through enforce
 }
 
 sealed class VarInfo {
@@ -172,6 +176,9 @@ public sealed partial class CodeGen {
 
   public string Generate(Node program) {
     CheckTopLevelFeatures(program);
+    LowerFieldGroups(program);
+    LowerWeakDecls(program);
+    LowerAccessors(program);
     AddPrelude(program);
     ProgramNode = program;
     definedTypes.Add("df_arr_string");   // defined by the runtime
@@ -214,6 +221,10 @@ public sealed partial class CodeGen {
     var bodies = new StringBuilder();
     // (a snapshot: compiling a body can make copies of generic functions, which are added to funs)
     foreach (var fun in funs.Values.SelectMany(overloads => overloads).Where(fun => !fun.IsAbstract).ToList()) {
+      if (fun.IsExtern) {
+        protos.Append(ExternDeclarations(fun));   // the C prototype and the wrapper (CodeGen.Extern.cs)
+        continue;
+      }
       protos.Append(Signature(fun)).Append(";\n");
       bodies.Append(fun.IsCtor ? EmitConstructor(fun) : EmitFun(fun)).Append('\n');
     }
@@ -388,24 +399,36 @@ public sealed partial class CodeGen {
       if (reference == 2 && def != null) {
         throw Error($"the writable reference '{p.Text}' cannot have a default value: it needs a variable", p);
       }
+      bool weakParam = p.Children.Any(child => child.Kind == "Weak");
+      if (weakParam && !IsClass(paramType)) {
+        throw Error("only objects have weak references", p);
+      }
       ps.Add(new ParamSig(p.Text!, variadic ? "arr<" + paramType + ">" : paramType, def?.Children[0]) {
         IsVariadic = variadic,
         IsGift = p.Kind == "GiftParam" && (IsClass(paramType) || paramType == "string"),
-        Ref = reference
+        Ref = reference,
+        IsWeak = weakParam
       });
     }
-    if (funNode.Children.Any(child => child.Kind == "NoBody") && cls?.IsTrait != true) {
+    bool isExtern = funNode.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ').Contains("extern") == true;
+    bool noBody = funNode.Children.Any(child => child.Kind == "NoBody");
+    if (isExtern) {
+      CheckExtern(funNode, cls, enumName, ret, ps, noBody);
+    } else if (noBody && cls?.IsTrait != true) {
       throw Error("functions without a body are only valid in traits", funNode);
     }
     if (!funs.TryGetValue(name, out var overloads)) {
       overloads = new List<FunSig>();
       funs[name] = overloads;
     }
+    if (overloads.Count > 0 && (isExtern || overloads.Any(existing => existing.IsExtern))) {
+      throw Error($"'{name}' is an extern C function: C has no overloads, so the name can be used once", funNode);
+    }
     // overloads differ by number, order or types of parameters; the return type alone doesn't count
     if (overloads.Any(existing => existing.Params.Select(param => param.Type).SequenceEqual(ps.Select(param => param.Type)))) {
       throw Error($"function '{name}' with these parameter types is already defined", funNode);
     }
-    var fun = new FunSig(name, ret, ps, funNode, enumName) { OverloadIndex = overloads.Count };
+    var fun = new FunSig(name, ret, ps, funNode, enumName) { OverloadIndex = overloads.Count, IsExtern = isExtern };
     overloads.Add(fun);
     return fun;
   }
@@ -442,7 +465,7 @@ public sealed partial class CodeGen {
       // a reference parameter is a pointer in C; the body reads and writes through it, a read-only one cannot be assigned
       scope.Vars[p.Name] = IsByPointer(p)
         ? new VarInfo(p.Type, $"(*{ParamName(p)})", p.Ref == 1) { ReadOnlyRef = p.Ref == 1 && IsArr(p.Type) }
-        : StringVar(new VarInfo(p.Type, "v_" + p.Name, false) { Own = p.IsGift, ReadOnlyRef = p.Ref == 1 && IsClass(p.Type), ReadOnlyString = p.Type == "string" && !p.IsGift });
+        : StringVar(new VarInfo(p.Type, "v_" + p.Name, false) { Own = p.IsGift, ReadOnlyRef = p.Ref == 1 && IsClass(p.Type), ReadOnlyString = p.Type == "string" && !p.IsGift, IsWeak = p.IsWeak });
       if (scope.Vars[p.Name].OwnFlag is string flag) {
         // a parameter borrows its string (one taken with -> owns it); assigned again, it may own the new one
         fn.Decls.Append($"  bool {flag} = {(p.IsGift ? "true" : "false")};\n  (void){flag};\n");
@@ -550,6 +573,10 @@ public sealed partial class CodeGen {
         return;
 
       case "Assign":
+        if (CollectionOperator(s, scope) is Node written) {
+          EmitStmt(written, sb, scope, indent);   // m += x, s -= x ...: the calls of the members (spec 6.6)
+          return;
+        }
         sb.Append(pad).Append(AssignCode(s, scope)).Append(";\n");
         return;
 
@@ -716,7 +743,7 @@ public sealed partial class CodeGen {
       }
       code = ZeroValue(type);
     } else {
-      var value = ExprOf(init.Children[0], scope, type);
+      var value = weak ? WeakSource(init.Children[0], scope, type) : ExprOf(init.Children[0], scope, type);
       if (weak) {
         if (!IsClass(type)) {
           throw Error("only objects have weak references", s);
@@ -997,9 +1024,12 @@ public sealed partial class CodeGen {
   }
 
   // Something that can be written: a variable or a tuple field
-  readonly record struct LValueInfo(string Code, string Type, bool IsConst, VarInfo? Variable = null, bool IsField = false);
+  readonly record struct LValueInfo(string Code, string Type, bool IsConst, VarInfo? Variable = null, bool IsField = false, bool IsWeakField = false);
 
   LValueInfo LValue(Node target, Scope scope) {
+    if (target.Kind == "RawField") {
+      return RawFieldLValue(target);
+    }
     if (target.Kind == "Name") {
       var variable = scope.Find(target.Text!);
       if (variable == null && currentClass != null && FindField(currentClass, target.Text!, target) is FieldInfo ownField) {
@@ -1009,7 +1039,7 @@ public sealed partial class CodeGen {
           // the reference to the parent: set once, by the constructor
           return initializing ? new LValueInfo(bare.Code, bare.Type, false) : throw Error($"'{target.Text}' is the reference to the parent: only the constructor sets it", target);
         }
-        return new LValueInfo(bare.Code, bare.Type, ownField.IsConst && !initializing, null, !ownField.IsStatic);
+        return new LValueInfo(bare.Code, bare.Type, ownField.IsConst && !initializing, null, !ownField.IsStatic, ownField.IsWeak);
       }
       if (variable == null && globalConsts.TryGetValue(target.Text!, out var global)) {
         return new LValueInfo(global.CName, global.Type, !initializing);
@@ -1038,6 +1068,9 @@ public sealed partial class CodeGen {
     if (targetNode.Kind == "Index") {
       return IndexAssign(s, scope);
     }
+    if (PropertyTarget(targetNode, scope) is var (propertyObj, property)) {
+      return PropertyAssign(s, targetNode, propertyObj, property, scope);   // through the setter (spec 11.1.4)
+    }
     var target = LValue(targetNode, scope);
     if (target.IsConst) {
       throw Error($"'{targetNode.Text}' is const", s);
@@ -1048,6 +1081,11 @@ public sealed partial class CodeGen {
     }
     if (op == "+=" && target.Type == "string" && StrAppendAssign(targetNode, s.Children[1], scope, s) is string appended) {
       return appended;   // always in place
+    }
+    if (op == "=" && (target.IsWeakField || target.Variable is { IsWeak: true })) {
+      // = into a weak reference works as _= (spec 12), with a warning: the weak link is not visible where it is made
+      Warn($"'{targetNode.Text}' is a weak reference: _= is expected", s, 3);
+      op = "_=";
     }
     if (op == "=") {
       var assigned = ExprOf(s.Children[1], scope, target.Type);
@@ -1104,8 +1142,15 @@ public sealed partial class CodeGen {
         return new Expr(n.Text!, "bool");
       case "Null":
         return new Expr("0", "null");
+      case "RawField":
+        return RawFieldExpr(n);
+      case "CValue":
+        return new Expr(n.Text!, n.Children[0].Text!);
       case "Name": {
         var v = scope.Find(n.Text!);
+        if (v == null && currentClass != null && scope.Find("this") != null && FindField(currentClass, n.Text!) is { HasAccessors: true } ownProperty) {
+          return PropertyGet(new Expr("self", currentClass.Name), ownProperty, scope, n);
+        }
         if (v != null) {
           if (v.IsWeak) {
             throw Error($"'{n.Text}' is a weak reference: use it through enforce {n.Text} {{ }} else {{ }}", n);
@@ -1114,6 +1159,7 @@ public sealed partial class CodeGen {
           return new Expr(v.CName, v.Type);
         }
         if (BareField(n.Text!, scope, n) is Expr field) {
+          CheckWeakFieldRead(FindField(currentClass!, n.Text!), n);
           return field;
         }
         if (globalConsts.TryGetValue(n.Text!, out var global)) {
@@ -1127,6 +1173,7 @@ public sealed partial class CodeGen {
         }
         return BareEnumEntry(n.Text!) ?? throw Error(currentFun != null && currentFun == globalConstsInit
           ? $"unknown name '{n.Text}': a top-level const is set at program start, so it can use literals, other consts, functions and statics, not variables"
+          : n.Text is "field" or "value" ? $"'{n.Text}' exists only inside the accessor blocks of a property (R: and W:, spec 11.1.4)"
           : $"unknown name '{n.Text}'", n);
       }
       case "Paren": {
@@ -1204,6 +1251,9 @@ public sealed partial class CodeGen {
         if (expected != null && IsMap(expected)) {
           return MapEmptyLiteral(n, expected);
         }
+        if (expected != null && IsSet(expected)) {
+          return SetLiteral(n, scope, expected);
+        }
         if (n.Children.Count == 0 && expected == null) {
           throw Error("an empty literal needs a declared type: arr<T>, vec<T>, map<K, V> ...", n);
         }
@@ -1271,6 +1321,9 @@ public sealed partial class CodeGen {
 
   Expr IncDec(Node n, Scope scope) {
     var targetNode = n.Children[0];
+    if (PropertyTarget(targetNode, scope) is var (propertyObj, property)) {
+      return PropertyIncDec(n, propertyObj, property, scope);
+    }
     var target = LValue(targetNode, scope);
     ReadCheck(target.Variable, targetNode.Text ?? "", targetNode);
     if (!IsNumeric(target.Type)) {
@@ -1949,7 +2002,7 @@ public sealed partial class CodeGen {
     if ((IsVec(obj.Type) || IsList(obj.Type)) && n.Text == "sizeof") {
       return CollectionSizeof(obj);
     }
-    if (IsMap(obj.Type) && n.Text == "sizeof") {
+    if ((IsMap(obj.Type) || IsSet(obj.Type)) && n.Text == "sizeof") {
       return MapSizeof(obj);
     }
     if (IsClass(obj.Type)) {
@@ -1962,7 +2015,14 @@ public sealed partial class CodeGen {
       if (!reachable && LookupMethods(owner, "get_" + n.Text).Count > 0) {
         return ObjectCall(obj, "get_" + n.Text, new List<Node>(), scope, n) ?? throw Error("no property", n);
       }
-      return TraitView(obj, n.Text!, n) ?? ObjectField(obj, n.Text!, n);   // x.TraitName, x.field
+      if (TraitView(obj, n.Text!, n) is Expr view) {
+        return view;
+      }
+      if (named is { HasAccessors: true }) {
+        return PropertyGet(obj, named, scope, n);
+      }
+      CheckWeakFieldRead(named, n);
+      return ObjectField(obj, n.Text!, n);   // x.field
     }
     if (obj.Type == "string" && n.Text == "len") {
       return new Expr($"df_str_chars({StrRead(obj)})", "u64");

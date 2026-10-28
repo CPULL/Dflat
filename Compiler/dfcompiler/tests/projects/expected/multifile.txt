@@ -1,0 +1,7 @@
+42
+12
+Square
+6
+14
+hello from a sibling
+---- exit code 0 ----

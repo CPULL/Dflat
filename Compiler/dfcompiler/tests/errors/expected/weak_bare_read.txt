@@ -1,0 +1,1 @@
+weak_bare_read.df(7): error: 'c' is a weak reference: use it through enforce c { } else { }

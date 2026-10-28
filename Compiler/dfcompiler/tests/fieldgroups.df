@@ -1,0 +1,35 @@
+// Field groups (spec 11.1.4.1) and readonly fields (spec 11.1.4)
+namespace fieldgroups
+alias Root as r
+
+class Sprite {
+  public pos { r32 x, r32 y }
+  public scale { r32 x = 1.0, r32 y = 2.0 }
+  public readonly i32 hits
+  public fun hit() { hits++; pos.x += 1.0 }
+  public fun r32 sum() { pos.x + pos.y }
+  public fun reset() { pos = (0.0, 0.0) }
+}
+
+var s = Sprite()
+s.pos.x++
+s.pos.y = 5.0
+s.pos.x += 2.5
+r.Console.log(s.pos.x)
+r.Console.log(s.scale.y)
+s.hit()
+r.Console.log(s.hits)
+r.Console.log(s.sum())
+s.pos = (10.0, 20.0)
+r.Console.log(s.pos.y)
+(r32 x, r32 y) p = s.pos
+r.Console.log(p.x)
+p.y = 7.5
+s.pos = p
+r.Console.log(s.pos.y)
+var other = Sprite()
+other.pos = s.pos
+r.Console.log(other.pos.x)
+s.reset()
+r.Console.log(s.pos.x)
+r.Console.log(s)

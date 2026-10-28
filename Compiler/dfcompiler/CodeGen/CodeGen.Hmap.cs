@@ -38,6 +38,13 @@ public class hmap<K, V> : MapCollection<K, V> {
     return true
   }
 
+  // merges another hmap: the new value wins (spec 6.6); the entries are copied, other is unchanged
+  public fun add(hmap<K, V> other) {
+    for (K key, V value) in other {
+      add(key, value)
+    }
+  }
+
   public fun bool tryGet(K key, (&)V result) {
     if !this.tree_hasKey(key) {
       V none
@@ -160,21 +167,280 @@ public class hmapValues<K, V>(&hmap<K, V> collection as parent) {
     collection.releaseIterator()
   }
 }
+
+// hset<T> (spec 6.8.7): a hash set, the table of hmap with an empty value (spec 6.8.5.1); the tree_ members are C emitted by the compiler
+// (CodeGen.Hset.cs)
+public class hset<T> : SetCollection<T> {
+  u64 tree              // the table: a df_ht in the C, values of 0 bytes
+
+  override fun uns get_len() { this.tree_len() }
+
+  override fun bool has(T item) {
+    return this.tree_has(item)
+  }
+
+  // true when the item is new; an item already there is left as it is (spec 6.6)
+  public fun bool add(T item) {
+    if this.tree_has(item) {
+      return false
+    }
+    checkUnlocked()
+    this.tree_add(item)
+    return true
+  }
+
+  // adds the items of another collection with the same item type, set and hset mixed: the number actually added (spec 6.6)
+  public fun uns add(arr<T> other) {
+    uns added = 0
+    for T item in other {
+      if add(item) {
+        added += 1
+      }
+    }
+    return added
+  }
+
+  public fun uns add(vec<T> other) {
+    uns added = 0
+    for T item in other {
+      if add(item) {
+        added += 1
+      }
+    }
+    return added
+  }
+
+  public fun uns add(list<T> other) {
+    uns added = 0
+    for T item in other {
+      if add(item) {
+        added += 1
+      }
+    }
+    return added
+  }
+
+  public fun uns add(set<T> other) {
+    uns added = 0
+    for T item in other {
+      if add(item) {
+        added += 1
+      }
+    }
+    return added
+  }
+
+  public fun uns add(hset<T> other) {
+    uns added = 0
+    for T item in other {
+      if add(item) {
+        added += 1
+      }
+    }
+    return added
+  }
+  public fun bool remove(T item) {
+    checkUnlocked()
+    return this.tree_remove(item)
+  }
+
+  // the new sets (spec 6.8.6): a set of the kind of this one; other can be a set or an hset. The items are copied, both sets are unchanged
+  public fun hset<T> union(set<T> other) {
+    hset<T> result = []
+    for T item in this {
+      result.add(item)
+    }
+    for T item in other {
+      result.add(item)
+    }
+    return ->result
+  }
+
+  public fun hset<T> intersection(set<T> other) {
+    hset<T> result = []
+    for T item in this {
+      if other.has(item) {
+        result.add(item)
+      }
+    }
+    return ->result
+  }
+
+  public fun hset<T> difference(set<T> other) {
+    hset<T> result = []
+    for T item in this {
+      if !other.has(item) {
+        result.add(item)
+      }
+    }
+    return ->result
+  }
+
+  public fun hset<T> symmetricDifference(set<T> other) {
+    hset<T> result = []
+    for T item in this {
+      if !other.has(item) {
+        result.add(item)
+      }
+    }
+    for T item in other {
+      if !this.has(item) {
+        result.add(item)
+      }
+    }
+    return ->result
+  }
+
+  public fun hset<T> union(hset<T> other) {
+    hset<T> result = []
+    for T item in this {
+      result.add(item)
+    }
+    for T item in other {
+      result.add(item)
+    }
+    return ->result
+  }
+
+  public fun hset<T> intersection(hset<T> other) {
+    hset<T> result = []
+    for T item in this {
+      if other.has(item) {
+        result.add(item)
+      }
+    }
+    return ->result
+  }
+
+  public fun hset<T> difference(hset<T> other) {
+    hset<T> result = []
+    for T item in this {
+      if !other.has(item) {
+        result.add(item)
+      }
+    }
+    return ->result
+  }
+
+  public fun hset<T> symmetricDifference(hset<T> other) {
+    hset<T> result = []
+    for T item in this {
+      if !other.has(item) {
+        result.add(item)
+      }
+    }
+    for T item in other {
+      if !this.has(item) {
+        result.add(item)
+      }
+    }
+    return ->result
+  }
+
+  // the tests (spec 6.8.6): every item of this set is in other; every item of other is in this set; no item in common
+  public fun bool isSubsetOf(set<T> other) {
+    for T item in this {
+      if !other.has(item) {
+        return false
+      }
+    }
+    return true
+  }
+
+  public fun bool isSupersetOf(set<T> other) {
+    for T item in other {
+      if !this.has(item) {
+        return false
+      }
+    }
+    return true
+  }
+
+  public fun bool isDisjointFrom(set<T> other) {
+    for T item in this {
+      if other.has(item) {
+        return false
+      }
+    }
+    return true
+  }
+
+  public fun bool isSubsetOf(hset<T> other) {
+    for T item in this {
+      if !other.has(item) {
+        return false
+      }
+    }
+    return true
+  }
+
+  public fun bool isSupersetOf(hset<T> other) {
+    for T item in other {
+      if !this.has(item) {
+        return false
+      }
+    }
+    return true
+  }
+
+  public fun bool isDisjointFrom(hset<T> other) {
+    for T item in this {
+      if other.has(item) {
+        return false
+      }
+    }
+    return true
+  }
+
+  // the item leaves the set (->s[item], spec 6.6); a missing item gives the zero value
+  public fun T takeAt(T item) {
+    checkUnlocked()
+    return this.tree_take(item)
+  }
+
+  override fun clear() {
+    checkUnlocked()
+    this.tree_clear()
+  }
+
+  public fun uns get_capacity() {
+    return this.tree_capacity()
+  }
+
+  public fun reserve(uns wanted) {
+    checkUnlocked()
+    this.tree_reserve(wanted)
+  }
+
+  public fun bool shrinkToFit() {
+    checkUnlocked()
+    return this.tree_shrinkToFit()
+  }
+}
 """;
 
-  // hmap<K, V>[capacity]: empty, with the directory and the buckets for that many entries (spec 6.3, 6.8.5.1)
+  // hmap<K, V>[capacity] and hset<T>[capacity]: empty, with the directory and the buckets for that many entries (spec 6.3, 6.8.5.1)
   Expr HmapNewWithCapacity(Node generic, Node sizeNode, Scope scope) {
-    if (generic.Children.Count != 3) {
+    string kind = generic.Children[0].Text!;
+    if (kind == "hmap" && generic.Children.Count != 3) {
       throw Error("hmap needs a key type and a value type: hmap<K, V>[capacity]", generic);
     }
-    string type = ResolveType(Synthetic("Type", generic, "hmap").Add(generic.Children[1]).Add(generic.Children[2]));
+    if (kind == "hset" && generic.Children.Count != 2) {
+      throw Error("hset needs one item type: hset<T>[capacity]", generic);
+    }
+    var typeNode = Synthetic("Type", generic, kind);
+    foreach (var argument in generic.Children.Skip(1)) {
+      typeNode.Add(argument);
+    }
+    string type = ResolveType(typeNode);
     var size = ExprOf(sizeNode, scope, "u64");
     string held = NewTemp();
     string code = $"({{ {CType(type)} {held} = {VecNewEmpty(type)}; df_ht_reserve({MapTree(held, type)}, {IndexValue(size, sizeNode)}, {HmapShape(type)}); {held}; }})";
     return new Expr(code, type, true);
   }
 
-  bool IsHmap(string type) => vecPrelude && classInstanceArgs.TryGetValue(type, out var instance) && instance.Template.Name == "hmap";
+  // the kinds over the hash table: hmap, and hset, which is the table of hmap with an empty value (CodeGen.Hset.cs)
+  bool IsHmap(string type) => vecPrelude && classInstanceArgs.TryGetValue(type, out var instance) && instance.Template.Name is "hmap" or "hset";
 
   // the runtime part of a map of this kind
   void NeedMapChunk(string type) => NeedChunk(IsHmap(type) ? "hmap" : "map");

@@ -36,6 +36,7 @@ public sealed class Parser {
   const int ComparisonLevel = 3;
 
   readonly List<Token> toks;
+  bool classMember;   // the statement being read is a member of a class or trait body
   int pos;
   bool noBrace; // true while parsing if/while/for/switch headers: '{' starts the block
   bool noAngle; // true while parsing a value inside <...>: '>' closes the list
@@ -84,10 +85,29 @@ public sealed class Parser {
   }
 
   Token ExpectIdent() {
+    CheckUnderscoreName();
     if (Peek.Kind != TokenKind.Ident) {
       throw Error("expected identifier");
     }
     return Next();
+  }
+
+  // '_' touching a name: a name cannot start with '_' (spec 1.1). Before a type and a name it is the weak marker of a declaration (_Texture2D t,
+  // spec 12), which is not built yet
+  void CheckUnderscoreName() {
+    if (!IsOp("_") || PeekAt(1).Kind != TokenKind.Ident || PeekAt(1).Line != Peek.Line || PeekAt(1).Col != Peek.Col + 1) {
+      return;
+    }
+    if (IsWeakMarker()) {
+      return;   // _T name: a weak declaration
+    }
+    throw ErrorAt($"a name cannot start with '_': _{PeekAt(1).Text} (spec 1.1)", Peek);
+  }
+
+  // '_' touching a type that is followed by a name on the same line: the weak marker of _T name (spec 12)
+  bool IsWeakMarker() {
+    return IsOp("_") && PeekAt(1).Kind == TokenKind.Ident && PeekAt(1).Line == Peek.Line && PeekAt(1).Col == Peek.Col + 1
+      && PeekAt(2).Kind == TokenKind.Ident && PeekAt(2).Line == Peek.Line;
   }
 
   Token ExpectMember() {
@@ -258,7 +278,10 @@ public sealed class Parser {
 
   List<Token> ParseModifiers() {
     var mods = new List<Token>();
-    while (Peek.Kind == TokenKind.Keyword && Modifiers.Contains(Peek.Text)) {
+    // readonly is a modifier only before a declaration and extern only before fun, so they are not reserved words (spec 11.1.4, 15.9)
+    while (Peek.Kind == TokenKind.Keyword && Modifiers.Contains(Peek.Text)
+           || Peek.Kind == TokenKind.Ident && Peek.Text is "readonly" or "readwrite" or "writeonly" && (PeekAt(1).Kind is TokenKind.Ident or TokenKind.Keyword || PeekAt(1).Is("_"))
+           || Peek.Kind == TokenKind.Ident && Peek.Text == "extern" && PeekAt(1).Kind == TokenKind.Keyword && PeekAt(1).Text == "fun") {
       mods.Add(Next());
     }
     return mods;
@@ -282,6 +305,7 @@ public sealed class Parser {
     if (caseBody && IsOp(",")) {
       return;
     }
+    CheckUnderscoreName();
     throw Error("expected end of statement");
   }
 
@@ -300,7 +324,11 @@ public sealed class Parser {
   }
 
   Node ParseStatementCore(string? ownerName, bool caseBody) {
+    classMember = ownerName != null;   // a field of a class can have accessor blocks (spec 11.1.4)
     var mods = ParseModifiers();
+    if (IsOp("_") && PeekAt(2).Kind == TokenKind.Ident && PeekAt(2).Line == Peek.Line) {
+      CheckUnderscoreName();   // _Texture2D t: a weak declaration
+    }
     if (IsKw("fun")) {
       return WithMods(ParseFun(), mods);
     }
@@ -324,6 +352,10 @@ public sealed class Parser {
     }
     if (ownerName != null && Peek.Kind == TokenKind.Ident && Peek.Text == ownerName && PeekAt(1).Is("(")) {
       return WithMods(ParseConstructor(), mods);
+    }
+    // pos { r32 x, r32 y }: a field group of a class (spec 11.1.4.1)
+    if (ownerName != null && Peek.Kind == TokenKind.Ident && PeekAt(1).Is("{")) {
+      return WithMods(ParseFieldGroup(), mods);
     }
     // placeholder Item (inside a trait)
     if (Peek.Kind == TokenKind.Ident && Peek.Text == "placeholder" && PeekAt(1).Kind == TokenKind.Ident) {
@@ -788,6 +820,9 @@ public sealed class Parser {
     }
 
     if (first.Kind == "Decl") {
+      if (classMember && IsOp("{")) {
+        ParseAccessors(first);
+      }
       if (IsOp("=") || IsOp("_=")) {
         var op = Next();
         SkipNewlines();
@@ -834,16 +869,21 @@ public sealed class Parser {
 
   // Speculative: "Type name" followed by '=', '_=', ',', or end of statement
   Node? TryParseDecl() {
-    bool startsType = Peek.Kind == TokenKind.Ident || IsOp("(") || IsOp("*") || IsKw("fun");
+    // _Texture2D texture: a weak reference (spec 12); the '_' touches the type
+    bool weak = IsWeakMarker();
+    bool startsType = weak || Peek.Kind == TokenKind.Ident || IsOp("(") || IsOp("*") || IsKw("fun");
     if (!startsType) {
       return null;
     }
     int save = pos;
     try {
+      if (weak) {
+        Next();
+      }
       var type = ParseType();
       // arr<i32>[100] samples: the size or capacity on the declaration (spec 6.3)
       Node? size = null;
-      if (IsOp("[") && type.Kind == "Type" && type.Text is "arr" or "vec" or "hmap" or "hset" && type.Children.Count > 0) {
+      if (IsOp("[") && type.Kind == "Type" && type.Text is "arr" or "vec" or "hmap" or "hset" or "set" or "bset" && type.Children.Count > 0) {
         var open = Next();
         bool savedBrace = noBrace;
         noBrace = false;
@@ -855,10 +895,13 @@ public sealed class Parser {
         var name = Peek;
         var after = PeekAt(1);
         bool ends = after.Kind == TokenKind.Newline || after.Kind == TokenKind.Eof
-          || after.Is("=") || after.Is("_=") || after.Is(",") || after.Is(";") || after.Is("}");
+          || after.Is("=") || after.Is("_=") || after.Is(",") || after.Is(";") || after.Is("}") || classMember && after.Is("{");
         if (ends) {
           Next();
           var decl = new Node("Decl", name, name.Text).Add(type);
+          if (weak) {
+            decl.Add(new Node("Weak", name));
+          }
           return size == null ? decl : decl.Add(size);
         }
       }
@@ -1158,6 +1201,10 @@ public sealed class Parser {
         } else if (AcceptOp("->")) {
           kind = "GiftParam";
         }
+        bool weakParam = kind == "Param" && IsWeakMarker();   // _T name (spec 12)
+        if (weakParam) {
+          Next();
+        }
         if (isVariadic) {
           if (kind != "Param" || isVolatile) {
             throw Error("'...' takes a plain type: ...T name");
@@ -1178,6 +1225,12 @@ public sealed class Parser {
           throw Error("a copy is chosen by the caller: f(x!)");
         }
         var p = new Node(kind, name, name.Text).Add(type);
+        if (weakParam) {
+          if (kind != "Param") {
+            throw ErrorAt("a weak parameter is _T name, with no other marker", name);
+          }
+          p.Add(new Node("Weak", name));
+        }
         if (isVolatile) {
           p.Add(new Node("Volatile", name));
         }
@@ -1253,6 +1306,72 @@ public sealed class Parser {
     }
     node.Add(ParseBlock(name.Text));
     return node;
+  }
+
+  // { [visibility] R: { ... } [visibility] W: { ... } } after a field (spec 11.1.4): an Accessors node with a Getter and / or a Setter,
+  // each with its block and, when written, a Mods child with its visibility
+  void ParseAccessors(Node decl) {
+    var open = ExpectOp("{");
+    var accessors = new Node("Accessors", open);
+    bool saved = noBrace;
+    noBrace = false;
+    SkipTerminators();
+    while (!IsOp("}")) {
+      Token? visibility = null;
+      if (Peek.Kind == TokenKind.Keyword && Peek.Text is "public" or "private" or "internal") {
+        visibility = Next();
+      }
+      if (Peek.Kind != TokenKind.Ident || Peek.Text is not ("R" or "W") || !PeekAt(1).Is(":")) {
+        throw Error("an accessor block is R: { ... } or W: { ... }");
+      }
+      var which = Next();
+      Next();
+      string kind = which.Text == "R" ? "Getter" : "Setter";
+      if (accessors.Children.Any(child => child.Kind == kind)) {
+        throw ErrorAt($"{which.Text}: is written twice", which);
+      }
+      var accessor = new Node(kind, which);
+      if (visibility != null) {
+        accessor.Add(new Node("Mods", visibility, visibility.Text));
+      }
+      accessor.Add(ParseBlock());
+      accessors.Add(accessor);
+      SkipTerminators();
+    }
+    Next();
+    noBrace = saved;
+    decl.Add(accessors);
+  }
+
+  // name { type field [= value], ... }: a FieldGroup node with one Decl per field, named "group.field"
+  Node ParseFieldGroup() {
+    var name = ExpectIdent();
+    var group = new Node("FieldGroup", name, name.Text);
+    bool saved = noBrace;
+    noBrace = false;
+    ExpectOp("{");
+    SkipNewlines();
+    do {
+      SkipNewlines();
+      var type = ParseType();
+      var field = ExpectIdent();
+      var decl = new Node("Decl", field, name.Text + "." + field.Text).Add(type);
+      if (IsOp("{")) {
+        ParseAccessors(decl);
+      }
+      if (IsOp("=")) {
+        decl.Add(new Node("Init", Next()).Add(ParseExpr()));
+      }
+      group.Add(decl);
+      SkipNewlines();
+    } while (AcceptOp(","));
+    ExpectOp("}");
+    noBrace = saved;
+    EndStatement(false);
+    if (group.Children.Count == 0) {
+      throw ErrorAt("a field group needs at least one field", name);
+    }
+    return group;
   }
 
   // trait Name : SuperTrait { properties, methods, constructor }
@@ -1731,7 +1850,7 @@ public sealed class Parser {
         generic.Add(ParseTypeArg());
       } while (AcceptOp(","));
       // arr<i32>[100]: a collection created with a size
-      bool sized = target.Kind == "Name" && target.Text is "arr" or "vec" or "hmap" or "hset" && IsOp(">") && PeekAt(1).Is("[");
+      bool sized = target.Kind == "Name" && target.Text is "arr" or "vec" or "hmap" or "hset" or "set" or "bset" && IsOp(">") && PeekAt(1).Is("[");
       if (sized) {
         Next();
         return generic;

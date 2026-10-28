@@ -1,0 +1,6 @@
+namespace readonly_write
+class A {
+  public readonly i32 hits
+}
+var a = A()
+a.hits += 2

@@ -1,0 +1,3 @@
+; a program of several files and one library (spec 16)
+source=main.df
+include=libs/shapes

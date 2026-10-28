@@ -1,0 +1,34 @@
+
+namespace DbProof
+
+alias Root.Console as console
+
+fun i32 calculate(i32 n) {
+  i32 result = 0
+  for i32 i = 1..n {
+    result += i
+  }
+  return result
+}
+
+fun int main() {
+  console.log("Dflat compile test")
+
+  i32 a = 10
+  i64 b = a
+
+  console.log($"a = {a}")
+  console.log($"b = {b}")
+  console.log($"sum 1..10 = {calculate(10)}")
+
+  atEnd {
+    console.log("cleanup B")
+  }
+
+  atEnd {
+    console.log("cleanup A")
+  }
+
+  console.log("test complete")
+  return 0
+}

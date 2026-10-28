@@ -1,0 +1,4 @@
+namespace property_readonly_setter
+class P {
+  public readonly i32 c { R: { 4 } W: { field = value } }
+}

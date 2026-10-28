@@ -1,0 +1,1 @@
+error: the namespace 'root' of the standard library and 'root.gfx' of the library mylib overlap: two roots cannot have the same namespace or one inside the other

@@ -1,0 +1,1 @@
+fieldgroup_name_clash.df(2): error: 'pos' is a field group and also a member of B: a group name cannot be the name of another member yet

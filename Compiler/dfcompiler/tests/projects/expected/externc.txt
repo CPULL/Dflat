@@ -1,0 +1,10 @@
+42
+true
+6
+256
+7
+2.5
+true
+true
+true
+---- exit code 0 ----

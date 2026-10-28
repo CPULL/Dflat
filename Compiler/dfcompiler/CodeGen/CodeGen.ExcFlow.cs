@@ -11,7 +11,7 @@ public sealed partial class CodeGen {
   readonly Dictionary<string, string> resultPairs = new();   // C type of the result → the struct that carries it with the exception
 
   // functions whose signature carries the exception: the others (pure and safe ones) return their result only
-  bool PairReturn(FunSig f) => failingFuns.Contains(f) && !f.IsDtor;
+  bool PairReturn(FunSig f) => failingFuns.Contains(f) && !f.IsDtor && !f.IsAccessor;
 
   string ResultPair(string cType) {
     if (!resultPairs.TryGetValue(cType, out var name)) {

@@ -1,0 +1,2 @@
+namespace extern_string_return
+extern fun string name()

@@ -1,0 +1,4 @@
+namespace readonly_fun
+class A {
+  public readonly fun f() { }
+}

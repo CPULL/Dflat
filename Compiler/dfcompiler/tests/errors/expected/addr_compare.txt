@@ -1,0 +1,1 @@
+addr_compare.df(3): error: cannot compare addr and i64

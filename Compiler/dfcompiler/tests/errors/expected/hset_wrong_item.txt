@@ -1,0 +1,1 @@
+hset_wrong_item.df(2): error: the items of this set are i32, not string

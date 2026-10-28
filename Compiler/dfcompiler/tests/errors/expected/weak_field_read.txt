@@ -1,0 +1,1 @@
+weak_field_read.df(9): error: 'c' is a weak reference: copy it into a weak variable (_C c _= ...) and use that through enforce

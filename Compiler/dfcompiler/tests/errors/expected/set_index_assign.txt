@@ -1,0 +1,1 @@
+set_index_assign.df(2): error: a set has no s[k] = v: add(item) adds an item (spec 6.6)

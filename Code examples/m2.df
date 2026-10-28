@@ -1,0 +1,82 @@
+namespace demo
+
+alias Root.Console as console
+
+fun string tryLockMap() {
+  map<string, i32> mm = []
+  mm["a"] = 1
+  var held = mm.keys
+  mm["b"] = 2
+  return "grew"
+  catch ModifyingIteratedCollectionException {
+    return "locked"
+  }
+}
+
+fun string tryLockHmap() {
+  hmap<string, i32> hm = []
+  hm["a"] = 1
+  var held = hm.keys
+  hm["b"] = 2
+  return "grew"
+  catch ModifyingIteratedCollectionException {
+    return "locked"
+  }
+}
+
+fun int main() {
+  console.log("Final trick: hmap + map + block string + atEnd + ownership")
+  atEnd {
+    console.log("atEnd 1 - should be last")
+  }
+  atEnd {
+    console.log("atEnd 2 - should be first")
+  }
+
+  // hmap symbol table like dfcompiler
+  hmap<string, i32> sym = []
+  sym["x"] = 10
+  sym["y"] = 20
+  sym["x"] = 11
+  sym["z"] = 30
+  console.log($"sym len {sym.len} x {sym["x"]} has y {sym.hasKey("y")}")
+
+  // map sorted view
+  map<string, i32> sorted = []
+  sorted["bob"] = 3
+  sorted["alice"] = 1
+  sorted["carol"] = 2
+  console.log($"sorted keys {sorted.keys} values {sorted.values}")
+  for (string k, i32 v) in sorted {
+    console.log($"sorted {k}:{v}")
+  }
+
+  // block string source
+  string src = "".padLeft(5000, 'a')
+  src[100] = 'X'
+  src[4000] = 'Y'
+  string copy = src
+  string moved = ->src
+  console.log($"src copy len {copy.len} moved len {moved.len} src after move len {src.len}")
+  console.log($"copy[100] {copy[100]} copy[4000] {copy[4000]}")
+
+  // ownership move field
+  hmap<string, i32> hm2 = []
+  hm2["a"] = 1
+  hm2["b"] = 2
+  var view = hm2.keys
+  console.log($"view len {view.len} has a {view.has("a")}")
+
+  // big hmap stress
+  hmap<string, i32> big = []
+  for i32 i = 0..50 {
+    string k = $"v{i}"
+    big[k] = i * 2
+  }
+  console.log($"big len {big.len} v10 {big["v10"]} has v25 {big.hasKey("v25")}")
+
+  console.log($"lock map {tryLockMap()} hmap {tryLockHmap()}")
+
+  console.log("trick done")
+  return 0
+}

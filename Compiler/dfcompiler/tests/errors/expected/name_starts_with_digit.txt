@@ -1,0 +1,1 @@
+name_starts_with_digit.df(1,5): error: a name must start with a letter, not a digit (spec 1.1)

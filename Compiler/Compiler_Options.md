@@ -62,6 +62,21 @@ native-int=16
 include=..\..\includes\a library I need\version 1.2.3\
 ```
 
+### Libraries
+- `include=<folder>` adds a library: a root folder whose root file declares the root namespace of the library (spec 16). Write one line per library: `include=a` and then `include=b`.
+- `import` looks for a namespace in the stdlib, in the folders of the program and in these libraries. Two roots with the same namespace, or one inside the namespace of another, are a compile error.
+- Libraries can be given only in the project file: there is no command line option.
+- `source=` names the root file. When it is `main.df`, `program.df` or `lib.df` the compilation is multi-file; any other name makes a single-file compilation (spec 16): it can import only its own subfolders and the stdlib, and the `include=` lines are ignored with a warning.
+
+### C files (temporary)
+- `csource=<file.c>` adds a C file to the build, compiled and linked with the program: it gives the functions declared with `extern fun` (spec 15.9). One line per file. It is temporary, until the libraries bring their own C files and link libraries.
+
+### Native libraries (hardcoded for gfx, temporary)
+A library can need C code and C libraries. Until the libraries can describe this themselves, the compiler knows it for the `gfx` library only: when a program imports `gfx`, it adds the `*.c` files of `<gfx library>/Src`, that folder as an include path, the Vulkan SDK and GLFW (and `user32`, `gdi32`, `shell32` on Windows, `dl`, `pthread` on Linux).
+- `vulkan-sdk=<folder>`: the Vulkan SDK (it has `Include/vulkan/vulkan.h` and `Lib`). Without it: `VULKAN_SDK`, then the newest `C:\VulkanSDK\<version>` on Windows, then the system package on Linux.
+- `glfw=<folder>`: GLFW (it has `include/GLFW/glfw3.h` and a lib folder; on Windows the newest `lib-vc<year>`, with `glfw3_mt.lib` when there is one). Without it: `GLFW_DIR`, then the system package on Linux.
+- A folder given in the project file wins over the search. Nothing found is a compiler error that names what is missing and the key to write. macOS is not supported yet (it needs MoltenVK).
+
 ### Claude proposals
 **Limits of the generated copies (spec 11.3.12).** Replace the `--chaindepth<type>` line with three families of options, each between 1 and 256:
 - `--max-chain-depth <n>`: nested instantiations (a generic that instantiates another that instantiates another). The default is 16.
@@ -80,7 +95,7 @@ include=..\..\includes\a library I need\version 1.2.3\
 2. Precedence, from the weakest to the strongest: default, `DFLAT_CC`, the `.dsprj`, the command line.
 3. An option with several values (for example `include`) is written on repeated lines: `include=a` and then `include=b`.
 4. A line that starts with `;` is a comment.
-5. Keys used in the example but missing from the list of options: `name`, `include` and the file to compile (`source` or `root`).
+5. Keys used in the example but missing from the list of options: `name` and the file to compile (`source` or `root`). `include` is defined in "Libraries" above.
 6. A folder with several `.dsprj` files is an error, unless the compiler is given the file to use.
 7. Keys are not case sensitive. Values and paths follow the rules of the operating system, and the arguments after `CL:` are passed as they are.
 8. `--emit-c` can be used in a `.dsprj`; `--run` and `--version` cannot.

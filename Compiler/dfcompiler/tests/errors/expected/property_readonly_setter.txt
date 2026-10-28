@@ -1,0 +1,1 @@
+property_readonly_setter.df(3): error: 'c' is readonly: it has no W:

@@ -1,0 +1,1 @@
+hset_object_item.df(2): error: hset items of type Dog are not built yet (this version: integers, bool, char, enums, reals, date, time, clock, lapse and string)

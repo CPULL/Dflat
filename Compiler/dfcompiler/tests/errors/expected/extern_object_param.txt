@@ -1,0 +1,1 @@
+extern_object_param.df(3): error: 'a' is A: an extern function takes numbers, bool, addr, string and arr of numbers (spec 15.9)

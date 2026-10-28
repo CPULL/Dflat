@@ -1,0 +1,6 @@
+namespace fieldgroup_tuple_size
+class A {
+  public pos { r32 x, r32 y }
+}
+var a = A()
+a.pos = (1.0, 2.0, 3.0)

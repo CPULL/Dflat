@@ -1,0 +1,1 @@
+main.df(1): error: the root file of a multi-file project declares its namespace (namespace <name>)

@@ -1,0 +1,32 @@
+// extern C functions (spec 15.9) with a C file given by csource= in the project
+namespace app
+alias Root as r
+
+extern fun addr counter_create()
+extern fun counter_add(addr c, i32 n)
+extern fun i32 counter_total(addr c)
+extern fun counter_free(addr c)
+extern fun i64 text_bytes(string text)
+extern fun u32 bytes_sum(arr<u8> data)
+extern fun bytes_fill(arr<u8> data, u8 value)
+extern fun r64 halve(r64 x)
+extern fun bool is_even(i32 n)
+extern fun addr nothing()
+
+addr c = counter_create()
+counter_add(c, 40)
+counter_add(c, 2)
+r.Console.log(counter_total(c))
+r.Console.log(c != null)
+counter_free(c)
+r.Console.log(text_bytes("héllo"))
+arr<u8> data = [1, 2, 3, 250]
+r.Console.log(bytes_sum(data))
+bytes_fill(data, 7)
+r.Console.log(data[3])
+r.Console.log(halve(5.0))
+r.Console.log(is_even(10))
+addr none = nothing()
+r.Console.log(none == null)
+addr empty = null
+r.Console.log(empty == none)

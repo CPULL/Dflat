@@ -1,0 +1,41 @@
+namespace demo
+
+alias Root.Console as console
+
+fun int main() {
+  console.log("Enter a sentence:")
+  string line = console.readLine()
+  if line.trim().len == 0 {
+    console.log("empty, bye")
+    return 0
+  }
+
+  map<string, i32> freq = []
+  arr<string> words = line.split(" ")
+
+  for string w in words {
+    string key = w.trim().toLower()
+    if key.len == 0 then continue
+    if freq.hasKey(key) {
+      freq[key] = freq[key] + 1
+    } else {
+      freq[key] = 1
+    }
+  }
+
+  console.log($"Found {freq.len} unique words:")
+  for (string word, i32 count) in freq {
+    console.log($"{word}: {count}")
+  }
+
+  string most = ""
+  i32 best = 0
+  for (string word, i32 count) in freq {
+    if count > best {
+      best = count
+      most = word
+    }
+  }
+  console.print($"Most common: {most} ({best})")
+  return 0
+}

@@ -1,0 +1,1 @@
+refcount_items_move.df(7): error: a ->T parameter receives a plain owned object: ->pack[...] passes a usage only to a @T parameter (spec 12.7)

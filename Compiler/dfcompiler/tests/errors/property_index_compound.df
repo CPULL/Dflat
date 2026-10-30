@@ -1,0 +1,7 @@
+namespace property_index_compound
+class P {
+  public readwrite i32 c { W: { field = value } }
+}
+vec<P> ps = []
+ps.add(P())
+ps[0].c += 5

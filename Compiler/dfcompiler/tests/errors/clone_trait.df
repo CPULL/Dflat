@@ -1,0 +1,8 @@
+namespace clone_trait
+trait Shape { }
+class Square : Shape { }
+fun f() {
+  Shape s = Square()
+  Shape t = s!
+}
+f()

@@ -1,0 +1,7 @@
+namespace refcount_field_borrow
+class Dog { }
+class Kennel {
+  public @Dog friend = Dog()
+}
+Kennel k = Kennel()
+Dog view = k.friend

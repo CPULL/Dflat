@@ -1,0 +1,8 @@
+namespace refcount_item_borrow
+class Dog { }
+fun f() {
+  list<@Dog> pack = []
+  pack.add(Dog())
+  Dog view = pack[0]
+}
+f()

@@ -1,0 +1,6 @@
+namespace refcount_marker_borrowed
+class Dog { }
+fun f(Dog d) {
+  @Dog c = @d
+}
+f(Dog())

@@ -1,0 +1,8 @@
+namespace refcount_plain_param
+class Dog { }
+fun g(Dog d) { }
+fun f() {
+  @Dog first = Dog()
+  g(first)
+}
+f()

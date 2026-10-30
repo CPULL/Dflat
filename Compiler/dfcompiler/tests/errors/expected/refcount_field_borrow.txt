@@ -1,0 +1,1 @@
+refcount_field_borrow.df(7): error: 'friend' is counted and cannot be borrowed: take another usage with @Dog view = ... (spec 12.7)

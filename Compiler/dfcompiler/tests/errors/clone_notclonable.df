@@ -1,0 +1,4 @@
+namespace clone_notclonable
+public notclonable class File { }
+File f = File()
+File g = f!

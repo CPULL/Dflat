@@ -1,0 +1,1 @@
+clone_map.df(4): error: map<string, i32> cannot be cloned: maps and sets are not clonable yet (spec 12.6)

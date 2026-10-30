@@ -1,4 +1,4 @@
-// a weak header parameter redeclared as public readonly keeps the value given to the constructor; an addr prints as hex (spec 2.3)
+// a weak header parameter redeclared as public readonly keeps the value given to the constructor (spec 12.7); an addr prints as hex (spec 2.3)
 namespace weakheader
 alias Root as r
 
@@ -14,8 +14,8 @@ class H(_C c) {
   }
 }
 
-var ctx = C()
-var h = H(ctx)
+@C ctx = C()
+var h = H(_ctx)
 r.Console.log(h.read())
 addr a = null
 r.Console.log(a)

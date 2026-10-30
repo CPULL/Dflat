@@ -1,0 +1,1 @@
+weak_var_read.df(8): error: 'w' is a weak reference: use it through enforce w { } else { }

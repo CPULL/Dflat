@@ -20,7 +20,8 @@ public sealed partial class CodeGen {
     if (s.Text is not ("+=" or "-=") || target.Kind is not ("Name" or "Member")) {
       return null;
     }
-    string type = LValue(target, scope).Type;
+    // a property is never read here the way a field is written (that would skip its W:): its type is enough
+    string type = PropertyTarget(target, scope) is var (_, property) ? property.Type : LValue(target, scope).Type;
     if (IsMap(type) && s.Text == "-=" && MapKeysToRemove(s, scope, type) is Node loop) {
       return loop;
     }

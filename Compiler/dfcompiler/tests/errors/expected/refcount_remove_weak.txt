@@ -1,0 +1,1 @@
+refcount_remove_weak.df(6): error: 'w' is a weak reference: removeRefCounting() is valid only on a counted object (@T, spec 12.7)

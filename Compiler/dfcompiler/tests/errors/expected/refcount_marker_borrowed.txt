@@ -1,0 +1,1 @@
+refcount_marker_borrowed.df(4): error: 'd' only borrows its object: only the owner of an object can make it counted (spec 12.7)

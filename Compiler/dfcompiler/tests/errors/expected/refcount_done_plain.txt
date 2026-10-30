@@ -1,0 +1,1 @@
+refcount_done_plain.df(4): error: 'is done.' releases a usage or a weak reference (@T, _T); a plain object ends with 'is atEnd.' (spec 12.7)

@@ -1,0 +1,1 @@
+refcount_atend.df(4): error: 'first' is counted: release its usage with 'first is done.'; 'is atEnd.' is only for plain owners (spec 12.4)

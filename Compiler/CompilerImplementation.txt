@@ -1568,3 +1568,177 @@ PROPERTIES WITH ACCESSOR BLOCKS (2026-10-28, spec 11.1.4, compiler 0.0.41alpha; 
   property with the default W: (the setter takes a borrowed value, so the owning field refuses it: write the W: yourself).
 - Tests properties (the examples of 11.1.4 and more), propertypanic, errors/property_private_setter, property_no_setter, property_writeonly,
   property_readonly_setter, property_field_outside.
+- 2026-10-28 (found while writing Dha Flatty Bird): PropertyTarget takes any receiver except a name that is not a value (a class name), so
+  blocks[i].pos.x = v calls the setter (it used to store into the field and skip W: in silence). op= and ++ / -- read the receiver twice, so
+  through a receiver that is not a name or a chain of members they are "not supported" (CheckReceiverReadTwice). TargetType (multiple
+  assignment) and CollectionOperator (+= / -= of maps and sets) take the type of a property from the property, not from LValue. As a safety
+  net, LValue of a bare field and ClassLValue refuse a property ("would skip its W:"). Tests propertyindex, errors/property_index_compound.
+
+REFERENCE COUNTING, STEP 1 (2026-10-30, spec 12.7, compiler 0.0.41alpha)
+- Runtime (Runtime.cs, after df_drop): df_rc { users, weaks, obj }, the counting block of the Rust model. df_rc_new(obj) starts a block with
+  1 user (NULL for a null object), df_rc_use adds a user, df_rc_release removes one and at 0 nulls obj, frees the block when no weak
+  reference counts on it (weaks is always 0 for now) and ends the object with df_drop. DF_RC_OBJ(T, rc) reads the object (NULL for NULL).
+- Parser: '@' and '~' are tokens. IsCountedMarker ('@' touching a type) makes TryParseDecl add a Counted child to the Decl; '@e' in an
+  expression is a CountedOf node; "x is done." is a Done node (a statement only, CheckFinalizers), and the lexer ends the statement after its
+  dot as for "is atEnd.". '@' on a parameter is "not built yet". '~e' is BitNot; '_e' in an expression is an error that points to '~'.
+- LowerCountedDecls (right after LowerWeakDecls): @T x = @e and var x = @e become a Decl with the Counted child and the Init without the
+  marker (Init.Text "marked" remembers it, for the message of @plain). A counted Decl in a multiple assignment, a class body or a trait body
+  is "not supported".
+- VarInfo.IsCounted: the C variable is a df_rc*. Every counted declaration gets an implicit release (DoneDropNode: an AtEnd "drop" with
+  "name is done."), so it is always hoisted (HoistDeclarations, EmitHoists write df_rc* = NULL) and the release runs on every way out of
+  the scope (end, return, break, continue, exceptions), as for the owners. EmitCountedDecl refuses a counted declaration that was not
+  hoisted (inside atEnd blocks, at the top level of an atEnd-less frame kind).
+- Values (CountedValue): null gives NULL, another counted variable df_rc_use, a new object (Fresh) df_rc_new; anything else is an error
+  (@plain is "not built yet"). CountedAssign (AssignCode, before LValue): the new block is taken before the old one is released, so a = a
+  keeps the object; only = is accepted.
+- Reading a counted name (ExprOfNode Name) gives DF_RC_OBJ(T*, v): members, calls, printing, == and borrows see a plain object. LValue
+  refuses a counted variable ("not supported": ->, (&), ++, swap, out arguments), which keeps the C type of the block out of the code
+  that expects the object. EmitFinalize refuses a counted subject (use is done.). CheckReturnOwnership refuses returning a counted name.
+- x.usersCount / x.weakrefsCount (CountsMember, before MemberValue): only on a counted name; a null variable raises NullPointerException
+  through NullChecked; the type is u64.
+- Not yet: the errors of step 2 (Dog v = first is accepted as a borrow), a method call taking a usage (the caller's usage covers the call,
+  since a method cannot reach the locals of its caller), counted parameters, returns, fields, weak references, collections.
+- Tests refcount (counts, nested block, is done., var / @ marker, null, reassignments, early return, loop passes, null usersCount, ~),
+  errors/refcount_atend, refcount_done_plain, refcount_plain_init, refcount_move, refcount_field, bitnot_underscore; bitfields uses ~.
+
+REFERENCE COUNTING, STEP 2 (2026-10-30, spec 12.7, compiler 0.0.41alpha)
+- @plain (CountedValue, marked): @this is an error; a borrowed or weak variable is an error (only the owner gives its object); otherwise the
+  operand goes through GiftExpr, as ->plain (Name or Member, so @k.resident moves a field out), and the moved object starts a block.
+  @x on a counted x is df_rc_use. An unmarked value that is not new: the error names the marker.
+- CheckNotBorrowOfCounted (CountedSource looks through parentheses): a counted name as the value of a plain object declaration (EmitDecl,
+  not for weak ones) or of = into an object variable or field (AssignCode) is an error. CheckNotWritableBorrowOfCounted: (&)first as a
+  (&)T object argument (ArgCode) and as a writable address (WritableAddress).
+- Local &T declarations do not parse (not a form of the parser), so &Dog view = first has no test.
+- Not yet: a counted argument to a plain or & parameter is still a borrow (step 3); @T as a type argument does not parse, so counted keys
+  have no check.
+- Tests refcount (movedIn: @plain, @ on a counted variable, var x = @..., x = @other, @k.resident), errors/refcount_borrow_plain,
+  refcount_assign_plain, refcount_writable_borrow, refcount_this, refcount_marker_borrowed; refcount_plain_init has the new message.
+
+REFERENCE COUNTING, STEP 3: FUNCTIONS (2026-10-30, spec 12.7, 13.1, compiler 0.0.41alpha)
+- The internal type "@Dog" (IsCountedType, CountedBase) is the type of a counted parameter (ParamSig.Type) and of a counted result
+  (FunSig.Ret); CType gives df_rc* and ZeroValue NULL, so Signature, the vtable casts, the exception pairs (RetCType, ResultPair) and the
+  return variable need no change. A counted variable keeps the plain type with VarInfo.IsCounted; IsClass("@Dog") is false, so the
+  ownership classification of the returns ignores these functions.
+- Parser: @T name in ParseParams gives a Param with a Counted child (no other marker with it); (@)T is "not built yet". fun @Dog make()
+  gives the Returns node the Text "counted" (only as the single result).
+- RegisterFun: CountedTypeOf (objects only). Counted parameters or results in a trait, an override, a function without body or an extern
+  function are "not supported" (the signatures of overrides are compared by the plain types). A counted parameter in a class header is
+  "not supported" (it would be a counted field).
+- EmitFun: a counted parameter is a counted VarInfo on v_name with a DoneDropNode, so the usage is released on every way out.
+- Arguments: ArgCode sends a @T parameter to CountedArg (f(->rc) TakeUsage: the caller's variable becomes null; otherwise CountedValue:
+  rc adds a user, a new object or @plain starts a block, null, a counted result is adopted). A counted name given to a plain, &, (&)
+  object parameter, or ->rc given to a ->T parameter, is an error. ArgCost asks CountedArgCost first (-1: the usual rules, -2: cannot
+  be passed), so overloads see the counted cases.
+- Returns: ReturnValueCode and the single-expression body use CountedReturnCode: a counted name gives its usage (TakeUsage), anything
+  else as CountedValue. The atEnd releases run after the value is taken, and see the variable null.
+- Results at the call: CountedValue adopts an Expr of type @T (no count change); an expression statement releases it at once
+  (df_rc_release); Convert and a method call on it give "keep it in a counted variable". LowerCountedVars (after ClassifyReturns) marks
+  var x = f() as counted when every function of that name returns @T (by the name of the call, as CallMoves); HoistDeclarations and
+  EmitCountedDecl strip the @ of the inferred type; LoopStatements wraps a loop body with a counted declaration.
+- Not yet: a method call on a counted object does not take a usage; read-only checks on @T parameters (open).
+- Tests refcount (inFunctions: show, keep with ->dog, make, makeShort, pass, fromPlain, a method with @T and one returning @T, a
+  dropped result, show(->rex)), errors/refcount_plain_param, refcount_ref_param, refcount_gift_param, refcount_param_plain_arg,
+  refcount_result_unkept, refcount_result_member, refcount_trait_param.
+
+REFERENCE COUNTING, STEP 4: FIELDS (2026-10-30, spec 12.7, 19.3, compiler 0.0.41alpha)
+- FieldInfo.IsCounted: a body Decl with the Counted child (static ones and properties are "not supported") or a header parameter @T name
+  (its ParamSig has the type @T, so the constructor call goes through CountedArg; the field keeps the plain type). EmitStruct declares
+  the field df_rc*; the zero start is NULL. A header parameter redeclared in the body must keep the @.
+- The constructor fills a counted field with the usual Assignment(this.field, value): the header parameter is a counted variable of
+  the init function, so the field adds a user and the parameter releases its own at the end; a start value goes through CountedValue.
+- Reads: BareField and ObjectField wrap a counted field in DF_RC_OBJ (CountedFieldRead), unless asked for the raw block (raw: true).
+- CountedRef (replaces CountedSource) finds a counted variable, a bare counted field of the current class (self->m_x) or a member
+  k.friend (CountedFieldOf looks at the type of the owner and swallows its errors); Code is the C lvalue of the block. CountedValue,
+  the borrow checks, the arguments, the overload costs, the returns (a field gives df_rc_use) and usersCount all use it.
+- Writes: LValue and ClassLValue refuse a counted field ("not supported": ->, (&), swap, out arguments) unless countedFieldWrite is on;
+  CountedFieldTarget turns it on, so the counted assignment (CountedFieldAssign, from AssignCode) and is done. go through the usual
+  checks of a field write (visibility, readonly, read-only references) and get &(block) as a slot.
+- Drop glue: counted fields are left out of OwnedObjectFields and released (df_rc_release) after the atEnd of the class, per class level.
+- Hash: a counted field is hashed as its type name plus the field name, like a weak reference (it is not stable).
+- WarnCountedCycles (after LowerCountedVars): for every counted field of a class of the program, a path of counted fields back to the
+  class (or a parent of it) gives a level 1 warning, once per set of fields. A field of the class's own type (a linked list) warns too.
+- CheckReturnOwnership: returning a counted variable or field from a function that returns a plain object is an error (fun @T).
+- Tests refcount (inFields: header parameter redeclared public, start value, null field, bare names in a method, fun @T returning a
+  field, o.other is done., a field reassigned, a field to a @T parameter, the release with the holder), errors/refcount_field_borrow,
+  refcount_field_move, refcount_field_static; errors/refcount_field removed (it compiles now). The cycle warning is not checked by the
+  test runner (warnings are not part of the expected output).
+
+REFERENCE COUNTING, STEP 5: WEAK REFERENCES (2026-10-30, spec 12.7, 7.2, compiler 0.0.41alpha)
+- Replaces the weak references of 2026-10-28 (any object, _=, the dead mark). A weak variable, field or parameter holds the counting
+  block (df_rc*) and adds one to its weaks: df_rc_weak, df_rc_unweak (frees the block when users and weaks are both 0), DF_RC_ALIVE
+  (users > 0). df_rc_release frees the block only when no weak reference counts on it.
+- Parser: '_e' in an expression is WeakOf; '_=' (declaration or statement) is an error that shows w = _first.
+- LowerWeakDecls keeps the WeakInit form (null "default" when nothing is written; the Init of = becomes WeakInit), without the level 3
+  warning. A weak declaration gets a DoneDropNode (AddImplicitDrops), so it is hoisted (EmitHoists: df_rc*) and lets go on every way out;
+  EmitWeakDecl writes the value.
+- WeakRef finds a weak variable, a bare weak field or a member weak field (the raw block). WeakValue: null, _x of a counted variable or
+  field (or of a weak one), another weak reference (copied); a counted name without the marker, a plain object or a new object is an
+  error. WeakAssign (AssignCode, before LValue; also the "_=" of the constructor's Assignment): the new block before the old one goes.
+  LValue and ClassLValue refuse a weak variable or field outside countedFieldWrite, so a weak block never goes where an object is
+  expected; reading one outside enforce is the old error.
+- Parameters: the internal type "_Dog" (IsWeakType; CType df_rc*, ZeroValue NULL), also for header parameters, so Signature and the
+  constructor need no change; ArgCode passes WeakValue (one more weak reference for the call), the function lets it go at the end
+  (DoneDropNode); CountedArgCost: a weak parameter takes _x, a weak reference or null, a weak argument goes only to a weak parameter.
+- enforce w { }: the condition is DF_RC_ALIVE; the block is wrapped (EnforcedWeakBlock) with a counted declaration of the same name
+  (marked EnforceUse, so CheckNotShadowing lets it through) whose value is the CValue df_rc_use(block) of type @T: inside the block
+  w is a counted variable, a temporary usage released by the usual release at the end of its scope (return, break, exceptions).
+- EmitDone on a weak reference lets the block go (df_rc_unweak) and nulls it. Drop glue: weak fields let their blocks go. The default
+  toStr prints null for a weak or counted field whose object is gone.
+- Tests weak (rewritten: counted contexts, _ctx, weak copies, weakrefsCount, the users inside enforce, ctx is done., a gone object,
+  a holder that ends, enforce with an early return), weakheader and ownership (weak part) on the new syntax, errors/weak_plain_object,
+  weak_no_marker, weak_old_assign, weak_var_read, weak_to_plain_param; weak_new_object and bitnot_underscore have new messages.
+  sample.df (Code examples and dfparser) uses the 0.0.19 forms. Libraries/Gfx and Dha Flatty Bird do not compile any more (to redo).
+
+REFERENCE COUNTING, STEP 6: removeRefCounting() (2026-10-30, spec 12.7, compiler 0.0.41alpha)
+- Runtime df_rc_take(df_rc** slot): with exactly 1 user the object leaves the block (obj NULL, users 0, the slot NULL; the block is freed
+  when no weak reference counts on it, otherwise the weak references see users 0, gone); otherwise NULL and nothing changes.
+- RemoveCountingCall (ExprOfNode Call, before Call): x.removeRefCounting() on a counted variable or field (CountedFieldTarget for a field)
+  gives a Fresh object of the plain type; on a weak reference, or on a plain object of a class without a method of that name, an error;
+  a class of the program with its own removeRefCounting keeps it for its plain objects. CallMoves says the call moves, so Dog alone =
+  x.removeRefCounting() owns the object, and the call used as a statement ends it at once (the usual drop of a new object).
+- Dog? alone = ... is a compile error (spec 7.1), so no warning is needed.
+- Tests refcount (removing: refused with two users, the last user, a watcher that sees it gone, a counted field, a dropped result),
+  errors/refcount_remove_weak, refcount_remove_plain.
+
+REFERENCE COUNTING, STEP 7: COLLECTIONS OF COUNTED OBJECTS (2026-10-30, spec 12.7, 6.2, compiler 0.0.41alpha)
+- The parser gives a type argument @T as a CountedType node (ParseTypeArg); for @T x in c gives the loop variable a Counted child.
+- LowerCountedTypeArgs (CodeGen.CountedItems.cs, after LowerCountedDecls): list<@Dog> and vec<@Dog> become list<Rc__Dog>, with the class
+  Rc__Dog(@Dog value) added to the program: the item is a box with one counted field (step 4), so VecPrelude and the C hot paths work on
+  plain owned objects and the box's drop releases the usage. A counted key of map / hmap / set / hset is an error (spec 6.2); map
+  values, arr items and other generics with a counted argument are "not supported".
+- The program never sees a box (BoxInner is null inside the code of the collections, LibraryCode): UnboxRead (ExprOfNode Index) reads
+  DF_RC_OBJ of the box's field; the for loop does the same for its variable (the collection is locked while the loop runs, spec 6.4,
+  so the variable takes no usage of its own); CountedItemRef (from CountedRef, rawBoxRead) gives the block of c[i], so @T x = c[i],
+  f(c[i]) into @T, c[i].usersCount and the borrow errors work as for a counted variable.
+- Values put in: ArgCode wraps the argument of a box parameter (add, insert) in a call of the box (BoxCall), whose @T header parameter
+  takes the usage (CountedArg); BoxArgCost gives the overload costs of the counted argument; IndexAssign wraps c[i] = v; VecLiteral and
+  ListLiteral wrap each item.
+- CheckCountedItemsMember (MethodCall, TryReceiverCall, VecMember, ListMember, transformTo): only add, insert, removeAt, clear, truncate,
+  reserve, shrinkToFit, swap, len and capacity on a collection of counted objects; the others would hand out or compare the boxes, or
+  leave items without a box (fill(null), resize). Views and ->c[i] are "not supported" too.
+- The box prints as its object (df_str_obj of the field), so the collection prints its objects.
+- Tests refcountitems (lists, vecs, a list in a field), errors/refcount_set_key, refcount_map_key, refcount_item_borrow,
+  refcount_items_has, refcount_items_view, refcount_items_move, refcount_items_plain.
+
+CLONING (2026-10-30, spec 12.6, compiler 0.0.41alpha)
+- Runtime: the class descriptor has a clone slot (df_class.clone, NULL for a class that cannot be cloned); df_clone_obj(o) gives NULL for
+  null, a destroyed object or an empty slot, otherwise calls the slot of the class of the object at run time.
+- CodeGen.Clone.cs: cloneUsed (UsesClone: a Copy node or a call of clone / tryClone in the program) turns the clone functions on, so a
+  program that never clones has none. EmitCloneFunction (in the descriptor loop, before the descriptor) writes df_clone_<class>:
+  - a class with a clone() of the program (UserClone, its own or inherited): a call of it (an exception it lets out is a panic);
+  - a list: a new chain of nodes, each item cloned (NewListNode, AppendListNode);
+  - otherwise a zeroed object with the class of the original (o->cls) and each field (AllInstanceFields) by its kind: hidden fields
+    (the children, the slot of a child) and the counter of open iterators of Collection left at zero; counted fields df_rc_use, weak
+    fields df_rc_weak; CloneValue: a string df_str_dup, an object df_clone_obj, an arr a helper df_arrclone_<type> (a new block, each
+    item cloned; the helpers of the items come first), a native or a tuple of natives copied (a tuple with strings or objects is "not
+    supported").
+  A vec is cloned by its fields (its arr), a list<@T> or vec<@T> through its boxes (a box's counted field adds a user).
+- NotClonableReason: a trait value (tryClone), a notclonable class or parent class (the parser takes notclonable before class), an
+  object with a parent (its class or a parent class has ParentField), an exception, a map or a set (not built yet). A field of such a
+  type is null in the clone (the slot is NULL), as the spec says for anything that cannot be duplicated.
+- Expressions: a! (the Copy case of ExprOfNode, after strings and map views) and a.clone() (CloneCall, before Call) give a Fresh object
+  (df_clone_obj); with a clone() of the class, a! is a call of it and a.clone() an ordinary call. CallMoves says clone() moves, so
+  Dog copy = dog.clone() owns its object; @Dog third = first! starts a count (CountedValue sees a new object). tryClone() is "not
+  supported" until ObjectNotClonableException has an ID. c[a..b]! is "not supported".
+- Tests clone (a deep clone with an owned object, counted and weak fields, a vec and a list; the dynamic class; a clone() of the
+  class; counted objects and collections), errors/clone_notclonable, clone_trait, clone_map, clone_try, clone_notclonable_child.

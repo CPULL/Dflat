@@ -174,21 +174,16 @@ public sealed partial class CodeGen {
     var unwrapped = new Scope(scope);
     foreach (var name in s.Children.Where(child => child.Kind == "Name")) {
       var variable = scope.Find(name.Text!);
-      if (variable == null && currentClass != null && FindField(currentClass, name.Text!, name) is { IsWeak: true } weakField
-          && BareField(name.Text!, scope, name) is Expr bare) {
-        // a weak field of the class (spec 12): the object must still be alive; inside the block it is a plain borrow
-        conditions.Add($"({bare.Code} != NULL && !DF_IS_DEAD({bare.Code}))");
-        unwrapped.Vars[name.Text!] = new VarInfo(weakField.Type, bare.Code, false);
+      if (WeakRef(name, scope) is CountedRefInfo weak) {
+        // a weak reference (spec 12.7): the object must still be alive; inside the block the name is a temporary usage
+        conditions.Add($"DF_RC_ALIVE({weak.Code})");
+        block = EnforcedWeakBlock(block, name.Text!, weak.Type, weak.Code);
         continue;
       }
       if (variable == null) {
         throw Error($"unknown variable '{name.Text}'", name);
       }
-      if (variable.IsWeak) {
-        // a weak reference: the object must still be alive; inside the block it is a plain borrow
-        conditions.Add($"({variable.CName} != NULL && !DF_IS_DEAD({variable.CName}))");
-        unwrapped.Vars[name.Text!] = new VarInfo(variable.Type, variable.CName, variable.IsConst);
-      } else if (IsNullable(variable.Type)) {
+      if (IsNullable(variable.Type)) {
         conditions.Add($"{variable.CName}.has");
         unwrapped.Vars[name.Text!] = new VarInfo(BaseOf(variable.Type), variable.CName + ".val", variable.IsConst);
       } else if (variable.Type == "string") {

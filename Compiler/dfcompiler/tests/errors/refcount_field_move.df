@@ -1,0 +1,8 @@
+namespace refcount_field_move
+class Dog { }
+class Kennel {
+  public @Dog friend = Dog()
+}
+fun take(->Dog d) { }
+Kennel k = Kennel()
+take(->k.friend)

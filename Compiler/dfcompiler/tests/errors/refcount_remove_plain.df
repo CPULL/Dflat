@@ -1,0 +1,7 @@
+namespace refcount_remove_plain
+class Dog { }
+fun f() {
+  Dog plain = Dog()
+  Dog d = plain.removeRefCounting()
+}
+f()

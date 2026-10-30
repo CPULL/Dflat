@@ -1,0 +1,5 @@
+namespace clone_notclonable_child
+public notclonable class File { }
+class Folder : File { }
+Folder f = Folder()
+Folder g = f.clone()

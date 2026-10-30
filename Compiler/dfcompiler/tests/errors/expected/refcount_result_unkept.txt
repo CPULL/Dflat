@@ -1,0 +1,1 @@
+refcount_result_unkept.df(7): error: this call gives a counted Dog: keep it in a counted variable (@Dog x = ...) to use it (spec 12.7)

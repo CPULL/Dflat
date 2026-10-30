@@ -1,0 +1,7 @@
+namespace weak_plain_object
+class C { }
+fun f() {
+  C c = C()
+  _C w = _c
+}
+f()

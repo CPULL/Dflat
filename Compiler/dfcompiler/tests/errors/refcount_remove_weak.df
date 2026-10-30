@@ -1,0 +1,8 @@
+namespace refcount_remove_weak
+class Dog { }
+fun f() {
+  @Dog first = Dog()
+  _Dog w = _first
+  Dog d = w.removeRefCounting()
+}
+f()

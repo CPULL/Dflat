@@ -34,8 +34,19 @@ Changes from the previous version -----------------------
 - importing the gfx library adds its C files, the Vulkan SDK and GLFW to the build (hardcoded; vulkan-sdk= and glfw= in the .dsprj, else VULKAN_SDK / C:\VulkanSDK / GLFW_DIR / the Linux system, else an error); not tested with a real SDK yet
 - properties with accessor blocks (spec 11.1.4): R: and W: with field and value, the defaults, readwrite / readonly / writeonly, a visibility on R: or W:, the start value through W:, accessors on the fields of a field group; reads, =, op=, ++ / -- and multiple assignments go through them; what leaves an accessor is a Panic. Not yet: static properties, accessors in traits
 - an addr prints as hex in groups of 4 digits (spec 2.3); readonly / readwrite / writeonly also in front of a weak type (_T); a weak header parameter redeclared in the body keeps the value of the constructor
+- a property assigned through any receiver (ps[0].c = 5, and in a multiple assignment) goes through its W:; op= and ++ through such a receiver say "not supported"; a write that would skip a W: is an error instead of a silent store
+- Code examples/Dha Flatty Bird: a quick game on the gfx library (keys from the console)
 - the gfx library (Libraries/Gfx/lib.df) and its demo (Libraries/Gfx/Demo) compile and run: window, textures, sprites, label, 180 frames, clean under the Vulkan validation layer
 - field groups (spec 11.1.4.1): pos { r32 x, r32 y } in classes; s.pos.x read, assigned, ++, +=; s.pos = (a, b), s.pos = other.pos, s.pos = a named tuple variable; s.pos read as a tuple
+- reference counting, step 1 (spec 12.7): @T x local variables (= new object, another counted variable or null), var x = @T(), = between counted variables, the usage released at the end of the scope (also on return, break and exceptions), x is done., x.usersCount, x.weakrefsCount; is atEnd. on a counted variable is an error
+- the bitwise not is ~x (spec 2.5); _x gives an error that points to ~x
+- reference counting, step 2 (spec 12.7): @plain (also @a.field) makes an owned object counted and leaves the source null; @x on a counted x adds a user; errors for Dog v = first, v = first, (&)first, @this, @ on a borrowed or weak variable, and @Dog rc = plain without the marker
+- reference counting, step 3 (spec 12.7, 13.1): @T parameters (a usage for the call, released when the function ends), f(->rc) gives the caller's usage, fun @T results (return gives the usage, a new object or @plain starts one; var x = f() is counted; a result nobody keeps is released at once), in functions and class methods; a counted argument to a plain, &, (&) or ->T parameter is an error
+- reference counting, step 4 (spec 12.7): @T fields in the class body (with or without a start value) and @T name in the class header; = on a field (also bare names in methods) adds or starts a usage and releases the old one; reads give the object; k.friend is done., k.friend.usersCount; the fields release their usages when their object ends; level 1 warning for a possible cycle of counted objects (classes with @ fields of each other's type, or of their own type)
+- weak references on the spec 0.0.19 rules (12.7): only on counted objects, made with _x (_Dog w = _first, f(_first)), = assigns (_= is removed, no level 3 warning), a weak copy of another weak reference, w is done., weakrefsCount counts them; enforce w { } gives a temporary usage released on every way out of the block; variables, parameters, fields and header parameters; a weak field that points to a gone object prints null. Breaks the Gfx library and Dha Flatty Bird until they are redone
+- removeRefCounting() (spec 12.7): on a counted variable or field, the last user gets a plain owned object (the variable becomes null, the weak references see it gone); with other users null and nothing changes; an error on a weak reference or a plain object
+- collections of counted objects (spec 12.7, 6.2): list<@T> and vec<@T> hold a usage per item: add, insert, c[i] = v, literals (a counted object adds a user; a new object, @plain or a counted result starts one; null is a valid item), c[i] reads the object, @T x = c[i] and f(c[i]) into a @T parameter add a user, for var x / for T x / for @T x in c, removeAt, clear, truncate, swap and the end of the collection release; map and set keys of a counted type are a compile error; the members that would give or compare items (has, indexOf, fill, sort, pop, replace, resize, views, getIterator, transformTo, ->c[i]) are not supported yet, nor map<K, @T> and arr<@T>
+- cloning (spec 12.6): a! and a.clone() on objects and collections (vec, list, also of counted items); the default clone follows the class of the object at run time and copies each field by its kind (natives and strings copied, owned objects and arrays cloned, counted fields another user, weak fields another weak reference, children and open iterators not copied, a field that cannot be cloned is null); a clone() of the class replaces the default; notclonable classes, objects with a parent, exceptions, trait values, maps and sets are a compile error; @Dog third = first! starts a new count
 
 Done -----------------------
 
@@ -176,13 +187,26 @@ Phase 4  Ownership                                                 IN PROGRESS
   ending it twice is a Panic ("Double free"); a destructor that throws propagates from the end of the scope like any exception
   x is atEnd. (owners only: a borrowed or weak variable is an error), ->x and ->a.c (the source becomes null; only owners move),
   ->T parameters (the callee owns; the call writes ->x), ->T in the header of a class (the object moves into the field)
-  weak references: T w _= x and _T w (fields, parameters, variables; 2026-10-28), used only through enforce w { } else { } (the object must be alive)
+  weak references: replaced by the 0.0.19 rules (spec 12.7, step 5 of 4b, 2026-10-30): _T w only on counted objects, made with _x, used through enforce
   atEnd after a function (final cleanup, runs before the objects of the function end), atEnd of a, b { } (as a scope atEnd)
   a result that nobody keeps (a call used as a statement) ends at once
   not yet in 4a: temporaries inside an expression (they are never destroyed), objects in arrays and tuples (not owned,
   not destroyed), static fields (not tracked), constructor atEnd fragments (need secondary constructors), atEnd after other statements (form 3),
   use after a move is found when it runs (NullPointerException), not at compile time, no lifetime check for borrows
- 4b  reference counting (.asRefCount, .asSharedRefCount, .isRC), .clone(), x! copy, ChangingRefCountTypeException    TODO
+ 4b  reference counting (spec 12.7), .clone(), x! copy                                                                 IN PROGRESS
+  clone (2026-10-30, spec 12.6): a!, a.clone(), the default clone, a clone() of the class, notclonable; not yet: tryClone() (ObjectNotClonableException has no ID), maps and sets, c[a..b]!, tuple fields with strings or objects, the remapping of weak references (not needed while weak references point only to counted objects, which are never cloned)
+  step 1 (2026-10-30): @T local variables, var x = @T(), = between counted variables, release at the end of the scope, is done., usersCount, weakrefsCount
+  step 2 (2026-10-30): @plain and @a.field, the errors for borrowing a counted object (Dog v = first, v = first, (&)first), @this, @ on a borrow
+  step 3 (2026-10-30): @T parameters, f(->rc), fun @T results, var x = f(); the errors for a counted argument to a plain, &, (&) or ->T parameter
+  not yet: counted keys (@T is not a type argument yet), (@)T parameters, @T in traits, overrides, extern functions and class headers, a counted
+  result used directly in an expression (make().bark() is an error: keep it in a variable), read-only checks on @T parameters (open, spec 99),
+  step 4 (2026-10-30): @T fields (body and header), assignments, reads, is done., usersCount, the release with the holder, the cycle warning
+  not yet: ->k.field, static counted fields, counted properties (accessor blocks), counted fields in traits and field groups (untested),
+  step 5 (2026-10-30): weak references on the 0.0.19 rules (_x, only on counted objects, enforce as a temporary usage)
+  step 6 (2026-10-30): removeRefCounting()
+  step 7 (2026-10-30): list<@T> and vec<@T> (boxes Rc__T); the members that give or compare items, map<K, @T>, arr<@T> not yet
+  not yet: (@)T and its lock, counted values in
+  multiple assignments and inside atEnd blocks; a method call does not take a usage (the caller's usage covers it)
  4c  collections that own their elements (needs collections), compile-time use-after-move and lifetimes                 TODO
  4d  parent and child objects (spec 12.5)                                                                             DONE 2026-10-24
   `&Parent name as parent` / `(&)Parent name as parent` in the header of a class (one per class, a reference to a class), asparent functions (only the

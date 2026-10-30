@@ -1,0 +1,1 @@
+refcount_field_static.df(4): error: feature not supported: Static counted fields and counted properties (spec 12.7)

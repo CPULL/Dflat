@@ -162,6 +162,13 @@ public sealed partial class CodeGen {
   int? ArgCost(Node arg, string paramType, Scope scope) {
     string target = BaseOf(paramType);
     var valueNode = arg.Kind == "Paren" ? arg.Children[0] : arg;
+    int counted = BoxArgCost(valueNode, paramType, scope);
+    if (counted == -1) {
+      counted = CountedArgCost(valueNode, paramType, scope);
+    }
+    if (counted != -1) {
+      return counted < 0 ? null : counted;   // a counted parameter, or a counted argument (spec 12.7)
+    }
     if (IsUntypedLiteral(valueNode)) {
       bool isInteger = (valueNode.Kind == "Neg" ? valueNode.Children[0] : valueNode).Kind == "Int";
       if (isInteger) {

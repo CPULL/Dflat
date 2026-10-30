@@ -1,9 +1,12 @@
-// Weak references declared with _T (spec 12): fields, header parameters, parameters, variables; enforce; the holder does not own
+// Weak references (spec 12.7): only on counted objects, made with _x; fields, header parameters, parameters, variables; enforce gives a
+// temporary usage; the holder does not keep the object alive
 namespace weak
 alias Root as r
 
 class Context {
   public i32 id = 7
+} atEnd {
+  r.Console.log($"context {id} ends")
 }
 
 class Handle(_Context context) {
@@ -12,7 +15,7 @@ class Handle(_Context context) {
     enforce context { return context.id }
     return -1
   }
-  public fun link(_Context c) { other _= c }
+  public fun link(_Context c) { other = c }
   public fun bool hasOther() {
     enforce other { return true }
     return false
@@ -24,27 +27,48 @@ fun string probe(_Context c) {
   return "gone"
 }
 
-var ctx = Context()
-var h = Handle(ctx)
+@Context ctx = Context()
+var h = Handle(_ctx)
 r.Console.log(h.read())
 r.Console.log(h.hasOther())
-h.link(ctx)
+h.link(_ctx)
 r.Console.log(h.hasOther())
+r.Console.log($"weak references {ctx.weakrefsCount}")
 _Context w
-r.Console.log(probe(ctx))
-w _= ctx
-enforce w { r.Console.log(w.id) } else { r.Console.log("none") }
-_Context copy _= h.other
+r.Console.log(probe(_ctx))
+w = _ctx
+enforce w {
+  r.Console.log($"{w.id}, users inside enforce {ctx.usersCount}")
+} else {
+  r.Console.log("none")
+}
+r.Console.log($"users after enforce {ctx.usersCount}")
+_Context copy = w                           // a weak reference copied into another
+r.Console.log($"weak references {ctx.weakrefsCount}")
 enforce copy { r.Console.log("copy ok") } else { r.Console.log("copy none") }
-ctx is atEnd.
+ctx is done.                                // the last user: the object ends, the weak references see it gone
 r.Console.log(h.read())
 r.Console.log(h.hasOther())
 enforce w { r.Console.log(w.id) } else { r.Console.log("w gone") }
+r.Console.log(probe(copy))
+copy is done.
 r.Console.log(h)
-// a weak field does not end with its holder; = into a weak reference works as _= (level 3 warning)
-var ctx2 = Context()
-var h2 = Handle(ctx2)
+
+// a weak field does not end with its holder
+@Context ctx2 = Context()
+ctx2.id = 8
+var h2 = Handle(_ctx2)
 h2 is atEnd.
-r.Console.log(ctx2.id)
-_Context plain = ctx2
-r.Console.log(probe(plain))
+r.Console.log($"{ctx2.id}, weak references {ctx2.weakrefsCount}")
+r.Console.log(probe(_ctx2))
+
+// the temporary usage of enforce keeps the object alive while the block runs, and is released on every way out
+fun i32 early(_Context c) {
+  enforce c {
+    if c.id == 8 { return 1 }
+    return 2
+  }
+  return 0
+}
+r.Console.log(early(_ctx2))
+r.Console.log($"users after early {ctx2.usersCount}")

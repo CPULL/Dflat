@@ -1,0 +1,1 @@
+refcount_gift_param.df(6): error: a ->T parameter receives a plain owned object: ->first passes a usage only to a @T parameter (spec 12.7)

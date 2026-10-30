@@ -1,0 +1,1 @@
+bitnot_underscore.df(3): error: _x makes a weak reference: it is the value of a weak variable, field or parameter (_T w = _x, spec 12.7); the bitwise not is ~x

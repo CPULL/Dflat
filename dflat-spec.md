@@ -1,7 +1,7 @@
 # Dflat Language
 A new language D♭ that is the same as C# but easier to write and faster to execute
 
-**Version** 0.0.18  2026/10/28 by CPU
+**Version** 0.0.19  2026/10/30 by CPU
 
 ## D♭ — Dflat Language Specification (draft)
 
@@ -191,14 +191,14 @@ Converting an `addr` to a pointer results in an `unsafe` pointer.
 | Kind | Operators |
 |---|---|
 | arithmetic | `+ - * / %` |
-| bitwise | `&` `|` `^` `_x` (not) `<<` `>>` |
+| bitwise | `&` `|` `^` `~x` (not) `<<` `>>` |
 | logical | `!` `&&` `^^` `||` |
 | comparison | `== != < > <= >=`, `is` |
-| assignment | `= += -= *= /= %= &= |= ^= <<= >>= ??=`, `_=` (weak) |
+| assignment | `= += -= *= /= %= &= |= ^= <<= >>= ??=` |
 | increment | `++x x++ --x x--` (not atomic) |
 | ranges | `a..b` exclusive, `a..=b` inclusive, `a..`, `..b` |
 | null-safe | `?.` `??` |
-| ownership | `->x` move, `x!` copy |
+| ownership | `->x` move, `x!` copy, `@x` start reference counting, `_x` weak reference (12.7) |
 | pointers | `&x` address (read-only pointer), `(&)x` writable pointer or writable argument |
 
 - Assignments are not expressions (`++`/`--` are expressions with the usual ++<var> to increment and then get return the value and <val>++ to increment and return the original value).
@@ -218,7 +218,7 @@ Converting an `addr` to a pointer results in an `unsafe` pointer.
 | 1 Highest | () . ?. | Left to Right |
 | 2 | () `casting` [] `transmute` . | Left to Right |
 | 3	| ++ -- (postfix) `x!` (copy) | Left to Right |
-| 4	| ++ -- + - (prefix) ! _ -> & (&) | Right to Left |
+| 4	| ++ -- + - (prefix) ! ~ @ _ -> & (&) | Right to Left |
 | 5	| \* / %  | Left to Right |
 | 6	| + -	| Left to Right |
 | 7	| << >>	| Left to Right |
@@ -233,7 +233,7 @@ Converting an `addr` to a pointer results in an `unsafe` pointer.
 | 16 | `..` `..=` (ranges) | Not associative |
 | 17 | `??` | Right to Left |
 | 18 | ? {} (switch expression) | Right to Left |
-| 19 Lowest | = += -= \*= /= %= &= \|= ^= <<= >>= ??= _= | Right to Left |
+| 19 Lowest | = += -= \*= /= %= &= \|= ^= <<= >>= ??= | Right to Left |
 
 # 3. Non basic types
 
@@ -290,7 +290,7 @@ bitfield32 Flags { CanRead: 0, CanWrite: 1, CanSeek: 2, IsNetwork: 3 }
 These methods return the value and do not change the original bitfield variable.
 
 
-- `_value` (bitwise not, 2.5) flips only the defined bits. Casting an integer to a bitfield masks off every bit that is not defined, so a bitfield never holds undefined bits: `[Flags]_[u32]value` is the same as `_value`.
+- `~value` (bitwise not, 2.5) flips only the defined bits. Casting an integer to a bitfield masks off every bit that is not defined, so a bitfield never holds undefined bits: `[Flags]~[u32]value` is the same as `~value`.
 
 ```
 Flags flag = Flags.None
@@ -638,7 +638,7 @@ A collection holds several items in one object. Dflat has seven: `arr`, `vec`, `
 Applies to the keys of `map` / `hmap` and to the items of `set` / `hset`.
 
 - Types that can be keys: all the native types (the numeric types, `bool`, `char`, `string`, `date`, `time`, `clock`, `lapse`, enums, bitfields), composite types (tuples, and structs when they are defined, 11.1.5) whose components are all valid key types, classes that implement the trait `Keyable` (11.2.1), and generic sets whose members are all valid key types (11.3.6.1).
-- Types that cannot be keys (compile error): `arr` and all the other collections (also as a component of a tuple), iterators and views, and classes that do not implement `Keyable` (the error names the trait).
+- Types that cannot be keys (compile error): `arr` and all the other collections (also as a component of a tuple), iterators and views, counted objects (`@T`, `(@)T`) and weak references (`_T`), which are not stable by definition (12.7), and classes that do not implement `Keyable` (the error names the trait).
 - Nullable types can be keys (`i16?`), and null is a valid key; it sorts first (6.2.2). The empty string `""` is a valid key: for a `string`, `""` and null are the same value (7.1), so there is no separate null string key.
 - Keys are always read-only through the collection.
 - Sorted collections (`map`, `set`): a key is found and ordered by its sort key and `compareTo` (6.2.2, 6.8.4.1). Hashed collections (`hmap`, `hset`): the hash chooses where to look, and two keys are the same when the hashes match and `equals` agrees (6.2.1, 6.8.5.1).
@@ -1248,6 +1248,7 @@ trait MapIterator<Key, Value> : Iterator {
 ## 7.2 `enforce` statement
 `enforce` is a way to guarantee that one or more variables are **not null**
 - `enforce a, b { } else { }`: the only unwrap for `type?` (and for weak references). Strings cannot be enforced.
+- On a weak reference the block holds a temporary usage of the object; on a read/write counted object (`(@)T`) the block holds its lock (12.7).
 
 
 ---
@@ -1953,25 +1954,25 @@ Rust model, Dflat syntax.
 |---|---|
 | `b = a` | same object, no ownership change (compiler checks lifetimes) |
 | `->a` | ownership moves: `Item b = ->a`, `f(->a)`, `list.add(->a)` |
-| `b _= a` | weak reference |
-| `_T name` | a weak reference declared: a field, a variable or a parameter (`public _Texture2D texture`) |
 | `a!` | copy: a shortcut for `a.clone()` (12.6) |
 | `.clone()` | method: a deep copy that follows the kind of each field (12.6); overridable |
 | `.tryClone()` | method: like `.clone()`, raises `ObjectNotClonableException` when the object cannot be cloned (12.6) |
-| `.asRefCount` | object becomes reference counted; `=` then adds an owner; repeated calls ignored |
-| `.asSharedRefCount` | thread-safe counting |
-| `.isRC` | true for both kinds |
+| `@T name` | a reference counted object, read-only (Rust `Rc<T>`, 12.7) |
+| `(@)T name` | a reference counted object, read/write, with a lock (12.7) |
+| `@a` | a plain object starts reference counting; `a` is lost, as after a move (12.7) |
+| `_T name` | a weak reference to a counted object (Rust `Weak<T>`): a field, a variable or a parameter (`public _Texture2D texture`, 12.7) |
+| `_a` | makes a weak reference to the counted object `a`: `_Dog w = _a` (12.7) |
+| `x is done.` | releases a usage or a weak reference (12.7) |
 
-- Single owner; freed at the end of the owner's scope, running the class `atEnd` (11.4).
+- Single owner; freed at the end of the owner's scope, running the class `atEnd` (11.4). A counted object is owned by the counting system (12.7).
 - Strings follow these rules (4): `b = a` is the same string, `->a` moves, `a!` copies; the owner frees the string at the end of its scope.
 - Function parameters borrow; returning moves ownership to the caller.
+- Borrows (`&T` read-only, `(&)T` writable) follow Rust: a borrow puts a strong lock on the object: while it is alive the object cannot be released, moved with `->` or given away. A borrower does not own the object, so it cannot release it, move it with `->` or give it away. A borrow cannot outlive its lender: storing it beyond the call (a `&T` field included), returning it (a function returning `&Dog`) or handing it to something that keeps running after the lender's scope (a fire-and-forget async call) is a compile error; to keep an object after the call, take `@` (12.7). Counted objects cannot be borrowed (12.7).
 - Collections own their elements: adding moves in, removing moves out, reading borrows. This is true for `arr` too: the variable that declares an array owns it, `b = a` borrows it, `->a` moves it, and a field that is an array is dropped by its class (6.1).
 - An owned object that loses its owner is destroyed and its `atEnd` runs (`clear()`, `fill(...)`, `c[i] = v` and any other operation that drops an owned object, 6.1).
 - Iterators and views: if not given away, they live only inside the scope that created them; when moved or borrowed they follow the rules of this section, and their collection becomes changeable again only when the last holder ends (6.5).
-- Switching an object between the two counting kinds → `ChangingRefCountTypeException`.
-- Weak references are used through `enforce w { } else { }`; inside the block the object is kept alive.
-- A weak reference is declared with `_` before its type (`_Texture2D texture`), like `&T` (borrowed) and `*T` (pointer); it does not own the object and starts as null. It is set with `_=`; a plain `=` into a weak reference is allowed with a level 3 warning (the weak link is not visible where it is made).
-- `.asRefCount` / `.asSharedRefCount` / `.isRC` are built-in operations, not methods.
+- A weak reference is declared with `_` before its type (`_Texture2D texture`), like `&T` (borrowed) and `*T` (pointer); it does not own the object and starts as null. It exists only on counted objects and is used through `enforce w { } else { }` (12.7).
+- `@`, `_`, `is done.`, `usersCount`, `weakrefsCount` and `removeRefCounting()` are built-in operations of the language (12.7).
 
 ## 12.1 Pointers
 
@@ -2067,8 +2068,8 @@ function(->a.c)                    // a.c is null afterwards, a stays usable
 - Moving out of a stored field or property: a value is copied; an object is passed with its ownership and the field becomes null. If the property is computed (its `R` returns a new object that is not stored), `->` gives away that new object, which needs no owner here; the property value is nullified in every case (11.1.4). Collections: `->c[k]` (6.6).
 - Moving an object into a collection that owns its items needs `->` when the object already exists (`list[3] = ->task`, `list.add(->task)`, `insert`, `swap`); the plain form with an existing object is a compile error. An object created in the same statement needs no marker. Basic values are copied and need no marker (6.1); a string is always copied and the copy is shrunk (4).
 - Finalizer: `f is atEnd.` is a statement only, never an expression. The final dot is mandatory, and only a line break or `;` may follow it (`f is atEnd.close()` is a compile error).
-- `f is atEnd.` releases the ownership held by the variable `f`: a single owner is destroyed running its full destructor (11.4); a reference counted object drops the counter by one and is destroyed when it reaches zero. In every case `f` becomes null; on a null `f` it does nothing.
-- When the object is destroyed, weak references to it see null (through `enforce`).
+- `f is atEnd.` releases the ownership held by the variable `f`: the single owner is destroyed running its full destructor (11.4). `f` becomes null; on a null `f` it does nothing.
+- On a counted or weak variable it is a compile error: it would read as destroying the object, while the meaning is "I do not need it anymore"; the form is `f is done.` (12.7). One way to do each thing.
 - On a borrowed variable (not an owner) it is a compile error. Using `f` after the finalizer raises `UsageOfDestroyedObjectException`, or is a compile error when the compiler can detect it.
 - It works on fields, locals and parameters that own the object, and replaces the explicit `close()` calls in cleanup code.
 - `atEnd of f { f is atEnd. }` is legal and not flagged: the block can use `f` first and release it explicitly.
@@ -2108,7 +2109,7 @@ public notclonable class File { }
 | owned `string` | copied: a new string with the same text |
 | owned object | deep cloned with the same rules; null when it cannot be cloned |
 | owned child (an object that has a parent, 12.5) | null: a child is never duplicated, a new one comes from the functions of its parent |
-| reference counted object | another reference: the object gets one more owner |
+| counted object (`@T`, `(@)T`, 12.7) | another user of the same object (the count goes up by one); never cloned recursively |
 | borrowed (`&`, `(&)`) | null |
 | weak reference (`_T`) | another reference to the same object; remapped when it points into the object's own parts |
 
@@ -2121,6 +2122,91 @@ public notclonable class File { }
   - an object that has a parent (`as parent`, 12.5): a new child comes from the functions of its parent;
   - an `unsafe` class (12.1) and a class with pointer fields (`*T`, `(*)T`); there is no opt-in, a class that needs it writes its own `clone()`.
 - `tryClone()` returns the clone or raises the non-silent `ObjectNotClonableException` (15.3) when the object cannot be cloned; the result is then null. It is needed when the class is not known at compile time (a value of a trait type, `any Shape`): there `clone()` and `a!` are a compile error.
+- On a counted variable `a!` makes a new object, a copy, counted from 1 (`@Dog third = first!`, 12.7).
+
+## 12.7 Reference counting and weak references
+
+The Rust model: `@T` is `Rc<T>`, `_T` is `Weak<T>`, `(@)T` is a counted object with a lock.
+
+```
+@Dog first = Dog("Rex")              // created counted, 1 user
+Dog plain = Dog("Fido")
+@Dog moved = @plain                  // plain starts counting and is lost, as after a move
+@Dog second = first                  // another user of the same object, count 2
+@Dog third = first!                  // a new object, a copy of first, counted from 1
+
+fun keepDog(@Dog dog) { }            // the function holds its own usage
+keepDog(first)                       // count +1 for the call
+keepDog(->moved)                     // the caller gives its usage away, count unchanged
+
+u64 users = first.usersCount
+u64 weakRefs = first.weakrefsCount
+
+_Dog watcher = _first                // weak reference, not a user
+enforce watcher {
+  watcher.bark()                     // a temporary usage while the block runs
+} else {
+  // the object is gone
+}
+
+second is done.                      // usage released, second becomes null
+Dog alone = third.removeRefCounting()   // a plain object when third is the last user, otherwise null
+
+list<@Dog> pack = []
+pack.add(first)                      // the list holds its own usage
+
+(@)Dog dogRw = Dog("Max")            // read/write counted object
+enforce dogRw { dogRw.name = "Rex" } // the lock is held inside the block
+
+class Node(string name) {
+  _Node parent                       // weak to the parent
+  list<@Node> children               // strong to the children
+}
+@Node root = Node("root")
+@Node leaf = Node("leaf")
+leaf.parent = _root
+root.children.add(leaf)
+```
+
+Users and owner
+- The owner of a counted object is the counting system. The variables, fields, parameters and items that hold it are its users, and each holds one usage: they protect the object from deletion and never delete it. When the last usage is released the count is 0 and the object is destroyed (its `atEnd` runs, then what it owns ends, its counted fields releasing their usages); this is final, the count cannot be raised again from 0.
+- Counting is declared only by the type (`@T`, `(@)T`), or by `var x = @T()` and `var x = f()` (where `f` returns `@T`) when the type is inferred; the type of the variable is what the compiler uses. There is one kind of counting.
+- Every object type can be null, counted objects and weak references included. A null holds no usage: the release at the end of the scope and `is done.` do nothing on it. A null item in a `list<@Dog>` is valid.
+- An existing plain object starts counting only with the marker `@` in the expression (`@Dog moved = @plain`, `dogs.add(@plain)`); `plain` is lost afterwards, as after a move, and the counting system becomes the owner. `@Dog rc = plain` without the marker is a compile error, and `->plain` into a counted receiver is not used for this (`->` always moves a plain ownership). `@x` on an already counted `x` changes nothing.
+- An object cannot make itself counted: `@this` is a compile error (like `->this`, 11.1), and `this` cannot be passed where a counted object is expected (`registry.add(this)` into a `list<@Dog>`); whoever holds the counted object does it (`registry.add(aDog)`).
+- `@Dog second = first` adds a user. A counted object cannot be borrowed: `Dog view = first` and `&Dog view = first` with a counted `first` are compile errors, and so is `(&)` on it; it is used through a new usage (`@`, or `(@)` to write).
+- `!` is always a clone: `@Dog third = first!` makes a new object counted from 1 (12.6). The default clone of an object does not clone its counted fields: the clone becomes another user of the same objects.
+- `==` works as on plain objects (11.1.3); `@` changes nothing.
+- Counted objects and weak references cannot be keys of a map or items of a set (6.2).
+
+Functions
+- `fun f(@Dog dog)` takes a usage: the count goes up when entering and down when returning; the function uses the object read-only. `fun f((@)Dog dog)` is the read/write form, as `&T` / `(&)T`. A counted argument to a `Dog`, `&Dog` or `(&)Dog` parameter is a compile error.
+- `->a` is allowed if and only if the code owns `a`, counted or not. An `@Dog dog` parameter holds one usage, so it can pass it down with `->dog` (no count change), or store the object with `=` (count +1) and release its own usage on return. A `&` borrower owns nothing and can never use `->`.
+- `f(->rc)` gives the caller's usage to the function: no count change on the call, `rc` cannot be used afterwards, and the usage is released when the function is done, unless it passes it on. Other users are never affected.
+- A method call on a counted object (`first.bark()`) is a usage until the method returns, so the object cannot be released while the method runs. The compiler may leave out the count when another usage of the caller already keeps the object alive for the whole call (the variable it is called on, a field of an object the caller holds).
+- A function returning `@Dog` passes the usage of the returned variable to the caller (`return dog` moves it, the count does not change).
+
+Releasing
+- A variable that holds a usage or a weak reference releases it automatically when its scope ends. `x is done.` releases it early; it works only on `@`, `(@)` and `_` variables (on a plain owned object it is a compile error: `is atEnd.` destroys it, 12.4).
+- A variable that releases its usage (`is done.`), transfers it (`->`) or successfully removes the counting becomes null; the cleanup at the end of the scope does not release it a second time.
+- `x.removeRefCounting()` (Rust `Rc::try_unwrap`) moves the object out of the counting: for the last user it returns a plain owned object and the counting block is freed once no weak reference needs it; weak references see the object as gone. When other users exist it returns null and `x` stays valid. Valid on `@` and `(@)` variables and fields (compile error on `_` and on a plain object).
+- `usersCount` gives the number of users, `weakrefsCount` the number of weak references; both are valid on every counted object (`weakrefsCount` is 0 when nothing points at it) and a compile error on a type that cannot be counted.
+
+Weak references
+- A weak reference exists only on a counted object; it does not count as a user. It is made with `_` in the type and in the expression (`_Dog weak = _first`, `var weak2 = _first`); `=` assigns it. Each weak reference adds one to `weakrefsCount`.
+- It is used only through `enforce w { } else { }` (7.2): inside the block it is a temporary usage of the object; the else branch runs when the object is gone (its user count reached 0).
+
+Fields and collections
+- An `@T` or `(@)T` field is a user like any other: it releases its usage when its object dies. A `_T` field is a weak reference, seen as gone once the object is destroyed. A `&T` field is not allowed (a borrow cannot outlive its lender, 12).
+- A collection of counted objects (`list<@Dog>`) holds its own usage for each item (`pack.add(first)` adds a user). Collections are structurally immutable while being iterated (6.4); the loop variable is a temporary usage, acquired at the start of each iteration and released at its end, with no borrow involved: `for var dog in pack { }` and `for @Dog dog in pack { }` are the same. The collection keeps its own usage of the item and cannot change while the loop runs, so the compiler may leave out the count of the loop variable.
+
+Read-only and read/write
+- `@T` is a read-only counted object, `(@)T` a read/write one. `(@)T` includes a lock in its runtime representation, so it is a distinct counted type.
+- Reads never need the lock; a write needs the caller to hold the object's lock, and writing without it raises `WritingOnRefCountWithoutLockingException` (not silent, 15.3). `enforce x { }` takes the lock and releases it at the end of the block (`enforce dogRw { dogRw.name = "Rex" }`).
+- Reads without the lock always see a valid state of the object, but not necessarily the latest one; several reads that must be consistent hold the lock.
+
+Cycles
+- As in Rust, nothing at runtime: an object does not know who counts it (it holds only the two counts), and the developer breaks a cycle with a weak reference (the `Node` above). Where the compiler can detect a possible cycle (two classes with `@` fields of each other's type, or a class with an `@` field of its own type) it gives a level 1 warning for possible zombie objects (19.3).
 
 ---
 
@@ -2148,8 +2234,12 @@ The definition says how a parameter is passed, ownership included. The call mark
 | `f((&)Item o)` | `f((&)o)` | borrowed, read/write; `(&)` required in the call |
 | `f(Item o)` | `f(o!)` | copied by the caller, not part of the definition |
 | `f(->Item o)` | `f(->o)` | ownership moves; `->` required in the call |
+| `f(@Item o)` | `f(o)` | a usage of a counted object, read-only: count +1 for the call (12.7) |
+| `f(@Item o)` | `f(->o)` | the caller's usage is given to the function, count unchanged (12.7) |
+| `f((@)Item o)` | | a usage of a counted object, read/write (12.7) |
 
 - Native data: integers, reals, chars, bools, enums, pointers. Objects: class instances.
+- A counted argument is accepted only by `@` and `(@)` parameters; `f(Item o)`, `f(&Item o)` and `f((&)Item o)` with a counted argument are compile errors (12.7).
 - A mismatched call is a compile error.
 - Defaults anywhere; named arguments when needed (`hello(age: 27)`).
 - Positional arguments stay in the order of the parameters; named arguments can be written in any position.
@@ -2355,6 +2445,7 @@ class Exception {
 | 47 | `InvalidIteratorReleaseException` (6.4, 11.2) | |
 | 48 | `UsageOfDestroyedObjectException` (12.4, 12.5) | |
 | | `ObjectNotClonableException` (12.6) | |
+| | `WritingOnRefCountWithoutLockingException` (12.7) | |
 
 - The list grows during development; each new standard exception takes the next ID.
 - `UsageOfDestroyedObjectException`: raised when an object that is gone is used: a child whose parent ended (12.5), or a variable released with `->` or `is atEnd.` (12.4). It is not silent and is catchable in Debug and Release builds (no `Panic` in Release).
@@ -2686,6 +2777,7 @@ Level 1 = most important, level 3 = least.
 | 1 | `Keyable` class with a field of a collection, iterator or view type | 11.2.1 |
 | 1 | `->` on a variable or field of a basic type | 12.4 |
 | 1 | Same constraint repeated inline and in `where` | 11.3.1 |
+| 1 | Possible cycle of counted objects (zombie objects): two classes with `@` fields of each other's type, or a class with an `@` field of its own type | 12.7 |
 | 2 | Cast out of range saturates | 3.5 |
 | 2 | Upward type check | 11.1 |
 | 2 | Type name not PascalCase | 1.1 |
@@ -2701,7 +2793,6 @@ Level 1 = most important, level 3 = least.
 | 3 | Primary parameter redeclared with an initializer | 11.1.1 |
 | 3 | Unreachable branch of a generic check | 11.1.3 |
 | 3 | `uns` smaller than the cpu size (limits the length of the collections and the size of `.hash`) | 2.1 |
-| 3 | `=` into a weak reference (`_=` is expected) | 12 |
 
 ---
 
@@ -2739,6 +2830,11 @@ Level 1 = most important, level 3 = least.
 - Collections: the lifetime of a borrow of an item taken outside a `for` loop (`(&)c[k]`), which an insert or a delete can move
 - Collections: the other non-silent exceptions of the collection operations, to be formalized during the implementation (out of memory is decided, 6.1, 15.3)
 - Strings: borrowed strings in the advanced cases (who releases them, lifetimes across fields and collections)
+- Ownership: when a local borrow ends (last use or end of scope); when a temporary object inside an expression ends
+- Reference counting (12.7): `->` from a counted variable into a `->T` parameter or a plain receiver (removing the counting); `->pack[0]` on a list of counted items; counted natives and strings (`@i32`, `@string`); counted traits and downcasts; `&` parameters of a primary constructor; whether a weak reference can be made without `_` in the expression; which methods a read-only `@T` can call; the call form of a `(@)T` parameter
+- Reference counting: the lock of `(@)T` (waiting or try-lock, the else branch, the order for `enforce a, b`, nested locking, deadlock), an expression form of `enforce` and several failure cases in one `enforce`
+- Reference counting: `ChangingRefCountTypeException` (15.3) has no use with one kind of counting
+- Reference counting: generics with counted type arguments (`Stack<@Dog>`), after 0.1.0; the `Rc` / `Arc` split, with threads; counted captures of lambdas, and the weak capture of a plain variable (13.3)
 - Properties: position of `readonly` / `readwrite` / `writeonly` next to `public` and `static`, and their use together with a body (11.1.4); `override` of a property with only one half; access to a property through a trait-typed value (`any`), left to the compiler
 - DateTime library: import path, timezone database, parsing for `CalendarDate` / `ZonedDateTime`
 - Import paths of the standard library parts (`import stdrnd`)
@@ -3251,3 +3347,18 @@ Level 1 = most important, level 3 = least.
 - 15.9 C functions (new, minimal): `extern fun` with no body at the top level; numbers, `bool` and `addr` as they are, `string` as `const char*` during the call, `arr<T>` as `T*` and a length; returns a number, `bool`, `addr` or nothing; never an error; 99 C interop item narrowed
 - 11.1.4 `readonly` on a class field without accessor blocks is a shorthand for a public reader and a private writer
 - 11.1.4.1 Field groups (new): `pos { r32 x, r32 y }` organizes fields inside a class; `s.pos.x` is a plain field (so `s.pos.x++` works); the group is not a value; a tuple can be assigned to it, and reading it gives a tuple copy
+
+## Changes in 0.0.19
+
+- 12.7 Reference counting and weak references (new, the Rust model): `@T` read-only counted object (`Rc<T>`), `(@)T` read/write counted object with a lock, `_T` weak reference (`Weak<T>`); the counting system owns the object and the holders are users with one usage each; the object dies at count 0, final; counting declared only by the type or `var x = @T()`; `@plain` starts counting (plain is lost), `@Dog rc = plain` is an error, `@this` is an error; counted objects cannot be borrowed (`Dog v = first`, `&Dog v = first`, `(&)` are errors); `!` makes a new counted object from 1; `@T` / `(@)T` parameters take a usage, `f(->rc)` gives it away; `->a` only when the code owns `a`; a method call is a usage; returning `@Dog` passes the usage; release at scope end, `x is done.` early, the released variable becomes null; `removeRefCounting()` (null when other users exist); `usersCount`, `weakrefsCount`; weak references only on counted objects, made with `_x` (`_Dog w = _first`), `=` assigns, used through `enforce`; `@T` fields are users, `_T` fields weak, `&T` fields not allowed; `list<@Dog>` holds a usage per item, the loop variable is a temporary usage; the lock of `(@)T` with `enforce`; cycles as in Rust with a level 1 warning (was: `.asRefCount`, `.asSharedRefCount`, `.isRC`, `ChangingRefCountTypeException` for switching kinds, `=` adding an owner)
+- 12 Borrows follow Rust: a borrow locks the object (no release, move or giving away while it lives), a borrower cannot release, move or give away, a borrow cannot outlive its lender (stored, returned, handed to a fire-and-forget call: compile error); the table has `@T`, `(@)T`, `@a`, `_T`, `_a`, `is done.`
+- 2.5, 2.5.1, 3.1.1 The bitwise not is `~x` (was `_x`); `_=` removed; `@` and `_` are prefix operators
+- 6.2 Counted objects and weak references cannot be keys or set items
+- 7.2 `enforce` on a weak reference holds a temporary usage, on a `(@)T` its lock
+- 12.4 `is atEnd.` is only for plain owners; on a counted or weak variable it is a compile error (`is done.` releases them)
+- 12.6 A counted field in a clone is another user of the same object, never cloned recursively; `a!` on a counted variable makes a new object counted from 1
+- 13.1 Parameters `@Item` (a usage, read-only; `->o` gives the caller's usage) and `(@)Item` (read/write); a counted argument to a plain, `&` or `(&)` parameter is a compile error
+- 19.3 New level 1 warning: possible cycle of counted objects; removed the level 3 warning for `=` into a weak reference
+- 99 Open items for ownership and reference counting added
+- 12.7 `var x = f()` is counted when `f` returns `@T`; `removeRefCounting()` also on counted fields; the compiler may leave out the count of a method call and of the loop variable over `list<@T>` when another usage keeps the object alive; a write to a `(@)T` without the lock raises `WritingOnRefCountWithoutLockingException` (new, 15.3); 99: the name of that exception removed
+- 12.7, 19.3 The cycle warning also covers a class with an `@` field of its own type

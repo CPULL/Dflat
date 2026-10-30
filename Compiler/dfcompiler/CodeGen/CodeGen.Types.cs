@@ -183,6 +183,9 @@ public sealed partial class CodeGen {
   }
 
   string CType(string type) {
+    if (IsCountedType(type) || IsWeakType(type)) {
+      return "df_rc*";   // @Dog, _Dog: a counted or weak parameter or result, the counting block (spec 12.7)
+    }
     if (type == "Exception") {
       return "df_exception*";
     }
@@ -257,6 +260,9 @@ public sealed partial class CodeGen {
 
   // value of a declared variable without initializer
   string ZeroValue(string type) {
+    if (IsCountedType(type) || IsWeakType(type)) {
+      return "NULL";
+    }
     if (type == "string") {
       return "df_str_lit(\"\", 0)";
     }
@@ -456,6 +462,14 @@ public sealed partial class CodeGen {
   string Convert(Expr e, string to, Node at) {
     if (e.Type == to) {
       return e.Code;
+    }
+    if (IsWeakType(e.Type) || IsWeakType(to)) {
+      throw Error("a weak reference is used through enforce w { } else { } (spec 12.7)", at);
+    }
+    if (IsCountedType(e.Type) || IsCountedType(to)) {
+      throw IsCountedType(e.Type)
+        ? Error($"this call gives a counted {CountedBase(e.Type)}: keep it in a counted variable (@{CountedBase(e.Type)} x = ...) to use it (spec 12.7)", at)
+        : Error($"a counted {CountedBase(to)} is expected here (spec 12.7)", at);
     }
     if (IsMulti(e.Type)) {
       throw Error($"this call returns {TupleElems(e.Type).Count} values; assign them to as many targets", at);

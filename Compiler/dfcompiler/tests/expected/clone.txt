@@ -1,0 +1,26 @@
+Rex 3 red [1, 2, 3] [good, loud]
+Copy 9 blue [1, 2, 3, ...] (4 items) [good, loud, new]
+pal users 3, weak 2, same friend true
+other Rex, pal users 4
+Rex ends
+collar red ends
+Copy ends
+collar blue ends
+Rex ends
+collar red ends
+Pal ends
+collar red ends
+meow 9
+101 101
+first 1, third 1, same false
+Packed PackedCopy
+first users 3, 1
+PackedCopy ends
+collar red ends
+Packed ends
+collar red ends
+First ends
+collar red ends
+First ends
+collar red ends
+---- exit code 0 ----

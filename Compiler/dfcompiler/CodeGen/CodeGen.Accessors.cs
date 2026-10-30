@@ -158,7 +158,8 @@ public sealed partial class CodeGen {
     }
     var receiver = target.Kind == "Member" && target.Children.Count == 1 ? target.Children[0] : null;
     // a name that is not a value (Shape.count, a static through its class) is never an object with properties
-    if (receiver != null && IsSimpleReceiver(receiver) && !(receiver.Kind == "Name" && scope.Find(receiver.Text!) == null && receiver.Text != "this"
+    // any other receiver (blocks[i].pos.x) is a property too, so the setter is never skipped; it is evaluated once per use
+    if (receiver != null && !(receiver.Kind == "Name" && scope.Find(receiver.Text!) == null && receiver.Text != "this"
         && (currentClass == null || FindField(currentClass, receiver.Text!) == null))) {
       var obj = ExprOf(receiver, scope);
       if (IsClass(obj.Type) && FindField(ObjInfo(obj.Type), target.Text!) is { HasAccessors: true } property) {
@@ -168,11 +169,21 @@ public sealed partial class CodeGen {
     return null;
   }
 
+  // op= and ++ use the receiver twice (getter, then setter): only a name or a chain of members, which can be read again
+  void CheckReceiverReadTwice(Node target, Node at) {
+    if (target.Kind == "Member" && target.Children.Count == 1 && !IsSimpleReceiver(target.Children[0])) {
+      throw NotSupported("op= and ++ / -- on a property through an expression (put the object in a variable first)", at);
+    }
+  }
+
   // target op value through the setter (op= reads the property through the getter first)
   string PropertyAssign(Node s, Node targetNode, Expr obj, FieldInfo property, Scope scope) {
     string op = s.Text!;
     if (op is "_=" or "??=") {
       throw NotSupported($"{op} on a property with accessor blocks", s);
+    }
+    if (op != "=") {
+      CheckReceiverReadTwice(targetNode, s);
     }
     Node value = op == "=" ? s.Children[1] : Synthetic("Binary", s, op[..^1]).Add(targetNode).Add(s.Children[1]);
     return PropertySet(obj, property, value, scope, s).Code;
@@ -190,6 +201,7 @@ public sealed partial class CodeGen {
   // x++ and the others on a property: the getter, then the setter with the new value
   Expr PropertyIncDec(Node n, Expr obj, FieldInfo property, Scope scope) {
     var targetNode = n.Children[0];
+    CheckReceiverReadTwice(targetNode, n);
     if (!IsNumeric(property.Type)) {
       throw Error($"++ and -- need a number, not {property.Type}", n);
     }

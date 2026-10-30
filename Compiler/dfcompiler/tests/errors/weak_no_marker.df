@@ -1,0 +1,7 @@
+namespace weak_no_marker
+class C { }
+fun f() {
+  @C c = C()
+  _C w = c
+}
+f()

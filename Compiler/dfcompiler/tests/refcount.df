@@ -1,0 +1,223 @@
+// Reference counting, step 1 (spec 12.7): @T variables, users, release at the end of the scope, is done., usersCount, weakrefsCount
+namespace refcount
+alias Root as r
+
+class Dog(string name) {
+  public fun bark() { r.Console.log($"{name}: woof") }
+} atEnd {
+  r.Console.log($"{name} ends")
+}
+
+fun counts() {
+  @Dog first = Dog("Rex")                   // counted, 1 user
+  r.Console.log($"users {first.usersCount}, weak {first.weakrefsCount}")
+  @Dog second = first                       // another user of the same object
+  r.Console.log($"users {first.usersCount}, same object {first == second}")
+  {
+    @Dog third = second
+    r.Console.log($"inner users {third.usersCount}")
+    third.bark()
+  }                                         // third releases its usage
+  r.Console.log($"after the block {first.usersCount}")
+  second is done.                           // early release: second becomes null
+  r.Console.log($"after done {first.usersCount}, second is null {second == null}")
+  r.Console.log("end of counts")
+}                                           // first is the last user: Rex ends here
+
+fun inferred() {
+  var dog = @Dog("Fido")                    // var x = @T(): counted
+  @Dog marked = @Dog("Max")                 // the marker on a new object is allowed
+  @Dog nobody                               // null: no usage
+  @Dog alsoNull = null
+  r.Console.log($"{dog.usersCount} {marked.usersCount} {nobody == null} {alsoNull == null}")
+  nobody is done.                           // nothing to release
+  dog is done.                              // Fido ends now
+  r.Console.log("end of inferred")
+}
+
+fun reassign() {
+  @Dog a = Dog("A")
+  @Dog b = Dog("B")
+  a = b                                     // A ends, a is another user of B
+  r.Console.log($"B users {b.usersCount}")
+  a = a                                     // nothing changes
+  r.Console.log($"B users {b.usersCount}")
+  a = Dog("C")                              // a new object counted from 1
+  r.Console.log($"B users {b.usersCount}, C users {a.usersCount}")
+  b = null                                  // B ends
+  r.Console.log("end of reassign")
+}
+
+fun earlyReturn(bool leave) {
+  @Dog d = Dog("Early")
+  if leave {
+    return                                  // the usage is released on every way out
+  }
+  r.Console.log("not left")
+}
+
+fun loop() {
+  for i32 i = 0..3 {
+    @Dog pass = Dog($"Pass{i}")             // each pass is a scope
+    pass.bark()
+  }
+}
+
+fun nullAccess() {
+  @Dog none
+  r.Console.log($"{none.usersCount}")
+  catch NullPointerException {
+    r.Console.log("usersCount of null: NullPointerException")
+  }
+}
+
+class Kennel {
+  public Dog resident = Dog("Resident")
+}
+
+fun movedIn() {
+  Dog plain = Dog("Plain")
+  @Dog moved = @plain                       // plain gives its object to counting and is null afterwards
+  r.Console.log($"plain is null {plain == null}, users {moved.usersCount}")
+  @Dog again = @moved                       // @ on a counted variable changes nothing: another user
+  r.Console.log($"users {moved.usersCount}")
+  var inferredMove = @Dog("Var")
+  Dog other = Dog("Other")
+  inferredMove = @other                     // Var ends, Other is counted
+  r.Console.log($"other is null {other == null}")
+  Kennel k = Kennel()
+  @Dog fromField = @k.resident              // a field of an owned object, as ->k.resident
+  r.Console.log($"field is null {k.resident == null}, users {fromField.usersCount}")
+  r.Console.log("end of movedIn")
+}
+
+// functions (spec 12.7, 13.1)
+fun show(@Dog dog) {                        // takes a usage: count +1 entering, -1 returning
+  r.Console.log($"show {dog.usersCount}")
+}
+
+fun keep(@Dog dog) {
+  @Dog held = dog                           // count +1, released with held
+  r.Console.log($"keep {dog.usersCount}")
+  show(->dog)                               // passes its own usage down: no count change
+  r.Console.log($"dog is null {dog == null}")
+}
+
+fun @Dog make(string name) {
+  return Dog(name)                          // a new object, counted from 1
+}
+
+fun @Dog makeShort(string name) { Dog(name) }
+
+fun @Dog pass(@Dog dog) {
+  return dog                                // gives the usage to the caller
+}
+
+fun @Dog fromPlain() {
+  Dog plain = Dog("FromPlain")
+  return @plain
+}
+
+class Trainer {
+  public fun train(@Dog dog) { r.Console.log($"train {dog.usersCount}") }
+  public fun @Dog adopt() { Dog("Adopted") }
+}
+
+fun inFunctions() {
+  @Dog rex = Dog("Rex2")
+  show(rex)                                 // caller keeps its usage
+  r.Console.log($"after show {rex.usersCount}")
+  keep(rex)
+  r.Console.log($"after keep {rex.usersCount}")
+  show(Dog("Temp"))                         // a new object: it ends with the call
+  @Dog made = make("Made")
+  r.Console.log($"made {made.usersCount}")
+  var inferredMade = makeShort("Short")     // var takes the counted result
+  r.Console.log($"short {inferredMade.usersCount}")
+  @Dog back = pass(made)                    // made gives a usage to the call, the call gives it back
+  r.Console.log($"back {made.usersCount}")
+  make("Dropped")                           // nobody keeps it: it ends at once
+  @Dog plainMade = fromPlain()
+  Trainer t = Trainer()
+  t.train(rex)
+  @Dog adopted = t.adopt()
+  show(->rex)                               // the caller gives its usage away
+  r.Console.log($"rex is null {rex == null}")
+  r.Console.log("end of inFunctions")
+}
+
+// fields (spec 12.7)
+class Owner(@Dog pet) {                      // a header parameter: the field is a user
+  public @Dog pet                           // redeclared to make it public
+  public @Dog spare = Dog("Spare")          // a field with a start value
+  public @Dog other                         // null
+  public fun swapPets() {
+    @Dog keep = pet
+    pet = spare                             // bare field names
+    spare = keep
+  }
+  public fun @Dog givePet() { pet }         // a field gives a new user
+} atEnd {
+  r.Console.log("owner ends")
+}
+
+fun inFields() {
+  @Dog buddy = Dog("Buddy")
+  {
+    Owner o = Owner(buddy)
+    r.Console.log($"buddy {buddy.usersCount}, spare {o.spare.usersCount}")
+    o.other = buddy                         // another user
+    r.Console.log($"buddy {buddy.usersCount}, other is buddy {o.other == buddy}")
+    o.pet.bark()
+    o.swapPets()
+    o.spare.bark()
+    o.pet.bark()
+    @Dog given = o.givePet()
+    r.Console.log($"spare users {given.usersCount}")
+    @Dog copy = o.other
+    r.Console.log($"buddy {buddy.usersCount}")
+    o.other is done.                        // early release
+    r.Console.log($"buddy {buddy.usersCount}, other is null {o.other == null}")
+    o.spare = Dog("Fresh")                  // the old spare (Buddy) loses a user
+    r.Console.log($"buddy {buddy.usersCount}")
+    show(o.pet)
+    r.Console.log("end of block")
+  }                                         // o ends: its fields release their usages
+  r.Console.log($"buddy {buddy.usersCount}")
+  r.Console.log("end of inFields")
+}
+
+// removeRefCounting (spec 12.7, Rust Rc::try_unwrap)
+fun removing() {
+  @Dog shared = Dog("Shared")
+  @Dog second = shared
+  Dog refused = shared.removeRefCounting()  // two users: null, shared stays valid
+  r.Console.log($"refused is null {refused == null}, shared users {shared.usersCount}")
+  second is done.
+  _Dog watcher = _shared
+  Dog alone = shared.removeRefCounting()    // the last user: a plain object, shared becomes null
+  alone.bark()
+  r.Console.log($"shared is null {shared == null}")
+  enforce watcher { r.Console.log("watcher alive") } else { r.Console.log("watcher sees it gone") }
+  Owner o = Owner(Dog("InField"))
+  Dog fromField = o.pet.removeRefCounting() // a counted field, the last user
+  fromField.bark()
+  r.Console.log($"field is null {o.pet == null}")
+  @Dog dropped = Dog("Dropped2")
+  dropped.removeRefCounting()               // nobody keeps the object: it ends at once
+  r.Console.log("end of removing")
+}                                           // alone and fromField end here as plain owned objects
+
+counts()
+inferred()
+movedIn()
+inFunctions()
+inFields()
+removing()
+reassign()
+earlyReturn(true)
+earlyReturn(false)
+loop()
+nullAccess()
+u32 bits = 5
+r.Console.log($"bitwise not {~bits}")

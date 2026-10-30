@@ -1,0 +1,5 @@
+namespace refcount_field_static
+class Dog { }
+class Kennel {
+  public static @Dog shared
+}

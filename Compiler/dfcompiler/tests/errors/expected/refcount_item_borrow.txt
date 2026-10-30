@@ -1,0 +1,1 @@
+refcount_item_borrow.df(6): error: 'pack[...]' is counted and cannot be borrowed: take another usage with @Dog view = ... (spec 12.7)

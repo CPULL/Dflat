@@ -1,0 +1,76 @@
+// Collections of counted objects (spec 12.7): list<@T> and vec<@T> hold a usage per item; reading an item gives the object
+namespace refcountitems
+alias Root as r
+
+class Dog(string name) {
+  public fun bark() { r.Console.log($"{name}: woof") }
+} atEnd {
+  r.Console.log($"{name} ends")
+}
+
+fun show(@Dog dog) {
+  r.Console.log($"show {dog.usersCount}")
+}
+
+fun @Dog make(string name) { Dog(name) }
+
+fun lists() {
+  @Dog rex = Dog("Rex")
+  list<@Dog> pack = []
+  pack.add(rex)                             // the list holds its own usage
+  r.Console.log($"rex {rex.usersCount}, len {pack.len}")
+  pack.add(Dog("Fido"))                     // a new object, counted from 1
+  Dog plain = Dog("Plain")
+  pack.add(@plain)                          // a plain object starts counting
+  pack.add(make("Made"))
+  pack.add(null)                            // a null item is valid
+  r.Console.log(pack)
+  pack[0].bark()
+  r.Console.log($"item users {pack[1].usersCount}, same {pack[0] == rex}, null item {pack[4] == null}")
+  @Dog held = pack[1]                       // another user of Fido
+  r.Console.log($"fido {held.usersCount}")
+  show(pack[2])
+  for var dog in pack {                     // the loop variable is the object
+    if dog != null { dog.bark() }
+  }
+  pack[3] = rex                             // Made ends, rex gets another user
+  r.Console.log($"rex {rex.usersCount}")
+  pack.removeAt(0)                          // rex loses the user of the list
+  r.Console.log($"rex {rex.usersCount}")
+  pack.insert(0, Dog("Inserted"))
+  r.Console.log(pack)
+  pack.clear()                              // every item releases its usage
+  r.Console.log($"rex {rex.usersCount}, fido {held.usersCount}")
+  r.Console.log("end of lists")
+}
+
+fun vecs() {
+  @Dog a = Dog("A")
+  vec<@Dog> v = [a, Dog("B")]               // a literal: a user of a, a new B
+  r.Console.log($"a {a.usersCount}, {v}")
+  v.add(a)
+  r.Console.log($"a {a.usersCount}")
+  v.swap(0, 1)
+  for Dog d in v { d.bark() }
+  for @Dog counted in v { counted.bark() }  // the same as for var (spec 12.7)
+  v.truncate(1)                             // the dropped items release their usages
+  r.Console.log($"a {a.usersCount}, len {v.len}")
+  r.Console.log("end of vecs")
+}                                           // v ends: B ends with it
+
+class Kennel {
+  public list<@Dog> dogs = []
+}
+
+fun inField() {
+  @Dog k9 = Dog("K9")
+  Kennel kennel = Kennel()
+  kennel.dogs.add(k9)
+  r.Console.log($"k9 {k9.usersCount}")
+  kennel is atEnd.                          // the list ends with its holder
+  r.Console.log($"k9 {k9.usersCount}")
+}
+
+lists()
+vecs()
+inField()

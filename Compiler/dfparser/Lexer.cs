@@ -66,7 +66,7 @@ public sealed class Lexer {
     "..=", "...", "??=", "<<=",
     "->", "_=", "==", "!=", "<=", ">=", "&&", "||", "^^", "++", "--",
     "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<", "?.", "??", "..",
-    "+", "-", "*", "/", "%", "&", "|", "^", "!", "_", "=", "<", ">",
+    "+", "-", "*", "/", "%", "&", "|", "^", "!", "~", "@", "_", "=", "<", ">",
     "(", ")", "{", "}", "[", "]", ",", ";", ":", ".", "?"
   };
 
@@ -177,8 +177,10 @@ public sealed class Lexer {
       return;
     }
     var last = tokens[^1];
-    // "f is atEnd." ends the statement with its dot
-    bool finalizer = last.Is(".") && tokens.Count > 1 && tokens[^2].Kind == TokenKind.Keyword && tokens[^2].Text == "atEnd";
+    // "f is atEnd." and "x is done." end the statement with their dot
+    bool finalizer = last.Is(".") && tokens.Count > 2
+      && (tokens[^2].Kind == TokenKind.Keyword && tokens[^2].Text == "atEnd"
+          || tokens[^2].Kind == TokenKind.Ident && tokens[^2].Text == "done" && tokens[^3].Kind == TokenKind.Keyword && tokens[^3].Text == "is");
     if (last.Kind != TokenKind.Newline && (EndsStatement(last) || finalizer)) {
       tokens.Add(new Token(TokenKind.Newline, "\n", line, col));
     }

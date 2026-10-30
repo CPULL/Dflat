@@ -1,0 +1,6 @@
+namespace clone_map
+fun f() {
+  map<string, i32> m = []
+  var n = m!
+}
+f()

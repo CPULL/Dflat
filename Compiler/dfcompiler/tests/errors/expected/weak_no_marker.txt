@@ -1,0 +1,1 @@
+weak_no_marker.df(5): error: a weak reference is made with the marker: _c (spec 12.7)

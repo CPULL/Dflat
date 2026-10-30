@@ -1,0 +1,1 @@
+property_index_compound.df(7): error: feature not supported: op= and ++ / -- on a property through an expression (put the object in a variable first)

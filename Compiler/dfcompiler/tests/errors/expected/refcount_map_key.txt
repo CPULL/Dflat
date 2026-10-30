@@ -1,0 +1,1 @@
+refcount_map_key.df(3): error: counted objects (@T) cannot be keys of a map or items of a set: a key must be stable (spec 6.2)

@@ -1,0 +1,8 @@
+namespace refcount_items_plain
+class Dog { }
+fun f() {
+  Dog plain = Dog()
+  list<@Dog> pack = []
+  pack.add(plain)
+}
+f()

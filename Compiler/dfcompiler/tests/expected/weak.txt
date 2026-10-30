@@ -1,13 +1,21 @@
 7
 false
 true
+weak references 2
 alive
-7
+7, users inside enforce 2
+users after enforce 1
+weak references 4
 copy ok
+context 7 ends
 -1
 false
 w gone
-Handle { context: Context{}, other: Context{} }
-7
+gone
+Handle { context: null, other: null }
+8, weak references 0
 alive
+1
+users after early 1
+context 8 ends
 ---- exit code 0 ----

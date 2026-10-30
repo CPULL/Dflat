@@ -1,0 +1,91 @@
+// Cloning (spec 12.6): a! is a.clone(); the default clone copies each field by its kind; a clone() of the class replaces it
+namespace clone
+alias Root as r
+
+class Collar(string color) {
+  public string color = color
+} atEnd {
+  r.Console.log($"collar {color} ends")
+}
+
+class Dog(string name) {
+  public string name = name
+  public i32 age = 3
+  public Collar collar = Collar("red")      // an owned object: cloned
+  public @Dog friend                        // counted: another user
+  public _Dog watcher                       // weak: another weak reference
+  public vec<i32> scores = [1, 2, 3]        // a collection: a new one with copies
+  public list<string> tags = ["good", "loud"]
+} atEnd {
+  r.Console.log($"{name} ends")
+}
+
+fun plainClone() {
+  Dog rex = Dog("Rex")
+  @Dog pal = Dog("Pal")
+  rex.friend = pal
+  rex.watcher = _pal
+  Dog copy = rex!
+  copy.name = "Copy"
+  copy.age = 9
+  copy.collar.color = "blue"
+  copy.scores.add(4)
+  copy.tags.add("new")
+  r.Console.log($"{rex.name} {rex.age} {rex.collar.color} {rex.scores} {rex.tags}")
+  r.Console.log($"{copy.name} {copy.age} {copy.collar.color} {copy.scores} {copy.tags}")
+  r.Console.log($"pal users {pal.usersCount}, weak {pal.weakrefsCount}, same friend {copy.friend == pal}")
+  Dog other = rex.clone()                   // the same as rex!
+  r.Console.log($"other {other.name}, pal users {pal.usersCount}")
+}
+
+// the class of the object at run time decides
+class Animal {
+  public string sound = "..."
+  public fun speak() { r.Console.log(sound) }
+}
+class Cat : Animal {
+  public i32 lives = 9
+  override fun speak() { r.Console.log($"meow {lives}") }
+}
+
+fun dynamicClone() {
+  Animal a = Cat()
+  Animal b = a!
+  b.speak()
+}
+
+// a clone() of the program replaces the default
+class Token(i32 id) {
+  public i32 id = id
+  public fun Token clone() {
+    return Token(id + 100)
+  }
+}
+
+fun customClone() {
+  Token t = Token(1)
+  Token u = t!
+  Token v = t.clone()
+  r.Console.log($"{u.id} {v.id}")
+}
+
+// counted and collections
+fun countedClone() {
+  @Dog first = Dog("First")
+  @Dog third = first!                       // a new object, counted from 1
+  r.Console.log($"first {first.usersCount}, third {third.usersCount}, same {first == third}")
+  vec<Dog> pack = []
+  pack.add(Dog("Packed"))
+  vec<Dog> packCopy = pack!
+  packCopy[0].name = "PackedCopy"
+  r.Console.log($"{pack[0].name} {packCopy[0].name}")
+  list<@Dog> shared = []
+  shared.add(first)
+  list<@Dog> sharedCopy = shared!          // the items are counted: the copy is another user
+  r.Console.log($"first users {first.usersCount}, {sharedCopy.len}")
+}
+
+plainClone()
+dynamicClone()
+customClone()
+countedClone()

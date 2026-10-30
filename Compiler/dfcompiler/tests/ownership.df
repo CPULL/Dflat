@@ -113,14 +113,14 @@ Res found = find(1)
 r.Console.log("  found " + found.name)
 
 r.Console.log("weak")
-Res strong = make("strong")
-Res weak _= strong
+@Res strong = make("strong")
+_Res weak = _strong
 enforce weak {
   r.Console.log("  alive: " + weak.name)
 } else {
   r.Console.log("  gone")
 }
-strong is atEnd.
+strong is done.
 enforce weak {
   r.Console.log("  alive: " + weak.name)
 } else {

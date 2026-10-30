@@ -1,0 +1,9 @@
+namespace refcount_items_move
+class Dog { }
+fun take(->Dog d) { }
+fun f() {
+  list<@Dog> pack = []
+  pack.add(Dog())
+  take(->pack[0])
+}
+f()

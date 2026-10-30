@@ -1,0 +1,36 @@
+rex 2, len 1
+[Dog { name: Rex }, Dog { name: Fido }, Dog { name: Plain }, ...] (5 items)
+Rex: woof
+item users 1, same true, null item true
+fido 2
+show 2
+Rex: woof
+Fido: woof
+Plain: woof
+Made: woof
+Made ends
+rex 3
+rex 2
+[Dog { name: Inserted }, Dog { name: Fido }, Dog { name: Plain }, ...] (5 items)
+Inserted ends
+Plain ends
+rex 1, fido 1
+end of lists
+Fido ends
+Rex ends
+a 2, [Dog { name: A }, Dog { name: B }]
+a 3
+B: woof
+A: woof
+A: woof
+B: woof
+A: woof
+A: woof
+a 1, len 1
+end of vecs
+B ends
+A ends
+k9 2
+k9 1
+K9 ends
+---- exit code 0 ----

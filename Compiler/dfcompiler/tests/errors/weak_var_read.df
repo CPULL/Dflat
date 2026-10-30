@@ -1,0 +1,10 @@
+namespace weak_var_read
+class C {
+  public i32 id
+}
+fun f() {
+  @C c = C()
+  _C w = _c
+  i32 n = w.id
+}
+f()

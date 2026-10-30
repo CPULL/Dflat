@@ -5,6 +5,8 @@
 #   .\run-tests.ps1 -Only a,b        run only these tests (names without .df)
 #   .\run-tests.ps1 -Update          save what the tests give now as the expected result (check the diff in git before you trust it)
 #   .\run-tests.ps1 -Verbose         accepted for old scripts: the first differing lines of a failed test are always printed
+#   .\run-tests.ps1 -Jobs 2          how many compilers run at the same time (default 4); the tests that use files or processes
+#                                    (Root.IO, ExecProcess) always run one at a time, after the others
 #
 # Two kinds of test:
 #  * tests\*.df are programs. The expected output is expected\<name>.txt: everything the program printed after the line "---- run ----"
@@ -23,7 +25,8 @@ param(
   [switch]$Build,
   [switch]$Verbose,
   [string[]]$Only = @(),
-  [int]$TimeoutSeconds = 180
+  [int]$TimeoutSeconds = 180,
+  [int]$Jobs = 4
 )
 
 $ErrorActionPreference = 'Stop'
@@ -40,7 +43,7 @@ if (-not (Test-Path $compiler)) {
   exit 2
 }
 
-# runs the compiler on a file; returns the standard output, the standard error, or $null on a timeout
+# starts the compiler on a file; its output is read while it runs
 function Start-Compiler([string]$file, [string]$option) {
   $info = New-Object System.Diagnostics.ProcessStartInfo
   $info.FileName = $compiler
@@ -54,18 +57,52 @@ function Start-Compiler([string]$file, [string]$option) {
   $info.CreateNoWindow = $true
   $process = [System.Diagnostics.Process]::Start($info)
   $process.StandardInput.Close()
-  $outTask = $process.StandardOutput.ReadToEndAsync()
-  $errTask = $process.StandardError.ReadToEndAsync()
-  if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-    try { $process.Kill() } catch { }
-    return $null
+  return @{
+    Process = $process
+    OutTask = $process.StandardOutput.ReadToEndAsync()
+    ErrTask = $process.StandardError.ReadToEndAsync()
+    Started = [DateTime]::Now
   }
-  return @{ Out = $outTask.Result; Err = $errTask.Result }
+}
+
+# the standard output and error of a finished compiler, or $null after a timeout (the process is killed)
+function Get-CompilerResult($running) {
+  if ($running.TimedOut) { return $null }
+  return @{ Out = $running.OutTask.Result; Err = $running.ErrTask.Result }
+}
+
+# runs the compilers of the tests, at most $limit at the same time; each test gets its finished run in .Run
+function Invoke-Pool($tests, [int]$limit) {
+  $queue = New-Object System.Collections.Queue
+  foreach ($test in $tests) { $queue.Enqueue($test) }
+  $active = New-Object System.Collections.ArrayList
+  while ($queue.Count -gt 0 -or $active.Count -gt 0) {
+    while ($queue.Count -gt 0 -and $active.Count -lt $limit) {
+      $test = $queue.Dequeue()
+      $test.Running = Start-Compiler $test.Path $test.Option
+      [void]$active.Add($test)
+    }
+    $finished = @()
+    foreach ($test in $active) {
+      $running = $test.Running
+      if ($running.Process.WaitForExit(50)) {
+        $finished += $test
+      } elseif (([DateTime]::Now - $running.Started).TotalSeconds -gt $TimeoutSeconds) {
+        try { $running.Process.Kill() } catch { }
+        $running.TimedOut = $true
+        $finished += $test
+      }
+    }
+    foreach ($test in $finished) {
+      if (-not $test.Running.TimedOut) { $test.Running.Process.WaitForExit() }   # the output has been read to the end
+      $test.Run = Get-CompilerResult $test.Running
+      [void]$active.Remove($test)
+    }
+  }
 }
 
 # a program: what it printed
-function Invoke-Program([string]$file) {
-  $run = Start-Compiler $file '--run'
+function Read-Program($run) {
   if ($null -eq $run) { return @{ Ok = $false; Text = "TIMEOUT after $TimeoutSeconds seconds" } }
   $text = $run.Out
   $marker = $text.IndexOf('---- run ----')
@@ -80,8 +117,7 @@ function Invoke-Program([string]$file) {
 }
 
 # a program that must not compile: the error lines, without the folder of the file
-function Invoke-ErrorProgram([string]$file) {
-  $run = Start-Compiler $file '--emit-c'
+function Read-ErrorProgram($run) {
   if ($null -eq $run) { return @{ Ok = $false; Text = "TIMEOUT after $TimeoutSeconds seconds" } }
   $all = $run.Out + "`n" + $run.Err
   $lines = @()
@@ -93,8 +129,7 @@ function Invoke-ErrorProgram([string]$file) {
 }
 
 # a project that must not compile: the error lines, with the paths relative to its folder
-function Invoke-ErrorProject([string]$folder) {
-  $run = Start-Compiler $folder '--emit-c'
+function Read-ErrorProject($run, [string]$folder) {
   if ($null -eq $run) { return @{ Ok = $false; Text = "TIMEOUT after $TimeoutSeconds seconds" } }
   $all = $run.Out + "`n" + $run.Err
   $lines = @()
@@ -171,17 +206,46 @@ if ($Only.Count -gt 0) {
   $errorProjects = $errorProjects | Where-Object { $Only -contains $_.Name }
 }
 
+# every test: its name, what the compiler runs on, how its output is read and where its expected result is
+$all = New-Object System.Collections.ArrayList
 foreach ($test in $programs) {
-  Test-One $test.BaseName (Invoke-Program $test.FullName) (Join-Path $testsFolder ('expected\' + $test.BaseName + '.txt'))
+  [void]$all.Add(@{ Name = $test.BaseName; Path = $test.FullName; Option = '--run'; Kind = 'program'
+    Expected = (Join-Path $testsFolder ('expected\' + $test.BaseName + '.txt')) })
 }
 foreach ($test in $errorPrograms) {
-  Test-One ('errors/' + $test.BaseName) (Invoke-ErrorProgram $test.FullName) (Join-Path $testsFolder ('errors\expected\' + $test.BaseName + '.txt'))
+  [void]$all.Add(@{ Name = 'errors/' + $test.BaseName; Path = $test.FullName; Option = '--emit-c'; Kind = 'error'
+    Expected = (Join-Path $testsFolder ('errors\expected\' + $test.BaseName + '.txt')) })
 }
 foreach ($test in $projects) {
-  Test-One ('projects/' + $test.Name) (Invoke-Program $test.FullName) (Join-Path $projectsFolder ('expected\' + $test.Name + '.txt'))
+  [void]$all.Add(@{ Name = 'projects/' + $test.Name; Path = $test.FullName; Option = '--run'; Kind = 'program'
+    Expected = (Join-Path $projectsFolder ('expected\' + $test.Name + '.txt')) })
 }
 foreach ($test in $errorProjects) {
-  Test-One ('projects/errors/' + $test.Name) (Invoke-ErrorProject $test.FullName) (Join-Path $projectsFolder ('errors\expected\' + $test.Name + '.txt'))
+  [void]$all.Add(@{ Name = 'projects/errors/' + $test.Name; Path = $test.FullName; Option = '--emit-c'; Kind = 'errorProject'
+    Expected = (Join-Path $projectsFolder ('errors\expected\' + $test.Name + '.txt')) })
+}
+
+# a program that uses files or processes may clash with another one that runs at the same time: those run one at a time
+function Test-Serial($test) {
+  if ($test.Kind -ne 'program') { return $false }
+  $sources = if (Test-Path $test.Path -PathType Container) { Get-ChildItem $test.Path -Filter '*.df' -Recurse } else { Get-Item $test.Path }
+  foreach ($source in $sources) {
+    if ((Get-Content -Raw $source.FullName) -match 'Root\.IO|ExecProcess') { return $true }
+  }
+  return $false
+}
+$parallel = @($all | Where-Object { -not (Test-Serial $_) })
+$serial = @($all | Where-Object { Test-Serial $_ })
+Invoke-Pool $parallel ([Math]::Max(1, $Jobs))
+Invoke-Pool $serial 1
+
+foreach ($test in $all) {
+  $result = switch ($test.Kind) {
+    'program' { Read-Program $test.Run }
+    'error' { Read-ErrorProgram $test.Run }
+    'errorProject' { Read-ErrorProject $test.Run $test.Path }
+  }
+  Test-One $test.Name $result $test.Expected
 }
 
 Write-Host ''

@@ -146,6 +146,9 @@ public sealed partial class CodeGen {
     if (target.Kind == "Decl") {
       return ResolveType(target.Children.First(child => TypeNodeKinds.Contains(child.Kind)));
     }
+    if (PropertyTarget(target, scope) is var (_, property)) {
+      return property.Type;   // set through its W: (AssignTarget)
+    }
     return LValue(target, scope).Type;
   }
 

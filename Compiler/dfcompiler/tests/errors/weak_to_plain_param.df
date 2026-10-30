@@ -1,0 +1,9 @@
+namespace weak_to_plain_param
+class C { }
+fun g(C c) { }
+fun f() {
+  @C c = C()
+  _C w = _c
+  g(w)
+}
+f()

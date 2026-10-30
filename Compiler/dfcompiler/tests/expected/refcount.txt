@@ -1,0 +1,90 @@
+users 1, weak 0
+users 2, same object true
+inner users 3
+Rex: woof
+after the block 2
+after done 1, second is null true
+end of counts
+Rex ends
+1 1 true true
+Fido ends
+end of inferred
+Max ends
+plain is null true, users 1
+users 2
+Var ends
+other is null true
+field is null true, users 1
+end of movedIn
+Resident ends
+Other ends
+Plain ends
+show 2
+after show 1
+keep 3
+show 3
+dog is null true
+after keep 1
+show 1
+Temp ends
+made 1
+short 1
+back 2
+Dropped ends
+train 2
+show 1
+Rex2 ends
+rex is null true
+end of inFunctions
+Adopted ends
+FromPlain ends
+Short ends
+Made ends
+buddy 2, spare 1
+buddy 3, other is buddy true
+Buddy: woof
+Buddy: woof
+Spare: woof
+spare users 2
+buddy 4
+buddy 3, other is null true
+buddy 2
+show 3
+end of block
+owner ends
+Spare ends
+Fresh ends
+buddy 1
+end of inFields
+Buddy ends
+refused is null true, shared users 2
+Shared: woof
+shared is null true
+watcher sees it gone
+InField: woof
+field is null true
+Dropped2 ends
+end of removing
+InField ends
+owner ends
+Spare ends
+Shared ends
+A ends
+B users 2
+B users 2
+B users 1, C users 1
+B ends
+end of reassign
+C ends
+Early ends
+not left
+Early ends
+Pass0: woof
+Pass0 ends
+Pass1: woof
+Pass1 ends
+Pass2: woof
+Pass2 ends
+usersCount of null: NullPointerException
+bitwise not 4294967290
+---- exit code 0 ----

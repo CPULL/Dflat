@@ -273,9 +273,13 @@ public sealed partial class CodeGen {
       var mods = decl.Children.FirstOrDefault(child => child.Kind == "Mods");
       bool isConst = mods?.Text?.Split(' ').Contains("const") == true;
       string type = TypeForHoist(decl, typingScope);
+      if (IsCountedType(type)) {
+        type = CountedBase(type);   // var x = make() with a counted result: a counted variable of the plain type (spec 12.7)
+      }
       frame.Hoisted[name] = StringVar(new VarInfo(type, $"v_{name}_{frame.Id}", isConst) {
         Own = declOwner.TryGetValue(decl, out bool owns) && owns,
-        IsWeak = decl.Children.Any(child => child.Kind == "WeakInit")
+        IsWeak = decl.Children.Any(child => child.Kind == "WeakInit"),
+        IsCounted = IsCountedDecl(decl)
       });
       typingScope.Vars[name] = frame.Hoisted[name];
     }
@@ -309,7 +313,7 @@ public sealed partial class CodeGen {
 
   void EmitHoists(Frame frame, StringBuilder sb, string pad) {
     foreach (var variable in frame.Hoisted.Values) {
-      sb.Append($"{pad}{CType(variable.Type)} {variable.CName} = {ZeroValue(variable.Type)};\n");
+      sb.Append(variable.IsCounted || variable.IsWeak ? $"{pad}df_rc* {variable.CName} = NULL;\n" : $"{pad}{CType(variable.Type)} {variable.CName} = {ZeroValue(variable.Type)};\n");
       if (variable.OwnFlag != null) {
         sb.Append($"{pad}bool {variable.OwnFlag} = false;\n");
       }

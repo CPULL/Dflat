@@ -1,0 +1,4 @@
+namespace refcount_move
+class Dog { }
+@Dog first = Dog()
+Dog other = ->first

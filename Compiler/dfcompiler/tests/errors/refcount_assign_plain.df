@@ -1,0 +1,8 @@
+namespace refcount_assign_plain
+class Dog { }
+fun f() {
+  @Dog first = Dog()
+  Dog view = null
+  view = first
+}
+f()

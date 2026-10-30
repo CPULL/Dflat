@@ -1,0 +1,1 @@
+weak_old_assign.df(5,3): error: '_=' is removed: a weak reference is assigned with =, w = _first (spec 12.7), found '_='

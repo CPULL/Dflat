@@ -1,0 +1,7 @@
+namespace clone_try
+class Dog { }
+fun f() {
+  Dog d = Dog()
+  Dog e = d.tryClone()
+}
+f()

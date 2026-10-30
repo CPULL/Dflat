@@ -1,0 +1,1 @@
+refcount_move.df(4): error: feature not supported: This use of the counted variable 'first' (->, (&), ++, swap, out arguments)

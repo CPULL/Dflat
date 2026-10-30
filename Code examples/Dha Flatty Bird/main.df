@@ -1,0 +1,240 @@
+// Dha Flatty Bird: steer the bird up (Q) and down (A) through the blocks; space brakes. The bird has inertia, going up is harder than going
+// down, and every block passed makes the world faster. A quick test of the gfx library: the keys are read from the console, so keep the
+// console window focused while playing (gfx has no input yet).
+namespace flatty
+import gfx
+alias Root as r
+
+// the feel of the game
+const r32 UP_PUSH = 900.0          // acceleration of Q, pixels / s²
+const r32 DOWN_PUSH = 1500.0       // acceleration of A: the gravity coefficient, going down is easier than going up
+const r32 FADE = 4.0               // inertia: the vertical speed fades by this much per second when no key is held
+const r32 MAX_SPEED_Y = 320.0
+const r32 START_SPEED = 170.0      // the world moves left at this speed, pixels / s
+const r32 SPEED_STEP = 9.0         // ... plus this much for every block passed
+const r32 BRAKE = 0.5              // space: the world moves at half speed
+const r32 DT = 0.0166667           // one frame at 60 frames per second (a lapse cannot be read as a number yet)
+
+const i32 BLOCKS = 4
+const r32 BLOCK_WIDTH = 46.0
+const r32 BLOCK_SPACING = 260.0
+const r32 GROUND = 336.0           // the top of the ground; the window is 640 x 360
+const r32 BIRD_X = 130.0
+const r32 HIT_W = 17.0             // half the size of the bird's hit box
+const r32 HIT_H = 13.0
+
+// the files: next to the program or a few folders up (it can be run from its folder or from build.win-x64)
+fun string findFile(string name) {
+  for string prefix in ["", "../", "../../", "../../../"] {
+    if File(prefix + name).exists() {
+      return prefix + name
+    }
+  }
+  return ""
+}
+
+// a texture of one pixel, stretched with scale
+fun Texture2D solid(Context ctx, u8 red, u8 green, u8 blue) {
+  arr<u8> pixel = [red, green, blue, 255]
+  return ctx.createTexture(pixel, 1, 1)
+}
+
+string birdUpFile = findFile("BirdUp.rgba")
+string birdDownFile = findFile("BirdDown.rgba")
+string fontFile = findFile("Libraries/Gfx/Font.rgba")
+if birdUpFile == "" || birdDownFile == "" || fontFile == "" {
+  r.Console.log("BirdUp.rgba, BirdDown.rgba or Libraries/Gfx/Font.rgba not found: run the game from its folder")
+  r.exit(1)
+}
+
+Context ctx = Gfx.createContext()
+Window win = ctx.createWindow(640, 360)
+win.resizeMode = ResizeMode.Fit
+
+Texture2D birdUp = ctx.createTexture(File(birdUpFile).readAll(), 64, 64)
+Texture2D birdDown = ctx.createTexture(File(birdDownFile).readAll(), 64, 64)
+Texture2D skyColor = solid(ctx, 120, 190, 235)
+Texture2D groundColor = solid(ctx, 120, 85, 50)
+Texture2D blockColor = solid(ctx, 60, 170, 70)
+TextureFont font = ctx.createTextureFont(ctx.createTexture(File(fontFile).readAll(), 456, 512, filter: FilteringMode.Linear), 38, 64)
+
+Sprite sky = ctx.createSprite(skyColor)
+sky.scale = (640.0, GROUND)
+sky.order = -10
+Sprite ground = ctx.createSprite(groundColor)
+ground.pos = (0.0, GROUND)
+ground.scale = (640.0, 24.0)
+ground.order = -5
+
+Sprite bird = ctx.createSprite(birdUp)
+bird.offset = (32.0, 32.0)
+bird.scale = (0.75, 0.75)
+bird.order = 10
+
+vec<Sprite> blocks = []
+arr<r32> blockX = arr<r32>[BLOCKS]
+arr<r32> blockY = arr<r32>[BLOCKS]
+arr<r32> blockH = arr<r32>[BLOCKS]
+arr<bool> passed = arr<bool>[BLOCKS]
+for i32 i in 0..BLOCKS {
+  blocks.add(ctx.createSprite(blockColor))
+  blocks[i].scale.x = BLOCK_WIDTH
+}
+
+Label score = ctx.createLabel(font, "0")
+score.scale = (0.5, 0.5)
+score.pos.y = 324.0
+score.order = 20
+Label message = ctx.createLabel(font, "Q up  A down  space brake\n(keys in the console)")
+message.scale = (0.4, 0.4)
+message.pos = (150.0, 140.0)
+message.color = (0.1, 0.1, 0.3, 1.0)
+message.order = 20
+
+// one run: a new game starts here
+bool restart = true
+bool crashed = false
+r32 birdY = 0.0
+r32 speedY = 0.0
+r32 speed = START_SPEED
+i32 points = 0
+i32 frame = 0
+i32 messageUntil = 180
+// the console gives a held key with the delay of the system's key repeat: a first press counts as held for a while
+i32 upUntil = -1
+i32 downUntil = -1
+i32 brakeUntil = -1
+i32 lastUp = -100
+i32 lastDown = -100
+i32 lastBrake = -100
+
+while ctx.update() {
+  frame++
+  if restart {
+    restart = false
+    crashed = false
+    birdY = 170.0
+    speedY = 0.0
+    speed = START_SPEED
+    points = 0
+    for i32 i in 0..BLOCKS {
+      blockX[i] = 700.0 + (r32)i * BLOCK_SPACING
+      blockH[i] = (r32)r.Random.int(70, 170)
+      blockY[i] = (r32)r.Random.int(10, (i64)(GROUND - blockH[i]) - 10)
+      passed[i] = false
+    }
+  }
+
+  // the keys typed in the console since the last frame
+  char? key = r.Console.read()
+  while key != null {
+    enforce key {
+      if key == 'q' || key == 'Q' {
+        upUntil = frame + 33
+        if frame - lastUp < 36 {
+          upUntil = frame + 8   // a repeat of a held key
+        }
+        lastUp = frame
+      } else if key == 'a' || key == 'A' {
+        downUntil = frame + 33
+        if frame - lastDown < 36 {
+          downUntil = frame + 8
+        }
+        lastDown = frame
+      } else if key == ' ' {
+        if crashed {
+          restart = true
+        }
+        brakeUntil = frame + 33
+        if frame - lastBrake < 36 {
+          brakeUntil = frame + 8
+        }
+        lastBrake = frame
+      }
+    }
+    key = r.Console.read()
+  }
+
+  if !crashed {
+    // the bird: pushes, inertia, a limit
+    if frame <= upUntil {
+      speedY -= UP_PUSH * DT
+    }
+    if frame <= downUntil {
+      speedY += DOWN_PUSH * DT
+    }
+    speedY -= speedY * FADE * DT
+    if speedY > MAX_SPEED_Y {
+      speedY = MAX_SPEED_Y
+    }
+    if speedY < -MAX_SPEED_Y {
+      speedY = -MAX_SPEED_Y
+    }
+    birdY += speedY * DT
+
+    // the world
+    r32 shift = speed * DT
+    if frame <= brakeUntil {
+      shift = shift * BRAKE
+    }
+    for i32 i in 0..BLOCKS {
+      blockX[i] -= shift
+      if blockX[i] < -BLOCK_WIDTH {
+        // gone on the left: it comes back on the right, after the last one
+        r32 last = blockX[0]
+        for i32 k in 0..BLOCKS {
+          if blockX[k] > last {
+            last = blockX[k]
+          }
+        }
+        blockX[i] = last + BLOCK_SPACING
+        blockH[i] = (r32)r.Random.int(70, 170)
+        blockY[i] = (r32)r.Random.int(10, (i64)(GROUND - blockH[i]) - 10)
+        passed[i] = false
+      }
+      if !passed[i] && blockX[i] + BLOCK_WIDTH < BIRD_X - HIT_W {
+        passed[i] = true
+        points++
+        speed += SPEED_STEP
+      }
+      // the hit box of the bird against the block
+      bool acrossX = blockX[i] < BIRD_X + HIT_W && blockX[i] + BLOCK_WIDTH > BIRD_X - HIT_W
+      bool acrossY = blockY[i] < birdY + HIT_H && blockY[i] + blockH[i] > birdY - HIT_H
+      if acrossX && acrossY {
+        crashed = true
+      }
+    }
+    if birdY - HIT_H < 0.0 || birdY + HIT_H > GROUND {
+      crashed = true
+    }
+    if crashed {
+      message.text = $"crash!  {points} blocks\nspace to play again"
+      message.color = (0.6, 0.0, 0.0, 1.0)
+      message.visible = true
+      messageUntil = frame + 1000000
+    }
+  }
+
+  // the picture
+  bird.pos = (BIRD_X, birdY)
+  bird.rotation = speedY * 0.0015
+  if speedY > 20.0 {
+    bird.setTexture(birdDown)
+  } else {
+    bird.setTexture(birdUp)
+  }
+  for i32 i in 0..BLOCKS {
+    blocks[i].pos.x = blockX[i]
+    blocks[i].pos.y = blockY[i]
+    blocks[i].scale.y = blockH[i]
+  }
+  string shown = $"{points}"
+  score.text = shown
+  score.pos.x = 630.0 - (r32)shown.len * 19.0   // right-aligned: 38-pixel glyphs at half size
+  if frame > messageUntil {
+    message.visible = false
+  }
+  if restart {
+    message.visible = false
+  }
+}

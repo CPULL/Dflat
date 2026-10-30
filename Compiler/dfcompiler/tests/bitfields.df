@@ -16,7 +16,7 @@ r.Console.log($"isAnySet read+seek: {both.isAnySet(Flags.CanRead | Flags.CanSeek
 r.Console.log($"isAnySet seek: {both.isAnySet(Flags.CanSeek)}")                      // false
 r.Console.log($"setAs off: {both.setAs(Flags.CanRead, false)}, setAs on: {flag.setAs(Flags.CanSeek, true)}")
 r.Console.log($"Flags.None.set: {Flags.None.set(Flags.Top)}, number {(u32)Flags.Top}")   // 2147483648
-r.Console.log($"not CanRead = {_(Flags.CanRead)}")                       // CanWrite | CanSeek | IsNetwork | Top
+r.Console.log($"not CanRead = {~(Flags.CanRead)}")                       // CanWrite | CanSeek | IsNetwork | Top
 r.Console.log($"and = {both & Flags.CanWrite}, xor = {both ^ Flags.CanWrite}")
 Flags cast = (Flags)255                                                // masks the undefined bits: 15
 r.Console.log($"(Flags)255 = {cast}, number {(u32)cast}")

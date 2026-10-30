@@ -1,0 +1,1 @@
+refcount_items_has.df(7): error: feature not supported: 'has' on a collection of counted objects

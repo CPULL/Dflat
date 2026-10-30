@@ -110,7 +110,8 @@ public sealed partial class CodeGen {
     string held = NewTemp();
     var sb = new StringBuilder();
     sb.Append($"({{ {CType(type)} {held} = {VecNewEmpty(type)}; ");
-    foreach (var item in literal.Children) {
+    foreach (var written in literal.Children) {
+      var item = BoxInner(elem) != null ? BoxCall(written, elem) : written;   // [first, Dog("x")] of a list<@Dog> (spec 12.7)
       var value = Adopted(ExprOf(item, scope, elem), item);
       if (IsClass(elem) && !value.Fresh && value.Type != "null") {
         throw Error("a list owns its items: put a new object in the literal, or move one in with ->x", item);
@@ -166,6 +167,7 @@ public sealed partial class CodeGen {
   // the members of a list that are not plain calls of the class
   Expr? ListMember(Expr list, string name, List<Node> args, Scope scope, Node at) {
     string elem = ListElem(list.Type);
+    CheckCountedItemsMember(ObjInfo(list.Type), name, at);   // fill, sort, has ... would hand out or compare the boxes (spec 12.7)
     if (name.StartsWith("node_")) {
       // the C of the methods of the class (VecPrelude): only its own code calls them
       return at.Line >= LibraryLine ? ListNodeMember(list, name, args, scope, at) : null;

@@ -1,0 +1,1 @@
+refcount_remove_plain.df(5): error: removeRefCounting() is valid only on a counted object (@T); this object is not counted (spec 12.7)

@@ -154,6 +154,10 @@ public sealed partial class CodeGen {
       return ArrayNew(n.Children[0], n.Children[1], scope);
     }
     if (n.Children[1].Kind == "Range") {
+      var viewed = ExprOf(n.Children[0], scope);
+      if ((IsVec(viewed.Type) || IsList(viewed.Type)) && BoxInner(IsVec(viewed.Type) ? VecElem(viewed.Type) : ListElem(viewed.Type)) != null) {
+        throw NotSupported("Views of a collection of counted objects", n);
+      }
       return ViewExpr(n, scope);
     }
     var obj = ExprOf(n.Children[0], scope);
@@ -195,6 +199,12 @@ public sealed partial class CodeGen {
     var obj = ExprOf(target.Children[0], scope);
     if (obj.Type == "string") {
       return StrSetChar(target, s.Children[1], s.Text!, scope, s);
+    }
+    if ((IsVec(obj.Type) || IsList(obj.Type)) && (IsVec(obj.Type) ? VecElem(obj.Type) : ListElem(obj.Type)) is string boxed && BoxInner(boxed) != null) {
+      if (s.Text != "=") {
+        throw Error("an item of a collection of counted objects takes only = (spec 12.7)", s);
+      }
+      s = Synthetic("Assign", s, "=").Add(target).Add(BoxCall(s.Children[1], boxed));   // pack[i] = first: a new box takes a usage
     }
     if (IsView(obj.Type)) {
       throw Error("a view is read-only: its items cannot be assigned (spec 6.5)", s);
@@ -750,6 +760,14 @@ public sealed partial class CodeGen {
     } else {
       throw Error($"cannot loop over {collection.Type} yet", s);
     }
+    // a collection of counted objects: the loop variable is the object of each box; the collection keeps its usage and cannot change while
+    // the loop runs (spec 6.4), so the variable needs no usage of its own (spec 12.7)
+    string? boxedElem = BoxInner(elem) != null ? elem : null;
+    if (boxedElem != null) {
+      elem = BoxInner(boxedElem)!;
+    } else if (varNode.Children.Any(child => child.Kind == "Counted")) {
+      throw Error("for @T x in c is a loop over a collection of counted objects (list<@T>, vec<@T>, spec 12.7)", s);
+    }
     // the loop variables: (the name, its type, the type of what it gets)
     var loopVars = new List<(Node Node, string Type, string Elem)>();
     if (overMap && mapPart == null) {
@@ -853,6 +871,9 @@ public sealed partial class CodeGen {
     sb.Append($"{innerPad}{loop} {{\n");
     if (cleanup) {
       sb.Append($"{innerPad}  {body.RanFlag} = true;\n");
+    }
+    if (boxedElem != null) {
+      itemCode = $"DF_RC_OBJ({CType(elem)}, ({itemCode})->{BoxField(boxedElem)})";
     }
     sb.Append($"{innerPad}  {CType(type)} {cname} = {Convert(new Expr(itemCode, elem), type, s)};\n");
     if (overMap && mapPart == null) {

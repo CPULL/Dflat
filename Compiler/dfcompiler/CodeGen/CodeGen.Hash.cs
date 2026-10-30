@@ -160,7 +160,7 @@ public sealed partial class CodeGen {
       if (!visiting.Add(cls)) {
         return true;   // a class that holds its own type: the recursion ends at a null field at run time
       }
-      bool stable = AllInstanceFields(cls).Where(field => !field.Hidden && !field.IsParentRef && !field.IsWeak).All(field => IsStableType(field.Type, visiting));
+      bool stable = AllInstanceFields(cls).Where(field => !field.Hidden && !field.IsParentRef && !field.IsWeak && !field.IsCounted).All(field => IsStableType(field.Type, visiting));
       visiting.Remove(cls);
       return stable;
     }
@@ -189,7 +189,7 @@ public sealed partial class CodeGen {
     sb.Append($"  const {cls.StructName}* o = (const {cls.StructName}*)p;\n  (void)o;\n");
     sb.Append($"  df_uns h = {HashConst(QualifiedTypeName(cls.Name))};\n");
     foreach (var field in AllInstanceFields(cls).Where(field => !field.Hidden)) {
-      string part = field.IsParentRef || field.IsWeak || !IsStableType(field.Type, new HashSet<ClassInfo>())
+      string part = field.IsParentRef || field.IsWeak || field.IsCounted || !IsStableType(field.Type, new HashSet<ClassInfo>())
         ? HashConst(QualifiedTypeName(field.Type) + field.Name)
         : HashCode(new Expr($"o->{field.CName}", field.Type), cls.Node);
       sb.Append($"  h = df_hash_comb(h, {part});\n");

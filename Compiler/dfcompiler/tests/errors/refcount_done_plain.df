@@ -1,0 +1,4 @@
+namespace refcount_done_plain
+class Dog { }
+Dog plain = Dog()
+plain is done.

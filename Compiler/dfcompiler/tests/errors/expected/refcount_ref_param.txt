@@ -1,0 +1,1 @@
+refcount_ref_param.df(6): error: 'first' is counted and cannot be borrowed: the parameter 'd' takes a counted object only if declared @Dog d (spec 12.7)

@@ -1,0 +1,4 @@
+namespace refcount_plain_init
+class Dog { }
+Dog plain = Dog()
+@Dog counted = plain

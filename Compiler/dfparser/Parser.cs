@@ -110,6 +110,11 @@ public sealed class Parser {
       && PeekAt(2).Kind == TokenKind.Ident && PeekAt(2).Line == Peek.Line;
   }
 
+  // '@' touching a type: the counted marker of @T name (spec 12.7)
+  bool IsCountedMarker() {
+    return IsOp("@") && PeekAt(1).Kind == TokenKind.Ident && PeekAt(1).Line == Peek.Line && PeekAt(1).Col == Peek.Col + 1;
+  }
+
   Token ExpectMember() {
     if (Peek.Kind != TokenKind.Ident && Peek.Kind != TokenKind.Int) {
       throw Error("expected member name");
@@ -271,6 +276,9 @@ public sealed class Parser {
     if (node.Kind == "Finalize" && parent?.Kind != "ExprStmt") {
       throw new DfException("'is atEnd.' is a statement, not an expression", node.Line, 0);
     }
+    if (node.Kind == "Done" && parent?.Kind != "ExprStmt") {
+      throw new DfException("'is done.' is a statement, not an expression", node.Line, 0);
+    }
     foreach (var child in node.Children) {
       CheckFinalizers(child, node);
     }
@@ -281,7 +289,8 @@ public sealed class Parser {
     // readonly is a modifier only before a declaration and extern only before fun, so they are not reserved words (spec 11.1.4, 15.9)
     while (Peek.Kind == TokenKind.Keyword && Modifiers.Contains(Peek.Text)
            || Peek.Kind == TokenKind.Ident && Peek.Text is "readonly" or "readwrite" or "writeonly" && (PeekAt(1).Kind is TokenKind.Ident or TokenKind.Keyword || PeekAt(1).Is("_"))
-           || Peek.Kind == TokenKind.Ident && Peek.Text == "extern" && PeekAt(1).Kind == TokenKind.Keyword && PeekAt(1).Text == "fun") {
+           || Peek.Kind == TokenKind.Ident && Peek.Text == "extern" && PeekAt(1).Kind == TokenKind.Keyword && PeekAt(1).Text == "fun"
+           || Peek.Kind == TokenKind.Ident && Peek.Text == "notclonable" && PeekAt(1).Kind == TokenKind.Keyword && PeekAt(1).Text == "class") {   // spec 11.1, 12.6
       mods.Add(Next());
     }
     return mods;
@@ -559,9 +568,14 @@ public sealed class Parser {
       var v = Next();
       node.Add(ParseForDestructure(new Node("Type", v, "var")));
     } else {
+      bool counted = IsCountedMarker();   // for @Dog dog in pack (spec 12.7): the same as for var dog in pack
+      if (counted) {
+        Next();
+      }
       var type = ParseType();
       var n = ExpectIdent();
-      node.Add(new Node("Var", n, n.Text).Add(type));
+      var loopVar = new Node("Var", n, n.Text).Add(type);
+      node.Add(counted ? loopVar.Add(new Node("Counted", n)) : loopVar);
     }
     if (IsKw("in")) {
       var tin = Next();
@@ -823,10 +837,13 @@ public sealed class Parser {
       if (classMember && IsOp("{")) {
         ParseAccessors(first);
       }
-      if (IsOp("=") || IsOp("_=")) {
+      if (IsOp("_=")) {
+        throw Error("'_=' is removed: a weak reference is made with _ in the expression, _Dog w = _first (spec 12.7)");
+      }
+      if (IsOp("=")) {
         var op = Next();
         SkipNewlines();
-        first.Add(new Node(op.Text == "=" ? "Init" : "WeakInit", op).Add(ParseExpr()));
+        first.Add(new Node("Init", op).Add(ParseExpr()));
       }
       return first;
     }
@@ -836,6 +853,9 @@ public sealed class Parser {
       opText = ">>=";
     } else if (Peek.Kind == TokenKind.Op && AssignOps.Contains(Peek.Text)) {
       opText = Peek.Text;
+    }
+    if (opText == "_=") {
+      throw Error("'_=' is removed: a weak reference is assigned with =, w = _first (spec 12.7)");
     }
     if (opText != null) {
       var opTok = Next();
@@ -871,13 +891,14 @@ public sealed class Parser {
   Node? TryParseDecl() {
     // _Texture2D texture: a weak reference (spec 12); the '_' touches the type
     bool weak = IsWeakMarker();
-    bool startsType = weak || Peek.Kind == TokenKind.Ident || IsOp("(") || IsOp("*") || IsKw("fun");
+    bool counted = IsCountedMarker();   // @Dog first: a counted object (spec 12.7)
+    bool startsType = weak || counted || Peek.Kind == TokenKind.Ident || IsOp("(") || IsOp("*") || IsKw("fun");
     if (!startsType) {
       return null;
     }
     int save = pos;
     try {
-      if (weak) {
+      if (weak || counted) {
         Next();
       }
       var type = ParseType();
@@ -901,6 +922,9 @@ public sealed class Parser {
           var decl = new Node("Decl", name, name.Text).Add(type);
           if (weak) {
             decl.Add(new Node("Weak", name));
+          }
+          if (counted) {
+            decl.Add(new Node("Counted", name));
           }
           return size == null ? decl : decl.Add(size);
         }
@@ -989,6 +1013,11 @@ public sealed class Parser {
       var n = Next();
       return new Node("Count", n, n.Text);
     }
+    if (IsCountedMarker()) {
+      // list<@Dog>: a collection of counted objects (spec 12.7)
+      var marker = Next();
+      return new Node("CountedType", marker).Add(ParseType());
+    }
     int save = pos;
     try {
       var type = ParseType();
@@ -1048,6 +1077,16 @@ public sealed class Parser {
     var rets = new Node("Returns", t);
     while (!(Peek.Kind == TokenKind.Ident && (PeekAt(1).Is("(") || PeekAt(1).Is("=") || IsGenericCallAhead(0)))
            && !((IsOp("==") || IsOp("!=")) && PeekAt(1).Is("("))) {
+      if (IsCountedMarker()) {
+        // fun @Dog make(): a counted result (spec 12.7)
+        Next();
+        if (rets.Children.Count > 0) {
+          throw Error("a counted result (@T) is the only result of its function");
+        }
+        rets.Text = "counted";
+      } else if (rets.Text == "counted") {
+        throw Error("a counted result (@T) is the only result of its function");
+      }
       rets.Add(ParseType(false));
       if (!AcceptOp(",")) {
         break;
@@ -1191,6 +1230,13 @@ public sealed class Parser {
           isVolatile = true;
         }
         string kind = "Param";
+        if (IsOp("(") && PeekAt(1).Is("@")) {
+          throw Error("read/write counted parameters ((@)T, spec 12.7) are not built yet");
+        }
+        bool countedParam = IsCountedMarker();   // @T name (spec 12.7)
+        if (countedParam) {
+          Next();
+        }
         if (PeekMarker("&")) {
           Next();
           Next();
@@ -1225,6 +1271,12 @@ public sealed class Parser {
           throw Error("a copy is chosen by the caller: f(x!)");
         }
         var p = new Node(kind, name, name.Text).Add(type);
+        if (countedParam) {
+          if (kind != "Param" || weakParam) {
+            throw ErrorAt("a counted parameter is @T name, with no other marker", name);
+          }
+          p.Add(new Node("Counted", name));
+        }
         if (weakParam) {
           if (kind != "Param") {
             throw ErrorAt("a weak parameter is _T name, with no other marker", name);
@@ -1603,6 +1655,15 @@ public sealed class Parser {
       }
       return new Node("Finalize", t).Add(subject);
     }
+    // x is done.   releases a usage or a weak reference (spec 12.7); written like the finalizer
+    if (Peek.Kind == TokenKind.Ident && Peek.Text == "done" && PeekAt(1).Is(".")) {
+      Next();
+      Next();
+      if (!(IsNewline || IsOp(";") || IsOp("}") || AtEnd)) {
+        throw Error("nothing can follow 'is done.' on the same line");
+      }
+      return new Node("Done", t).Add(subject);
+    }
     // value is ? { Numeric: (r64)value, string: r64.parse(value), default: 0.0 }   (the type switch of generics, spec 11.3.7)
     if (IsOp("?") && PeekAt(1).Is("{")) {
       return ParseTypeSwitch(subject);
@@ -1701,10 +1762,16 @@ public sealed class Parser {
         case "->":
           Next();
           return new Node("Gift", t).Add(ParseUnary());
+        case "~":
+          Next();
+          return new Node("BitNot", t).Add(ParseUnary());
+        case "@":
+          Next();
+          return new Node("CountedOf", t).Add(ParseUnary());   // @Dog(), @plain (spec 12.7)
         case "_":
           Next();
           if (StartsOperand(Peek)) {
-            return new Node("BitNot", t).Add(ParseUnary());
+            return new Node("WeakOf", t).Add(ParseUnary());   // _first: a weak reference to a counted object (spec 12.7; the bitwise not is ~x)
           }
           return new Node("Discard", t);
         case "[":

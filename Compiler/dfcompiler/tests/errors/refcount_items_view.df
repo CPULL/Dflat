@@ -1,0 +1,8 @@
+namespace refcount_items_view
+class Dog { }
+fun f() {
+  vec<@Dog> v = []
+  v.add(Dog())
+  var part = v[0..1]
+}
+f()

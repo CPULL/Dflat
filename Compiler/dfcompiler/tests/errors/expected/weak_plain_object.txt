@@ -1,0 +1,1 @@
+weak_plain_object.df(5): error: weak references exist only on counted objects: 'c' is not counted (spec 12.7)

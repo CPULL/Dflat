@@ -1,0 +1,1 @@
+refcount_param_plain_arg.df(6): error: a counted variable or parameter takes a new object, another counted object or null; an existing plain object starts counting with the marker: @plain (spec 12.7)

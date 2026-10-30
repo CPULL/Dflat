@@ -154,6 +154,9 @@ public sealed partial class CodeGen {
           if (member.Children.Any(child => child.Kind == "Size")) {
             throw NotSupported("Sized declarations (arr<T>[n] name)", member);
           }
+          if (IsCountedDecl(member)) {
+            throw NotSupported("Counted fields (@T name, spec 12.7)", member);
+          }
           var init = member.Children.FirstOrDefault(child => child.Kind is "Init" or "WeakInit");
           if (init?.Kind == "WeakInit") {
             throw NotSupported("Ownership", init);

@@ -1232,6 +1232,7 @@ typedef struct df_class {
   uint32_t nimpls;
   void (*drop)(void*);   /* ends the object: its atEnd, then the objects it owns */
   df_uns (*hash)(const void*);   /* .hash (spec 6.2.1): the override of get_hash() or the default; NULL when the program uses no hash */
+  void* (*clone)(const void*);   /* .clone() (spec 12.6): a new object; NULL when the class cannot be cloned (or nothing clones) */
 } df_class;
 
 typedef struct { const df_class* cls; } df_object;
@@ -1270,9 +1271,18 @@ static df_string df_dead_str(const void* obj) {
   return df_str_lit("(destroyed)", 11);
 }
 
-static const df_class df_dead_class = { 0, "(destroyed)", NULL, NULL, df_dead_str, NULL, 0, NULL, NULL };
+static const df_class df_dead_class = { 0, "(destroyed)", NULL, NULL, df_dead_str, NULL, 0, NULL, NULL, NULL };
 
 #define DF_IS_DEAD(p) (((const df_object*)(p))->cls == &df_dead_class)
+
+/* a clone of an object by its class at run time (spec 12.6): null for null, a destroyed object or a class that cannot be cloned */
+static void* df_clone_obj(const void* obj) {
+  if (obj == NULL || DF_IS_DEAD(obj)) {
+    return NULL;
+  }
+  const df_class* c = ((const df_object*)obj)->cls;
+  return c->clone != NULL ? c->clone(obj) : NULL;
+}
 
 /* releases the ownership held by a variable: the object ends; ending a destroyed object is a double free */
 static void df_drop(void* obj) {
@@ -1288,6 +1298,79 @@ static void df_drop(void* obj) {
   if (c != NULL && c->drop != NULL) {
     c->drop(obj);
   }
+}
+
+/* reference counting (spec 12.7, the Rust Rc model): a counted variable holds the counting block of its object; the counting system owns the
+   object and each holder is a user. The last release ends the object; the block stays while weak references need it. A null variable holds
+   no block (NULL) and no usage */
+typedef struct df_rc { df_uns users; df_uns weaks; void* obj; } df_rc;
+
+static df_rc* df_rc_new(void* obj) {
+  if (obj == NULL) {
+    return NULL;
+  }
+  df_rc* rc = (df_rc*)df_alloc(sizeof(df_rc));
+  rc->users = 1;
+  rc->weaks = 0;
+  rc->obj = obj;
+  return rc;
+}
+
+/* one more user of the same object */
+static df_rc* df_rc_use(df_rc* rc) {
+  if (rc != NULL) {
+    rc->users++;
+  }
+  return rc;
+}
+
+/* a user releases its usage: at 0 the object ends (final, the count never rises again) */
+static void df_rc_release(df_rc* rc) {
+  if (rc == NULL || --rc->users != 0) {
+    return;
+  }
+  void* obj = rc->obj;
+  rc->obj = NULL;
+  if (rc->weaks == 0) {
+    free(rc);
+  }
+  df_drop(obj);
+}
+
+#define DF_RC_OBJ(T, rc) ((T)((rc) != NULL ? (rc)->obj : NULL))
+
+/* weak references (spec 12.7): they hold the counting block, not a usage; the object is gone when its user count is 0 */
+static df_rc* df_rc_weak(df_rc* rc) {
+  if (rc != NULL) {
+    rc->weaks++;
+  }
+  return rc;
+}
+
+static void df_rc_unweak(df_rc* rc) {
+  if (rc != NULL && --rc->weaks == 0 && rc->users == 0) {
+    free(rc);
+  }
+}
+
+#define DF_RC_ALIVE(rc) ((rc) != NULL && (rc)->users > 0)
+
+/* removeRefCounting() (spec 12.7, Rust Rc::try_unwrap): the last user takes the object out of the counting as a plain owned object and
+   its variable becomes null; the weak references see the object as gone, and the block is freed when none of them needs it. With other
+   users (or a null variable) it gives NULL and nothing changes */
+static void* df_rc_take(df_rc** slot) {
+  df_rc* rc = *slot;
+  if (rc == NULL || rc->users != 1) {
+    return NULL;
+  }
+  void* obj = rc->obj;
+  rc->obj = NULL;
+  rc->users = 0;
+  *slot = NULL;
+  if (rc->weaks == 0) {
+    free(rc);
+  }
+  return obj;
 }
 
 /* the adopted children of a parent object (spec 12.5): a child moved with -> is registered with its parent, which nulls the child's reference to it

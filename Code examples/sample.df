@@ -118,12 +118,12 @@ enum Status { Active, Inactive, Pending: 10 }
 Item first = Item(1)
 Item sameObject = first
 Item owner = ->first
-Item weakRef _= owner
-Item counted = Item(2).asRefCount
-Item shared = Item(3).asSharedRefCount
+@Item counted = Item(2)
+@Item shared = counted
+_Item weakRef = _counted
 Item copied = owner!
 Item cloned = owner.clone()
-if counted.isRC then r.Console.log("counted")
+if counted.usersCount > 1 then r.Console.log("counted")
 enforce weakRef {
   weakRef.Use()
 } else {
@@ -186,7 +186,7 @@ i16 big16 = 257
 i8 sat = (i8)big16
 i8 low = [i8]big16
 r32 bits = [r32]a
-i32 inv = _a
+i32 inv = ~a
 bool z = (a & 0xFF) == 0
 a >>= 2
 

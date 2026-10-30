@@ -1,0 +1,1 @@
+refcount_borrow_plain.df(5): error: 'first' is counted and cannot be borrowed: take another usage with @Dog view = ... (spec 12.7)

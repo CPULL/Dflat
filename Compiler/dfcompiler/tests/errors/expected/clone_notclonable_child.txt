@@ -1,0 +1,1 @@
+clone_notclonable_child.df(5): error: Folder cannot be cloned: File is notclonable (spec 12.6)

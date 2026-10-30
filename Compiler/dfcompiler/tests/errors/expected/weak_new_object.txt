@@ -1,1 +1,1 @@
-weak_new_object.df(3): error: a weak reference needs an existing object: nobody would own a new one
+weak_new_object.df(3): error: a weak reference takes _x of a counted object, another weak reference or null (spec 12.7)

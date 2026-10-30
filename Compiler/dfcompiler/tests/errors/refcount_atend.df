@@ -1,0 +1,4 @@
+namespace refcount_atend
+class Dog { }
+@Dog first = Dog()
+first is atEnd.

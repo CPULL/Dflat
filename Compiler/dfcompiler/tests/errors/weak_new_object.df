@@ -1,3 +1,3 @@
 namespace weak_new_object
 class C { }
-_C c _= C()
+_C c = C()

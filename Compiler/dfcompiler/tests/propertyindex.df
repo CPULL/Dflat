@@ -1,0 +1,14 @@
+namespace propertyindex
+// a property assigned through any receiver (an item of a vec) goes through its W:
+class P {
+  public i32 n = 0
+  public readwrite i32 c { W: { field = value; n++ } }
+  public readwrite pos { r32 x { W: { field = value; n++ } }, r32 y { W: { field = value; n++ } } }
+}
+vec<P> ps = []
+ps.add(P())
+ps[0].c = 5
+P first = ps[0]
+first.pos = (1.0, 2.0)
+Root.Console.log(ps[0].c)
+Root.Console.log(ps[0].n)

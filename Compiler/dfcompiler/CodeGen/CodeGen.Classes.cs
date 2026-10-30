@@ -30,6 +30,7 @@ sealed class FieldInfo {
   public bool Hidden { get; set; }           // a field of the compiler (the children of a parent, the slot of a child)
   public bool IsReadOnly { get; set; }       // readonly (spec 11.1.4): read with its visibility, written only by the class
   public bool IsWeak { get; set; }           // _T name (spec 12): does not own its object, read through enforce, set with _=
+  public bool IsCounted { get; set; }        // @T name (spec 12.7): a user of a counted object, the C field holds the counting block (df_rc*)
   public bool HasAccessors { get; set; }     // a property with R: / W: blocks (spec 11.1.4): read and written through get_ and set_
   public bool CanRead { get; set; } = true;
   public bool CanWrite { get; set; } = true;
@@ -298,10 +299,18 @@ public sealed partial class CodeGen {
         if (weakParam && !IsClass(type)) {
           throw Error("only objects have weak references", p);
         }
+        if (p.Children.Any(child => child.Kind == "Counted")) {
+          // class Kennel(@Dog dog): the constructor takes a usage and the field becomes a user (spec 12.7)
+          string counted = CountedTypeOf(type, p);
+          cls.PrimaryParams.Add(new ParamSig(p.Text!, counted, def?.Children[0]));
+          CheckFieldName(cls, p.Text!, p);
+          cls.Fields.Add(new FieldInfo(p.Text!, type, cls, p) { FromParam = true, IsCounted = true });
+          continue;
+        }
         if (IsClass(type) && p.Kind != "GiftParam" && !weakParam) {
           throw Error($"the object '{p.Text}' goes into a field of {cls.Name}, which owns it: write ->{type} {p.Text} (or _{type} {p.Text} for a weak reference)", p);
         }
-        cls.PrimaryParams.Add(new ParamSig(p.Text!, type, def?.Children[0]) { IsGift = p.Kind == "GiftParam" && (IsClass(type) || type == "string"), IsWeak = weakParam });
+        cls.PrimaryParams.Add(new ParamSig(p.Text!, weakParam ? "_" + type : type, def?.Children[0]) { IsGift = p.Kind == "GiftParam" && (IsClass(type) || type == "string"), IsWeak = weakParam });
         CheckFieldName(cls, p.Text!, p);
         cls.Fields.Add(new FieldInfo(p.Text!, type, cls, p) { FromParam = true, IsWeak = weakParam });
       }
@@ -321,6 +330,10 @@ public sealed partial class CodeGen {
           if (member.Children.Any(child => child.Kind == "Size")) {
             throw NotSupported("Sized declarations (arr<T>[n] name)", member);
           }
+          bool countedField = IsCountedDecl(member);   // @Dog friend (spec 12.7)
+          if (countedField && (isStatic || member.Children.Any(child => child.Kind == "Property"))) {
+            throw NotSupported("Static counted fields and counted properties (spec 12.7)", member);
+          }
           var init = member.Children.FirstOrDefault(child => child.Kind is "Init" or "WeakInit");
           bool weakField = member.Children.Any(child => child.Kind == "Weak");
           if (init?.Kind == "WeakInit" && !weakField) {
@@ -334,8 +347,8 @@ public sealed partial class CodeGen {
           var existing = cls.Fields.FirstOrDefault(field => field.Name == member.Text && field.FromParam);
           if (existing != null && !isStatic) {
             // redeclaring a primary parameter sets its visibility (spec 11.1.1)
-            if (existing.Type != type) {
-              throw Error($"'{member.Text}' is declared with the type {existing.Type} in the header", member);
+            if (existing.Type != type || existing.IsCounted != countedField) {
+              throw Error($"'{member.Text}' is declared with the type {(existing.IsCounted ? "@" : "")}{existing.Type} in the header", member);
             }
             existing.Visibility = visibility;
             existing.IsReadOnly = ModsOf(member).Contains("readonly");
@@ -352,8 +365,12 @@ public sealed partial class CodeGen {
             IsConst = isConst,
             IsReadOnly = ModsOf(member).Contains("readonly"),
             IsWeak = weakField,
+            IsCounted = countedField,
             Init = init?.Children[0]
           };
+          if (countedField && !IsClass(type)) {
+            throw NotSupported($"Counted values of type {type} (only objects are counted for now, spec 12.7)", member);
+          }
           if (member.Children.FirstOrDefault(child => child.Kind == "Property") is Node property) {
             field.HasAccessors = true;
             field.CanRead = property.Text!.Contains('r');
@@ -695,7 +712,7 @@ public sealed partial class CodeGen {
       string fieldType = IsList(cls.Name) && field.Name is "first" or "last" ? ListNode(cls.Name) + "*"
         : IsListIterator(cls.Name) && field.Name == "node" ? ListNode(cls.ParentField!.Type) + "*"
         : (IsMap(cls.Name) || IsSet(cls.Name)) && field.Name == "tree" ? (IsHmap(cls.Name) ? "df_ht" : "df_bt")
-        : field.Hidden && field.Name == "df_children" ? "df_kids*" : CType(field.Type);
+        : field.Hidden && field.Name == "df_children" ? "df_kids*" : field.IsCounted || field.IsWeak ? "df_rc*" : CType(field.Type);
       fields.Append($"  {fieldType} {field.CName};\n");
     }
     typeDefs.Append($"struct {cls.StructName} {{\n  const df_class* cls;\n{(cls.IsException ? ExceptionFields : "")}{fields}}};\n\n");
@@ -923,9 +940,12 @@ public sealed partial class CodeGen {
   // ---------------------------------------------------------------- names, fields, members
 
   // a field of the current class used by its bare name
-  Expr? BareField(string name, Scope scope, Node at) {
+  Expr? BareField(string name, Scope scope, Node at, bool raw = false) {
     if (currentClass == null || FindField(currentClass, name, at) is not FieldInfo field) {
       return null;
+    }
+    if (field.IsCounted && !raw) {
+      return CountedFieldRead(BareField(name, scope, at, true)!.Value, field);   // the object of the counting block (spec 12.7)
     }
     if (field.IsStatic) {
       return new Expr(field.CName, field.Type);
@@ -948,7 +968,7 @@ public sealed partial class CodeGen {
     return $"({{ {CType(type)} {temp} = {code}; if ({temp} == NULL || DF_IS_DEAD({temp})) {{ df_raise(&df_desc_NullPointerException, {fn!.NameConst}); {RaiseJump} }} {temp}; }})";
   }
 
-  Expr ObjectField(Expr obj, string name, Node at) {
+  Expr ObjectField(Expr obj, string name, Node at, bool raw = false) {
     var cls = ObjInfo(obj.Type);
     if (cls.IsException && ExceptionObjectMember(obj, name, at) is Expr exceptionMember) {
       return exceptionMember;
@@ -961,7 +981,8 @@ public sealed partial class CodeGen {
     if (cls.IsTrait) {
       return new Expr(TraitFieldCode(NullChecked(obj.Code, obj.Type), field), field.Type);
     }
-    return new Expr($"({NullChecked(obj.Code, obj.Type)})->{field.CName}", field.Type);
+    var stored = new Expr($"({NullChecked(obj.Code, obj.Type)})->{field.CName}", field.Type);
+    return field.IsCounted && !raw ? CountedFieldRead(stored, field) : stored;
   }
 
   Expr StaticField(ClassInfo cls, string name, Node at) {
@@ -996,10 +1017,19 @@ public sealed partial class CodeGen {
     if (ReadOnlyVariable(target.Children[0], scope) is not null) {
       throw Error($"'{target.Children[0].Text}' is a read-only reference (&): its fields cannot be assigned", target);
     }
-    var instance = ObjectField(owner, target.Text!, target);
+    var instance = ObjectField(owner, target.Text!, target, true);
     var info = FindField(ObjInfo(owner.Type), target.Text!)!;
+    if (info.IsCounted && !countedFieldWrite) {
+      throw NotSupported($"This use of the counted field '{info.Name}' (->, (&), swap, out arguments)", target);
+    }
+    if (info.IsWeak && !countedFieldWrite) {
+      throw Error($"'{info.Name}' is a weak reference: copy it into a weak variable and use that through enforce (spec 12.7)", target);
+    }
     CheckTraitFieldWrite(info, target);
     CheckReadOnlyWrite(info, target);
+    if (info.HasAccessors) {
+      throw NotSupported($"this kind of write to the property '{info.Name}' (it would skip its W:)", target);
+    }
     if (info.IsParentRef) {
       // the reference to the parent: set once, by the constructor
       return initializing ? new LValueInfo(instance.Code, instance.Type, false) : throw Error($"'{target.Text}' is the reference to the parent: only the constructor sets it", target);
@@ -1101,6 +1131,7 @@ public sealed partial class CodeGen {
       return $"({{ {CType(obj.Type)} {array} = {obj.Code}; df_uns {position} = {IndexValue(index, target)}; "
         + $"if (!df_idx_ok({array}.len, {position}, {fn!.NameConst})) {RaiseJump} &{array}.p[{position}]; }})";
     }
+    CheckNotWritableBorrowOfCounted(target, scope, at);
     var lvalue = LValue(target, scope);
     if (lvalue.IsConst) {
       throw Error($"'{target.Text}' is const and cannot be passed as (&)", at);
@@ -1114,6 +1145,23 @@ public sealed partial class CodeGen {
 
   // one argument: an object given to a parameter written ->T moves (the call writes ->x); the others only borrow
   string ArgCode(ParamSig param, Node arg, Scope scope) {
+    if (BoxInner(param.Type) != null) {
+      arg = BoxCall(arg, param.Type);   // pack.add(first): a new box takes a usage (spec 12.7)
+    }
+    if (IsCountedType(param.Type)) {
+      return CountedArg(arg, CountedBase(param.Type), scope);   // @T name (spec 12.7)
+    }
+    if (IsWeakType(param.Type)) {
+      return WeakValue(arg, scope, param.Type[1..], arg);   // _T name: one more weak reference for the call (spec 12.7)
+    }
+    if (IsClass(param.Type) && CountedRef(arg.Kind == "WritableAddressOf" ? arg.Children[0] : arg, scope) is CountedRefInfo counted) {
+      throw arg.Kind == "WritableAddressOf"
+        ? Error($"(&) is not allowed on the counted object '{counted.Name}': writing needs a read/write usage, (@)T (spec 12.7)", arg)
+        : Error($"'{counted.Name}' is counted and cannot be borrowed: the parameter '{param.Name}' takes a counted object only if declared @{counted.Type} {param.Name} (spec 12.7)", arg);
+    }
+    if (param.IsGift && arg.Kind == "Gift" && CountedRef(arg.Children[0], scope) is CountedRefInfo given) {
+      throw Error($"a ->T parameter receives a plain owned object: ->{given.Name} passes a usage only to a @T parameter (spec 12.7)", arg);
+    }
     if (IsByPointer(param)) {
       return ReferenceArg(param, arg, scope);
     }
@@ -1123,6 +1171,7 @@ public sealed partial class CodeGen {
         throw Error($"'{param.Name}' is a writable borrow: pass it as (&)object", arg);
       }
       arg = arg.Children[0];
+      CheckNotWritableBorrowOfCounted(arg, scope, arg);
       if (ReadOnlyVariable(arg, scope) is not null) {
         throw Error($"'{arg.Text}' is a read-only reference (&): it cannot be passed as (&)", arg);
       }
@@ -1130,10 +1179,7 @@ public sealed partial class CodeGen {
       throw Error($"'{param.Name}' is not a (&) parameter: remove the (&)", arg);
     }
     // a weak parameter takes any existing object, also another weak reference (spec 12)
-    var value = param.IsWeak ? WeakSource(arg, scope, param.Type) : ExprOf(arg, scope, param.Type);
-    if (param.IsWeak && value.Fresh) {
-      throw Error($"'{param.Name}' is a weak reference: a new object needs an owner", arg);
-    }
+    var value = ExprOf(arg, scope, param.Type);
     if (param.Type == "string") {
       string converted = Convert(value, param.Type, arg);
       return param.IsGift ? StrOwnedAs(value, "string", converted) : StrRead(new Expr(converted, "string", FreshCode(value, converted) == "true" && !IsStaticStr(converted)));
@@ -1152,6 +1198,7 @@ public sealed partial class CodeGen {
   // cls.name(args): a static function (receiver null) or a function of an object
   // direct: no virtual dispatch (parent.name())
   Expr MethodCall(ClassInfo cls, string name, string? receiver, bool direct, List<Node> args, Scope scope, Node at) {
+    CheckCountedItemsMember(cls, name, at);
     var all = LookupMethods(cls, name);
     if (all.Count == 0) {
       throw Error($"{DisplayName(cls.Name)} has no function '{name}'", at);
@@ -1323,13 +1370,19 @@ public sealed partial class CodeGen {
       var sb = classCode;
       sb.Append($"static df_string df_str_{cls.Name}(const {cls.StructName}* o) {{\n");
       sb.Append("  if (o == NULL) {\n    return df_str_lit(\"null\", 4);\n  }\n");
-      sb.Append($"  df_string r = {CString(CodePoints(DisplayName(cls.Name) + (all.Count == 0 ? " {}" : " { ")))};\n");
+      if (boxInner.ContainsKey(cls.Name)) {
+        // the box of an item of list<@T> prints as its object (spec 12.7)
+        all.Clear();
+        sb.Append($"  return df_str_obj(DF_RC_OBJ(const void*, o->{FindField(cls, "value")!.CName}));\n");
+      }
+      sb.Append($"  df_string r ={CString(CodePoints(DisplayName(cls.Name) + (all.Count == 0 ? " {}" : " { ")))};\n");
       for (int index = 0; index < all.Count && index < 3; index++) {
         var field = all[index];
         string label = (index > 0 ? ", " : "") + field.Name + ": ";
         string value;
         if (IsClass(field.Type)) {
-          value = $"(o->{field.CName} == NULL ? df_str_lit(\"null\", 4) : {CString(CodePoints(DisplayName(field.Type) + "{}"))})";
+          string isNull = field.IsWeak || field.IsCounted ? $"!DF_RC_ALIVE(o->{field.CName})" : $"o->{field.CName} == NULL";   // a weak reference to a gone object prints null
+          value = $"({isNull} ? df_str_lit(\"null\", 4) : {CString(CodePoints(DisplayName(field.Type) + "{}"))})";
         } else {
           value = StrOf(new Expr($"o->{field.CName}", field.Type), cls.Node);
         }
@@ -1356,7 +1409,8 @@ public sealed partial class CodeGen {
         EmitHashFunction(cls, sb);
       }
       string hash = hashUsed ? $"df_hash_{cls.Name}" : "NULL";
-      sb.Append($"static const df_class {cls.Descriptor} = {{ {256 + cls.Index}, \"{DisplayName(cls.Name)}\", {parent}, {slots}, df_strp_{cls.Name}, {impls}, df_dropall_{cls.Name}, {hash} }};\n\n");
+      string clone = EmitCloneFunction(cls, sb);
+      sb.Append($"static const df_class {cls.Descriptor} = {{ {256 + cls.Index}, \"{DisplayName(cls.Name)}\", {parent}, {slots}, df_strp_{cls.Name}, {impls}, df_dropall_{cls.Name}, {hash}, {clone} }};\n\n");
     }
   }
 

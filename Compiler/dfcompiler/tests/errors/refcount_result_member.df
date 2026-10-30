@@ -1,0 +1,6 @@
+namespace refcount_result_member
+class Dog {
+  public fun bark() { }
+}
+fun @Dog make() { Dog() }
+make().bark()

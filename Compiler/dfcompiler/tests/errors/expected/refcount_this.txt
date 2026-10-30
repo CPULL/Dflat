@@ -1,0 +1,1 @@
+refcount_this.df(4): error: an object cannot make itself counted: @this (whoever holds the object makes it counted, spec 12.7)

@@ -1,0 +1,1 @@
+clone_trait.df(6): error: Shape cannot be cloned: the class of a trait value is known only at run time (tryClone) (spec 12.6)

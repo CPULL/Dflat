@@ -1,0 +1,6 @@
+namespace refcount_this
+class Dog {
+  public fun me() {
+    @Dog self = @this
+  }
+}

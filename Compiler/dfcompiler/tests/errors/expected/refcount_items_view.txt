@@ -1,0 +1,1 @@
+refcount_items_view.df(6): error: feature not supported: Views of a collection of counted objects

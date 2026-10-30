@@ -1,0 +1,3 @@
+; Dha Flatty Bird: a quick test of the gfx library
+source=main.df
+include=../../Libraries/Gfx

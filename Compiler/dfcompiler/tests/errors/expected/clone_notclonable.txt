@@ -1,0 +1,1 @@
+clone_notclonable.df(4): error: File cannot be cloned: File is notclonable (spec 12.6)

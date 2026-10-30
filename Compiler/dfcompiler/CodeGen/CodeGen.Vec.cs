@@ -948,6 +948,9 @@ public class set<T> : SetCollection<T> {
     }
     for (int index = 0; index < count; index++) {
       var item = list.Children[index];
+      if (BoxInner(elem) != null) {
+        item = BoxCall(item, elem);   // [first, Dog("x")] of a vec<@Dog> (spec 12.7)
+      }
       var value = Adopted(ExprOf(item, scope, elem), item);
       if (IsClass(elem) && !value.Fresh && value.Type != "null") {
         throw Error("a vec owns its items: put a new object in the literal, or move one in with ->x", item);
@@ -992,6 +995,9 @@ public class set<T> : SetCollection<T> {
 
   // ->v[i]: the item goes to the receiver and the slot is zeroed (spec 6.6); a basic value is copied
   Expr GiftIndex(Node gift, Node operand, Scope scope) {
+    if (CountedItemRef(operand, scope) != null) {
+      throw NotSupported("->c[i] on a collection of counted objects (open, spec 99)", gift);
+    }
     if (operand.Children[0].Kind != "Index" && IsView(ExprOf(operand.Children[0], scope).Type)) {
       throw Error("a view is read-only: its items cannot be moved out (spec 6.5)", gift);
     }
@@ -1103,6 +1109,7 @@ public class set<T> : SetCollection<T> {
   // the members of a vec written in C here: add(collection), removeAt(range), copyFrom (spec 6.6)
   Expr? VecMember(Expr vec, string name, List<Node> args, Scope scope, Node at) {
     string elem = VecElem(vec.Type);
+    CheckCountedItemsMember(ObjInfo(vec.Type), name, at);   // fill, sort, has ... would hand out or compare the boxes (spec 12.7)
     if (name == "add" && args.Count == 1 && AddedCollectionType(args[0], scope, elem) is string sourceType) {
       return VecAddCollection(vec, args[0], sourceType, scope, at);
     }

@@ -374,8 +374,11 @@ public sealed partial class CodeGen {
   // x is atEnd.
   void EmitFinalize(Node finalize, StringBuilder sb, Scope scope, string pad) {
     var subject = finalize.Children[0];
-    if (subject.Kind == "Name" && scope.Find(subject.Text!) is VarInfo { IsCounted: true }) {
-      throw Error($"'{subject.Text}' is counted: release its usage with '{subject.Text} is done.'; 'is atEnd.' is only for plain owners (spec 12.4)", finalize);
+    if (CountedRef(subject, scope) is CountedRefInfo counted) {
+      throw Error($"'{counted.Name}' is counted: release its usage with '{counted.Name} is done.'; 'is atEnd.' is only for plain owners (spec 12.4)", finalize);
+    }
+    if (WeakRef(subject, scope) is CountedRefInfo weak) {
+      throw Error($"'{weak.Name}' is a weak reference: release it with '{weak.Name} is done.'; 'is atEnd.' is only for plain owners (spec 12.4)", finalize);
     }
     var target = LValue(subject, scope);
     if (!IsClass(target.Type)) {
@@ -405,7 +408,7 @@ public sealed partial class CodeGen {
     var variable = target.Variable;
     bool owns = variable != null ? variable.Own : target.IsField;
     if (variable is { IsWeak: true }) {
-      throw Error($"'{targetNode.Text}' is a weak reference: assign it with _=", at);
+      throw Error($"'{targetNode.Text}' is a weak reference: it takes a counted object marked with _ ({targetNode.Text} = _x) or another weak reference (spec 12.7)", at);
     }
     bool movesIn = value.Fresh || value.Type == "null";
     if (owns && !movesIn) {

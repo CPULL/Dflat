@@ -1,0 +1,12 @@
+  end rex
+copy of rex
+not clonable
+  end square 4
+side 4
+n (own clone)
+null gives null true
+  end square 4
+  end guard
+  end rex
+done
+---- exit code 0 ----

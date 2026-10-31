@@ -1,1 +1,0 @@
-list_add_objects_copy.df(9): error: add(collection) with objects moves them: write add(->other) (a copy needs cloning, not built yet)

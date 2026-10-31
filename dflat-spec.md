@@ -2094,7 +2094,7 @@ class ListIterator<Item>(&list<Item> collection as parent) : IndexIterator<Item>
 
 ```
 Dog copy = dog!                               // same as dog.clone()
-Dog? other = dog.tryClone()                   // ObjectNotClonableException when it cannot be cloned
+Dog other = dog.tryClone()                    // ObjectNotClonableException when it cannot be cloned
 any Shape s2 = shape.tryClone()               // a trait type needs tryClone
 
 public notclonable class File { }
@@ -2111,10 +2111,10 @@ public notclonable class File { }
 | owned child (an object that has a parent, 12.5) | null: a child is never duplicated, a new one comes from the functions of its parent |
 | counted object (`@T`, `(@)T`, 12.7) | another user of the same object (the count goes up by one); never cloned recursively |
 | borrowed (`&`, `(&)`) | null |
-| weak reference (`_T`) | another reference to the same object; remapped when it points into the object's own parts |
+| weak reference (`_T`) | another weak reference to the same object |
 
 - Any field that cannot be duplicated, for any reason, becomes null in the clone.
-- Remapping: a weak reference that points to an object owned by the clone tree (the object itself or something it owns) points to the copy of that object in the clone, not to the original. The clone keeps a table from originals to copies only while `clone()` runs, and only for classes that have weak fields; the other classes are a plain recursive copy.
+- No remapping: a weak reference always points to a counted object (12.7), and a clone never copies a counted object (a counted field is shared), so a weak reference of the clone points to the same object as the original's. This holds also when a counted object is cloned and one of its weak fields points to the object itself: the clone is a plain new object while `clone()` runs, so a weak reference cannot point to it.
 - A clone never inherits the children of the original: a cloned collection has copies of its items and no iterators or views.
 - Collections: the items follow the rules of the fields (owned items are cloned, children become null). `c!` and `c[a..b]!` (6.5) clone the items.
 - Objects that cannot be cloned; calling `clone()` or `a!` on them is a compile error:
@@ -2199,6 +2199,8 @@ Weak references
 Fields and collections
 - An `@T` or `(@)T` field is a user like any other: it releases its usage when its object dies. A `_T` field is a weak reference, seen as gone once the object is destroyed. A `&T` field is not allowed (a borrow cannot outlive its lender, 12).
 - A collection of counted objects (`list<@Dog>`) holds its own usage for each item (`pack.add(first)` adds a user). Collections are structurally immutable while being iterated (6.4); the loop variable is a temporary usage, acquired at the start of each iteration and released at its end, with no borrow involved: `for var dog in pack { }` and `for @Dog dog in pack { }` are the same. The collection keeps its own usage of the item and cannot change while the loop runs, so the compiler may leave out the count of the loop variable.
+- The members that search (`has`, `indexOf`, `remove`, `removeAll`) take a counted object or null; a plain object is a compile error. The items compare by the rules of their objects (`equals`, `==`, or identity, 11.1.3). The value searched is only looked at: it gains no usage.
+- The members that give an item pass its usage to the caller: `@Dog old = pack.replace(0, other)`. A counted `var` comes only from a function that returns `@T` (`var x = f()`); for a counted item the type is written (`var old = pack.replace(0, other)` is a compile error that asks for `@Dog old`).
 
 Read-only and read/write
 - `@T` is a read-only counted object, `(@)T` a read/write one. `(@)T` includes a lock in its runtime representation, so it is a distinct counted type.
@@ -2413,7 +2415,7 @@ class Exception {
 | 13 | `InvalidCastException` | |
 | 14 | `DivisionByZeroException` | |
 | 15 | `OutOfMemoryException` | |
-| 16 | `ChangingRefCountTypeException` | |
+| 16 | retired (was `ChangingRefCountTypeException`: there is one kind of counting, 12.7); not reused | |
 | 17 | `OutOfRangeCastException` | saturates (3.5) |
 | 18 | `InvalidCharacterCodePointException` | U+0000 (3.5) |
 | 19 | `IndexOutOfRangeException` | |
@@ -2444,8 +2446,8 @@ class Exception {
 | 46 | `ModifyingIteratedCollectionException` | |
 | 47 | `InvalidIteratorReleaseException` (6.4, 11.2) | |
 | 48 | `UsageOfDestroyedObjectException` (12.4, 12.5) | |
-| | `ObjectNotClonableException` (12.6) | |
-| | `WritingOnRefCountWithoutLockingException` (12.7) | |
+| 49 | `ObjectNotClonableException` (12.6) | |
+| 50 | `WritingOnRefCountWithoutLockingException` (12.7) | |
 
 - The list grows during development; each new standard exception takes the next ID.
 - `UsageOfDestroyedObjectException`: raised when an object that is gone is used: a child whose parent ended (12.5), or a variable released with `->` or `is atEnd.` (12.4). It is not silent and is catchable in Debug and Release builds (no `Panic` in Release).
@@ -2833,7 +2835,6 @@ Level 1 = most important, level 3 = least.
 - Ownership: when a local borrow ends (last use or end of scope); when a temporary object inside an expression ends
 - Reference counting (12.7): `->` from a counted variable into a `->T` parameter or a plain receiver (removing the counting); `->pack[0]` on a list of counted items; counted natives and strings (`@i32`, `@string`); counted traits and downcasts; `&` parameters of a primary constructor; whether a weak reference can be made without `_` in the expression; which methods a read-only `@T` can call; the call form of a `(@)T` parameter
 - Reference counting: the lock of `(@)T` (waiting or try-lock, the else branch, the order for `enforce a, b`, nested locking, deadlock), an expression form of `enforce` and several failure cases in one `enforce`
-- Reference counting: `ChangingRefCountTypeException` (15.3) has no use with one kind of counting
 - Reference counting: generics with counted type arguments (`Stack<@Dog>`), after 0.1.0; the `Rc` / `Arc` split, with threads; counted captures of lambdas, and the weak capture of a plain variable (13.3)
 - Properties: position of `readonly` / `readwrite` / `writeonly` next to `public` and `static`, and their use together with a body (11.1.4); `override` of a property with only one half; access to a property through a trait-typed value (`any`), left to the compiler
 - DateTime library: import path, timezone database, parsing for `CalendarDate` / `ZonedDateTime`
@@ -3362,3 +3363,7 @@ Level 1 = most important, level 3 = least.
 - 99 Open items for ownership and reference counting added
 - 12.7 `var x = f()` is counted when `f` returns `@T`; `removeRefCounting()` also on counted fields; the compiler may leave out the count of a method call and of the loop variable over `list<@T>` when another usage keeps the object alive; a write to a `(@)T` without the lock raises `WritingOnRefCountWithoutLockingException` (new, 15.3); 99: the name of that exception removed
 - 12.7, 19.3 The cycle warning also covers a class with an `@` field of its own type
+- 12.6 A weak field of a clone is another weak reference to the same object; the remapping of weak references into the clone tree is removed (a weak reference points only to a counted object, which a clone never copies)
+- 12.7 The search members of a collection of counted objects take a counted object or null and compare by the rules of the objects; the members that give an item pass its usage, and a counted item needs its type written (`@Dog old = pack.replace(...)`, not `var`)
+- 12.6 Example: `Dog other = dog.tryClone()` (was `Dog?`: objects are nullable already, `T?` on them is a compile error, 7.1)
+- 15.3 ID 16 retired (was `ChangingRefCountTypeException`, no use with one kind of counting); IDs 49 `ObjectNotClonableException` and 50 `WritingOnRefCountWithoutLockingException`; 99: the open item on `ChangingRefCountTypeException` removed

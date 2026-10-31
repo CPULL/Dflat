@@ -2,8 +2,9 @@ namespace refcount_items_has
 class Dog { }
 fun f() {
   @Dog rex = Dog()
+  Dog plain = Dog()
   list<@Dog> pack = []
   pack.add(rex)
-  bool found = pack.has(rex)
+  bool found = pack.has(plain)
 }
 f()

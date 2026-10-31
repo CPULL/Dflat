@@ -98,7 +98,6 @@ static const df_descriptor df_desc_OverflowException = { 12, "OverflowException"
 static const df_descriptor df_desc_InvalidCastException = { 13, "InvalidCastException", &df_desc_Exception, false };
 static const df_descriptor df_desc_DivisionByZeroException = { 14, "DivisionByZeroException", &df_desc_Exception, false };
 static const df_descriptor df_desc_OutOfMemoryException = { 15, "OutOfMemoryException", &df_desc_Exception, false };
-static const df_descriptor df_desc_ChangingRefCountTypeException = { 16, "ChangingRefCountTypeException", &df_desc_Exception, false };
 static const df_descriptor df_desc_OutOfRangeCastException = { 17, "OutOfRangeCastException", &df_desc_Exception, true };
 static const df_descriptor df_desc_InvalidCharacterCodePointException = { 18, "InvalidCharacterCodePointException", &df_desc_Exception, true };
 static const df_descriptor df_desc_IndexOutOfRangeException = { 19, "IndexOutOfRangeException", &df_desc_Exception, false };
@@ -128,6 +127,8 @@ static const df_descriptor df_desc_StreamCloseFailureException = { 45, "StreamCl
 static const df_descriptor df_desc_ModifyingIteratedCollectionException = { 46, "ModifyingIteratedCollectionException", &df_desc_Exception, false };
 static const df_descriptor df_desc_InvalidIteratorReleaseException = { 47, "InvalidIteratorReleaseException", &df_desc_Exception, false };
 static const df_descriptor df_desc_UsageOfDestroyedObjectException = { 48, "UsageOfDestroyedObjectException", &df_desc_Exception, false };
+static const df_descriptor df_desc_ObjectNotClonableException = { 49, "ObjectNotClonableException", &df_desc_Exception, false };
+static const df_descriptor df_desc_WritingOnRefCountWithoutLockingException = { 50, "WritingOnRefCountWithoutLockingException", &df_desc_Exception, false };
 
 /* The exception of a function is a local of that function (df_err in the generated code) and travels back to the caller as the second
    value it returns. The runtime functions written in C cannot return it that way: they leave it here, and the code generated around
@@ -1797,19 +1798,36 @@ static int64_t df_console_read(void) {
 }
 
 /* Console.clear (stdlib 2): empties the console and puts the cursor at the top-left corner; nothing when the output is not a console */
+#if defined(_WIN32) && !defined(ENABLE_VIRTUAL_TERMINAL_PROCESSING)
+#define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x0004
+#endif
 static void df_console_clear(void) {
   fflush(stdout);
 #ifdef _WIN32
   HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+  DWORD mode;
+  if (!GetConsoleMode(out, &mode)) {
+    return;   // not a console (redirected output)
+  }
+  if ((mode & ENABLE_VIRTUAL_TERMINAL_PROCESSING) || SetConsoleMode(out, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING)) {
+    // home, clear the visible screen and the scrollback: the next frame starts at the top of the window
+    fputs("\x1b[H\x1b[2J\x1b[3J", stdout);
+    fflush(stdout);
+    return;
+  }
+  // an old console without escape sequences: clear the visible window and home the cursor to its top-left
   CONSOLE_SCREEN_BUFFER_INFO info;
   if (!GetConsoleScreenBufferInfo(out, &info)) {
     return;
   }
-  DWORD cells = (DWORD)info.dwSize.X * (DWORD)info.dwSize.Y;
-  COORD home = { 0, 0 };
+  SHORT width = (SHORT)(info.srWindow.Right - info.srWindow.Left + 1);
   DWORD written;
-  FillConsoleOutputCharacterW(out, L' ', cells, home, &written);
-  FillConsoleOutputAttribute(out, info.wAttributes, cells, home, &written);
+  for (SHORT row = info.srWindow.Top; row <= info.srWindow.Bottom; row++) {
+    COORD start = { info.srWindow.Left, row };
+    FillConsoleOutputCharacterW(out, L' ', (DWORD)width, start, &written);
+    FillConsoleOutputAttribute(out, info.wAttributes, (DWORD)width, start, &written);
+  }
+  COORD home = { info.srWindow.Left, info.srWindow.Top };
   SetConsoleCursorPosition(out, home);
 #else
   if (!isatty(STDOUT_FILENO)) {

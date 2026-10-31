@@ -504,6 +504,13 @@ public class map<K, V> : MapCollection<K, V> {
 
   override fun uns get_len() { this.tree_len() }
 
+  // the clone (spec 12.6): a new map<K, V> with the entries copied (the same as add(this) into an empty one)
+  public fun map<K, V> clone() {
+    map<K, V> copy = []
+    copy.add(this)
+    return ->copy
+  }
+
   override fun bool has(V value) {
     return this.tree_hasValue(value)
   }
@@ -643,6 +650,13 @@ public class set<T> : SetCollection<T> {
   u64 tree              // the tree: a df_bt in the C, values of 0 bytes
 
   override fun uns get_len() { this.tree_len() }
+
+  // the clone (spec 12.6): a new set<T> with the entries copied (the same as add(this) into an empty one)
+  public fun set<T> clone() {
+    set<T> copy = []
+    copy.add(this)
+    return ->copy
+  }
 
   override fun bool has(T item) {
     return this.tree_has(item)
@@ -1055,6 +1069,9 @@ public class set<T> : SetCollection<T> {
       throw Error("pop takes one writable variable: pop((&)x)", at);
     }
     var targetNode = args[0].Children[0];
+    if (BoxInner(VecElem(vec.Type)) != null) {
+      return CountedVecPop(vec, targetNode, scope, at);
+    }
     var target = LValue(targetNode, scope);
     if (target.IsConst) {
       throw Error($"'{targetNode.Text}' is const", at);
@@ -1126,9 +1143,8 @@ public class set<T> : SetCollection<T> {
   Expr VecAddCollection(Expr vec, Node arg, string sourceType, Scope scope, Node at) {
     string elem = VecElem(vec.Type);
     bool moving = arg.Kind == "Gift";
-    if (IsClass(elem) && !moving) {
-      throw Error("add(collection) with objects moves them: write add(->other) (a copy needs cloning, not built yet)", at);
-    }
+    bool cloning = IsClass(elem) && !moving;   // a plain add(other) clones the object items (spec 6.6, 12.6)
+    cloneUsed |= cloning;
     var source = ExprOf(arg, scope);
     string held = NewTemp();
     string s = NewTemp();
@@ -1144,7 +1160,7 @@ public class set<T> : SetCollection<T> {
     sb.Append(LockCheck(held, vec.Type));
     sb.Append($"df_uns {amount} = {SourceLength(sourceType, s)}; {VecReserve(held, vec.Type, $"{count} + {amount}")}");
     sb.Append(ForEachSourceItem(sourceType, s, "0", amount, item =>
-      $"{items}.p[{count}] = {(elem == "string" && !moving ? $"df_str_dup({item})" : item)}; {count} += 1; " + (moving && (IsClass(elem) || elem == "string") ? $"{item} = NULL; " : "")));
+      $"{items}.p[{count}] = {(cloning ? CloneValue(item, elem, at) : elem == "string" && !moving ? $"df_str_dup({item})" : item)}; {count} += 1; " + (moving && (IsClass(elem) || elem == "string") ? $"{item} = NULL; " : "")));
     if (moving && sourceIsObject) {
       sb.Append($"df_drop((void*){s}); ");   // the collection was moved in: its items are gone and it ends
     }

@@ -1,0 +1,1 @@
+retired_refcount_exception.df(6): error: unknown exception type 'ChangingRefCountTypeException': a catch names an exception type, then an optional variable (catch Exception ChangingRefCountTypeException gets any exception)

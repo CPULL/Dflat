@@ -1,0 +1,8 @@
+namespace weak_atend
+class Dog { }
+fun f() {
+  @Dog a = Dog()
+  _Dog w = _a
+  w is atEnd.
+}
+f()

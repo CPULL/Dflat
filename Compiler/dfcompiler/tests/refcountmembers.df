@@ -1,0 +1,79 @@
+// Collections of counted objects (spec 12.7): the members that compare items (has, indexOf, remove, removeAll; the objects compare by their
+// own rules) and the members that give or share items (replace, pop, fill, transformTo, reverse)
+alias Root as r
+public class Dog(string name) {
+  public string name
+} atEnd {
+  r.Console.log("  end " + name)
+}
+fun compare() {
+  @Dog a = Dog("a")
+  @Dog b = Dog("b")
+  @Dog c = Dog("c")
+  list<@Dog> pack = [a, b, null, a]
+  vec<@Dog> kennel = [b, a]
+  r.Console.log($"list has a {pack.has(a)}, has c {pack.has(c)}, has null {pack.has(null)}, indexOf a {pack.indexOf(a)}, indexOf c {pack.indexOf(c)}")
+  r.Console.log($"vec has a {kennel.has(a)}, has c {kennel.has(c)}, indexOf a {kennel.indexOf(a)}")
+  r.Console.log($"users of a {a.usersCount}")
+  r.Console.log($"removeAll a {pack.removeAll(a)}, users of a {a.usersCount}, len {pack.len}")
+  r.Console.log($"remove b {kennel.remove(b)}, remove c {kennel.remove(c)}, users of b {b.usersCount}, len {kennel.len}")
+}
+fun give() {
+  @Dog a = Dog("a")
+  @Dog b = Dog("b")
+  list<@Dog> pack = [a, b]
+  vec<@Dog> kennel = [a]
+  @Dog old = pack.replace(0, b)
+  r.Console.log($"old {old.name}, users a {a.usersCount}, b {b.usersCount}")
+  @Dog old2 = kennel.replace(0, Dog("fresh"))
+  r.Console.log($"old2 {old2.name}, users a {a.usersCount}, kennel[0] {kennel[0].name}")
+  pack.replace(1, a)
+  r.Console.log($"ignored, users a {a.usersCount}, b {b.usersCount}")
+}
+fun share() {
+  @Dog a = Dog("a")
+  @Dog b = Dog("b")
+  vec<@Dog> kennel = [a, b, a]
+  @Dog last = null
+  bool got = kennel.pop((&)last)
+  r.Console.log($"pop {got} {last.name}, users a {a.usersCount}, len {kennel.len}")
+  got = kennel.pop((&)last)
+  r.Console.log($"pop {got} {last.name}, users a {a.usersCount}, b {b.usersCount}")
+  kennel.fill(a)
+  r.Console.log($"fill vec, users a {a.usersCount}, b {b.usersCount}")
+  list<@Dog> pack = [b, b]
+  pack.fill(a)
+  r.Console.log($"fill list, users a {a.usersCount}, b {b.usersCount}")
+  pack.fill(2, b)
+  r.Console.log($"fill(2, b), len {pack.len}, users b {b.usersCount}, pack[3] {pack[3].name}")
+  pack.fill(null)
+  r.Console.log($"fill null, users a {a.usersCount}, b {b.usersCount}, has null {pack.has(null)}")
+  kennel.pop((&)last)
+  kennel.pop((&)last)
+  r.Console.log($"empty pop, last is null {last == null}, users a {a.usersCount}")
+}
+fun transform() {
+  @Dog a = Dog("a")
+  list<@Dog> pack = [a, Dog("b")]
+  vec<@Dog> kennel = pack.transformTo<vec>()
+  r.Console.log($"vec len {kennel.len}, users a {a.usersCount}, {kennel[1].name}")
+  list<@Dog> back = kennel.transformTo<list>()
+  r.Console.log($"list len {back.len}, users a {a.usersCount}, {back[0].name}")
+}
+fun turn() {
+  @Dog a = Dog("a")
+  list<@Dog> pack = [a, Dog("b")]
+  pack.reverse()
+  r.Console.log($"reversed {pack[0].name} {pack[1].name}, users a {a.usersCount}")
+}
+r.Console.log("compare")
+compare()
+r.Console.log("give")
+give()
+r.Console.log("share")
+share()
+r.Console.log("transform")
+transform()
+r.Console.log("turn")
+turn()
+r.Console.log("done")

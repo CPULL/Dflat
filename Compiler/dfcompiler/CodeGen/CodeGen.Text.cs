@@ -232,6 +232,9 @@ public sealed partial class CodeGen {
     }
     if (IsVec(receiver.Type) || IsList(receiver.Type)) {
       CheckCountedItemsMember(ObjInfo(receiver.Type), name, at);   // spec 12.7
+      if (name == "fill" && CountedFill(receiver, args, scope, at) is Expr filled) {
+        return filled;
+      }
     }
     if (IsVec(receiver.Type) && IsClass(VecElem(receiver.Type)) && name is "fillAtCapacity" or "resize" && args.Count > 0 && args[^1].Kind != "Null") {
       throw Error($"{name} puts the same object in many items: a class instance is not allowed, null is", at);

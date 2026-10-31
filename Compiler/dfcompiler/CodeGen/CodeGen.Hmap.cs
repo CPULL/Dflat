@@ -19,6 +19,13 @@ public class hmap<K, V> : MapCollection<K, V> {
 
   override fun uns get_len() { this.tree_len() }
 
+  // the clone (spec 12.6): a new hmap<K, V> with the entries copied (the same as add(this) into an empty one)
+  public fun hmap<K, V> clone() {
+    hmap<K, V> copy = []
+    copy.add(this)
+    return ->copy
+  }
+
   override fun bool has(V value) {
     return this.tree_hasValue(value)
   }
@@ -174,6 +181,13 @@ public class hset<T> : SetCollection<T> {
   u64 tree              // the table: a df_ht in the C, values of 0 bytes
 
   override fun uns get_len() { this.tree_len() }
+
+  // the clone (spec 12.6): a new hset<T> with the entries copied (the same as add(this) into an empty one)
+  public fun hset<T> clone() {
+    hset<T> copy = []
+    copy.add(this)
+    return ->copy
+  }
 
   override fun bool has(T item) {
     return this.tree_has(item)

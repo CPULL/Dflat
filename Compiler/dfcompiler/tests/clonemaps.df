@@ -1,0 +1,30 @@
+// Clones of maps and sets (spec 12.6): a new collection with the entries copied; also as fields of a cloned object
+alias Root as r
+public class Bag {
+  public map<string, i32> counts = ["a": 1]
+  public hset<string> tags = ["x"]
+}
+fun run() {
+  map<string, i32> m = ["one": 1, "two": 2]
+  map<string, i32> c = m!
+  c["three"] = 3
+  r.Console.log($"{m} / {c}")
+  hmap<i32, string> h = [1: "uno"]
+  var h2 = h.clone()
+  h2[2] = "due"
+  r.Console.log($"{h.len} {h2.len} {h2[1]}")
+  set<i32> s = [3, 1, 2]
+  set<i32> s2 = s!
+  s2 += 9
+  r.Console.log($"{s} / {s2}")
+  hset<string> t = ["p", "q"]
+  hset<string> t2 = t!
+  t2 -= "p"
+  r.Console.log($"{t.len} {t2.len} {t2.has("q")}")
+  Bag b = Bag()
+  Bag b2 = b!
+  b2.counts["b"] = 2
+  b2.tags += "y"
+  r.Console.log($"{b.counts} {b.tags.len} / {b2.counts} {b2.tags.len}")
+}
+run()

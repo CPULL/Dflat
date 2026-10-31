@@ -1742,3 +1742,31 @@ CLONING (2026-10-30, spec 12.6, compiler 0.0.41alpha)
   supported" until ObjectNotClonableException has an ID. c[a..b]! is "not supported".
 - Tests clone (a deep clone with an owned object, counted and weak fields, a vec and a list; the dynamic class; a clone() of the
   class; counted objects and collections), errors/clone_notclonable, clone_trait, clone_map, clone_try, clone_notclonable_child.
+
+STABILIZATION (2026-10-31, spec 0.0.19, compiler 0.0.42alpha)
+- Last expression as result (spec 13): MarkImplicitReturn (CodeGen.cs) turns the last ExprStmt of a non-void, non-multi body into a Return
+  with Text "implicit", in RegisterFun (before ClassifyReturns, so a last expression that makes an object moves) and again in EmitFun (for
+  the functions made by the compiler, equals). The old single-expression paths of EmitFun are gone: every body goes through EmitFrameBody.
+  An implicit return of a void expression is an error ("its last expression gives nothing").
+- ExceptionMember: a known member in another case (ex.message) names the right one.
+- df_console_clear (Windows): ENABLE_VIRTUAL_TERMINAL_PROCESSING and ESC[H ESC[2J ESC[3J; without it, the visible window (srWindow) is
+  cleared and the cursor homed to its top-left.
+- Counted items (CodeGen.CountedItems.cs): LookupBox, a box on the C stack around the counting block of the value (CountedBlockOf: a counted
+  reference or null), with no usage, given to the borrowing box parameters (ArgCode) and to has / indexOf of the array code; BoxEquals
+  (called first by ObjectEquals) compares two boxes by their objects (ObjectEquals of the item type; a null box or null object equals only
+  null). UnboxTaken turns a box handed out (replace, takeAt: the end of MethodCall, ArrayReplace) into a counted result: the usage moves
+  out and the empty box is dropped. CountedVecPop (pop into a @T variable or field: the old usage released), CountedFill (fill, list
+  fill(count, v): f_<box>(df_rc_use(block)) per item, the old boxes dropped; called from TryReceiverCall). transformTo and reverse move
+  boxes as they are. A var declared from a counted value that LowerCountedVars did not see is an error asking for the @T type.
+- Clone: map, hmap, set and hset have a clone() in the library (an empty one, then add(this)); LibraryClone / CloneMethod route a!,
+  clone() and the clone slot of the descriptor to it. Plain add(other) of vec / list and copyFrom (CollectionCopyFrom, also arr to arr
+  with objects) clone object items with CloneValue (cloneUsed is set while compiling: the descriptors come after the bodies); the items
+  written over are dropped (the whole copy is wrapped in CheckRaise). tryClone (TryCloneExpr): the clone slot of the class at run time,
+  df_raise of ObjectNotClonableException when it is empty, null for null; FlowNode adds 49 to the raises of a call of tryClone.
+- Exceptions: 16 retired (ChangingRefCountTypeException removed from StandardExceptions and Runtime); ObjectNotClonableException 49,
+  WritingOnRefCountWithoutLockingException 50 (not raised yet: the lock of (@)T).
+- EmitFinalize: x is atEnd. on a counted reference (CountedRef: variables, fields, items) or a weak reference (WeakRef) gives the error of
+  spec 12.4.
+- Tests lastexpr, refcountmembers, clonemaps, clonecopy, tryclone, errors/exception_member_case, refcount_items_has (now a plain object),
+  refcount_items_var, refcount_items_pop_plain, weak_atend, retired_refcount_exception; removed errors/clone_map, clone_try,
+  list_add_objects_copy, list_copyfrom_objects (they tested restrictions that are gone).

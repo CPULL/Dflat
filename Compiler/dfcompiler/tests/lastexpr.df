@@ -1,0 +1,64 @@
+// The last expression of a function body is its result (spec 13), also after other statements; an object it makes moves to the caller
+alias Root as r
+
+public class R(string name) {
+  public string name
+  public fun R copyNamed() { R("copy of " + name) }
+} atEnd {
+  r.Console.log("  end " + name)
+}
+
+fun one() { r.Console.log("  one") }
+fun i32 alone() { 5 }
+fun i32 afterDecl() {
+  i32 x = 1
+  x + 4
+}
+fun i32 afterCall() {
+  one()
+  6
+}
+fun string text() {
+  string s = "ab"
+  s + "cd"
+}
+fun R single() { R("single") }
+fun R make() {
+  one()
+  R("made")
+}
+fun R pick(bool first) {
+  if first {
+    return R("early")
+  }
+  R("late")
+}
+fun R allocate() { R("alloc") }
+public class Holder {
+  public R a = allocate()                    // a field from a call: the result moves into it
+  public R c = a.copyNamed()
+}
+fun bool check(i32 v) {
+  i32 limit = 3
+  v > limit
+}
+
+r.Console.log($"alone {alone()}, afterDecl {afterDecl()}, afterCall {afterCall()}")
+r.Console.log("text " + text())
+r.Console.log($"check {check(2)} {check(4)}")
+fun useAll() {
+  R a = single()
+  r.Console.log("got " + a.name)
+  R b = make()
+  r.Console.log("got " + b.name)
+  R c = pick(true)
+  R d = pick(false)
+  r.Console.log("got " + c.name + " " + d.name)
+}
+useAll()
+fun holder() {
+  Holder h = Holder()
+  r.Console.log("holder " + h.a.name + ", " + h.c.name)
+}
+holder()
+r.Console.log("done")

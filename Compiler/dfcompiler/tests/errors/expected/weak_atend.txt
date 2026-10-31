@@ -1,0 +1,1 @@
+weak_atend.df(6): error: 'w' is a weak reference: release it with 'w is done.'; 'is atEnd.' is only for plain owners (spec 12.4)

@@ -447,6 +447,9 @@ public sealed partial class CodeGen {
     if (overloads.Any(existing => existing.Params.Select(param => param.Type).SequenceEqual(ps.Select(param => param.Type)))) {
       throw Error($"function '{name}' with these parameter types is already defined", funNode);
     }
+    if (ret != "void" && !IsMulti(ret) && !isExtern && !noBody) {
+      MarkImplicitReturn(funNode);   // before ClassifyReturns, so a last expression that makes an object moves it
+    }
     var fun = new FunSig(name, ret, ps, funNode, enumName) { OverloadIndex = overloads.Count, IsExtern = isExtern };
     overloads.Add(fun);
     return fun;
@@ -466,7 +469,21 @@ public sealed partial class CodeGen {
     return $"static {RetCType(f)} {f.CName}({ps})";
   }
 
+  // the last expression of a body is its result (spec 13): written as a return, so it is checked, moved and cleaned up like one
+  static void MarkImplicitReturn(Node funNode) {
+    if (funNode.Children.FirstOrDefault(child => child.Kind == "Block") is not Node block || block.Children.Count == 0) {
+      return;
+    }
+    var last = block.Children[^1];
+    if (last.Kind == "ExprStmt" && last.Children[0].Kind is not ("Finalize" or "Done")) {
+      block.Children[^1] = Synthetic("Return", last, "implicit").Add(last.Children[0]);
+    }
+  }
+
   string EmitFun(FunSig f) {
+    if (f.Ret != "void" && !IsMulti(f.Ret) && !f.IsCtor && !f.IsInit && !f.IsStaticInit) {
+      MarkImplicitReturn(f.Node);   // also the functions made by the compiler (equals)
+    }
     fn = NewFunctionContext(FunHeader(f), f.Ret, false);
     fn.PairOf = PairReturn(f) ? f : null;
     assign = new AssignState();
@@ -517,33 +534,13 @@ public sealed partial class CodeGen {
     var root = PrepareFrame(statements, scope, FrameKind.Function);
     root.OuterHandler = fn.FailLabel;
     var body = new StringBuilder();
-    // single-expression body returns its value
-    bool singleValue = f.Ret != "void" && !IsMulti(f.Ret);
-    if (singleValue && IsCountedType(f.Ret) && statements.Count == 1 && statements[0].Kind == "ExprStmt") {
-      frames.Push(root);
-      root.CurrentIndex = 0;
-      string counted = CountedReturnCode(block.Children[0].Children[0], scope, block.Children[0]);
-      body.Append(fn.PairOf != null ? $"  return {PairValue(f, counted)};\n" : $"  return {counted};\n");
-      frames.Pop();
-    } else if (singleValue && statements.Count == 1 && statements[0].Kind == "ExprStmt") {
-      frames.Push(root);
-      root.CurrentIndex = 0;
-      var returned = ExprOf(block.Children[0].Children[0], scope, f.Ret);
-      if (f.Ret == "string") {
-        returned = StrReturned(returned, block.Children[0].Children[0], scope);
-      }
-      var e = Convert(returned, f.Ret, block.Children[0]);
-      body.Append(fn.PairOf != null ? $"  return {PairValue(f, e)};\n" : $"  return {e};\n");
-      frames.Pop();
-    } else {
-      if (f.IsInit) {
-        body.Append(InitPrologue(f.Class!));
-      }
-      EmitHoists(root, body, "  ");
-      EmitFrameBody(root, body, 1);
-      if (f.GenericT != null && !assign.Unreachable) {
-        throw Error($"every path of equals must return a value (checked for T = {f.GenericT})", f.Node);
-      }
+    if (f.IsInit) {
+      body.Append(InitPrologue(f.Class!));
+    }
+    EmitHoists(root, body, "  ");
+    EmitFrameBody(root, body, 1);
+    if (f.GenericT != null && !assign.Unreachable) {
+      throw Error($"every path of equals must return a value (checked for T = {f.GenericT})", f.Node);
     }
 
     var sb = new StringBuilder();
@@ -784,6 +781,9 @@ public sealed partial class CodeGen {
     if (IsCountedDecl(s)) {
       EmitCountedDecl(s, type, init, sb, scope, pad);
       return;
+    }
+    if (IsCountedType(type)) {
+      throw Error($"the value is a counted {CountedBase(type)}: declare the variable as @{CountedBase(type)} {s.Text} (spec 12.7)", s);
     }
     if (init?.Kind == "WeakInit") {
       EmitWeakDecl(s, type, init, sb, scope, pad);   // _Dog w = _first (spec 12.7)
@@ -1069,6 +1069,9 @@ public sealed partial class CodeGen {
       return CountedReturnCode(s.Children[0], scope, s);
     }
     var returned = ExprOf(s.Children[0], scope, currentRet);
+    if (returned.Type == "void" && s.Text == "implicit") {
+      throw Error($"this function must return a {currentRet}: its last expression gives nothing", s);
+    }
     returned = CheckReturnOwnership(returned, s.Children[0], scope, s);
     if (currentRet == "string") {
       returned = StrReturned(returned, s.Children[0], scope);

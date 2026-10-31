@@ -1,0 +1,51 @@
+// tryClone() (spec 12.6): the clone of the class of the object at run time, or ObjectNotClonableException (not silent) when that class
+// cannot be cloned; the result is then null. It works on trait values, where clone() and a! are a compile error
+alias Root as r
+
+public trait Shape { }
+public class Square(i32 side) : Shape {
+  public i32 side
+} atEnd {
+  r.Console.log($"  end square {side}")
+}
+public class Dog {
+  public string name = "dog"
+} atEnd {
+  r.Console.log("  end " + name)
+}
+public notclonable class Guard : Dog { }
+public class Named(string name) {
+  public string name
+  public fun Named clone() { Named(name + " (own clone)") }
+}
+
+fun string copyName(Dog d) {
+  Dog c = d.tryClone()
+  return "copy of " + c.name
+  catch ObjectNotClonableException { return "not clonable" }
+}
+fun i32 copySide(Shape s) {
+  Shape c = s.tryClone()
+  if c is Square sq {
+    return sq.side
+  }
+  return -1
+}
+fun run() {
+  Dog rex = Dog()
+  rex.name = "rex"
+  r.Console.log(copyName(rex))
+  Guard g = Guard()
+  g.name = "guard"
+  r.Console.log(copyName(g))
+  Square sq = Square(4)
+  r.Console.log($"side {copySide(sq)}")
+  Named n = Named("n")
+  Named m = n.tryClone()
+  r.Console.log(m.name)
+  Dog none = null
+  Dog other = none.tryClone()
+  r.Console.log($"null gives null {other == null}")
+}
+run()
+r.Console.log("done")

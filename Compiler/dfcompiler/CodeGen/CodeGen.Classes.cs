@@ -29,7 +29,7 @@ sealed class FieldInfo {
   public bool ReadOnlyRef { get; set; }      // declared with & (not (&)): only unrestricted and asparent functions are called through it
   public bool Hidden { get; set; }           // a field of the compiler (the children of a parent, the slot of a child)
   public bool IsReadOnly { get; set; }       // readonly (spec 11.1.4): read with its visibility, written only by the class
-  public bool IsWeak { get; set; }           // _T name (spec 12): does not own its object, read through enforce, set with _=
+  public bool IsWeak { get; set; }           // _T name (spec 12.7): does not own its object, read through enforce, set with = _x
   public bool IsCounted { get; set; }        // @T name (spec 12.7): a user of a counted object, the C field holds the counting block (df_rc*)
   public bool HasAccessors { get; set; }     // a property with R: / W: blocks (spec 11.1.4): read and written through get_ and set_
   public bool CanRead { get; set; } = true;
@@ -1146,6 +1146,9 @@ public sealed partial class CodeGen {
   // one argument: an object given to a parameter written ->T moves (the call writes ->x); the others only borrow
   string ArgCode(ParamSig param, Node arg, Scope scope) {
     if (BoxInner(param.Type) != null) {
+      if (!param.IsGift) {
+        return LookupBox(arg, param.Type, scope);   // pack.has(first): compared, not kept
+      }
       arg = BoxCall(arg, param.Type);   // pack.add(first): a new box takes a usage (spec 12.7)
     }
     if (IsCountedType(param.Type)) {
@@ -1241,7 +1244,8 @@ public sealed partial class CodeGen {
         call = $"({{ {CType(cls.Name)} {temp} = {self}; (({RetCType(chosen)}(*)({string.Join(", ", paramTypes)}))({temp}->cls->vtable[{chosen.Slot}]))({string.Join(", ", codes)}); }})";
       }
     }
-    return new Expr(UserCallCode(chosen, call), chosen.Ret, IsClass(chosen.Ret) && chosen.ReturnsOwned);
+    var result = new Expr(UserCallCode(chosen, call), chosen.Ret, IsClass(chosen.Ret) && chosen.ReturnsOwned);
+    return BoxInner(chosen.Ret) != null && result.Fresh ? UnboxTaken(result) : result;   // pack.replace(i, x) gives the usage of the old item
   }
 
   // x.name(args) on an object, or name(args) inside a method

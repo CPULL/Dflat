@@ -98,7 +98,7 @@ public sealed partial class CodeGen {
     ["InvalidCastException"] = 13,
     ["DivisionByZeroException"] = 14,
     ["OutOfMemoryException"] = 15,
-    ["ChangingRefCountTypeException"] = 16,
+    // 16 is retired (spec 15.3): there is one kind of counting
     ["OutOfRangeCastException"] = 17,
     ["InvalidCharacterCodePointException"] = 18,
     ["IndexOutOfRangeException"] = 19,
@@ -129,7 +129,9 @@ public sealed partial class CodeGen {
     ["StreamCloseFailureException"] = 45,
     ["ModifyingIteratedCollectionException"] = 46,
     ["InvalidIteratorReleaseException"] = 47,   // spec 6.4: a release of the counter of open iterators when it is zero
-    ["UsageOfDestroyedObjectException"] = 48   // spec 12.5: an adopted child whose parent ended
+    ["UsageOfDestroyedObjectException"] = 48,  // spec 12.5: an adopted child whose parent ended
+    ["ObjectNotClonableException"] = 49,       // spec 12.6: tryClone()
+    ["WritingOnRefCountWithoutLockingException"] = 50   // spec 12.7: a write to a (@)T without its lock
   };
 
   readonly Stack<Frame> frames = new();
@@ -777,6 +779,8 @@ public sealed partial class CodeGen {
       "Message" => new Expr($"df_str_dup_cstr(({exception.Code})->message)", "string"),
       "Function" => new Expr($"df_str_dup_cstr(({exception.Code})->function)", "string"),
       "Line" => new Expr($"(({exception.Code})->line)", "u64"),
+      _ when new[] { "Id", "Message", "Function", "Line" }.FirstOrDefault(known => known.Equals(member, StringComparison.OrdinalIgnoreCase)) is string known
+        => throw Error($"Exception has no member '{member}': write {known} (spec 10.2)", at),
       _ => throw Error($"member '{member}' of Exception is not supported yet", at)
     };
   }

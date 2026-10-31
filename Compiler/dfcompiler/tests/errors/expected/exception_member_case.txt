@@ -1,0 +1,1 @@
+exception_member_case.df(6): error: Exception has no member 'message': write Message (spec 10.2)

@@ -127,6 +127,9 @@ public sealed partial class CodeGen {
     if (r.Type == "null") {
       return $"(({l.Code}) == NULL)";
     }
+    if (BoxEquals(l, r, at) is string boxes) {
+      return boxes;   // the items of a collection of counted objects (spec 12.7)
+    }
     var cls = classes.TryGetValue(l.Type, out var found) ? found : null;
     if (cls != null) {
       if (FindEqualsClass(cls) != null && !IsNullable(r.Type)) {

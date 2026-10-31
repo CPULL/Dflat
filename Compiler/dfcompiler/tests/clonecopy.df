@@ -1,0 +1,33 @@
+// add(other) and copyFrom clone object items (spec 6.6, 12.6); the items written over end
+alias Root as r
+public class Toy(string name) {
+  public string name
+} atEnd {
+  r.Console.log("  end " + name)
+}
+fun run() {
+  vec<Toy> a = [Toy("a1"), Toy("a2")]
+  vec<Toy> b = []
+  b.add(a)
+  b[0].name = "b1"
+  r.Console.log("a: " + a[0].name + ", b: " + b[0].name + " " + b[1].name + $", len {b.len}")
+  list<Toy> l = [Toy("l1")]
+  l.add(a)
+  r.Console.log($"list len {l.len}, {l[1].name}")
+  r.Console.log("copyFrom over b1")
+  b.copyFrom(0, l, 0, 1)
+  r.Console.log("b: " + b[0].name + ", l: " + l[0].name + $", len {b.len}")
+  b.copyFrom(2, a, 0..2)
+  r.Console.log($"appended, len {b.len}, {b[3].name}")
+  r.Console.log("list copyFrom over l1")
+  l.copyFrom(0, a, 1, 1)
+  r.Console.log($"l[0] {l[0].name}, len {l.len}")
+  arr<Toy> x = [Toy("x1"), Toy("x2")]
+  arr<Toy> y = [Toy("y1"), Toy("y2")]
+  r.Console.log("arr copyFrom over y2")
+  y.copyFrom(1, x, 0, 1)
+  r.Console.log($"y {y[0].name} {y[1].name}")
+  r.Console.log("end of run")
+}
+run()
+r.Console.log("done")

@@ -1,0 +1,17 @@
+  one
+alone 5, afterDecl 5, afterCall 6
+text abcd
+check false true
+got single
+  one
+got made
+got early late
+  end late
+  end early
+  end made
+  end single
+holder alloc, copy of alloc
+  end alloc
+  end copy of alloc
+done
+---- exit code 0 ----

@@ -1,0 +1,1 @@
+refcount_items_var.df(6): error: the value is a counted Dog: declare the variable as @Dog old (spec 12.7)

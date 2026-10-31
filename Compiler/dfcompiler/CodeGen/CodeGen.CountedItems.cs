@@ -70,6 +70,94 @@ public sealed partial class CodeGen {
     return new Expr($"DF_RC_OBJ({CType(inner)}, ({item.Code})->{BoxField(item.Type)})", inner);
   }
 
+  // a box handed out by the collection (replace, takeAt): its usage passes to the caller as a counted result, the empty box ends
+  Expr UnboxTaken(Expr box) {
+    string inner = boxInner[box.Type];
+    string field = BoxField(box.Type);
+    string held = NewTemp();
+    string usage = NewTemp();
+    string code = $"({{ {CType(box.Type)} {held} = {box.Code}; {CType("@" + inner)} {usage} = NULL; "
+      + $"if ({held} != NULL) {{ {usage} = {held}->{field}; {held}->{field} = NULL; df_drop((void*){held}); }} {usage}; }})";
+    return new Expr(code, "@" + inner, true);
+  }
+
+  // the counting block of a value given to a member that only looks at it or shares it: a counted object or null
+  string CountedBlockOf(Node arg, string box, Scope scope) {
+    if (arg.Kind == "Null") {
+      return "NULL";
+    }
+    if (CountedRef(arg, scope) is not CountedRefInfo given) {
+      throw Error($"a collection of counted objects takes here a counted object or null (spec 12.7)", arg);
+    }
+    if (!IsSubtype(given.Type, boxInner[box]) && !IsSubtype(boxInner[box], given.Type)) {
+      throw Error($"cannot use a {given.Type} as an item of a collection of {boxInner[box]}", arg);
+    }
+    return given.Code;
+  }
+
+  // fill(value) of a vec<@T> or list<@T>, and fill(count, value) of a list<@T>: every item becomes a user of the same object, the usages the
+  // items had are released; null when the collection does not hold counted objects
+  Expr? CountedFill(Expr coll, List<Node> args, Scope scope, Node at) {
+    bool isVec = IsVec(coll.Type);
+    string box = isVec ? VecElem(coll.Type) : ListElem(coll.Type);
+    if (BoxInner(box) == null) {
+      return null;
+    }
+    if (args.Count != (isVec ? 1 : args.Count is 1 or 2 ? args.Count : 1)) {
+      throw Error(isVec ? "fill takes one value: fill(value)" : "fill takes a value, or a count and a value: fill(value), fill(count, value)", at);
+    }
+    string held = NewTemp();
+    string block = NewTemp();
+    string fresh = $"f_{box}(df_rc_use({block}))";   // the box constructor takes a usage
+    string head = $"({{ {CType(coll.Type)} {held} = {NullChecked(coll.Code, coll.Type)}; df_rc* {block} = {CountedBlockOf(args[^1], box, scope)}; ";
+    string old = NewTemp();
+    string code;
+    if (isVec) {
+      string items = VecField(coll.Type, "items");
+      string i = NewTemp();
+      code = head + $"for (df_uns {i} = 0; {i} < {held}->{VecField(coll.Type, "count")}; {i}++) {{ {CType(box)} {old} = {held}->{items}.p[{i}]; "
+        + $"{held}->{items}.p[{i}] = {fresh}; if ({old} != NULL) {{ df_drop((void*){old}); }} }} }})";
+    } else if (args.Count == 1) {
+      string node = NewTemp();
+      code = head + $"for ({ListNode(coll.Type)}* {node} = {held}->{VecField(coll.Type, "first")}; {node} != NULL; {node} = {node}->next) {{ "
+        + $"{CType(box)} {old} = {node}->value; {node}->value = {fresh}; if ({old} != NULL) {{ df_drop((void*){old}); }} }} }})";
+    } else {
+      var amount = ExprOf(args[0], scope, NativeUns);
+      string count = NewTemp();
+      string step = NewTemp();
+      string node = NewTemp();
+      code = head + $"df_uns {count} = {Convert(amount, NativeUns, args[0])}; {LockCheck(held, coll.Type)}"
+        + $"for (df_uns {step} = 0; {step} < {count}; {step}++) {{ {NewListNode(coll.Type, node, fresh)}{AppendListNode(held, coll.Type, node)}}} }})";
+    }
+    return new Expr(CheckRaise(code, "void"), "void");
+  }
+
+  // v.pop((&)x) of a vec<@T>: the usage of the last item passes to the counted x, the usage x had is released; false and null when empty
+  Expr CountedVecPop(Expr vec, Node targetNode, Scope scope, Node at) {
+    string box = VecElem(vec.Type);
+    string inner = boxInner[box];
+    if (CountedRef(targetNode, scope) is not CountedRefInfo target) {
+      throw Error($"pop of a vec<@{inner}> gives a counted object: '{targetNode.Text}' must be @{inner} (spec 12.7)", at);
+    }
+    if (!IsSubtype(inner, target.Type)) {
+      throw Error($"pop gives {inner}, but '{target.Name}' is {target.Type}", at);
+    }
+    MarkAssigned(target.Variable);
+    string items = VecField(vec.Type, "items");
+    string count = VecField(vec.Type, "count");
+    string field = BoxField(box);
+    string held = NewTemp();
+    string ok = NewTemp();
+    string taken = NewTemp();
+    string old = NewTemp();
+    string code = $"({{ {CType(vec.Type)} {held} = {NullChecked(vec.Code, vec.Type)}; bool {ok} = false; {CType(box)} {taken} = NULL; {LockCheck(held, vec.Type)}"
+      + $"if ({held}->{count} > 0) {{ {held}->{count} -= 1; {taken} = {held}->{items}.p[{held}->{count}]; {held}->{items}.p[{held}->{count}] = NULL; {ok} = true; }} "
+      + $"df_rc* {old} = {target.Code}; {target.Code} = NULL; "
+      + $"if ({taken} != NULL) {{ {target.Code} = {taken}->{field}; {taken}->{field} = NULL; df_drop((void*){taken}); }} "
+      + $"df_rc_release({old}); {ok}; }})";
+    return new Expr(CheckRaise(code, "bool"), "bool");
+  }
+
   // the counting block of c[i] when c holds counted objects (for CountedRef), or null
   CountedRefInfo? CountedItemRef(Node index, Scope scope) {
     if (index.Kind != "Index" || LibraryCode || index.Children.Count < 2 || index.Children[1].Kind == "Range") {
@@ -90,7 +178,8 @@ public sealed partial class CodeGen {
 
   // the members of a collection of counted objects that are built; the others would hand out or compare boxes (not built yet)
   static readonly HashSet<string> CountedItemsMembers = new() {
-    "add", "insert", "removeAt", "clear", "truncate", "reserve", "shrinkToFit", "swap", "get_len", "get_capacity"
+    "add", "insert", "removeAt", "clear", "truncate", "reserve", "shrinkToFit", "swap", "get_len", "get_capacity",
+    "has", "indexOf", "remove", "removeAll", "replace", "takeAt", "pop", "fill", "transformTo", "reverse"
   };
 
   void CheckCountedItemsMember(ClassInfo cls, string name, Node at) {
@@ -101,6 +190,27 @@ public sealed partial class CodeGen {
     if (BoxInner(elem) != null && !CountedItemsMembers.Contains(name)) {
       throw NotSupported($"'{name}' on a collection of counted objects", at);
     }
+  }
+
+  // the value searched by has, indexOf, remove and removeAll of a collection of counted objects: a box on the stack around the counting block
+  // of the value, with no usage of its own (nothing keeps it, nothing releases it)
+  string LookupBox(Node arg, string box, Scope scope) =>
+    $"(&({CType(box)[..^1]}){{ .{BoxField(box)} = {CountedBlockOf(arg, box, scope)} }})";
+
+  // two boxes compare their objects with the rules of the objects (equals, ==, or identity, 11.1.3); a slot left empty (no box) is null
+  string? BoxEquals(Expr l, Expr r, Node at) {
+    if (!boxInner.TryGetValue(l.Type, out var inner) || r.Type != l.Type) {
+      return null;
+    }
+    string field = BoxField(l.Type);
+    string Obj(string box) => $"({box} != NULL ? DF_RC_OBJ({CType(inner)}, {box}->{field}) : NULL)";
+    return WithTemp(l, left => WithTemp(r, right => {
+      string leftObj = NewTemp();
+      string rightObj = NewTemp();
+      string same = ObjectEquals(new Expr(leftObj, inner), new Expr(rightObj, inner), at);
+      return $"({{ {CType(inner)} {leftObj} = {Obj(left)}; {CType(inner)} {rightObj} = {Obj(right)}; "
+        + $"({leftObj} == NULL || {rightObj} == NULL) ? {leftObj} == {rightObj} : {same}; }})";
+    }));
   }
 
   // the cost of an argument for a parameter whose type is a box (the item of add, insert ...): -1 when it is not that case

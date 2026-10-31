@@ -1,0 +1,8 @@
+namespace refcount_items_pop_plain
+class Dog { }
+fun f() {
+  vec<@Dog> kennel = [Dog()]
+  Dog last = null
+  kennel.pop((&)last)
+}
+f()

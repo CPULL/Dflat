@@ -1,4 +1,4 @@
-Compiler version 0.0.41 alpha for version 0.0.15 of the specs 2026/10/28
+Compiler version 0.0.42 alpha for version 0.0.19 of the specs 2026/10/31
 
 Changes from the previous version -----------------------
 - vec: growth policy of spec 6.8.2 (16 items first, doubles up to a 4 MB block, then by half) and the sized declaration vec<T>[n] name
@@ -47,6 +47,15 @@ Changes from the previous version -----------------------
 - removeRefCounting() (spec 12.7): on a counted variable or field, the last user gets a plain owned object (the variable becomes null, the weak references see it gone); with other users null and nothing changes; an error on a weak reference or a plain object
 - collections of counted objects (spec 12.7, 6.2): list<@T> and vec<@T> hold a usage per item: add, insert, c[i] = v, literals (a counted object adds a user; a new object, @plain or a counted result starts one; null is a valid item), c[i] reads the object, @T x = c[i] and f(c[i]) into a @T parameter add a user, for var x / for T x / for @T x in c, removeAt, clear, truncate, swap and the end of the collection release; map and set keys of a counted type are a compile error; the members that would give or compare items (has, indexOf, fill, sort, pop, replace, resize, views, getIterator, transformTo, ->c[i]) are not supported yet, nor map<K, @T> and arr<@T>
 - cloning (spec 12.6): a! and a.clone() on objects and collections (vec, list, also of counted items); the default clone follows the class of the object at run time and copies each field by its kind (natives and strings copied, owned objects and arrays cloned, counted fields another user, weak fields another weak reference, children and open iterators not copied, a field that cannot be cloned is null); a clone() of the class replaces the default; notclonable classes, objects with a parent, exceptions, trait values, maps and sets are a compile error; @Dog third = first! starts a new count
+- license: GPL-2.0-only (as Linux) with the Dflat Runtime Exception, so programs written in Dflat can use any license; was CC0
+- fixed: the last expression of a function is its result also after other statements (was 0 or null); a body of one expression that makes an object moves it to the caller (it leaked, and a field initialized from such a call was an error)
+- Exception members written in another case (ex.message) give an error that names the right one (Message)
+- Console.clear on Windows clears the visible window and the scrollback and homes the cursor to the top of the window (was: the top of the buffer)
+- list<@T> and vec<@T>: has, indexOf, remove, removeAll (with a counted object or null; the objects compare by their own rules), replace (the old item's usage goes to the caller, @T x = c.replace(i, v)), vec pop((&)x) into a @T variable, fill(value) and list fill(count, value) (every item another user), transformTo, reverse
+- clone of map, hmap, set and hset (also as fields of a cloned object); a plain add(other) and copyFrom clone object items (the items written over end)
+- exceptions (spec 15.3): ID 16 retired (ChangingRefCountTypeException, no use with one kind of counting); ObjectNotClonableException is 49 and WritingOnRefCountWithoutLockingException 50
+- tryClone() (spec 12.6): the clone of the class of the object at run time, also on trait values; ObjectNotClonableException when that class cannot be cloned; null gives null
+- x is atEnd. on a weak reference (variable or field) and on a counted field gives the error of spec 12.4 (release it with x is done.)
 
 Done -----------------------
 
@@ -194,7 +203,7 @@ Phase 4  Ownership                                                 IN PROGRESS
   not destroyed), static fields (not tracked), constructor atEnd fragments (need secondary constructors), atEnd after other statements (form 3),
   use after a move is found when it runs (NullPointerException), not at compile time, no lifetime check for borrows
  4b  reference counting (spec 12.7), .clone(), x! copy                                                                 IN PROGRESS
-  clone (2026-10-30, spec 12.6): a!, a.clone(), the default clone, a clone() of the class, notclonable; not yet: tryClone() (ObjectNotClonableException has no ID), maps and sets, c[a..b]!, tuple fields with strings or objects, the remapping of weak references (not needed while weak references point only to counted objects, which are never cloned)
+  clone (2026-10-30, spec 12.6): a!, a.clone(), the default clone, a clone() of the class, notclonable; maps and sets, add(other) and copyFrom (2026-10-31); tryClone() (2026-10-31); not yet: c[a..b]!, tuple fields with strings or objects
   step 1 (2026-10-30): @T local variables, var x = @T(), = between counted variables, release at the end of the scope, is done., usersCount, weakrefsCount
   step 2 (2026-10-30): @plain and @a.field, the errors for borrowing a counted object (Dog v = first, v = first, (&)first), @this, @ on a borrow
   step 3 (2026-10-30): @T parameters, f(->rc), fun @T results, var x = f(); the errors for a counted argument to a plain, &, (&) or ->T parameter

@@ -266,6 +266,9 @@ public sealed partial class CodeGen {
     string Elem(string a, string i) => $"{a}.p[{i}]";
 
     Expr Value(Node arg) {
+      if (BoxInner(elem) != null) {
+        return new Expr(LookupBox(arg, elem, scope), elem);   // has / indexOf of a vec<@T> (spec 12.7)
+      }
       var value = ExprOf(arg, scope, elem);
       return new Expr(Convert(value, elem, arg), elem);
     }
@@ -412,7 +415,8 @@ public sealed partial class CodeGen {
     }
     string elem = ArrElem(array.Type);
     var first = ExprOf(args[0], scope, "u64");
-    var replacement = Adopted(ExprOf(args[1], scope, elem), args[1]);
+    bool boxed = BoxInner(elem) != null;
+    var replacement = Adopted(ExprOf(boxed ? BoxCall(args[1], elem) : args[1], scope, elem), args[1]);   // vec<@T>: a new box takes a usage
     if (IsClass(elem) && !replacement.Fresh && replacement.Type != "null") {
       throw Error("a collection owns its items: move an existing object in with ->x, or put a new one", args[1]);
     }
@@ -422,7 +426,8 @@ public sealed partial class CodeGen {
     string old = NewTemp();
     string code = $"({{ {CType(array.Type)} {a} = {array.Code}; df_uns {i} = {IndexValue(first, args[0])}; {CType(elem)} {incoming} = {StrItemAs(replacement, elem, Convert(replacement, elem, args[1]))}; "
       + $"if (!df_idx_ok({a}.len, {i}, {fn!.NameConst})) {RaiseJump} {CType(elem)} {old} = {a}.p[{i}]; {a}.p[{i}] = {incoming}; {old}; }})";
-    return new Expr(code, elem, IsClass(elem) || elem == "string");
+    var result = new Expr(code, elem, IsClass(elem) || elem == "string");
+    return boxed ? UnboxTaken(result) : result;
   }
 
   // arr<T>[n] name = [] / = [items] / = arr<T>[n]: the size on the declaration (spec 6.8.1); vec<T>[n] name (= []): the capacity on the declaration,
@@ -577,12 +582,16 @@ public sealed partial class CodeGen {
       throw Error("copyFrom takes (dstIndex, source, srcIndex, count) or (dstIndex, source, range)", at);
     }
     string elem = ArrElem(destination.Type);
-    if (IsClass(elem)) {
-      throw Error("copyFrom clones object items, which needs cloning (not built yet)", at);
-    }
     var source = ExprOf(args[1], scope);
     if ((IsVec(source.Type) || IsList(source.Type)) && IndexCollectionElem(source.Type) == elem) {
       return CollectionCopyFrom(destination, args, scope, at);   // from a vec or a list (spec 6.6)
+    }
+    if (IsClass(elem) && IsArr(source.Type) && ArrElem(source.Type) == elem) {
+      if (destination.Code == source.Code && SimpleCode.IsMatch(source.Code)) {
+        throw Error("copyFrom cannot use the same array as source and destination", at);
+      }
+      CheckCopyFromRanges(args, scope, at);
+      return CollectionCopyFrom(destination, args, scope, at);   // the object items are cloned (spec 6.6, 12.6)
     }
     if (!IsArr(source.Type) || ArrElem(source.Type) != elem) {
       throw Error($"copyFrom needs an {destination.Type} as the source, not {source.Type}", args[1]);

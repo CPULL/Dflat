@@ -1,0 +1,24 @@
+a: a1, b: b1 a2, len 2
+list len 3, a1
+copyFrom over b1
+  end b1
+b: l1, l: l1, len 2
+appended, len 4, a2
+list copyFrom over l1
+  end l1
+l[0] a2, len 3
+arr copyFrom over y2
+  end y2
+y y1 x1
+end of run
+  end a2
+  end a1
+  end a2
+  end l1
+  end a2
+  end a1
+  end a2
+  end a1
+  end a2
+done
+---- exit code 0 ----

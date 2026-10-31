@@ -1,1 +1,1 @@
-refcount_items_has.df(7): error: feature not supported: 'has' on a collection of counted objects
+refcount_items_has.df(8): error: a collection of counted objects takes here a counted object or null (spec 12.7)

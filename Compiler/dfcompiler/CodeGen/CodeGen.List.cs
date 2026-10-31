@@ -552,9 +552,8 @@ public sealed partial class CodeGen {
   Expr ListAddCollection(Expr list, Node arg, string sourceType, Scope scope, Node at) {
     string elem = ListElem(list.Type);
     bool moving = arg.Kind == "Gift";
-    if (IsClass(elem) && !moving) {
-      throw Error("add(collection) with objects moves them: write add(->other) (a copy needs cloning, not built yet)", at);
-    }
+    bool cloning = IsClass(elem) && !moving;   // a plain add(other) clones the object items (spec 6.6, 12.6)
+    cloneUsed |= cloning;
     var source = ExprOf(arg, scope);
     string held = NewTemp();
     string s = NewTemp();
@@ -577,7 +576,8 @@ public sealed partial class CodeGen {
       sb.Append(ForEachSourceItem(sourceType, s, "0", SourceLength(sourceType, s), item => {
         string node = NewTemp();
         string take = moving && (IsClass(elem) || elem == "string") ? $"{item} = NULL; " : "";
-        return NewListNode(list.Type, node, elem == "string" && !moving ? $"df_str_dup({item})" : item) + take + AppendListNode(held, list.Type, node);
+        string value = cloning ? CloneValue(item, elem, at) : elem == "string" && !moving ? $"df_str_dup({item})" : item;
+        return NewListNode(list.Type, node, value) + take + AppendListNode(held, list.Type, node);
       }));
     }
     if (moving && sourceIsObject) {
@@ -628,9 +628,8 @@ public sealed partial class CodeGen {
       throw Error("copyFrom takes (dstIndex, source, srcIndex, count) or (dstIndex, source, range)", at);
     }
     string elem = IndexCollectionElem(destination.Type)!;
-    if (IsClass(elem)) {
-      throw Error("copyFrom clones object items, which needs cloning (not built yet)", at);
-    }
+    bool objects = IsClass(elem);   // the items are cloned (spec 6.6, 12.6); the items written over end
+    cloneUsed |= objects;
     var source = ExprOf(args[1], scope);
     bool intoArr = IsArr(destination.Type);
     bool intoVec = IsVec(destination.Type);
@@ -673,7 +672,8 @@ public sealed partial class CodeGen {
       }
     }
     if (source.Type == destination.Type) {
-      sb.Append($"if ({s} == {held}) {{ df_raise(&df_desc_ModifyingProtectedSourceException, {fn!.NameConst}); {RaiseJump} }} ");
+      string same = intoArr ? $"{s}.p != NULL && {s}.p == {held}.p" : $"{s} == {held}";
+      sb.Append($"if ({same}) {{ df_raise(&df_desc_ModifyingProtectedSourceException, {fn!.NameConst}); {RaiseJump} }} ");
     }
     string fits = intoArr ? $" || {n} > {count} - {di}" : "";
     sb.Append($"if ({di} > {count} || {si} > {sourceLength} || {n} > {sourceLength} - {si}{fits}) {{ df_raise(&df_desc_IndexOutOfRangeException, {fn!.NameConst}); {RaiseJump} }} ");
@@ -682,7 +682,11 @@ public sealed partial class CodeGen {
     }
     // the items are read first, then written: the source and the destination do not mix
     sb.Append($"{elemType}* {buffer} = ({elemType}*)df_calloc({n}, sizeof({elemType})); df_uns {index} = 0; ");
-    sb.Append(ForEachSourceItem(source.Type, s, si, n, item => $"{buffer}[{index}++] = {item}; "));
+    sb.Append(ForEachSourceItem(source.Type, s, si, n, item => $"{buffer}[{index}++] = {(objects ? CloneValue(item, elem, at) : item)}; "));
+    string old = NewTemp();
+    string Put(string slot, string value) => objects
+      ? $"{{ {elemType} {old} = {slot}; {slot} = {value}; if ({old} != NULL) {{ df_drop((void*){old}); }} }}"
+      : $"{slot} = {value};";
     if (intoArr || intoVec) {
       string items = intoArr ? held : $"{held}->{VecField(destination.Type, "items")}";
       if (intoVec) {
@@ -690,21 +694,21 @@ public sealed partial class CodeGen {
       }
       sb.Append(elem == "string"
         ? $"for (df_uns {step} = 0; {step} < {n}; {step}++) {{ df_str_put(&{items}.p[{di} + {step}], df_str_dup({buffer}[{step}]), true); }} "
-        : $"for (df_uns {step} = 0; {step} < {n}; {step}++) {{ {items}.p[{di} + {step}] = {buffer}[{step}]; }} ");
+        : $"for (df_uns {step} = 0; {step} < {n}; {step}++) {{ {Put($"{items}.p[{di} + {step}]", $"{buffer}[{step}]")} }} ");
       if (intoVec) {
         sb.Append($"if ({di} + {n} > {count}) {{ {count} = {di} + {n}; }} ");
       }
       sb.Append($"free({buffer}); }})");
-      return new Expr(sb.ToString(), "void");
+      return new Expr(objects ? CheckRaise(sb.ToString(), "void") : sb.ToString(), "void");
     }
     sb.Append(WalkToNode(held, destination.Type, node, di));
     string added = NewTemp();
     string copied = elem == "string" ? $"df_str_dup({buffer}[{step}])" : $"{buffer}[{step}]";
-    string write = elem == "string" ? $"df_str_put(&{node}->value, {copied}, true);" : $"{node}->value = {copied};";
+    string write = elem == "string" ? $"df_str_put(&{node}->value, {copied}, true);" : Put($"{node}->value", copied);
     sb.Append($"for (df_uns {step} = 0; {step} < {n}; {step}++) {{ if ({node} != NULL) {{ {write} {node} = {node}->next; }} "
       + $"else {{ {NewListNode(destination.Type, added, copied)}{AppendListNode(held, destination.Type, added)}}} }} ");
     sb.Append($"free({buffer}); }})");
-    return new Expr(sb.ToString(), "void");
+    return new Expr(objects ? CheckRaise(sb.ToString(), "void") : sb.ToString(), "void");
   }
 
   // ---------------------------------------------------------------- transformTo<Kind>()

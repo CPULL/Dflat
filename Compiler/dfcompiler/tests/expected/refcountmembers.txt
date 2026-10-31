@@ -1,0 +1,37 @@
+compare
+list has a true, has c false, has null true, indexOf a 0, indexOf c 18446744073709551615
+vec has a true, has c false, indexOf a 1
+users of a 4
+removeAll a 2, users of a 2, len 2
+remove b true, remove c false, users of b 2, len 1
+  end c
+  end b
+  end a
+give
+old a, users a 3, b 3
+old2 a, users a 3, kennel[0] fresh
+ignored, users a 4, b 2
+  end fresh
+  end b
+  end a
+share
+pop true a, users a 3, len 2
+pop true b, users a 2, b 2
+fill vec, users a 2, b 2
+fill list, users a 4, b 2
+fill(2, b), len 4, users b 4, pack[3] b
+fill null, users a 2, b 2, has null true
+empty pop, last is null true, users a 1
+  end b
+  end a
+transform
+vec len 2, users a 2, b
+list len 2, users a 2, a
+  end b
+  end a
+turn
+reversed b a, users a 2
+  end b
+  end a
+done
+---- exit code 0 ----

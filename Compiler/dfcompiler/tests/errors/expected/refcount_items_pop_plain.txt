@@ -1,0 +1,1 @@
+refcount_items_pop_plain.df(6): error: pop of a vec<@Dog> gives a counted object: 'last' must be @Dog (spec 12.7)

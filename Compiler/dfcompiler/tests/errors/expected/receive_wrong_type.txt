@@ -1,0 +1,1 @@
+receive_wrong_type.df(3): error: cannot convert i32 to string implicitly; use a cast

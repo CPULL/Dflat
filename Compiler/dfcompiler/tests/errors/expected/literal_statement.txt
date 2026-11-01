@@ -1,0 +1,1 @@
+literal_statement.df(3): error: a literal must be assigned, passed or returned (or be the last expression of a function that returns it)

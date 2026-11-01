@@ -1,0 +1,6 @@
+namespace enforce_expr_var
+class Box { public fun i32 size() { 1 } }
+fun f(Box b) {
+  var res = enforce b.size()
+}
+f(Box())

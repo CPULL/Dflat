@@ -1,0 +1,1 @@
+return_mixed_move_borrow.df(4): error: the returns of 'f' mix moving and borrowing: all of them must move (a new object, ->x, an owned variable) or all must borrow

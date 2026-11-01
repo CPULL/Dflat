@@ -750,7 +750,7 @@ static df_string df_str_from_cstr(const char* text) {
   return df_str_make(text, strlen(text));
 }
 
-/* a copy of the text: the Message of an exception stays valid after the exception is released */
+/* a copy of the text: the message of an exception stays valid after the exception is released */
 static df_string df_str_dup_cstr(const char* text) {
   return df_str_make(text, strlen(text));
 }

@@ -681,7 +681,7 @@ public sealed partial class CodeGen {
       return $"df_str_obj({e.Code})";
     }
     if (e.Type == "Exception") {
-      throw Error("Exception cannot be converted to a string yet; use its Message", at);
+      throw Error("Exception cannot be converted to a string yet; use its message", at);
     }
     if (SignedTypes.Contains(e.Type)) {
       return $"df_str_from_i64((int64_t)({e.Code}))";

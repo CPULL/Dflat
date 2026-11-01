@@ -67,8 +67,8 @@ r.Console.log(target.len)                                  // 6
 fun string tryCopy(arr<i32> to, arr<i32> from, i32 dst, i32 src, i32 count) {
   to.copyFrom(dst, from, src, count)
   return "copied"
-  catch IndexOutOfRangeException ex { return "IndexOutOfRangeException " + ex.Id }
-  catch ModifyingProtectedSourceException ex { return "ModifyingProtectedSourceException " + ex.Id }
+  catch IndexOutOfRangeException ex { return "IndexOutOfRangeException " + ex.id }
+  catch ModifyingProtectedSourceException ex { return "ModifyingProtectedSourceException " + ex.id }
 }
 r.Console.log(tryCopy(target, source, 4, 0, 3))            // IndexOutOfRangeException 19 (does not fit in the destination)
 r.Console.log(tryCopy(target, source, 0, 3, 3))            // IndexOutOfRangeException 19 (does not fit in the source)

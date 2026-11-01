@@ -39,7 +39,7 @@ fun string sortWhileLooping(vec<i32> source) {
     source.reverse()
   }
   return "no exception"
-  catch ModifyingIteratedCollectionException e { return "reordered: " + e.Message }
+  catch ModifyingIteratedCollectionException e { return "reordered: " + e.message }
 }
 fun string readOnly(vec<i32> source) {
   i32 total = 0

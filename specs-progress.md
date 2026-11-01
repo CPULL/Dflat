@@ -6,6 +6,10 @@ Tags: TOBEDISCUSSED (open, needed shortly), UNDERDISCUSSION (being discussed), P
 
 # Part 1 - Collections
 
+### NEXT WEEK (from 2026-11-02): custom collections (Specs6.9, marked "partial")
+
+- The members and the cursor types of the map iterator (`MapIterator`); subclassing of the default collections (`vec`, `list`, `map`, `hmap`, `set`, `hset`; `arr` cannot) and the dispatch of the overridden methods; how a custom class receives the literals; `get_view` for custom collections (point 34); lists of pointers and references (with the pointers work).
+
 ### 36. [TOBEDISCUSSED] sort(lambda) and lambdas
 
 Specs6.6: `sort(lambda)` uses a temporary custom sorter; the lambda returns a bool (true is -1) or a number. Lambdas and function types are in Specs13 and are not built, so `sort(lambda)` and every functional member are "feature not supported".
@@ -65,12 +69,12 @@ The decided rules are in Specs12 and 12.7 (Specs0.0.19). Principle: the Rust mod
 
 ### Read/write counted objects and enforce
 
-Decided (Specs12.7): `@T` read-only, `(@)T` read/write with a lock in the object; reads never lock; writes need the lock; `enforce x { }` takes and releases it; writing without it is an exception.
+- DECIDED (2026-10-31, written in Specs7.2): the new `enforce`: checks (null, alive, locks in variable order), clauses `null [on ...]`, `lockfail [on ...]`, `catch E [ex] [on ...]`, `atEnd`, the order of the clauses, the releases at the very end, `return` / `break`, `else` only alone, `default` (the catch-all, 2026-11-01), the expression form (the variables of the expression are enforced, clauses give values, 2026-11-01). Built: steps 1-4 (2026-10-31/11-01: the clauses, the checks, null, catch / atEnd, catch on x, return). Not built: `default`, the expression form, `(@)T` and `lockfail`. Before: today the compiler has only `enforce a, b { } else { }` for `T?` and weak references.
+
+Decided (Specs12.7): `@T` read-only, `(@)T` read/write with a lock in the object; reads never lock; writes need the lock; `enforce x { }` takes it and releases it when the `enforce` ends (Specs7.2.5); writing without it is an exception.
 - UNDERDISCUSSION: at the call only the writing forms are marked (`a((@)rc)`, as `b((&)v)`); read-only is written only in the definition (`a(rc)`). No transformation between read-only and read/write: it is decided at creation.
-- UNDERDISCUSSION: an expression form `i32 val = enforce myRcRW.callFun()` holding the lock for that call only (`enforce` is only a statement in Specs7.2). Open: the result when the lock or the object is unavailable.
-- Open: the meaning of the else branch for a lock (busy lock, or null/gone), waiting or try-lock, the lock order for `enforce a, b`, holding the lock over several statements (check then write), nested locking in method bodies (reentrant lock or lock held for the whole call), deadlock. The exception for a write without the lock is `WritingOnRefCountWithoutLockingException` (Specs12.7, 2026-10-30).
-- UNDERDISCUSSION: weak references and downcasts in `enforce`: `enforce w is Blah b { b.something() }` checks in one statement that `w` is alive and is a `Blah`; `b` is a temporary user for the block; the else branch covers both failures. Preference: the reason is carried by a silent exception (Specs15.4). The plain `else { }` ignores the reason.
-- UNDERDISCUSSION: `enforce` with several failure cases. Proposals: `enforce a, b { ... } catch silent1 ex on a { } silent2 ex on b { }` with a `null on b { }` clause; and (2026-10-30, with `(@)RC a`, `@RC b`, `_WR c`) `enforce a, b, c { ... } null on c { ... } lock failed on a { ... } exception ex on b { ... }`: the failures are a null object, a lock failure and silent or regular exceptions. Open: several failing variables (first failure only, aggregate exception, one exception per variable, or one `enforce` per variable), whether both handlers run, `else` together with them.
+- Open: waiting or try-lock (today `lockfail` reads as a try-lock), nested locking in method bodies (reentrant lock or lock held for the whole call), the order of the locks and deadlocks with threads (FUTURE). The exception for a write without the lock is `WritingOnRefCountWithoutLockingException`, ID 50.
+- UNDERDISCUSSION (Specs7.2.7): `enforce w is Blah b { b.something() }` checks in one statement that `w` is alive and is a `Blah`; `b` is a temporary user for the block. Open: what runs when `w` is alive but not a `Blah`.
 - Not mapped yet: mutation through several users (Rust `RefCell`, `Mutex`, `RwLock`, `Rc::get_mut`, `Rc::make_mut`).
 
 ### FUTURE
@@ -81,6 +85,7 @@ Decided (Specs12.7): `@T` read-only, `(@)T` read/write with a lock in the object
 
 # Part 3 - Later versions (left on purpose)
 
+- A tree collection (a tree of items with parents and children, for the program; not the B+ tree inside `map` and `set`): its members, iterators and views (Specs6.5 already expects dedicated views for trees). Not designed yet.
 - 19. Debug and Release becoming a runtime choice (like Java and C#); today the index check and `ModifyingIteratedCollectionException` are fixed by `--debug` / `--release`, and Release panics with `Panic -1000` (a single panic code, Specs99).
 - 63. How a custom class receives the literals `[...]` and `[k: v]` (Specs6.9, Specs99); `c[k]` is decided (`read_pos`, `set_pos`), `+=` and `-=` call the members.
 - 64. Subclassing the default collections: the compiler's direct code for `c[i]`, `for` and the hot paths does not call methods; if a class overrides `add`, which one runs? PROPOSAL: a subclass loses the direct paths and goes through the virtual calls. `arr` cannot be subclassed.

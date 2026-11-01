@@ -1,0 +1,82 @@
+// enforce, step 5 (spec 7.2.1, 7.2.6): default, the catch-all of an enforce; the expression form, T r = enforce E clauses: the variables of E
+// are enforced, each clause gives the value (a single expression, or return in a longer block), nothing handled gives zero or null
+alias Root as r
+
+public class Trouble(string text) : Exception { }
+
+public class Box(i32 size) {
+  public i32 size
+  public fun i32 count() { size }
+  public fun i32 test(bool fail) {
+    if fail {
+      throw Trouble("box trouble")
+    }
+    return size * 10
+  }
+  public fun string label() { $"box {size}" }
+}
+
+// statement form with default
+fun statement(i32? a, Box b, bool fail) {
+  enforce a, b {
+    r.Console.log($"  value {a + b.test(fail)}")
+  }
+  null on a { r.Console.log("  no a") }
+  default { r.Console.log("  default") }      // b null, or an exception no catch takes
+}
+
+fun i32 plain(Box b) {
+  i32 size = enforce b.count()
+  return size
+}
+
+fun i32 withDefault(Box b) {
+  i32 size = enforce b.count() default { -1 }
+  return size
+}
+
+fun i32 clauses(Box f, bool fail) {
+  i32 count = 100
+  i32 res = enforce f.test(fail)
+    catch NullPointerException { return -1234 }
+    catch Trouble {
+      count++
+      return count
+    }
+    default { -1 }
+  return res
+}
+
+fun i32 nullClause(i32? a, Box b) {
+  i32 total = enforce a + b.count() null on a { 1 } default { 42 }
+  return total
+}
+
+fun i32 returned(Box b) {
+  return enforce b.count() default { -7 }
+}
+
+fun i32 lastExpression(Box b) {
+  enforce b.count() default { -8 }
+}
+
+fun string text(Box b) {
+  string s = enforce b.label() default { "no box" }
+  return s
+}
+
+Box box = Box(3)
+r.Console.log("statement form")
+statement(1, box, false)
+statement(null, box, false)
+statement(1, null, false)
+statement(1, box, true)
+r.Console.log("expression form")
+r.Console.log($"  plain {plain(box)} {plain(null)}")
+r.Console.log($"  default {withDefault(box)} {withDefault(null)}")
+r.Console.log($"  clauses {clauses(box, false)} {clauses(null, false)} {clauses(box, true)}")
+r.Console.log($"  null clause {nullClause(2, box)} {nullClause(null, box)} {nullClause(2, null)}")
+r.Console.log($"  returned {returned(box)} {returned(null)}")
+r.Console.log($"  last expression {lastExpression(box)} {lastExpression(null)}")
+r.Console.log("  text " + text(box) + ", " + text(null))
+r.Console.log("done")

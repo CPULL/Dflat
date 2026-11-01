@@ -19,7 +19,7 @@ fun i32 caught(i32 a) {
 }
 fun string withVariable(i32 a) {
   return $"{divide(a, 0)}"
-  catch DivisionByZeroException ex { return ex.Message }   // the message is copied before the record is released
+  catch DivisionByZeroException ex { return ex.message }   // the message is copied before the record is released
 }
 fun i32 replaced(i32 a) {
   return divide(a, 0)
@@ -31,11 +31,11 @@ fun i32 rethrown(i32 a) {
 }
 fun string outerCatch(i32 a) {
   return $"{replaced(a)}"
-  catch Trouble t { return t.Message }
+  catch Trouble t { return t.message }
 }
 fun string rethrownCatch(i32 a) {
   return $"{rethrown(a)}"
-  catch Exception e { return e.Message }
+  catch Exception e { return e.message }
 }
 fun i32 ignoredSilent(i32 a) {
   note(a)                                                  // the notice is ignored here and released

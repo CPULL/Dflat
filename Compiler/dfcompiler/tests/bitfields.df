@@ -42,14 +42,14 @@ fun string first() {
   throw FileNotFoundException("no such file")
   return "none"
   catch FileNotFoundException ex {
-    return $"caught {ex.Message}, id {ex.Id}"                          // id 25
+    return $"caught {ex.message}, id {ex.id}"                          // id 25
   }
 }
 fun string second() {
   throw Root.StreamCloseFailureException("close failed")
   return "none"
   catch Exception ex {
-    return $"caught {ex.Message}, id {ex.Id}"                          // id 45
+    return $"caught {ex.message}, id {ex.id}"                          // id 45
   }
 }
 fun string third() {

@@ -422,7 +422,10 @@ public sealed class Parser {
         case "atEnd":
           return PeekAt(1).Kind == TokenKind.Ident && PeekAt(1).Text == "of" ? ParseAtEndOf() : ParseAtEnd();
         case "enforce":
-          return ParseEnforce();
+          if (PeekAt(1).Kind == TokenKind.Ident && (PeekAt(2).Is(",") || PeekAt(2).Is("{"))) {
+            return ParseEnforce();
+          }
+          break;   // enforce <expression> as a statement (spec 7.2.6): ParseSimple reads it
       }
     }
     var simple = ParseSimple(!caseBody);
@@ -758,13 +761,15 @@ public sealed class Parser {
   }
 
   // catch { }   |   catch Exception { }   |   catch OverflowException ex { }   |   catch all ex { }   |   catch my.lib.Err e { }
-  Node ParseCatch() {
+  // in an enforce also: catch E [ex] on a, b { } (spec 7.2)
+  Node ParseCatch(bool inEnforce = false) {
     var t = Next();
     var node = new Node("Catch", t);
+    bool OnFollows() => Peek.Kind == TokenKind.Ident && Peek.Text == "on" && PeekAt(1).Kind == TokenKind.Ident;
     if (Peek.Kind == TokenKind.Ident) {
       var start = Peek;
       string first = ParseQualifiedName();
-      if (Peek.Kind == TokenKind.Ident) {
+      if (Peek.Kind == TokenKind.Ident && !OnFollows()) {
         var name = Next();
         node.Text = name.Text;
         node.Add(new Node("Type", start, first));
@@ -774,6 +779,12 @@ public sealed class Parser {
         }
         node.Text = first;
       }
+    }
+    if (OnFollows()) {
+      if (!inEnforce) {
+        throw Error("catch ... on is a clause of an enforce (spec 7.2): it lists the variables of the enforce");
+      }
+      node.Add(ParseOnList());
     }
     node.Add(ParseBlock());
     return node;
@@ -797,7 +808,9 @@ public sealed class Parser {
     return node;
   }
 
-  // enforce a, b { } else { }
+  // enforce a, b { } else { }   |   enforce a, b { } null [on a] { } lockfail [on b] { } atEnd { } catch E [ex] [on a, b] { } ... (spec 7.2)
+  // The clauses become children after the block: EnforceNull and EnforceLockFail (with an On child when they list variables), Catch,
+  // and AtEnd with the text "enforce". else is valid only alone.
   Node ParseEnforce() {
     var t = Next();
     var node = new Node("Enforce", t);
@@ -809,7 +822,64 @@ public sealed class Parser {
     if (AcceptElse()) {
       node.Add(new Node("Else", t).Add(ParseBlock()));
     }
+    ParseEnforceClauses(node);
     return node;
+  }
+
+  // the clauses after an enforce block or an enforce expression (spec 7.2.1): EnforceNull, EnforceLockFail, Catch, AtEnd "enforce",
+  // EnforceDefault (at most one)
+  void ParseEnforceClauses(Node node) {
+    bool hasElse = node.Children.Any(child => child.Kind == "Else");
+    while (PeekEnforceClause()) {
+      SkipNewlines();
+      if (hasElse) {
+        throw Error("else is valid only when the enforce has no other clause (spec 7.2.1)");
+      }
+      var c = Next();
+      if (c.Text == "catch") {
+        pos--;
+        node.Add(ParseCatch(true));
+      } else if (c.Text == "default") {
+        if (node.Children.Any(child => child.Kind == "EnforceDefault")) {
+          throw Error("an enforce has at most one default (spec 7.2.1)");
+        }
+        node.Add(new Node("EnforceDefault", c).Add(ParseBlock()));
+      } else if (c.Text == "atEnd") {
+        node.Add(new Node("AtEnd", c, "enforce").Add(ParseBlock()));
+      } else {
+        var clause = new Node(c.Text == "null" ? "EnforceNull" : "EnforceLockFail", c);
+        if (Peek.Kind == TokenKind.Ident && Peek.Text == "on") {
+          clause.Add(ParseOnList());
+        }
+        node.Add(clause.Add(ParseBlock()));
+      }
+    }
+    if (PeekElse()) {
+      throw Error("else is valid only when the enforce has no other clause (spec 7.2.1)");
+    }
+  }
+
+  // the next token, past the line breaks, starts a clause of an enforce: null [on], lockfail [on], catch, atEnd {
+  bool PeekEnforceClause() {
+    int at = pos;
+    while (toks[at].Kind == TokenKind.Newline) {
+      at++;
+    }
+    var first = toks[at];
+    var second = toks[Math.Min(at + 1, toks.Count - 1)];
+    bool opensOrOn = second.Is("{") || second.Kind == TokenKind.Ident && second.Text == "on";
+    return first.Kind == TokenKind.Keyword && (first.Text == "catch" || first.Text is "atEnd" or "default" && second.Is("{") || first.Text == "null" && opensOrOn)
+      || first.Kind == TokenKind.Ident && first.Text == "lockfail" && opensOrOn;
+  }
+
+  // on a, b: the variables of an enforce that a clause is about
+  Node ParseOnList() {
+    var on = new Node("On", Next());
+    do {
+      var n = ExpectIdent();
+      on.Add(new Node("Name", n, n.Text));
+    } while (AcceptOp(","));
+    return on;
   }
 
   // Declaration, multiple assignment, assignment or expression
@@ -870,7 +940,8 @@ public sealed class Parser {
       throw ErrorAt("'_' alone is only valid as an assignment target", start);
     }
     if (first.Kind is "Tuple" or "List" or "Map" or "MapLit") {
-      throw ErrorAt("a literal must be assigned, passed or returned", start);
+      // valid only as the last expression of a function, its result (spec 13): the compiler decides
+      return new Node("ExprStmt", start, "literal").Add(first);
     }
     return new Node("ExprStmt", start).Add(first);
   }
@@ -1968,6 +2039,13 @@ public sealed class Parser {
         Next();
         return new Node("Name", t, t.Text);
       case TokenKind.Keyword:
+        if (t.Text == "enforce") {
+          // enforce <expression> clauses (spec 7.2.6): lowered to the statement form by the compiler
+          Next();
+          var enforced = new Node("EnforceExpr", t).Add(ParseExpr());
+          ParseEnforceClauses(enforced);
+          return enforced;
+        }
         if (t.Text is "true" or "false") {
           Next();
           return new Node("Bool", t, t.Text);

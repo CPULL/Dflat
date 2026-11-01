@@ -16,7 +16,7 @@ fun cleanup() {
   atEnd {
     throw Notice("silent in atEnd")
     r.Console.log("not printed: the throw is caught below")
-    catch Notice n { r.Console.log("caught inside atEnd: " + n.Message) }
+    catch Notice n { r.Console.log("caught inside atEnd: " + n.message) }
   }
   atEnd {
     throw Notice("ignored")

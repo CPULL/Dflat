@@ -1,0 +1,7 @@
+namespace enforce_on_unknown
+fun f(i32? a, i32? b) {
+  enforce a {
+  }
+  null on b { }
+}
+f(1, 2)

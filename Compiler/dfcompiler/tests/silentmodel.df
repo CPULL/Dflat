@@ -18,11 +18,11 @@ fun i64 add3(i64 a, i64 b, i64 c) {                         // no catch: the war
 }
 fun string observe(i64 a, i64 b, i64 c) {
   return "result " + add3(a, b, c)
-  catch Warning w { return "observed in observe: " + w.Message }
+  catch Warning w { return "observed in observe: " + w.message }
 }
 fun string observeMul(i64 a, i64 b) {
   return "mul " + mul(a, b)
-  catch Warning w { return "observed in observeMul: " + w.Message }
+  catch Warning w { return "observed in observeMul: " + w.message }
 }
 r.Console.log(observe(2, 3, 4))                             // mul went on / result 10
 r.Console.log(observe(20, 30, 4))                           // result 4: mul returned 0 at its throw, add3 ignored the warning, observe never sees it
@@ -37,7 +37,7 @@ fun i64 checked(i64 a, i64 b) {
 }
 fun string seeChecked(i64 a, i64 b) {
   return "checked " + checked(a, b)
-  catch Warning w { return "observed up the chain: " + w.Message }
+  catch Warning w { return "observed up the chain: " + w.message }
 }
 r.Console.log(seeChecked(2, 3))                             // mul went on / checked 6
 r.Console.log(seeChecked(20, 30))                           // observed up the chain: big product
@@ -46,11 +46,11 @@ r.Console.log(checked(20, 30))                              // nobody observes t
 // catch SilentException and catch all observe silent exceptions; catch Exception does not (spec 15.1, 15.4, 15.8.2)
 fun string sink(i64 a) {
   return "sink " + mul(a, a)
-  catch Exception e { return "Exception sees: " + e.Message }
+  catch Exception e { return "Exception sees: " + e.message }
 }
 fun string bySilent(i64 a) {
   return "bySilent " + mul(a, a)
-  catch SilentException e { return "SilentException sees: " + e.Message }
+  catch SilentException e { return "SilentException sees: " + e.message }
 }
 fun string byAll(i64 a) {
   return "byAll " + mul(a, a)
@@ -58,7 +58,7 @@ fun string byAll(i64 a) {
 }
 fun string wrongKind(i64 a) {
   return "wrongKind " + mul(a, a)
-  catch Notice n { return "Notice: " + n.Message }
+  catch Notice n { return "Notice: " + n.message }
 }
 r.Console.log(sink(20))                                     // sink 0: catch Exception does not observe a silent exception
 r.Console.log(bySilent(20))                                 // SilentException sees: big product
@@ -74,11 +74,11 @@ fun i64 cousin(i64 a) {
 }
 fun string byParent(i64 a) {
   return "byParent " + cousin(a)
-  catch Family f { return "Family sees: " + f.Message }
+  catch Family f { return "Family sees: " + f.message }
 }
 fun string byException(i64 a) {
   return "byException " + cousin(a)
-  catch Exception e { return "Exception sees: " + e.Message }
+  catch Exception e { return "Exception sees: " + e.message }
 }
 r.Console.log(byParent(5))                                  // Family sees: a cousin
 r.Console.log(byParent(0))                                  // byParent 0
@@ -90,7 +90,7 @@ fun string sameFunction() {
   throw Notice("local")
   r.Console.log("  after the throw")
   return "finished"
-  catch Notice n { return "local catch: " + n.Message }
+  catch Notice n { return "local catch: " + n.message }
 }
 r.Console.log(sameFunction())                               // local catch: local
 
@@ -106,7 +106,7 @@ public class Noisy : Sensor {
 }
 fun string reading(Sensor s, i64 v) {
   return "reading " + s.read(v)
-  catch Notice n { return "noise: " + n.Message }
+  catch Notice n { return "noise: " + n.message }
 }
 fun string ignoring(Sensor s, i64 v) {
   return "ignoring " + s.read(v)
@@ -127,7 +127,7 @@ public class Deep : Probe {
 }
 fun string probing(Probe p, i64 v) {
   return "level " + p.level(v)
-  catch Warning w { return "probe warning: " + w.Message }
+  catch Warning w { return "probe warning: " + w.message }
 }
 r.Console.log(probing(Deep(), 4))                           // level 8
 r.Console.log(probing(Deep(), -4))                          // probe warning: below zero
@@ -140,7 +140,7 @@ fun i64 hard(i64 a) {
 fun i64 middleman(i64 a) { hard(a) + 1 }
 fun string hardCatcher(i64 a) {
   return "hard " + middleman(a)
-  catch Trouble t { return "Trouble: " + t.Message }
+  catch Trouble t { return "Trouble: " + t.message }
 }
 r.Console.log(hardCatcher(3))                               // hard 4
 r.Console.log(hardCatcher(0))                               // Trouble: zero
@@ -161,8 +161,8 @@ fun i64 forwarder(i64 which, i64 a) {
 }
 fun string seeForwarded(i64 which, i64 a) {
   return "forwarded " + forwarder(which, a)
-  catch Notice n { return "Notice seen: " + n.Message }
-  catch Warning w { return "Warning seen: " + w.Message }
+  catch Notice n { return "Notice seen: " + n.message }
+  catch Warning w { return "Warning seen: " + w.message }
 }
 fun string ignoreForwarded(i64 which, i64 a) {
   return "ignored " + forwarder(which, a)

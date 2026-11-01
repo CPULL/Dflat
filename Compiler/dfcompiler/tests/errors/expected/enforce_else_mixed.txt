@@ -1,0 +1,1 @@
+enforce_else_mixed.df(6,3): error: else is valid only when the enforce has no other clause (spec 7.2.1), found 'null'

@@ -68,8 +68,8 @@ r.Console.log($"after close: {modes.readMode}, {modes.writeMode}")              
 fun string tryOpen(string p, fs.StreamOpenMode mode) {
   FileStream s = FileStream(p, fs.StreamReadWriteAccessMode.Shared, fs.StreamReadWriteAccessMode.None, mode)
   return "opened"
-  catch FileNotFoundException ex { return "FileNotFoundException " + ex.Id }
-  catch FileAlreadyExistsException ex { return "FileAlreadyExistsException " + ex.Id }
+  catch FileNotFoundException ex { return "FileNotFoundException " + ex.id }
+  catch FileAlreadyExistsException ex { return "FileAlreadyExistsException " + ex.id }
 }
 r.Console.log(tryOpen(File.combinePaths(base, "nothing.bin"), fs.StreamOpenMode.OpenExisting))
 r.Console.log(tryOpen(path, fs.StreamOpenMode.CreateIfMissing))
@@ -77,14 +77,14 @@ r.Console.log(tryOpen(path, fs.StreamOpenMode.CreateIfMissing))
 fun string badModes(string p) {
   FileStream s = FileStream(p, fs.StreamReadWriteAccessMode.Shared, fs.StreamReadWriteAccessMode.None, fs.StreamOpenMode.AppendExisting)
   return "opened"
-  catch InvalidStreamModesException ex { return "InvalidStreamModesException " + ex.Id }
+  catch InvalidStreamModesException ex { return "InvalidStreamModesException " + ex.id }
 }
 r.Console.log(badModes(path))
 
 fun string directory(string p) {
   FileStream s = FileStream(p, fs.StreamReadWriteAccessMode.Shared, fs.StreamReadWriteAccessMode.None, fs.StreamOpenMode.OpenExisting)
   return "opened"
-  catch FileAccessToADirectoryException ex { return "FileAccessToADirectoryException " + ex.Id }
+  catch FileAccessToADirectoryException ex { return "FileAccessToADirectoryException " + ex.id }
 }
 r.Console.log(directory(base))
 
@@ -93,7 +93,7 @@ fun string usage(string p) {
   arr<u8> small = arr<u8>[2]
   s.write(small)
   return "wrote"
-  catch StreamModeNotAllowedException ex { return "StreamModeNotAllowedException " + ex.Id }
+  catch StreamModeNotAllowedException ex { return "StreamModeNotAllowedException " + ex.id }
 }
 r.Console.log(usage(path))
 
@@ -102,7 +102,7 @@ fun string range(string p) {
   arr<u8> small = arr<u8>[2]
   s.read(small, 1, 5)
   return "read"
-  catch InvalidBufferRangeException ex { return "InvalidBufferRangeException " + ex.Id }
+  catch InvalidBufferRangeException ex { return "InvalidBufferRangeException " + ex.id }
 }
 r.Console.log(range(path))
 
@@ -111,7 +111,7 @@ fun string closed(string p) {
   s.close()
   s.readByte()
   return "read"
-  catch AccessToAClosedStreamException ex { return "AccessToAClosedStreamException " + ex.Id }
+  catch AccessToAClosedStreamException ex { return "AccessToAClosedStreamException " + ex.id }
 }
 r.Console.log(closed(path))
 

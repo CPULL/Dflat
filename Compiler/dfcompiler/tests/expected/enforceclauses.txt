@@ -1,0 +1,39 @@
+nothing fails
+  block
+  atEnd 1
+  atEnd 3
+  atEnd 5
+  atEnd 7
+atEnd 1 raises E2
+  block
+  atEnd 1
+  catch E2
+  atEnd 5
+  atEnd 7
+atEnd 3 raises E2
+  block
+  atEnd 1
+  atEnd 3
+  catch E2
+  atEnd 5
+  atEnd 7
+block raises E1
+  block
+  catch E1
+  atEnd 3
+  atEnd 5
+  atEnd 7
+null: nothing runs
+no catch matches
+  finally
+  caught outside
+return
+  finally after return
+  8
+weak usage
+  in block: rex
+  atEnd: rex
+  end rex
+  after the enforce
+done
+---- exit code 0 ----

@@ -1,0 +1,104 @@
+// The ways a function returns (spec 13): one value (return, last expression, early return, every type kind), several values,
+// a tuple, objects (moved), strings, counted results, the ways the caller receives them
+alias Root as r
+
+public class Box(string label) {
+  public string label
+} atEnd {
+  r.Console.log("  end " + label)
+}
+
+// one value
+fun i32 explicitReturn() { return 1 }
+fun i32 lastExpr() { 2 }
+fun i32 lastAfterStatements() {
+  i32 x = 1
+  x += 2
+  x
+}
+fun i32 early(i32 v) {
+  if v < 0 {
+    return -1
+  }
+  v * 10
+}
+fun i32 viaIf(bool b) { b ? { 4, 5 } }
+fun bool flag(i32 v) { v > 3 }
+fun r64 real() { 1.5 }
+fun char letter() { 'z' }
+fun string text() {
+  string s = "ab"
+  s + "c"
+}
+fun string literal() { "lit" }
+fun i32? maybe(bool b) {
+  if b {
+    return 7
+  }
+  return null
+}
+fun Box newBox(string l) { Box(l) }
+fun Box newBoxAfter(string l) {
+  string full = "box " + l
+  Box(full)
+}
+fun Box moveOut() {
+  Box b = Box("moved")
+  return ->b
+}
+fun @Box counted() { Box("counted") }
+fun voidFun() { r.Console.log("  void") }
+fun voidEarly(bool b) {
+  if b {
+    return
+  }
+  r.Console.log("  not early")
+}
+
+// several values
+fun i32, string two() { return 1, "one" }
+fun i32, string forwardTwo() { return two() }
+fun i64, r64, bool three(i32 n) { return n * 2, (r64)n / 2.0, n > 3 }
+fun string, string strings() { return "left", "right" }
+
+// a tuple
+fun (i32 id, string name) pair() { return (2, "bob") }
+fun (i32, i32) plainPair() { (3, 4) }                 // a literal as the last expression is the result
+fun vec<i32> listResult() {
+  i32 x = 1
+  [x, 2]
+}
+fun map<string, i32> mapResult() { ["a": 1] }
+
+r.Console.log("one value")
+r.Console.log($"{explicitReturn()} {lastExpr()} {lastAfterStatements()} {early(-5)} {early(5)} {viaIf(true)} {viaIf(false)}")
+r.Console.log($"{flag(4)} {real()} {letter()} {text()} {literal()} {maybe(true) ?? 0} {maybe(false) ?? 0}")
+fun objects() {
+  Box a = newBox("a")
+  Box b = newBoxAfter("b")
+  Box c = moveOut()
+  @Box d = counted()
+  r.Console.log(a.label + ", " + b.label + ", " + c.label + ", " + d.label + $" ({d.usersCount} user)")
+}
+objects()
+voidFun()
+voidEarly(true)
+voidEarly(false)
+
+r.Console.log("several values")
+i32 n, string s = two()
+r.Console.log($"{n} {s}")
+i32 n2, _ = forwardTwo()
+r.Console.log($"{n2}")
+i64 doubled, r64 halved, bool big = three(5)
+r.Console.log($"{doubled} {halved} {big}")
+n, s = two()
+string left, string right = strings()
+r.Console.log(left + " " + right)
+
+r.Console.log("tuples")
+(i32 id, string name) p = pair()
+r.Console.log($"{p.id} {p.name}")
+var q = plainPair()
+r.Console.log($"{q} {listResult()} {mapResult()}")
+r.Console.log("done")

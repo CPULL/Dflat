@@ -1770,3 +1770,62 @@ STABILIZATION (2026-10-31, spec 0.0.19, compiler 0.0.42alpha)
 - Tests lastexpr, refcountmembers, clonemaps, clonecopy, tryclone, errors/exception_member_case, refcount_items_has (now a plain object),
   refcount_items_var, refcount_items_pop_plain, weak_atend, retired_refcount_exception; removed errors/clone_map, clone_try,
   list_add_objects_copy, list_copyfrom_objects (they tested restrictions that are gone).
+- Literal statements: the parser no longer rejects a tuple, list or map literal used as a statement; it makes an ExprStmt with Text
+  "literal". MarkImplicitReturn turns the last one of a function into its result; any other is the error "a literal must be assigned,
+  passed or returned" (EmitStmt). Article() gives "an i32", "an r64", "a u64" in the return errors.
+- Tests returns (every way to return and receive one value, several values, tuples, objects, strings, counted results, void) and 17 error
+  tests for the returns: return_*, receive_*, literal_statement.
+- Exception members camelCase (spec 15.2): ExceptionMembers (CodeGen.Errors.cs) = id, message, function, line, used by ExceptionMember,
+  ExceptionObjectMember (which also takes the other spellings, to name the right one), the reserved field names and CheckFieldName.
+
+ENFORCE, STEP 1 (2026-10-31, spec 7.2, compiler 0.0.42alpha)
+- Parser: ParseEnforce reads the clauses after the block while PeekEnforceClause sees one past the line breaks (null / lockfail followed by
+  on or {, catch, atEnd {): EnforceNull and EnforceLockFail nodes (an On child with the names when written), Catch nodes (ParseCatch with
+  inEnforce: an optional On list after the type and the variable; catch ... on elsewhere is an error) and AtEnd nodes with the text
+  "enforce". else with any other clause is an error. A catch or atEnd written after an enforce now belongs to it (no existing code had one).
+- CodeGen.Nulls.cs: CheckEnforceExits (break / continue / jump that leave the block; loops and switches inside keep theirs); EmitEnforce
+  gives "not supported" for the clauses until step 2.
+- Tests errors/enforce_else_mixed, enforce_continue, catch_on_outside.
+
+ENFORCE, STEP 2 (2026-10-31, spec 7.2.1, 7.2.2)
+- EmitEnforce (CodeGen.Nulls.cs): a check per variable in order (T?: .has; weak: DF_RC_ALIVE and the temporary usage of
+  EnforcedWeakBlock; counted: DF_RC_ALIVE; object: not NULL and not DF_IS_DEAD; trait value: not NULL), joined with && (they stop at the
+  first failure). The failure branch is the else block, or a chain "if (!check1) {...} else if (!check2) {...}" where each variable runs
+  the first null clause whose On list names it (no On = every variable), or nothing. The AssignState of each branch is merged.
+  lockfail: an error until (@)T. catch and atEnd clauses: "not supported" until step 3.
+- Tests enforcenull, errors/enforce_lockfail_no_lock, enforce_on_unknown.
+
+ENFORCE, STEP 3 (2026-10-31, spec 7.2.3, 7.2.5)
+- EnforceClausesBlock (CodeGen.Nulls.cs) lowers the catch and atEnd clauses to one Block run when the checks pass: the enforce block as a
+  nested statement, each atEnd clause but the last as a plain block statement, the catches in place (the usual catches of a block: an
+  exception goes to the first catch after it, tries the next ones, skips the statements in between; a catch body raises outward), and a
+  last atEnd as the AtEnd of the block (every exit, a raise while another exception passes is a Panic, 14.2). The weak usages wrap this
+  block, so they end after the atEnds.
+- Test enforceclauses.
+
+ENFORCE, STEP 4 (2026-11-01, spec 7.2.3, 7.2.4)
+- catch E on x: an enforce with such catches has a C int df_enfsrc (function local, 0 outside the calls on its variables). ExprOf passes
+  every expression through EnforceSourceCall: a call whose receiver chain starts at a variable of the enforce (CallRoot) saves the
+  variable, sets the position of x (1-based), runs, restores it; a raise inside jumps out with x set. catchOnCondition (Catch node -> C
+  test) is added to the test of EmitDispatch. Not attributed: a raise in the arguments of a call on x that is not itself a call (it is
+  counted as x's).
+- Return: when the block has a return, the success atEnd clauses (all but the last) are also put, in order, in an AtEnd "enforce-return"
+  of the block; EmitAtEnd places it only while EmitReturnUnwind runs (returnUnwinding), never at the normal end or for an exception.
+- Remaining gap: the last atEnd is an atEnd block (14.2), so an exception it raises with nothing pending is a Panic (spec 7.2.3: it
+  should bubble up).
+- Test enforceon.
+
+ENFORCE, STEP 5 (2026-11-01, spec 7.2.1, 7.2.6)
+- Parser: ParseEnforceClauses (shared by the statement and the expression), EnforceDefault (at most one); enforce in ParsePrimary gives an
+  EnforceExpr (the expression, then the clauses); at the start of a statement enforce is the statement form only when a name is followed by
+  , or {.
+- default: EnforceClausesBlock adds it as a last catch Exception (silent exceptions stay silent); EmitEnforce runs it for a failed check
+  with no null clause (after a catch NullPointerException in the expression form).
+- CodeGen.EnforceExpr.cs, LowerEnforceExprs (first pass of Generate): T r = enforce E clauses becomes T r + Enforce "expr" over the Names of
+  E (not the functions called by name) with the block r = E; each clause block becomes r = v ({ v }) or a while true loop where return v is
+  r = v + break (a return inside a loop of a clause is "not supported"). return enforce ... and an enforce expression as the last statement
+  of a function go through a variable of the return type. var r = enforce ... is an error (the type is needed). EmitEnforce skips the
+  names of an "expr" enforce that cannot be checked, and marks the target assigned (no L1 warning).
+- Not built: an enforce expression in other places (assignment to an existing variable, inside a larger expression, arguments).
+- Tests enforceexpr, errors/enforce_default_type, enforce_expr_var, enforce_two_defaults.
+

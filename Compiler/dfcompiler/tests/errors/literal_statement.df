@@ -1,0 +1,6 @@
+namespace literal_statement
+fun i32 f() {
+  (1, 2)
+  3
+}
+f()

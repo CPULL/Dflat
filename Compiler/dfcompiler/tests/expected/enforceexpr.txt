@@ -1,0 +1,15 @@
+statement form
+  value 31
+  no a
+  default
+  default
+expression form
+  plain 3 0
+  default 3 -1
+  clauses 30 -1234 101
+  null clause 5 1 42
+  returned 3 -7
+  last expression 3 -8
+  text box 3, no box
+done
+---- exit code 0 ----

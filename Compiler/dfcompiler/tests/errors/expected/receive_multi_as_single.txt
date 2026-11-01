@@ -1,0 +1,1 @@
+receive_multi_as_single.df(3): error: this call returns 2 values; assign them to as many targets

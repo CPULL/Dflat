@@ -97,7 +97,7 @@ r.Console.log(nothing?.age == null)
 i32 caught = 0
 r.Console.log(nobody.name)
 catch NullPointerException ex {
-  r.Console.log("caught: " + ex.Message)
+  r.Console.log("caught: " + ex.message)
   caught += 1
 }
 nobody.age = 4

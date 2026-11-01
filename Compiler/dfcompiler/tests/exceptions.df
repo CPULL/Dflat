@@ -27,13 +27,13 @@ fun string Try(i32 kind) {
   Fail(kind)
   return "ok"
   catch TimeoutException ex {
-    return "timeout " + ex.host + ": " + ex.Message
+    return "timeout " + ex.host + ": " + ex.message
   }
   catch NetworkException ex {
-    return "network " + ex.code + ": " + ex.Message
+    return "network " + ex.code + ": " + ex.message
   }
   catch AppException ex {
-    return "app [" + ex.Message + "]"
+    return "app [" + ex.message + "]"
   }
 }
 r.Console.log(Try(0))
@@ -48,7 +48,7 @@ fun string Describe(i32 kind) {
   Fail(kind)
   return "ok"
   catch Exception ex {
-    return "any: " + ex.Message + " id>=256: " + (ex.Id >= 256)
+    return "any: " + ex.message + " id>=256: " + (ex.id >= 256)
   }
 }
 r.Console.log(Describe(2))
@@ -133,7 +133,7 @@ fun string CatchTrait() {
   throw AlertException("alert", "d")
   return "continued"
   catch SilentException ex {
-    return "by trait: " + ex.Message
+    return "by trait: " + ex.message
   }
 }
 fun string CatchAll() {

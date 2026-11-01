@@ -67,7 +67,7 @@ r.Console.log(at(numbers, 2))
 i32 caught = 0
 at(numbers, 3)
 catch IndexOutOfRangeException ex {
-  r.Console.log("caught: " + ex.Message)
+  r.Console.log("caught: " + ex.message)
   caught += 1
 }
 numbers[7] = 1

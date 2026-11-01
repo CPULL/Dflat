@@ -1,0 +1,8 @@
+namespace enforce_two_defaults
+fun f(i32? a) {
+  enforce a {
+  }
+  default { }
+  default { }
+}
+f(1)

@@ -1,0 +1,7 @@
+namespace enforce_lockfail_no_lock
+fun f(i32? a) {
+  enforce a {
+  }
+  lockfail on a { }
+}
+f(1)

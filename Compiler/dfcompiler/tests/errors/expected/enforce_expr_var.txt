@@ -1,0 +1,1 @@
+enforce_expr_var.df(4): error: an enforce expression needs the type of the variable written: i32 r = enforce ... (the clauses give values of that type)

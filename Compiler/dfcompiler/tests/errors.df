@@ -6,7 +6,7 @@ fun i32 divide(i32 total, i32 parts) { total / parts }
 fun i32 safeDivide(i32 total, i32 parts) {
   i32 result = divide(total, parts)
   catch DivisionByZeroException ex {
-    r.Console.log($"caught: {ex.Message} | id {ex.Id} | in {ex.Function} | line {ex.Line}")
+    r.Console.log($"caught: {ex.message} | id {ex.id} | in {ex.function} | line {ex.line}")
     return -1
   }
   return result
@@ -25,7 +25,7 @@ fun check(i32 mode) {
     r.Console.log($"  mode {mode}: division by zero catch")
   }
   catch Exception ex {
-    r.Console.log($"  mode {mode}: generic catch, message '{ex.Message}'")
+    r.Console.log($"  mode {mode}: generic catch, message '{ex.message}'")
   }
   r.Console.log($"  mode {mode}: code after the catches runs")
 }
@@ -40,13 +40,13 @@ fun fail(string message) {
 fun relay() {
   fail("from fail()")
   catch Exception ex {
-    r.Console.log("relay saw: " + ex.Message)
+    r.Console.log("relay saw: " + ex.message)
     throw ex
   }
 }
 relay()
 catch all ex {
-  r.Console.log($"top level got it again: {ex.Message}, thrown in {ex.Function}")
+  r.Console.log($"top level got it again: {ex.message}, thrown in {ex.function}")
 }
 
 // a catch only covers the code above it
@@ -57,7 +57,7 @@ catch all ex {
   }
   fail("below the catch")
   catch Exception ex {
-    r.Console.log("second catch: " + ex.Message)
+    r.Console.log("second catch: " + ex.message)
   }
 }
 
@@ -73,7 +73,7 @@ r.Console.log($"cleanup(1) = {cleanup(1)}")
 r.Console.log($"cleanup(3) = {cleanup(3)}")
 i32 failed = cleanup(2)
 catch Exception ex {
-  r.Console.log("cleanup(2) raised: " + ex.Message)
+  r.Console.log("cleanup(2) raised: " + ex.message)
 }
 
 // the return value is computed first; a return inside atEnd overrides it

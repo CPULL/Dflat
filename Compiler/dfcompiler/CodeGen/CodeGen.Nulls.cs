@@ -166,44 +166,210 @@ public sealed partial class CodeGen {
   }
 
   // enforce a, b { a and b are plain values here } else { }
+  // break, continue and jump that leave the block of an enforce are a compile error (spec 7.2.4); a loop or a switch inside the block keeps
+  // its own. A labelled break is checked only for the loops of the block (it is an error at the top of the block)
+  void CheckEnforceExits(Node node, int loops, int switches) {
+    foreach (var child in node.Children) {
+      switch (child.Kind) {
+        case "Break" when loops == 0 && switches == 0:
+        case "Continue" when loops == 0:
+          throw Error($"'{child.Kind.ToLowerInvariant()}' cannot leave an enforce: return is the only way out of its block (spec 7.2.4)", child);
+        case "Jump" when switches == 0:
+          throw Error("'jump' cannot leave an enforce: return is the only way out of its block (spec 7.2.4)", child);
+        case "Fun" or "Lambda" or "Class":
+          continue;
+        case "For" or "While" or "DoWhile":
+          CheckEnforceExits(child, loops + 1, switches);
+          continue;
+        case "Switch" or "TypeSwitch":
+          CheckEnforceExits(child, loops, switches + 1);
+          continue;
+      }
+      CheckEnforceExits(child, loops, switches);
+    }
+  }
+
+  // enforce a, b { } [else { } | null [on a] { } ...] (spec 7.2): each variable is checked in the order written (7.2.2): a T? has a value,
+  // an object is not null and not destroyed, a counted object and a weak reference are alive. When a check fails the first null clause that
+  // names the failing variable (or names none) runs, or the else branch; with no clause for it nothing runs. Step 2: the catch and atEnd
+  // clauses (7.2.3) and lockfail with (@)T come later
+  // the catch and atEnd clauses (spec 7.2.3) become one block run when the checks pass: the enforce block as a nested statement, each
+  // atEnd before the last clause as a statement (it runs when nothing is pending: an exception skips it on its way to the next catch that
+  // matches), the catches where they are written (the usual catches of a block, 15.1), and an atEnd written last as the atEnd of this block
+  // (it runs on every way out, like a finally). The temporary usages of the weak references wrap this block, so they end after it
+  // catch E on x (spec 7.2.3): inside an enforce with such catches, a call whose receiver is x (x.f(), x.a.f()) sets the C variable of the
+  // enforce to the position of x and restores it after the call, so an exception raised by the call carries x; the catch tests it
+  (string Var, Dictionary<string, int> Positions)? enforceSource;
+  readonly Dictionary<Node, string> catchOnCondition = new();
+
+  static string? CallRoot(Node call) {
+    if (call.Kind != "Call" || call.Children[0].Kind != "Member") {
+      return null;
+    }
+    var node = call.Children[0].Children[0];
+    while (node.Kind is "Member" or "Call" or "Index" or "Paren") {
+      node = node.Children[0];
+    }
+    return node.Kind == "Name" ? node.Text : null;
+  }
+
+  Expr EnforceSourceCall(Node n, Expr e) {
+    if (enforceSource is not (string variable, var positions) || CallRoot(n) is not string root || !positions.TryGetValue(root, out int position)) {
+      return e;
+    }
+    string saved = NewTemp();
+    if (e.Type == "void") {
+      return e with { Code = $"({{ int {saved} = {variable}; {variable} = {position}; {e.Code}; {variable} = {saved}; }})" };
+    }
+    string result = NewTemp();
+    return e with { Code = $"({{ int {saved} = {variable}; {variable} = {position}; __auto_type {result} = {e.Code}; {variable} = {saved}; {result}; }})" };
+  }
+
+  Node EnforceClausesBlock(Node s, Node block) {
+    var clauses = s.Children.Where(child => child.Kind is "Catch" or "AtEnd").ToList();
+    var defaultClause = s.Children.FirstOrDefault(child => child.Kind == "EnforceDefault");
+    if (clauses.Count == 0 && defaultClause == null) {
+      return block;
+    }
+    var outer = Synthetic("Block", s);
+    if (clauses.Count > 0 && clauses[^1].Kind == "AtEnd") {
+      outer.Add(Synthetic("AtEnd", clauses[^1]).Add(clauses[^1].Children[0]));   // the finally
+      clauses.RemoveAt(clauses.Count - 1);
+    }
+    if (defaultClause != null) {
+      // default takes the exceptions no catch matches (7.2.3), as a last catch Exception (silent exceptions stay silent, 15.4)
+      clauses.Add(Synthetic("Catch", defaultClause, "Exception").Add(defaultClause.Children[0]));
+    }
+    // a return inside the block also runs the atEnd clauses written before the last one (7.2.4): they become an atEnd of the block that
+    // runs only on a return (EmitAtEnd), in the order written
+    var success = clauses.Where(clause => clause.Kind == "AtEnd").Select(clause => clause.Children[0]).ToList();
+    if (success.Count > 0 && CollectReturns(block).Any()) {
+      var onReturn = Synthetic("Block", block);
+      onReturn.Children.AddRange(success);
+      var wrapped = Synthetic("Block", block).Add(Synthetic("AtEnd", block, "enforce-return").Add(onReturn));
+      wrapped.Children.AddRange(block.Children);
+      block = wrapped;
+    }
+    outer.Add(block);
+    foreach (var clause in clauses) {
+      outer.Add(clause.Kind == "Catch" ? clause : clause.Children[0]);
+    }
+    return outer;
+  }
+
   void EmitEnforce(Node s, StringBuilder sb, Scope scope, int indent) {
     string pad = Pad(indent);
     var block = s.Children.First(child => child.Kind == "Block");
+    CheckEnforceExits(block, 0, 0);
+    block = EnforceClausesBlock(s, block);
     var elseNode = s.Children.FirstOrDefault(child => child.Kind == "Else");
-    var conditions = new List<string>();
+    var names = s.Children.Where(child => child.Kind == "Name").ToList();
+    var checks = new List<(string Name, string Condition)>();
     var unwrapped = new Scope(scope);
-    foreach (var name in s.Children.Where(child => child.Kind == "Name")) {
+    foreach (var name in names) {
       var variable = scope.Find(name.Text!);
       if (WeakRef(name, scope) is CountedRefInfo weak) {
         // a weak reference (spec 12.7): the object must still be alive; inside the block the name is a temporary usage
-        conditions.Add($"DF_RC_ALIVE({weak.Code})");
+        checks.Add((name.Text!, $"DF_RC_ALIVE({weak.Code})"));
         block = EnforcedWeakBlock(block, name.Text!, weak.Type, weak.Code);
         continue;
+      }
+      if (s.Text == "expr" && (variable == null || variable.Type == "string" || !(IsNullable(variable.Type) || variable.IsCounted || IsClass(variable.Type)))) {
+        continue;   // the expression form enforces only what can be checked: names of functions, types and plain values are skipped
       }
       if (variable == null) {
         throw Error($"unknown variable '{name.Text}'", name);
       }
       if (IsNullable(variable.Type)) {
-        conditions.Add($"{variable.CName}.has");
+        checks.Add((name.Text!, $"{variable.CName}.has"));
         unwrapped.Vars[name.Text!] = new VarInfo(BaseOf(variable.Type), variable.CName + ".val", variable.IsConst);
+      } else if (variable.IsCounted) {
+        checks.Add((name.Text!, $"DF_RC_ALIVE({variable.CName})"));   // a counted variable: its object is alive while it holds a usage
+      } else if (IsClass(variable.Type) && !IsTraitType(variable.Type)) {
+        checks.Add((name.Text!, $"({variable.CName} != NULL && !DF_IS_DEAD({variable.CName}))"));   // objects are nullable (7.1)
+      } else if (IsTraitType(variable.Type)) {
+        checks.Add((name.Text!, $"({variable.CName} != NULL)"));
       } else if (variable.Type == "string") {
         throw Error($"strings cannot be enforced ('{name.Text}')", name);
       } else {
         throw Error($"'{name.Text}' is {variable.Type}, which is never null", name);
       }
     }
-    sb.Append($"{pad}if ({string.Join(" && ", conditions)}) {{\n");
+    var known = names.Select(name => name.Text!).ToHashSet();
+    var savedSource = enforceSource;
+    var onCatches = s.Children.Where(child => child.Kind == "Catch" && child.Children.Any(c => c.Kind == "On")).ToList();
+    if (onCatches.Count > 0) {
+      string sourceVar = "df_enfsrc" + NewTemp();
+      fn!.Decls.Append($"  int {sourceVar} = 0;\n  (void){sourceVar};\n");
+      var positions = names.Select((name, index) => (name.Text!, index + 1)).ToDictionary(pair => pair.Item1, pair => pair.Item2);
+      foreach (var onCatch in onCatches) {
+        var listed = onCatch.Children.First(c => c.Kind == "On").Children;
+        foreach (var name in listed.Where(name => !known.Contains(name.Text!))) {
+          throw Error($"'{name.Text}' is not a variable of this enforce", name);
+        }
+        catchOnCondition[onCatch] = "(" + string.Join(" || ", listed.Select(name => $"{sourceVar} == {positions[name.Text!]}")) + ")";
+      }
+      enforceSource = (sourceVar, positions);
+    }
+    List<string> OnNames(Node clause) {
+      var on = clause.Children.FirstOrDefault(child => child.Kind == "On");
+      if (on == null) {
+        return known.ToList();
+      }
+      foreach (var listed in on.Children.Where(child => !known.Contains(child.Text!))) {
+        throw Error($"'{listed.Text}' is not a variable of this enforce", listed);
+      }
+      return on.Children.Select(child => child.Text!).ToList();
+    }
+    foreach (var lockClause in s.Children.Where(child => child.Kind == "EnforceLockFail")) {
+      throw Error($"'{OnNames(lockClause)[0]}' has no lock: lockfail is for the (@)T variables of the enforce (spec 7.2.2), which are not built yet", lockClause);
+    }
+    var nullClauses = s.Children.Where(child => child.Kind == "EnforceNull").Select(clause => (Clause: clause, On: OnNames(clause))).ToList();
+    var defaultClause = s.Children.FirstOrDefault(child => child.Kind == "EnforceDefault");
+    var nullCatch = s.Text == "expr"
+      ? s.Children.FirstOrDefault(child => child.Kind == "Catch" && !child.Children.Any(c => c.Kind == "On") && CatchTarget(child).Id == StandardExceptions["NullPointerException"])
+      : null;
+
+    sb.Append($"{pad}if ({(checks.Count == 0 ? "1" : string.Join(" && ", checks.Select(check => check.Condition)))}) {{\n");
     var before = assign.Clone();
-    EmitBlock(block, sb, unwrapped, indent + 1);
-    var afterThen = assign;
-    assign = before;
+    try {
+      EmitBlock(block, sb, unwrapped, indent + 1);
+    } finally {
+      enforceSource = savedSource;
+    }
+    var states = new List<AssignState> { assign };
     sb.Append(pad).Append('}');
     if (elseNode != null) {
+      assign = before.Clone();
       sb.Append(" else {\n");
       EmitBlock(elseNode.Children[0], sb, scope, indent + 1);
       sb.Append(pad).Append('}');
+      states.Add(assign);
+    } else if (nullClauses.Count > 0 || defaultClause != null) {
+      // the first variable that fails picks the first null clause that names it (7.2.2), then (expression form) a catch
+      // NullPointerException, then default
+      sb.Append(" else {\n");
+      string inner = Pad(indent + 1);
+      bool first = true;
+      foreach (var (name, condition) in checks) {
+        var chosen = nullClauses.FirstOrDefault(clause => clause.On.Contains(name)).Clause ?? nullCatch ?? defaultClause;
+        sb.Append(inner).Append(first ? "" : "} else ").Append($"if (!({condition})) {{\n");
+        first = false;
+        assign = before.Clone();
+        if (chosen != null) {
+          EmitBlock(chosen.Children.First(child => child.Kind == "Block"), sb, scope, indent + 2);
+        }
+        states.Add(assign);
+      }
+      sb.Append(inner).Append("}\n").Append(pad).Append('}');
+    } else {
+      states.Add(before);
     }
-    assign = AssignState.Merge(new[] { afterThen, assign });
+    assign = AssignState.Merge(states);
+    if (s.Text == "expr" && s.Children.First(child => child.Kind == "Block").Children[0] is { Kind: "Assign" } result && result.Children[0].Text is string target) {
+      MarkAssigned(scope.Find(target));   // the expression form gives zero or null when nothing handles a failure (7.2.6): the target is set
+    }
     sb.Append('\n');
   }
+
 }

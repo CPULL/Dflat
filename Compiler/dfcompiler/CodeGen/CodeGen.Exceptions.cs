@@ -43,7 +43,7 @@ public sealed partial class CodeGen {
         id++;
       }
       customExceptionIds[cls.Name] = id;
-      foreach (string reserved in new[] { "Id", "Message", "Function", "Line" }) {
+      foreach (string reserved in ExceptionMembers) {
         if (cls.Fields.Any(field => field.Name == reserved)) {
           throw Error($"'{reserved}' is a member of every exception: it cannot be a field of {cls.Name}", cls.Node);
         }
@@ -88,7 +88,7 @@ public sealed partial class CodeGen {
 
   // exception members of an object of an exception class
   Expr? ExceptionObjectMember(Expr obj, string name, Node at) {
-    if (name is not ("Id" or "Message" or "Function" or "Line")) {
+    if (!ExceptionMembers.Any(known => known.Equals(name, StringComparison.OrdinalIgnoreCase))) {
       return null;
     }
     return ExceptionMember(new Expr($"((df_exception*)({NullChecked(obj.Code, obj.Type)}))", "Exception"), name, at);

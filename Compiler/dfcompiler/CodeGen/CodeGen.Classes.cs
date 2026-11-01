@@ -409,7 +409,7 @@ public sealed partial class CodeGen {
     if (name == "this" || name == "parent") {
       throw Error($"'{name}' cannot be a field name", at);
     }
-    if (cls.IsException && name is "Id" or "Message" or "Function" or "Line" or "message") {
+    if (cls.IsException && ExceptionMembers.Contains(name)) {
       throw Error($"'{name}' is reserved in an exception class", at);
     }
     for (var c = cls; c != null; c = c.Parent) {

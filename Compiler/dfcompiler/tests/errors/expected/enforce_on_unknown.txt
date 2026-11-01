@@ -1,0 +1,1 @@
+enforce_on_unknown.df(5): error: 'b' is not a variable of this enforce

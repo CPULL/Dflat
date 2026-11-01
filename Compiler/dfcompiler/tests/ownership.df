@@ -134,7 +134,7 @@ fun fails() {
 }
 fails()
 catch Exception ex {
-  r.Console.log("  caught " + ex.Message)
+  r.Console.log("  caught " + ex.message)
 }
 
 r.Console.log("program end")

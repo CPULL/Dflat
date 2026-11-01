@@ -1,0 +1,1 @@
+enforce_continue.df(6): error: 'continue' cannot leave an enforce: return is the only way out of its block (spec 7.2.4)

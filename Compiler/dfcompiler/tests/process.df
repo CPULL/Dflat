@@ -48,18 +48,18 @@ r.Console.log($"arguments with spaces and quotes arrive whole: {spaced.output.co
 
 // a program that does not exist: run gives the exception in error, exec throws it
 Root.ExecProcess.RunResult missing = Root.ExecProcess.run("dflat-no-such-program")
-r.Console.log($"missing: exit {missing.exitCode}, {missing.error.Message} (id {missing.error.Id})")
+r.Console.log($"missing: exit {missing.exitCode}, {missing.error.message} (id {missing.error.id})")
 
 fun string execMissing() {
   ep.exec("dflat-no-such-program")
   return "no exception"
-  catch FileNotFoundException e { return "exec raised " + e.Message }
+  catch FileNotFoundException e { return "exec raised " + e.message }
 }
 r.Console.log(execMissing())
 
 fun string missingFolder() {
   var result = ep.run("cmd", workDir: "/c:/dflat-no-such-folder/inside")
-  return result.error.Message
+  return result.error.message
 }
 ##if os == windows
 r.Console.log($"working directory missing: {missingFolder()}")

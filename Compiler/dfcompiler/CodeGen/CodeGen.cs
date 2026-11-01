@@ -176,6 +176,7 @@ public sealed partial class CodeGen {
   // ---------------------------------------------------------------- entry
 
   public string Generate(Node program) {
+    LowerEnforceExprs(program, null);   // enforce expressions become enforce statements (spec 7.2.6)
     CheckTopLevelFeatures(program);
     LowerFieldGroups(program);
     LowerWeakDecls(program);
@@ -469,6 +470,10 @@ public sealed partial class CodeGen {
     return $"static {RetCType(f)} {f.CName}({ps})";
   }
 
+  // "an i32", "an r64", "an Item", "a u64", "a string"
+  static string Article(string type) =>
+    type.Length > 0 && ("aeioAEIO".Contains(type[0]) || type[0] == 'r' && type.Length > 1 && char.IsDigit(type[1])) ? "an" : "a";
+
   // the last expression of a body is its result (spec 13): written as a return, so it is checked, moved and cleaned up like one
   static void MarkImplicitReturn(Node funNode) {
     if (funNode.Children.FirstOrDefault(child => child.Kind == "Block") is not Node block || block.Children.Count == 0) {
@@ -618,6 +623,9 @@ public sealed partial class CodeGen {
         return;
 
       case "ExprStmt": {
+        if (s.Text == "literal") {
+          throw Error("a literal must be assigned, passed or returned (or be the last expression of a function that returns it)", s);
+        }
         if (s.Children[0].Kind == "Finalize") {
           EmitFinalize(s.Children[0], sb, scope, pad);
           return;
@@ -1057,7 +1065,7 @@ public sealed partial class CodeGen {
       return null;
     }
     if (s.Children.Count == 0) {
-      throw Error($"this function must return a {currentRet}", s);
+      throw Error($"this function must return {Article(currentRet!)} {currentRet}", s);
     }
     if (IsMulti(currentRet!)) {
       return MultiReturnCode(s, scope, sb, pad);
@@ -1070,7 +1078,7 @@ public sealed partial class CodeGen {
     }
     var returned = ExprOf(s.Children[0], scope, currentRet);
     if (returned.Type == "void" && s.Text == "implicit") {
-      throw Error($"this function must return a {currentRet}: its last expression gives nothing", s);
+      throw Error($"this function must return {Article(currentRet!)} {currentRet}: its last expression gives nothing", s);
     }
     returned = CheckReturnOwnership(returned, s.Children[0], scope, s);
     if (currentRet == "string") {
@@ -1199,6 +1207,7 @@ public sealed partial class CodeGen {
   // a string says whether it is new (CodeGen.Strings.cs)
   Expr ExprOf(Node n, Scope scope, string? expected = null) {
     var e = ExprOfNode(n, scope, expected);
+    e = EnforceSourceCall(n, e);
     return e.Type == "string" ? e with { Fresh = StrNodeFresh(n, e) } : e;
   }
 

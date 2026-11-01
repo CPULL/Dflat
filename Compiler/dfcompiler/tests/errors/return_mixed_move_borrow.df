@@ -1,0 +1,10 @@
+namespace return_mixed_move_borrow
+class Box { }
+Box kept = Box()
+fun Box f(bool b) {
+  if b {
+    return Box()
+  }
+  return kept
+}
+f(true)

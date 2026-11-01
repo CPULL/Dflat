@@ -1,0 +1,1 @@
+receive_too_few.df(3): error: the call returns 3 values, not 2

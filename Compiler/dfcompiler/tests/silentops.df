@@ -11,7 +11,7 @@ fun i8 addPlain(i8 a, i8 b) { a + b }                       // no catch: wraps
 fun string mulCaught(i32 a, i32 b) {
   i32 product = a * b
   return $"product {product}"
-  catch OverflowException e { return "caught: " + e.Message }
+  catch OverflowException e { return "caught: " + e.message }
 }
 fun string subCaught(u8 a, u8 b) {
   u8 difference = a - b

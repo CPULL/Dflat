@@ -1,0 +1,2 @@
+namespace return_exit_code_many
+return 1, 2

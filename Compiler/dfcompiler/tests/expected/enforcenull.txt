@@ -1,0 +1,30 @@
+all three
+  all there: 3 a
+a null
+  no a
+b null
+  no b or c
+c null
+  no b or c
+first clause
+  b missing (named)
+  something missing (any)
+quiet
+  goes on
+no clause
+  after
+  no a
+  after
+short form
+  value 3
+  else
+weak
+  alive: rex
+  end rex
+  gone
+counted
+  counted: max
+  end max
+  counted released
+done
+---- exit code 0 ----

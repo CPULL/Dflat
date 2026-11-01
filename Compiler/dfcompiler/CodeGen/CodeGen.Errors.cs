@@ -396,7 +396,7 @@ public sealed partial class CodeGen {
       _ => false
     };
     if (escapes) {
-      throw Error($"the exception '{name}' belongs to its catch and ends with it: it cannot be stored, returned or moved out; copy its Id and Message, or throw it", node);
+      throw Error($"the exception '{name}' belongs to its catch and ends with it: it cannot be stored, returned or moved out; copy its id and message, or throw it", node);
     }
     foreach (var child in node.Children) {
       CheckCatchVariableStays(child, name);
@@ -508,12 +508,13 @@ public sealed partial class CodeGen {
       bool caughtAll = false;
       for (int next = ordinal; next < frame.Catches.Count; next++) {
         var (id, _) = CatchTarget(frame.Catches[next].Node);
-        if (id == null) {
+        string? on = catchOnCondition.TryGetValue(frame.Catches[next].Node, out var condition) ? condition : null;   // catch E on x (spec 7.2.3)
+        if (id == null && on == null) {
           sb.Append($"{pad}  goto {frame.CatchLabel(next)};\n");
           caughtAll = true;
           break;
         }
-        string test = id == -2 ? "df_err->descriptor->silent" : $"df_exc_is(df_err, {id})";
+        string test = id == null ? on! : (id == -2 ? "df_err->descriptor->silent" : $"df_exc_is(df_err, {id})") + (on != null ? $" && {on}" : "");
         sb.Append($"{pad}  if ({test}) goto {frame.CatchLabel(next)};\n");
       }
       if (!caughtAll) {
@@ -541,7 +542,12 @@ public sealed partial class CodeGen {
   }
 
   // the atEnd body, inlined at an exit of its scope
+  bool returnUnwinding;   // EmitReturnUnwind is placing the atEnd blocks of a return
+
   void EmitAtEnd(Frame owner, int step, bool exceptionMode, StringBuilder sb, int indent) {
+    if (owner.AtEnds[step - 1].Text == "enforce-return" && (exceptionMode || !returnUnwinding)) {
+      return;   // the success atEnd clauses of an enforce on a return only (spec 7.2.4)
+    }
     string pad = Pad(indent);
     var block = owner.AtEnds[step - 1].Children[0];
     int savedLoopDepth = loopDepth;
@@ -667,6 +673,16 @@ public sealed partial class CodeGen {
 
   // return: atEnd blocks of every scope up to the function, then return the stored value
   void EmitReturnUnwind(StringBuilder sb, int indent) {
+    bool saved = returnUnwinding;
+    returnUnwinding = true;
+    try {
+      EmitReturnUnwindFrames(sb, indent);
+    } finally {
+      returnUnwinding = saved;
+    }
+  }
+
+  void EmitReturnUnwindFrames(StringBuilder sb, int indent) {
     string pad = Pad(indent);
     var frame = frames.Peek();
     while (frame != null) {
@@ -772,15 +788,18 @@ public sealed partial class CodeGen {
     return condition == "";
   }
 
-  // ex.Id, ex.Message, ex.Function, ex.Line
+  // the members of every exception (spec 15.2); also reserved as field names of an exception class
+  static readonly string[] ExceptionMembers = { "id", "message", "function", "line" };
+
+  // ex.id, ex.message, ex.function, ex.line
   Expr ExceptionMember(Expr exception, string member, Node at) {
     return member switch {
-      "Id" => new Expr($"(({exception.Code})->id)", "u64"),
-      "Message" => new Expr($"df_str_dup_cstr(({exception.Code})->message)", "string"),
-      "Function" => new Expr($"df_str_dup_cstr(({exception.Code})->function)", "string"),
-      "Line" => new Expr($"(({exception.Code})->line)", "u64"),
-      _ when new[] { "Id", "Message", "Function", "Line" }.FirstOrDefault(known => known.Equals(member, StringComparison.OrdinalIgnoreCase)) is string known
-        => throw Error($"Exception has no member '{member}': write {known} (spec 10.2)", at),
+      "id" => new Expr($"(({exception.Code})->id)", "u64"),
+      "message" => new Expr($"df_str_dup_cstr(({exception.Code})->message)", "string"),
+      "function" => new Expr($"df_str_dup_cstr(({exception.Code})->function)", "string"),
+      "line" => new Expr($"(({exception.Code})->line)", "u64"),
+      _ when ExceptionMembers.FirstOrDefault(known => known.Equals(member, StringComparison.OrdinalIgnoreCase)) is string known
+        => throw Error($"Exception has no member '{member}': write {known} (spec 15.2)", at),
       _ => throw Error($"member '{member}' of Exception is not supported yet", at)
     };
   }

@@ -1,0 +1,7 @@
+namespace catch_on_outside
+fun i32 divide(i32 a, i32 b) { a / b }
+fun f(i32 x) {
+  divide(x, 0)
+  catch DivisionByZeroException on x { }
+}
+f(1)

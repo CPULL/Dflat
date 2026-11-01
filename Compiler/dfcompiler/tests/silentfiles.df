@@ -14,7 +14,7 @@ File(File.combinePaths(base, "inner/file.txt")).writeAllText("x")
 fun string tryDelete(string path) {
   bool done = File.delete(path)
   return $"deleted: {done}"
-  catch DirectoryNotEmptyException e { return "DirectoryNotEmptyException (silent, id " + e.Id + ")" }
+  catch DirectoryNotEmptyException e { return "DirectoryNotEmptyException (silent, id " + e.id + ")" }
 }
 r.Console.log(tryDelete(File.combinePaths(base, "inner")))     // DirectoryNotEmptyException (silent, id 28)
 r.Console.log(tryDelete(File.combinePaths(base, "missing")))   // deleted: false
@@ -27,14 +27,14 @@ r.Console.log(plainDelete(File.combinePaths(base, "inner")))   // false
 fun string tryCreate(string path) {
   File made = File.createDirectory(path)
   return "created " + made.name
-  catch FileNameAlreadyExistsException e { return "FileNameAlreadyExistsException (silent, id " + e.Id + ")" }
+  catch FileNameAlreadyExistsException e { return "FileNameAlreadyExistsException (silent, id " + e.id + ")" }
 }
 r.Console.log(tryCreate(File.combinePaths(base, "inner")))     // FileNameAlreadyExistsException (silent, id 29)
 r.Console.log(tryCreate(File.combinePaths(base, "fresh")))     // created fresh
 
 fun string viaObject(File directory) {
   return "deleted " + directory.delete()
-  catch DirectoryNotEmptyException e { return "through the object, id " + e.Id }
+  catch DirectoryNotEmptyException e { return "through the object, id " + e.id }
 }
 r.Console.log(viaObject(File(File.combinePaths(base, "inner"))))   // through the object, id 28
 
@@ -58,7 +58,7 @@ r.Console.log(copyIgnoring(File(File.combinePaths(base, "inner/file.txt")), File
 fun string seekBack(FileStream stream) {
   u64 at = stream.seek(-5, fs.StreamSeekOrigin.Begin)
   return $"position {at}"
-  catch SeekBeforeBeginException e { return "SeekBeforeBeginException (silent, id " + e.Id + ")" }
+  catch SeekBeforeBeginException e { return "SeekBeforeBeginException (silent, id " + e.id + ")" }
 }
 fun string seekIgnored(FileStream stream) {
   u64 at = stream.seek(-5, fs.StreamSeekOrigin.Begin)
@@ -72,7 +72,7 @@ s is atEnd.
 // the library errors that are not silent still go up on their own
 fun string missing(string path) {
   return File(path).readAllText()
-  catch FileNotFoundException e { return "FileNotFoundException id " + e.Id }
+  catch FileNotFoundException e { return "FileNotFoundException id " + e.id }
 }
 r.Console.log(missing(File.combinePaths(base, "nothing.txt")))  // FileNotFoundException id 25
 

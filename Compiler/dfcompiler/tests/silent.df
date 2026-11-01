@@ -25,7 +25,7 @@ fun ownType() {
   date c = date("still bad")
   r.Console.log("not printed when raised")
   catch InvalidDateTimeFormatException ex {
-    r.Console.log("caught: " + ex.Message)
+    r.Console.log("caught: " + ex.message)
   }
 }
 
@@ -33,7 +33,7 @@ fun otherType() {
   time late = time(90000000)
   r.Console.log("not printed either")
   catch OutOfRangeCastException ex {
-    r.Console.log("caught: " + ex.Message)
+    r.Console.log("caught: " + ex.message)
   }
 }
 

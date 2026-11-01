@@ -1,0 +1,2 @@
+namespace return_exit_code_type
+return "x"

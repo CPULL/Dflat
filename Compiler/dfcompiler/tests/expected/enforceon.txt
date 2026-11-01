@@ -1,0 +1,22 @@
+a fails
+  from a: a failed
+b fails
+    a works
+  from b: b failed
+nested calls
+  right: b
+through a member
+  right: a
+other objects
+  not on a: loose failed
+return
+  success atEnd 1
+  success atEnd 2
+  finally
+  15
+raise before the return
+  caught
+  finally
+  -1
+done
+---- exit code 0 ----

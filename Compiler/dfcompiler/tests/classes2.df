@@ -75,7 +75,7 @@ r.Console.log(tryDivider(0))
 fun i32 viaParent(Base b, i32 n) {
   return b.Run(n)
   catch DivisionByZeroException ex {
-    r.Console.log("caught " + ex.Message)
+    r.Console.log("caught " + ex.message)
     return -2
   }
 }

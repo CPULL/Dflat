@@ -1,0 +1,11 @@
+namespace enforce_continue
+fun f(arr<i32?> items) {
+  for var item in items {
+    enforce item {
+      if item > 2 {
+        continue
+      }
+    }
+  }
+}
+f([1, 2, 3])

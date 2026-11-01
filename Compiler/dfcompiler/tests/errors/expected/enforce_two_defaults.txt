@@ -1,0 +1,1 @@
+enforce_two_defaults.df(6,11): error: an enforce has at most one default (spec 7.2.1), found '{'

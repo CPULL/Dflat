@@ -1,0 +1,1 @@
+return_last_void.df(5): error: this function must return an i32: its last expression gives nothing

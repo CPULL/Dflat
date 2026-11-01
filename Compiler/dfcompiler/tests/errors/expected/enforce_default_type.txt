@@ -1,0 +1,1 @@
+enforce_default_type.df(4): error: cannot convert string to i32 implicitly; use a cast

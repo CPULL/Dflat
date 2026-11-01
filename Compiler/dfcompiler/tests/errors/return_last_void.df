@@ -1,0 +1,7 @@
+namespace return_last_void
+fun g() { }
+fun i32 f() {
+  i32 x = 1
+  g()
+}
+f()

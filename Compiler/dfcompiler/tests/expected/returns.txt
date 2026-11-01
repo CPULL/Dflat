@@ -1,0 +1,20 @@
+one value
+1 2 3 -1 50 4 5
+true 1.5 z abc lit 7 0
+a, box b, moved, counted (1 user)
+  end counted
+  end moved
+  end box b
+  end a
+  void
+  not early
+several values
+1 one
+1
+10 2.5 true
+left right
+tuples
+2 bob
+(3, 4) [1, 2] [a: 1]
+done
+---- exit code 0 ----

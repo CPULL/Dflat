@@ -1,0 +1,1 @@
+enforce_lockfail_no_lock.df(5): error: 'a' has no lock: lockfail is for the (@)T variables of the enforce (spec 7.2.2), which are not built yet

@@ -1,0 +1,1 @@
+catch_on_outside.df(5,33): error: catch ... on is a clause of an enforce (spec 7.2): it lists the variables of the enforce, found 'on'

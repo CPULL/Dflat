@@ -1,0 +1,8 @@
+namespace enforce_else_mixed
+fun f(i32? a) {
+  enforce a {
+  } else {
+  }
+  null on a { }
+}
+f(1)

@@ -5,12 +5,17 @@
 		var res = regex.exec(text)
 		
 		if (res == null) {
-			$("#output").html("Type the example better");
+			$("#output").html("You should have types something like: Root.Console.log(\"Hello, John!\")");
 			return;
 	  }
 		var msg = "";
-		if (res.length > 1) msg = res[1];
-		if (res.length > 2 && res[2]) msg += "\n; is not required";
+		var hasSemicolon = res.length > 2 && res[2];
+
+		if (res.length > 1) {
+			msg = res[1];
+			if (msg == "Hello, NAME!") msg += "\nA copy/paste dude here..."
+		}
+		if (hasSemicolon) msg += "\n; is not required";
 		if (regexCase.exec(text) == null) msg += "\nRoot and Console need to be written with the first letter uppercase!";
 		$("#output").html(msg);
 	}

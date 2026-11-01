@@ -4,6 +4,9 @@ Changes from the previous version -----------------------
 - a declaration can carry its own atEnd (spec 14.2): Some a = Some() atEnd { } is atEnd of a, also after a multiple declaration; atEnd of a, b { } no longer runs when all the listed variables are null
 - enforce: the last atEnd raising with nothing pending bubbles up (was a Panic); enforce expressions also in assignments, arguments and var r = enforce ... (not in conditions and loop headers)
 - arrays (point 20, second part): a local array that ends with its scope can also be given to a function that only reads it (checked through the calls) and returned (it moves to the caller: arr<T> x = f() then owns it); arrays kept by a function, assigned, moved with ->, viewed or in fields still leak
+- a size that does not fit (arr<T>[n], vec<T>[n], reserve with n * size overflowing) ends the program as a failed allocation, on every target (was left to the C library)
+- a literal as an argument takes the type of the parameter: m += [k: v], m.add([k: v]), s.add([2, 3]), v.add([2, 3]) (point 53); when several collections fit, the arr wins
+- enforce expressions also in an if condition (evaluated once, before the if); an else if and loop headers stay not supported
 
 Done -----------------------
 

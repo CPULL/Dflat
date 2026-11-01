@@ -36,30 +36,69 @@ const languageRules = [
 function highlightCodeNode(node) {
     if (!node) return;
 
-    const rawText = node.textContent;
-    
-    // Escape HTML for safety
-    const safeText = rawText
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;");
+    const text = node.textContent;
+    node.innerHTML = ''; // Clear current content
 
-    // Dynamically combine all rules into one regex safely
     const combinedPattern = new RegExp(
         languageRules.map(rule => `(${rule.regex.source})`).join('|'),
         'g'
     );
 
-    // Replace matches using the corresponding rule type
-    const highlighted = safeText.replace(combinedPattern, (match, ...args) => {
-        // Find which capture group matched
+    let lastIndex = 0;
+    let match;
+
+    while ((match = combinedPattern.exec(text)) !== null) {
+        // 1. Append preceding plain text safely as a text node
+        if (match.index > lastIndex) {
+            node.appendChild(document.createTextNode(text.substring(lastIndex, match.index)));
+        }
+
+        // 2. Find which rule matched
+        let matchedRule = null;
         for (let i = 0; i < languageRules.length; i++) {
-            if (args[i] !== undefined) {
-                return `<span class="token ${languageRules[i].type}">${match}</span>`;
+            if (match[i + 1] !== undefined) {
+                matchedRule = languageRules[i];
+                break;
             }
         }
-        return match;
+
+        // 3. Append matched token inside a styled span
+        if (matchedRule) {
+            const span = document.createElement('span');
+            span.className = `token ${matchedRule.type}`;
+            span.textContent = match[0];
+            node.appendChild(span);
+        } else {
+            node.appendChild(document.createTextNode(match[0]));
+        }
+
+        lastIndex = combinedPattern.lastIndex;
+    }
+
+    // Append any remaining text at the end
+    if (lastIndex < text.length) {
+        node.appendChild(document.createTextNode(text.substring(lastIndex)));
+    }
+}
+
+function initDflatEditor(textareaId, highlightingCodeId) {
+    const textarea = document.getElementById(textareaId);
+    const highlightingCode = document.getElementById(highlightingCodeId);
+
+    if (!textarea || !highlightingCode) return;
+
+    function update() {
+        // ALWAYS use textContent here so raw < and > stay raw characters in DOM
+        highlightingCode.textContent = textarea.value;
+        highlightCodeNode(highlightingCode);
+    }
+
+    textarea.addEventListener('input', update);
+    textarea.addEventListener('scroll', () => {
+        highlightingCode.scrollTop = textarea.scrollTop;
+        highlightingCode.scrollLeft = textarea.scrollLeft;
     });
 
-    node.innerHTML = highlighted;
+    // Initial sync
+    update();
 }

@@ -1459,7 +1459,6 @@ i32 r = enforce account.whatever() lockfail { -1 } default { 0 }
 
 ### 7.2.7 Under discussion
 
-- `enforce w is Blah b { }`: the liveness check and a type test in one step; what runs when `w` is alive but is not a `Blah`.
 - The order of the locks across threads (with multithreading).
 
 ---
@@ -3047,7 +3046,7 @@ Level 1 = most important, level 3 = least.
 - Strings: borrowed strings in the advanced cases (who releases them, lifetimes across fields and collections)
 - Ownership: when a local borrow ends (last use or end of scope)
 - Reference counting (12.7): `->` from a counted variable into a `->T` parameter or a plain receiver (removing the counting); `->pack[0]` on a list of counted items; counted natives and strings (`@i32`, `@string`); counted traits and downcasts; `&` parameters of a primary constructor; whether a weak reference can be made without `_` in the expression; which methods a read-only `@T` can call; the call form of a `(@)T` parameter
-- Reference counting: `enforce w is Blah b { }` (7.2.7); the order of the locks, waiting and deadlocks with threads; nested locking of the same `(@)T`
+- Reference counting: the order of the locks, waiting and deadlocks with threads; nested locking of the same `(@)T`
 - Reference counting: generics with counted type arguments (`Stack<@Dog>`), after 0.1.0; the `Rc` / `Arc` split, with threads; counted captures of lambdas, and the weak capture of a plain variable (13.3)
 - Properties: position of `readonly` / `readwrite` / `writeonly` next to `public` and `static`, and their use together with a body (11.1.4); `override` of a property with only one half; access to a property through a trait-typed value (`any`), left to the compiler
 - DateTime library: import path, timezone database, parsing for `CalendarDate` / `ZonedDateTime`
@@ -3588,3 +3587,4 @@ Level 1 = most important, level 3 = least.
 - 12.6 Example: `Dog other = dog.tryClone()` (was `Dog?`: objects are nullable already, `T?` on them is a compile error, 7.1)
 - 15.3 ID 16 retired (was `ChangingRefCountTypeException`, no use with one kind of counting); IDs 49 `ObjectNotClonableException` and 50 `WritingOnRefCountWithoutLockingException`; 99: the open item on `ChangingRefCountTypeException` removed
 - 12 A new object that nothing keeps ends when its statement ends (an argument to a borrowing parameter, a receiver); a borrow of it is valid only in that statement; 99: the open item removed
+- 7.2.7, 99 `enforce w is Blah b { }` dropped (no longer under discussion)

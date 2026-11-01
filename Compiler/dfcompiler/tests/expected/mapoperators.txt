@@ -14,4 +14,5 @@ dos
 locked
 locked too
 [1: 10, 2: 20]
+literals [a: 1, b: 2, c: 3] 4 [1, 2, 3] [x, y, z]
 ---- exit code 0 ----

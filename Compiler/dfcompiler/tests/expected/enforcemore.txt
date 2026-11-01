@@ -13,5 +13,8 @@ expressions
   assigned -1
   argument -10
   var 0
+if condition
+  big
+  small or none
 done
 ---- exit code 0 ----

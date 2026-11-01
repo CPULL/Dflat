@@ -82,3 +82,16 @@ for (i32 k, i32 v) in counts {
   counts += (k, v * 10)                              // replacing a value does not change the size
 }
 r.Console.log(counts)                                // [1: 10, 2: 20]
+// a literal as the argument takes the type of the parameter (point 53)
+map<string, i32> lit = ["a": 1]
+lit.add(["b": 2])
+lit += ["c": 3]
+set<i32> litSet = [1]
+litSet.add([2, 3])
+litSet += [4]
+vec<i32> litVec = [1]
+litVec.add([2, 3])
+list<string> litList = ["x"]
+litList.add(["y", "z"])
+r.Console.log($"literals {lit} {litSet.len} {litVec} {litList}")
+

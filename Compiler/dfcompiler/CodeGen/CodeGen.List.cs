@@ -536,6 +536,9 @@ public sealed partial class CodeGen {
   // the type of what add(x) is given when it is a collection of the items of the list (and not an item itself), or null
   string? AddedCollectionType(Node arg, Scope scope, string elem) {
     var operand = arg.Kind == "Gift" ? arg.Children[0] : arg;
+    if (operand.Kind == "List" && !IsArr(elem) && !IsVec(elem) && !IsList(elem)) {
+      return "arr<" + elem + ">";   // v.add([2, 3]): the literal is an arr of the items (spec 6.3, point 53)
+    }
     if (operand.Kind is not ("Name" or "Member")) {
       return null;
     }
@@ -554,7 +557,7 @@ public sealed partial class CodeGen {
     bool moving = arg.Kind == "Gift";
     bool cloning = IsClass(elem) && !moving;   // a plain add(other) clones the object items (spec 6.6, 12.6)
     cloneUsed |= cloning;
-    var source = ExprOf(arg, scope);
+    var source = ExprOf(arg, scope, sourceType);   // a literal takes the type of the source (point 53)
     string held = NewTemp();
     string s = NewTemp();
     bool sourceIsObject = !IsArr(sourceType);

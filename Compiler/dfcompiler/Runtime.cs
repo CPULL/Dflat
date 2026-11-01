@@ -1475,6 +1475,9 @@ typedef struct { df_string* p; df_uns len; } df_arr_string;
 typedef struct { uint8_t* p; df_uns len; } df_arr_u8;
 
 static void* df_calloc(df_uns count, df_uns size) {
+  if (size != 0 && count > (df_uns)SIZE_MAX / size) {
+    df_out_of_memory();   /* count * size does not fit: reported as a failed allocation (spec 15.3) */
+  }
   void* p = calloc(count ? count : 1, size ? size : 1);
   if (!p) {
     df_out_of_memory();

@@ -62,8 +62,11 @@ public sealed partial class CodeGen {
     if (statement.Kind is "ExprStmt" or "Decl" or "Assign" or "Return" or "MultiAssign" && ContainsEnforceExpr(statement)) {
       return HoistEnforceExpr(statement);
     }
+    if (statement.Kind is "If" or "Switch" && holder.Kind is "Block" or "Program" && ContainsEnforceExpr(statement.Children[0])) {
+      return HoistEnforceExpr(statement);   // if enforce f.ok() default { false } { }: evaluated once, before the if (an else if stays out)
+    }
     if (statement.Kind != "Fun" && ContainsEnforceExpr(statement)) {
-      throw NotSupported("An enforce expression here (in a condition or a loop header: give it to a variable first)", statement);
+      throw NotSupported("An enforce expression here (in a loop header or an else if: give it to a variable first)", statement);
     }
     return null;
   }

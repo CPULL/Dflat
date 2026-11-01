@@ -74,7 +74,6 @@ The decided rules are in Specs12 and 12.7 (Specs0.0.19). Principle: the Rust mod
 Decided (Specs12.7): `@T` read-only, `(@)T` read/write with a lock in the object; reads never lock; writes need the lock; `enforce x { }` takes it and releases it when the `enforce` ends (Specs7.2.5); writing without it is an exception.
 - UNDERDISCUSSION: at the call only the writing forms are marked (`a((@)rc)`, as `b((&)v)`); read-only is written only in the definition (`a(rc)`). No transformation between read-only and read/write: it is decided at creation.
 - Open: waiting or try-lock (today `lockfail` reads as a try-lock), nested locking in method bodies (reentrant lock or lock held for the whole call), the order of the locks and deadlocks with threads (FUTURE). The exception for a write without the lock is `WritingOnRefCountWithoutLockingException`, ID 50.
-- UNDERDISCUSSION (Specs7.2.7): `enforce w is Blah b { b.something() }` checks in one statement that `w` is alive and is a `Blah`; `b` is a temporary user for the block. Open: what runs when `w` is alive but not a `Blah`.
 - Not mapped yet: mutation through several users (Rust `RefCell`, `Mutex`, `RwLock`, `Rc::get_mut`, `Rc::make_mut`).
 
 ### FUTURE
@@ -98,7 +97,7 @@ Decided (Specs12.7): `@T` read-only, `(@)T` read/write with a lock in the object
 - 75. Collections and threads: shared collections need locks or immutable views; nothing is specified (see the `Rc` / `Arc` split above).
 - Widening of the stuck buckets of `hmap` / `hset` (Specs6.8.5.1, Specs99).
 
-# Part 4 - Not built yet (compiler 0.0.41alpha)
+# Part 4 - Not built yet (compiler 0.0.44alpha)
 
 What the specification decides and the compiler does not build. The point numbers are the old collection points.
 
@@ -115,7 +114,7 @@ What the specification decides and the compiler does not build. The point number
 
 - 6, 7. The counter of open iterators and views and the change checks on `arr`: an `arr` has no header yet (Specs6.4, 6.6).
 - 8. The compile-time proof of a change inside a loop (Specs6.4): only the runtime check is built.
-- 18. A failed allocation ends the program (a panic) instead of raising `OutOfMemoryException` in Debug (Specs6.1, 15.3); a huge `vec<T>[n]`, `arr<T>[n]` or `fill(count, value)` is not checked for overflow of `n * size`.
+- 18. A failed allocation ends the program (a panic) instead of raising `OutOfMemoryException` in Debug (Specs6.1, 15.3); a size that does not fit (`n * size` overflowing) ends it the same way since 2026-11-01.
 - 34. `c[a..b]!` (clone is built, the copy of a view is not) and `get_view` for custom collections (Specs6.5).
 - 35. Cloning (Specs12.6) is built for objects, `vec`, `list` (also of counted items), and since 2026-10-31 `map`, `hmap`, `set`, `hset` (a new collection, then `add(this)`), the plain `add(other)` and `copyFrom` (object items cloned, the items written over end); `tryClone()` since 2026-10-31; not yet: tuple fields with strings or objects, the object items of the set operations (sets hold no objects yet). `fill` of an object stays a compile error (Specs6.6).
 - 36. Lambdas and function types (Specs13.3), so `sort(lambda)` and the functional members; sorting objects and tuples with the default comparer.
@@ -135,7 +134,7 @@ What the specification decides and the compiler does not build. The point number
 - 46, 48. Object keys in `hmap` (step 8 of its build order) and in `map`, after `Keyable`.
 - 50. No iterator object for `hmap` (the `for` loop and the views use the cursor directly).
 - 52, 55, set step 7. Objects as items of `set` and `hset` and in the set operations (`union` ...) and `add(collection)`: they need clone and `Keyable`; the usual warning until then.
-- 53. `m += ->other`, and a map literal as the argument (`m += [k: v]`, `m.add([k: v])`): the overload resolution does not type a literal.
+- 53. `m += ->other`. A literal as the argument (`m += [k: v]`, `m.add([k: v])`, `s.add([2, 3])`, `v.add([2, 3])`) is typed by the parameter since 2026-11-01.
 - 55. A view or a call result as the collection of `-=`. Cost note: every `set` / `hset` instance brings `vec`, `list` and the other set kind of its item type (the overloads of `add`).
 - 78 step 5. Writable map values with `(&)` (needs `for (&)`, point 5, and point 83).
 - 79. `Keyable` (Specs11.2.1): needs the chained `executeAfter` (point 9) and the default hash, `compareTo` and `equals` of classes.
@@ -147,5 +146,5 @@ What the specification decides and the compiler does not build. The point number
 - Reference counting (Specs12.7, phase 4b). Steps 1 to 7 are built (2026-10-30): `list<@T>` and `vec<@T>` (step 7; since 2026-10-31 also `has`, `indexOf`, `remove`, `removeAll`, `replace`, `pop`, `fill`, `transformTo`, `reverse`; not yet `sort`, `resize`, `fillAtCapacity`, views, `getIterator`, `->c[i]` (open, Specs99), `map<K, @T>` (maps hold no objects yet) and `arr<@T>`), `removeRefCounting()` (step 6), weak references (step 5, see below), `@T` fields (body and header), their assignments and release with the holder, the cycle warning (level 1, also for a field of the class's own type), `@T` local variables, `var x = @T()`, `=` between counted variables, the release at the end of the scope, `is done.`, `usersCount`, `weakrefsCount`, `@plain`, the errors for borrowing a counted object, `@this` and `@` on a borrow, `@T` parameters, `f(->rc)`, `@T` results (also `var x = f()`), the errors for a counted argument to a plain, `&`, `(&)` or `->T` parameter. Not built: `(@)T` and its lock with `enforce`, `(@)T` parameters, `@T` in traits, overrides and extern functions, `->k.field`, static counted fields and counted properties, a counted result used directly in an expression (`make().bark()`), counted keys (`@T` is not a type argument yet), local `&T` declarations (not parsed), a method call taking a usage, counted variables in multiple assignments and inside `atEnd` blocks. The old `.asRefCount`, `.asSharedRefCount` and `.isRC` were never built.
 - Weak references are built on the Specs0.0.19 rules (2026-10-30). The Gfx library (Libraries/Gfx), its Demo and Dha Flatty Bird still use the old weak references on plain objects and `_=`, so they do not compile until they are redone.
 - DECIDED (2026-11-01, written in Specs12, built, point 85): a new object that nothing keeps (an argument to a borrowing parameter, a receiver) ends when its statement ends, as the full expressions of C++.
-- Phase 4a gaps: objects in arrays and tuples are not owned and not destroyed; static fields are not tracked; constructor `atEnd` fragments (need secondary constructors); `atEnd` after other statements; use after a move is found at run time (`NullPointerException`), not at compile time; no lifetime check for borrows.
+- Phase 4a gaps: objects in tuples are not owned and not destroyed (in arrays: point 20); static fields are not tracked; constructor `atEnd` fragments (need secondary constructors); use after a move is found at run time (`NullPointerException`), not at compile time; no lifetime check for borrows.
 - Phase 4c: collections that own their elements fully (the drop of `arr`, point 20), compile-time use-after-move and lifetimes.

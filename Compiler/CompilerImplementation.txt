@@ -1871,3 +1871,12 @@ ARRAYS, SECOND PART (2026-11-01, spec 6.8.1, point 20)
   var x = [...].
 - Test arrfree (reader functions, returned arrays, a keeper).
 
+SMALL FIXES (2026-11-01)
+- df_calloc checks count * size against SIZE_MAX before calloc; VecReserve checks the wanted count against SIZE_MAX / sizeof(item); both
+  call df_out_of_memory (point 18).
+- ArgCost (CodeGen.Features.cs): a List or MapLit argument is typed as the parameter (ExprOf with the expected type, a CompileException
+  means it does not fit); cost 0 for an arr or a map literal, 1 for the other collections, so a bare [...] prefers arr. AddedCollectionType
+  gives arr<elem> for a list literal, and VecAddCollection / ListAddCollection type their source with it (point 53).
+- HoistEnforceExpr also for an If or a Switch at statement level whose condition has an enforce expression.
+- Tests mapoperators (literal arguments), enforcemore (if condition); enforce_expr_condition has the new message.
+

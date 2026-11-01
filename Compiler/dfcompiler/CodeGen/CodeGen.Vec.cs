@@ -1117,7 +1117,7 @@ public class set<T> : SetCollection<T> {
     string want = NewTemp();
     string capacity = NewTemp();
     string bigger = NewTemp();
-    return $"df_uns {want} = {needed}; if ({want} > {items}.len) {{ df_uns {capacity} = {items}.len == 0 ? 16 "
+    return $"df_uns {want} = {needed}; if ({want} > (df_uns)SIZE_MAX / sizeof({elemType})) {{ df_out_of_memory(); }} if ({want} > {items}.len) {{ df_uns {capacity} = {items}.len == 0 ? 16 "
       + $": {items}.len * sizeof({elemType}) < {VecDoubleGrowLimit} ? {items}.len * 2 : {items}.len + {items}.len / 2; if ({capacity} < {want}) {{ {capacity} = {want}; }} "
       + $"{elemType}* {bigger} = ({elemType}*)df_calloc({capacity}, sizeof({elemType})); if ({held}->{VecField(type, "count")} > 0) {{ memcpy({bigger}, {items}.p, {held}->{VecField(type, "count")} * sizeof({elemType})); }} "
       + $"free({items}.p); {items}.p = {bigger}; {items}.len = {capacity}; }} ";
@@ -1145,7 +1145,7 @@ public class set<T> : SetCollection<T> {
     bool moving = arg.Kind == "Gift";
     bool cloning = IsClass(elem) && !moving;   // a plain add(other) clones the object items (spec 6.6, 12.6)
     cloneUsed |= cloning;
-    var source = ExprOf(arg, scope);
+    var source = ExprOf(arg, scope, sourceType);   // a literal takes the type of the source (point 53)
     string held = NewTemp();
     string s = NewTemp();
     string amount = NewTemp();

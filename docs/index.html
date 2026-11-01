@@ -3,6 +3,7 @@
 <head>
 	<link rel="stylesheet" href="css/css.css">
 	<link rel="stylesheet" href="css/code.css">
+	<link rel="stylesheet" href="css/editor.css">
 	<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
 	<script src="js/codeHighlight.js"></script>
   <title>Learn DFlat</title>
@@ -39,13 +40,26 @@
   <pre><code id="editor" class="code-editor">
 alias Root.Console as c
 c.log("Hello, world!")
+// This is read only
 	</code></pre>
+
+
+<div class="dflat-editor-container">
+    <pre><code id="highlighting" class="code-editor"></code></pre>
+    <!-- Use literal '>' and '<', never &gt; or &lt; inside a textarea -->
+    <textarea id="editing" spellcheck="false">
+alias Root.Console as c
+c.log("Hello, world!")
+// You can edit this one
+</textarea>
+</div>
 
 	</div>
 </body>
 <script>
 
 	highlightCodeNode($("#editor")[0]);
+	initDflatEditor('editing', 'highlighting');
 </script>
 
 </html>

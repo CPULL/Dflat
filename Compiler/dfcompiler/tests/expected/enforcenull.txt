@@ -1,11 +1,14 @@
 all three
   all there: 3 a
+  end a
 a null
   no a
+  end b
 b null
   no b or c
 c null
   no b or c
+  end c
 first clause
   b missing (named)
   something missing (any)

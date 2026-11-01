@@ -1176,27 +1176,47 @@ static bool df_str_owner = true;
 /* new strings that are only read in a statement (an operand, an argument): freed when the statement ends. A function frees the
    ones above the mark it took when it started, so the temporaries of its callers stay */
 static df_string* df_tmps = NULL;
+static bool* df_tmp_objs = NULL;   /* the entry is an object (dropped), not a string (freed) */
 static size_t df_tmp_top = 0;
 static size_t df_tmp_cap = 0;
+static void df_drop(void* obj);
 
-static df_string df_tmp(df_string s) {
-  if (!s) {
-    return s;
-  }
+static void df_tmp_push(void* p, bool object) {
   if (df_tmp_top == df_tmp_cap) {
     df_tmp_cap = df_tmp_cap ? df_tmp_cap * 2 : 64;
     df_tmps = (df_string*)realloc(df_tmps, df_tmp_cap * sizeof(df_string));
-    if (!df_tmps) {
+    df_tmp_objs = (bool*)realloc(df_tmp_objs, df_tmp_cap * sizeof(bool));
+    if (!df_tmps || !df_tmp_objs) {
       df_out_of_memory();
     }
   }
-  df_tmps[df_tmp_top++] = s;
+  df_tmp_objs[df_tmp_top] = object;
+  df_tmps[df_tmp_top++] = (df_string)p;
+}
+
+static df_string df_tmp(df_string s) {
+  if (s) {
+    df_tmp_push((void*)s, false);
+  }
   return s;
+}
+
+/* a new object only used in a statement (an argument to a borrowing parameter, a receiver): it ends when the statement ends */
+static void* df_tmpo(void* o) {
+  if (o) {
+    df_tmp_push(o, true);
+  }
+  return o;
 }
 
 static void df_tmp_drop(size_t mark) {
   while (df_tmp_top > mark) {
-    df_str_free(df_tmps[--df_tmp_top]);
+    --df_tmp_top;
+    if (df_tmp_objs[df_tmp_top]) {
+      df_drop((void*)df_tmps[df_tmp_top]);
+    } else {
+      df_str_free(df_tmps[df_tmp_top]);
+    }
   }
 }
 

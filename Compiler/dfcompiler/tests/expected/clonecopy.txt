@@ -11,6 +11,8 @@ arr copyFrom over y2
   end y2
 y y1 x1
 end of run
+  end y1
+  end x1
   end a2
   end a1
   end a2

@@ -1,0 +1,63 @@
+// A local array made in its scope ends with the scope (spec 6.8.1, point 20): its objects end, its strings and its block are freed. For now
+// only arrays used as a[i], a.member or in a for: one given to a function, assigned, moved, returned or viewed is left as before
+alias Root as r
+
+public class Dog(string name) {
+  public string name
+} atEnd {
+  r.Console.log("  end " + name)
+}
+
+fun show(arr<Dog> dogs) { r.Console.log($"  {dogs.len} dogs") }
+
+fun objects() {
+  arr<Dog> dogs = [Dog("a"), Dog("b")]
+  r.Console.log("  first " + dogs[0].name)
+  for var d in dogs {
+    r.Console.log("  loop " + d.name)
+  }
+}
+
+fun strings() {
+  arr<string> words = ["one", "two"]
+  words[1] = "two" + "!"
+  r.Console.log($"  {words[0]} {words[1]} {words.len}")
+}
+
+fun nested() {
+  arr<arr<Dog>> rows = [[Dog("r1")], [Dog("r2"), Dog("r3")]]
+  r.Console.log($"  rows {rows.len}")
+}
+
+fun sized() {
+  arr<Dog> slots = arr<Dog>[3]
+  slots[1] = Dog("slot")
+  slots.fill(null)
+  r.Console.log("  filled")
+}
+
+fun inLoop() {
+  for i32 i = 0..2 {
+    arr<Dog> pass = [Dog($"pass {i}")]
+    r.Console.log("  " + pass[0].name)
+  }
+}
+
+fun given() {
+  arr<Dog> kept = [Dog("given")]
+  show(kept)                         // given to a function: not freed (as before)
+}
+
+r.Console.log("objects")
+objects()
+r.Console.log("strings")
+strings()
+r.Console.log("nested")
+nested()
+r.Console.log("sized")
+sized()
+r.Console.log("in a loop")
+inLoop()
+r.Console.log("given")
+given()
+r.Console.log("done")

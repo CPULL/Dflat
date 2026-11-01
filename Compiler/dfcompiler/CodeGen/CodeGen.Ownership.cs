@@ -292,16 +292,82 @@ public sealed partial class CodeGen {
       owners.Add(statement);
       drops.Add(DropNode(statement.Text!, statement));
     }
+    for (int index = 0; index < statements.Count; index++) {
+      var statement = statements[index];
+      if (statement.Kind == "Decl" && IsOwnedLocalArray(statement, statements.Skip(index + 1))) {
+        owners.Add(statement);   // hoisted, so the drop at the end of the scope sees it
+        drops.Add(Synthetic("AtEnd", statement, "drop").Add(Synthetic("Block", statement).Add(Synthetic("ArrDrop", statement, statement.Text))));
+      }
+    }
     frame.AtEnds.InsertRange(0, drops);
     return owners;
   }
+
+  // an array that ends with its scope (spec 6.8.1, point 20), for now only when that is safe to see: a local declared with its type from a new
+  // array (a literal, arr<T>[n], a clone), and used afterwards only as a[i], a.member (not transformTo, which moves the block) or the
+  // source of a for. Any other use (an argument, an assignment, ->a, a return, a view a[x..y]) leaves it as before: not freed
+  static bool IsOwnedLocalArray(Node decl, IEnumerable<Node> after) {
+    if (!IsArrTypeNode(decl.Children.FirstOrDefault(child => TypeNodeKinds.Contains(child.Kind)))) {
+      return false;
+    }
+    if (decl.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ').Contains("const") == true) {
+      return false;
+    }
+    var value = decl.Children.FirstOrDefault(child => child.Kind == "Init")?.Children[0];
+    bool fresh = value is { Kind: "List" or "Copy" } || value is { Kind: "Index" } && value.Children[0].Kind == "GenericRef";
+    return fresh && after.All(node => ArrayUsesStayLocal(node, null, 0, decl.Text!));
+  }
+
+  static bool IsArrTypeNode(Node? type) =>
+    type is { Kind: "Type", Text: "arr", Children.Count: 1 } || type is { Kind: "ResolvedType" } && type.Text!.StartsWith("arr<");
+
+  static bool ArrayUsesStayLocal(Node node, Node? parent, int position, string name) {
+    if (node.Kind == "Name" && node.Text == name) {
+      return parent switch {
+        { Kind: "Index" } => position == 0 && parent.Children.Count > 1 && parent.Children[1].Kind != "Range",
+        { Kind: "Member" } => position == 0 && parent.Text != "transformTo",
+        { Kind: "For" or "In" } => true,
+        _ => false
+      };
+    }
+    if (node.Kind is "Fun" or "Lambda") {
+      return true;
+    }
+    for (int index = 0; index < node.Children.Count; index++) {
+      if (!ArrayUsesStayLocal(node.Children[index], node, index, name)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // a[i] items end with the array: objects dropped, strings freed, arrays of arrays dropped in turn; then the block is freed
+  string ArrDropHelper(string type) {
+    string elem = ArrElem(type);
+    string name = "df_arrdrop_" + System.Text.RegularExpressions.Regex.Replace(type, @"[^A-Za-z0-9_]", "_");
+    if (arrDropHelpers.Add(name)) {
+      string item = IsClass(elem) ? "if (a.p[i] != NULL) { df_drop((void*)a.p[i]); }"
+        : elem == "string" ? "df_str_free(a.p[i]);"
+        : IsArr(elem) ? $"{ArrDropHelper(elem)}(a.p[i]);" : "";
+      string arrType = ArrCType(elem);
+      classCode.Append($"static void {name}({arrType} a) {{\n");
+      if (item != "") {
+        classCode.Append($"  for (df_uns i = 0; i < a.len; i++) {{\n    {item}\n  }}\n");
+      }
+      classCode.Append("  free(a.p);\n}\n\n");
+    }
+    return name;
+  }
+
+  readonly HashSet<string> arrDropHelpers = new();
 
   // a loop body that declares objects: each pass is a block of its own, so its objects end with the pass
   List<Node> LoopStatements(List<Node> statements) {
     if (statements.Count == 0 || statements.Any(s => s.Kind is "AtEnd" or "AtEndOf" or "Catch" or "Label")) {
       return statements;
     }
-    if (!statements.Any(s => (s.Kind == "Decl" && (IsCountedDecl(s) || ObjectTypeOf(s) != null || IsStringDecl(s)))
+    if (!statements.Any(s => (s.Kind == "Decl" && (IsCountedDecl(s) || ObjectTypeOf(s) != null || IsStringDecl(s)
+          || IsArrTypeNode(s.Children.FirstOrDefault(child => TypeNodeKinds.Contains(child.Kind)))))
         || (s.Kind == "MultiAssign" && s.Children[0].Children.Any(target => target.Kind == "Decl" && IsStringDecl(target))))) {
       return statements;
     }

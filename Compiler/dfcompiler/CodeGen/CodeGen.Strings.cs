@@ -296,8 +296,17 @@ public sealed partial class CodeGen {
   }
 
   // the statements of a frame free the temporaries they made
+  // a new object that nothing keeps (point 85): it goes on the temporaries of the statement and ends with it; a counted result or a
+  // borrowed one is left alone
+  Expr TempObject(Expr e) {
+    if (!e.Fresh || !IsClass(e.Type) || IsTraitType(e.Type) || LibraryCode) {
+      return e;
+    }
+    return e with { Code = $"(({CType(e.Type)})df_tmpo((void*)({e.Code})))", Fresh = false };
+  }
+
   void EmitTmpRelease(StringBuilder sb, int from, string pad) {
-    if (fn != null && sb.Length > from && sb.ToString(from, sb.Length - from).Contains("df_tmp(")) {
+    if (fn != null && sb.Length > from && sb.ToString(from, sb.Length - from) is string code && (code.Contains("df_tmp(") || code.Contains("df_tmpo("))) {
       fn.UsesTmp = true;
       sb.Append($"{pad}df_tmp_drop(df_tm);\n");
     }

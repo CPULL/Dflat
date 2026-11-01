@@ -1,7 +1,7 @@
 # Dflat Language
 A new language D♭ that is the same as C# but easier to write and faster to execute
 
-**Version** 0.0.19  2026/10/30 by CPU
+**Version** 0.0.20  2026/11/01 by CPU
 
 ## D♭ — Dflat Language Specification (draft)
 
@@ -2178,6 +2178,7 @@ Rust model, Dflat syntax.
 - Single owner; freed at the end of the owner's scope, running the class `atEnd` (11.4). A counted object is owned by the counting system (12.7).
 - Strings follow these rules (4): `b = a` is the same string, `->a` moves, `a!` copies; the owner frees the string at the end of its scope.
 - Function parameters borrow; returning moves ownership to the caller.
+- A new object that nothing keeps ends when its statement ends, like the full expressions of C++: an argument given to a borrowing parameter (`show(Dog("a"))`), the receiver of a call or of a field read (`make().bark()`, `Dog("e").name`). A borrow taken from it is valid only in that statement (`Dog("f").same().bark()`); kept in a variable, it refers to a destroyed object after the statement, and using it raises an exception (12.4).
 - Borrows (`&T` read-only, `(&)T` writable) follow Rust: a borrow puts a strong lock on the object: while it is alive the object cannot be released, moved with `->` or given away. A borrower does not own the object, so it cannot release it, move it with `->` or give it away. A borrow cannot outlive its lender: storing it beyond the call (a `&T` field included), returning it (a function returning `&Dog`) or handing it to something that keeps running after the lender's scope (a fire-and-forget async call) is a compile error; to keep an object after the call, take `@` (12.7). Counted objects cannot be borrowed (12.7).
 - Collections own their elements: adding moves in, removing moves out, reading borrows. This is true for `arr` too: the variable that declares an array owns it, `b = a` borrows it, `->a` moves it, and a field that is an array is dropped by its class (6.1).
 - An owned object that loses its owner is destroyed and its `atEnd` runs (`clear()`, `fill(...)`, `c[i] = v` and any other operation that drops an owned object, 6.1).
@@ -3044,7 +3045,7 @@ Level 1 = most important, level 3 = least.
 - Collections: the lifetime of a borrow of an item taken outside a `for` loop (`(&)c[k]`), which an insert or a delete can move
 - Collections: the other non-silent exceptions of the collection operations, to be formalized during the implementation (out of memory is decided, 6.1, 15.3)
 - Strings: borrowed strings in the advanced cases (who releases them, lifetimes across fields and collections)
-- Ownership: when a local borrow ends (last use or end of scope); when a temporary object inside an expression ends
+- Ownership: when a local borrow ends (last use or end of scope)
 - Reference counting (12.7): `->` from a counted variable into a `->T` parameter or a plain receiver (removing the counting); `->pack[0]` on a list of counted items; counted natives and strings (`@i32`, `@string`); counted traits and downcasts; `&` parameters of a primary constructor; whether a weak reference can be made without `_` in the expression; which methods a read-only `@T` can call; the call form of a `(@)T` parameter
 - Reference counting: `enforce w is Blah b { }` (7.2.7); the order of the locks, waiting and deadlocks with threads; nested locking of the same `(@)T`
 - Reference counting: generics with counted type arguments (`Stack<@Dog>`), after 0.1.0; the `Rc` / `Arc` split, with threads; counted captures of lambdas, and the weak capture of a plain variable (13.3)
@@ -3575,6 +3576,9 @@ Level 1 = most important, level 3 = least.
 - 99 Open items for ownership and reference counting added
 - 12.7 `var x = f()` is counted when `f` returns `@T`; `removeRefCounting()` also on counted fields; the compiler may leave out the count of a method call and of the loop variable over `list<@T>` when another usage keeps the object alive; a write to a `(@)T` without the lock raises `WritingOnRefCountWithoutLockingException` (new, 15.3); 99: the name of that exception removed
 - 12.7, 19.3 The cycle warning also covers a class with an `@` field of its own type
+
+## Changes in 0.0.20
+
 - 12.6 A weak field of a clone is another weak reference to the same object; the remapping of weak references into the clone tree is removed (a weak reference points only to a counted object, which a clone never copies)
 - 12.7 The search members of a collection of counted objects take a counted object or null and compare by the rules of the objects; the members that give an item pass its usage, and a counted item needs its type written (`@Dog old = pack.replace(...)`, not `var`)
 - 7.2 `enforce` rewritten: the checks (null, alive, locks in variable order), the clauses `null [on ...]`, `lockfail [on ...]`, `catch E [ex] [on ...]` and `atEnd`; a failing check skips the whole `enforce` (only the first matching clause runs, quietly nothing without one); the clauses after the block run top to bottom, a pending exception skips the `atEnd` clauses until a catch handles it, the last `atEnd` always runs; locks and usages are released at the very end; `return` allowed, `break` / `continue` / `jump` out of the block are an error; `else` only alone; the expression form `enforce x.f()` (zero or null when a check fails); 12.7 updated to match; 99: the open items of `enforce` replaced by what is left
@@ -3583,3 +3587,4 @@ Level 1 = most important, level 3 = least.
 - 15.1, 15.2, 15.5, 15.7 The members of `Exception` are camelCase: `id`, `message`, `function`, `line`, `stackTrace` (were `Id`, `Message`, `Function`, `Line`, `StackTrace`)
 - 12.6 Example: `Dog other = dog.tryClone()` (was `Dog?`: objects are nullable already, `T?` on them is a compile error, 7.1)
 - 15.3 ID 16 retired (was `ChangingRefCountTypeException`, no use with one kind of counting); IDs 49 `ObjectNotClonableException` and 50 `WritingOnRefCountWithoutLockingException`; 99: the open item on `ChangingRefCountTypeException` removed
+- 12 A new object that nothing keeps ends when its statement ends (an argument to a borrowing parameter, a receiver); a borrow of it is valid only in that statement; 99: the open item removed

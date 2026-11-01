@@ -1,0 +1,25 @@
+objects
+  first a
+  loop a
+  loop b
+  end a
+  end b
+strings
+  one two! 2
+nested
+  rows 2
+  end r1
+  end r2
+  end r3
+sized
+  end slot
+  filled
+in a loop
+  pass 0
+  end pass 0
+  pass 1
+  end pass 1
+given
+  1 dogs
+done
+---- exit code 0 ----

@@ -1,4 +1,4 @@
-Compiler version 0.0.42 alpha for version 0.0.19 of the specs 2026/10/31
+Compiler version 0.0.43 alpha for version 0.0.20 of the specs 2026/11/01
 
 Changes from the previous version -----------------------
 - a tuple, list or map literal as the last expression of a function is its result (fun (i32, i32) f() { (3, 4) }); anywhere else a literal statement is still an error; the return errors say "an i32", "a u64"
@@ -8,6 +8,8 @@ Changes from the previous version -----------------------
 - enforce step 3 (spec 7.2.3, 7.2.5): catch and atEnd clauses, read top to bottom (a pending exception skips the atEnd clauses until a catch handles it; the last atEnd always runs, like a finally; an exception not handled bubbles up); the temporary usage of a weak reference ends after the atEnd clauses
 - enforce step 4 (spec 7.2.3, 7.2.4): catch E on x takes only the exceptions of the calls on x (x.f(), x.a.f(), also nested in other calls); a return inside the block runs every atEnd clause in order, then the last one
 - enforce step 5 (spec 7.2.1, 7.2.6): default { }, the catch-all (a failed check without its clause, an exception no catch takes); the expression form T r = enforce E clauses (also return enforce ..., and as the last expression of a function): the variables of E are enforced, each clause gives the value (a single expression, or return in a longer block), nothing handled gives zero or null; a null variable also goes to a catch NullPointerException
+- fixed (point 85): a new object that nothing keeps (an argument to a borrowing parameter, the receiver of a call or of a field read: f(Dog("a")), make().bark(), Dog("e").name) ends when its statement ends; it leaked before
+- arrays (point 20, first part): a local arr<T> a made in its scope (a literal, arr<T>[n], a clone) and used only as a[i], a.member or in a for ends with the scope: its objects end, its strings and its block are freed, also once per pass in a loop; any other use leaves it as before (not freed)
 
 Done -----------------------
 

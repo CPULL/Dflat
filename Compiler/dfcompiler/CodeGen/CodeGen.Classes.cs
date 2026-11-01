@@ -1194,6 +1194,9 @@ public sealed partial class CodeGen {
       if (!param.IsGift && arg.Kind == "Gift") {
         throw Error($"'{param.Name}' only borrows the object: remove the ->", arg);
       }
+      if (!param.IsGift) {
+        value = TempObject(value);   // f(Dog("a")): the new object is borrowed by the call and ends with the statement
+      }
     }
     return Convert(value, param.Type, arg);
   }
@@ -1253,7 +1256,7 @@ public sealed partial class CodeGen {
     if (!IsClass(receiver.Type)) {
       return null;
     }
-    return MethodCall(ObjInfo(receiver.Type), name, receiver.Code, false, args, scope, at);
+    return MethodCall(ObjInfo(receiver.Type), name, TempObject(receiver).Code, false, args, scope, at);   // make().bark()
   }
 
   // name(args) written inside a class: a function of this class (or a parent), before free functions

@@ -606,6 +606,12 @@ public sealed partial class CodeGen {
         EmitStrDrop(s, sb, scope, pad);
         return;
 
+      case "ArrDrop":
+        if (scope.Find(s.Text!) is VarInfo array && IsArr(array.Type)) {
+          sb.Append(pad).Append($"{ArrDropHelper(array.Type)}({array.CName}); {array.CName}.p = NULL; {array.CName}.len = 0;\n");   // spec 6.8.1
+        }
+        return;
+
       case "RawC":
         sb.Append(pad).Append(s.Text).Append('\n');   // C made by the compiler (the release of a loop's counter, EmitForEach)
         return;
@@ -2083,7 +2089,7 @@ public sealed partial class CodeGen {
     if (n.Text == "len" && MapViewOf(n.Children[0], scope) is (Expr viewMap, _)) {
       return MapLen(viewMap);   // m.keys.len: the map itself, no view object (CodeGen.Map.cs)
     }
-    var obj = ExprOf(n.Children[0], scope);
+    var obj = TempObject(ExprOf(n.Children[0], scope));   // Dog("a").name: the new object ends with the statement
     if (n.Text == "hash") {
       return HashOf(obj, n);   // every type has it, the nullable ones too (CodeGen.Hash.cs)
     }

@@ -1829,3 +1829,22 @@ ENFORCE, STEP 5 (2026-11-01, spec 7.2.1, 7.2.6)
 - Not built: an enforce expression in other places (assignment to an existing variable, inside a larger expression, arguments).
 - Tests enforceexpr, errors/enforce_default_type, enforce_expr_var, enforce_two_defaults.
 
+TEMPORARY OBJECTS (2026-11-01, point 85)
+- Runtime: the temporaries of a statement (df_tmps) hold strings and objects (df_tmp_objs marks an object); df_tmpo(o) pushes a new
+  object, df_tmp_drop drops the objects (df_drop) and frees the strings down to the mark of the function.
+- TempObject (CodeGen.Strings.cs): a Fresh class value becomes df_tmpo(...) and is no longer Fresh. Used by ArgCode (a borrowing
+  parameter), ObjectCall (the receiver of a call) and MemberValue (the receiver of a field read). EmitTmpRelease also looks for df_tmpo(.
+  Not in library code. A borrowed result of a temporary (Dog("f").same()) is valid only in its statement: kept in a variable it is a
+  destroyed object after the statement (a NullPointerException when used).
+- Test temporaries; enforcenull now shows the ends of its arguments.
+
+ARRAYS THAT END WITH THEIR SCOPE (2026-11-01, spec 6.8.1, point 20, first part)
+- AddImplicitDrops (CodeGen.Ownership.cs): IsOwnedLocalArray - a Decl with the type arr<T> written (Type arr or ResolvedType arr<...>),
+  not const, from a List literal, a Copy or arr<T>[n] (Index of a GenericRef), and every later use of the name in the frame is a[i] (not a
+  view), a.member (not transformTo) or the source of a for (For / In). The Decl is an owner (hoisted) and gets an AtEnd "drop" with an
+  ArrDrop statement: ArrDropHelper(type) writes df_arrdrop_<type> (objects df_drop, strings df_str_free, arrays recursively, then
+  free(p)); the variable is set to { NULL, 0 }. LoopStatements wraps a loop body that declares an arr, so it ends with each pass.
+- Not yet: arrays given to a function, assigned, moved, returned, viewed or kept in a field (fields of classes are not dropped by their
+  class), and var x = [...] arrays.
+- Test arrfree; clonecopy now shows the end of its local array y.
+

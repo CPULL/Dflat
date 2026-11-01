@@ -1,0 +1,27 @@
+argument
+show a
+  end a
+two arguments
+b and c
+  end b
+  end c
+receiver of a call
+d barks
+  end d
+receiver of a field
+e
+  end e
+borrowed result used in the same statement
+f barks
+  end f
+in a loop
+show loop 0
+  end loop 0
+show loop 1
+  end loop 1
+kept, not a temporary
+  kept h
+  end h
+done
+  end g
+---- exit code 0 ----

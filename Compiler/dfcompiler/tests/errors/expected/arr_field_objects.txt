@@ -1,0 +1,1 @@
+arr_field_objects.df(8): error: 'dogs' owns its array of Dog: write ->pack to move it, or pack! to copy it (spec 6.8.1)

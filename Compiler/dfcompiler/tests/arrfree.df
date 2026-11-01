@@ -1,6 +1,6 @@
 // A local array made in its scope ends with the scope (spec 6.8.1, point 20): its objects end, its strings and its block are freed. It can
 // be read as a[i], a.member, in a for, given to a function that only reads it, or returned (it moves to the caller, which then owns it).
-// One kept by a function, assigned, moved with ->, viewed or put in a field is left as before (not freed)
+// One assigned, moved with ->, viewed or kept by a function is left as before (not freed)
 alias Root as r
 
 public class Dog(string name) {
@@ -21,7 +21,7 @@ fun arr<Dog> pack(string name) {
 fun arr<Dog> direct() { [Dog("direct")] }
 public class Keeper {
   public arr<Dog> kept
-  public fun keep(arr<Dog> dogs) { kept = dogs }
+  public fun keep(arr<Dog> dogs) { kept = dogs! }   // a clone: the caller keeps its own array
 }
 
 fun objects() {
@@ -70,7 +70,7 @@ fun returned() {
 
 fun kept(Keeper k) {
   arr<Dog> held = [Dog("held")]
-  k.keep(held)                        // kept by the function: not freed (as before)
+  k.keep(held)                        // the function clones it: held is still freed here
 }
 
 r.Console.log("objects")

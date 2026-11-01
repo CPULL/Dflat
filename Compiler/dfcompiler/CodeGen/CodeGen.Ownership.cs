@@ -308,14 +308,17 @@ public sealed partial class CodeGen {
   // array (a literal, arr<T>[n], a clone), and used afterwards only as a[i], a.member (not transformTo, which moves the block) or the
   // source of a for. Any other use (an argument, an assignment, ->a, a return, a view a[x..y]) leaves it as before: not freed
   bool IsOwnedLocalArray(Node decl, IEnumerable<Node> after) {
-    if (!IsArrTypeNode(decl.Children.FirstOrDefault(child => TypeNodeKinds.Contains(child.Kind)))) {
+    var typeNode = decl.Children.FirstOrDefault(child => TypeNodeKinds.Contains(child.Kind));
+    var init = decl.Children.FirstOrDefault(child => child.Kind == "Init")?.Children[0];
+    bool varLiteral = typeNode is { Kind: "Type", Text: "var" } && init is { Kind: "List" };   // var x = [1, 2] is an arr of its scope
+    if (!IsArrTypeNode(typeNode) && !varLiteral) {
       return false;
     }
     if (decl.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ').Contains("const") == true) {
       return false;
     }
-    var value = decl.Children.FirstOrDefault(child => child.Kind == "Init")?.Children[0];
-    return IsNewArray(value) && after.All(node => ArrayUsesStayLocal(node, null, null, 0, decl.Text!, true));
+    bool plain = !varLiteral && TryResolveType(typeNode!) is string arrType && IsArr(arrType) && HasPlainItems(arrType);
+    return IsNewArray(init) && after.All(node => ArrayUsesStayLocal(node, null, null, 0, decl.Text!, true, plain));
   }
 
   // a value that is a new array nobody else holds: a literal, a clone, arr<T>[n], or a call of a function that returns a new array
@@ -328,14 +331,15 @@ public sealed partial class CodeGen {
 
   // the uses of an array that keep it local: a[i] (not a view), a.member (not transformTo), the source of a for, an argument to a parameter
   // that keeps it local (ParamStaysLocal), and (for the owner, canReturn) return a, which moves it to the caller
-  bool ArrayUsesStayLocal(Node node, Node? parent, Node? grand, int position, string name, bool canReturn) {
+  bool ArrayUsesStayLocal(Node node, Node? parent, Node? grand, int position, string name, bool canReturn, bool plain) {
     if (node.Kind == "Name" && node.Text == name) {
       return parent switch {
         { Kind: "Index" } => position == 0 && parent.Children.Count > 1 && parent.Children[1].Kind != "Range",
         { Kind: "Member" } => position == 0 && parent.Text != "transformTo",
-        { Kind: "For" or "In" } => true,
+        { Kind: "For" or "In" or "Copy" } => true,   // a! only reads it
         { Kind: "Return" } => canReturn && parent.Children.Count == 1,
         { Kind: "Args" } => grand is { Kind: "Call" } && ArgumentStaysLocal(grand, position),
+        { Kind: "Assign", Text: "=" } => plain && position == 1 && parent.Children[0].Kind == "Member",   // obj.field = a: the field gets a copy
         _ => false
       };
     }
@@ -343,11 +347,23 @@ public sealed partial class CodeGen {
       return true;
     }
     for (int index = 0; index < node.Children.Count; index++) {
-      if (!ArrayUsesStayLocal(node.Children[index], node, parent, index, name, canReturn)) {
+      if (!ArrayUsesStayLocal(node.Children[index], node, parent, index, name, canReturn, plain)) {
         return false;
       }
     }
     return true;
+  }
+
+  // a call of a function of the standard library written in the runtime (Root.X.f, through an alias of Root)
+  bool IsRuntimeCall(Node call) {
+    if (Path(call.Children[0]) is not string path) {
+      return false;
+    }
+    string first = path.Split('.')[0];
+    if (nameAliases.TryGetValue(first, out var target)) {
+      first = target.Split('.')[0];
+    }
+    return first == "Root";
   }
 
   // the functions a call can reach, by name (every overload, every class with that method); empty for the functions of the runtime
@@ -363,6 +379,9 @@ public sealed partial class CodeGen {
   }
 
   bool ArgumentStaysLocal(Node call, int position) {
+    if (IsRuntimeCall(call)) {
+      return true;   // r.Console.log(a) and the other functions of Root read their arguments (a borrowed read)
+    }
     var callees = CalleesOf(call);
     return callees.Count > 0 && callees.All(f => ParamStaysLocal(f, position));
   }
@@ -380,7 +399,7 @@ public sealed partial class CodeGen {
       return paramStaysLocal[(f, position)] = false;
     }
     paramStaysLocal[(f, position)] = true;   // a recursive call is assumed to keep it local
-    return paramStaysLocal[(f, position)] = ArrayUsesStayLocal(body, null, null, 0, param.Name, false);
+    return paramStaysLocal[(f, position)] = ArrayUsesStayLocal(body, null, null, 0, param.Name, false, HasPlainItems(param.Type));
   }
 
   readonly Dictionary<FunSig, bool> returnsNewArray = new();
@@ -1150,6 +1169,11 @@ public sealed partial class CodeGen {
   }
 
   void EmitDropGlue(ClassInfo cls) {
+    if (cls.Node.Line < LibraryLine) {
+      foreach (var field in cls.Fields.Where(field => IsArr(field.Type) && !field.IsStatic)) {
+        ArrDropHelper(field.Type);   // the helpers are written before the drop function that calls them
+      }
+    }
     var sb = classCode;
     sb.Append($"static void df_dropc_{cls.Name}({cls.StructName}* self) {{\n");
     if (cls.Dtor != null) {
@@ -1170,6 +1194,7 @@ public sealed partial class CodeGen {
     foreach (var field in OwnedStringFields(cls)) {
       sb.Append($"  df_str_free(self->{field.CName});\n  self->{field.CName} = NULL;\n");
     }
+    EmitArrayFieldDrops(cls, sb);   // spec 6.8.1 (CodeGen.ArrOwnership.cs)
     foreach (var field in cls.Fields.Where(field => field.IsCounted && !field.IsStatic)) {
       // a counted field is a user: it releases its usage (spec 12.7)
       sb.Append($"  {{ df_rc* r = self->{field.CName}; self->{field.CName} = NULL; df_rc_release(r); }}\n");

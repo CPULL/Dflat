@@ -12,6 +12,7 @@
 #include <string.h>
 #include <math.h>
 #include <time.h>
+#include <errno.h>
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -25,15 +26,26 @@ typedef uint64_t df_uns;
 #define DF_UNS_MAX UINT64_MAX
 #endif
 
+/* a string is a pointer to its first allocation (spec 4.4); NULL is the empty string */
+typedef struct df_strh df_strh;
+typedef df_strh* df_string;
+
+/* the text of a string, for the code that reads it */
 typedef struct {
-  const char* p;   /* UTF-8 bytes, not NUL-terminated */
+  const char* p;   /* UTF-8 bytes, followed by a 0 */
   uint64_t len;    /* byte length */
-} df_string;
+} df_sv;
 
 /* ---- panic ---- */
 
+/* set by the console when it changes the terminal mode (Console.read): gives the terminal back before a panic */
+static void (*df_panic_hook)(void) = NULL;
+
 /* critical exit: prints "Panic <code>" on stdout, no cleanup */
 static void df_panic(int64_t code) {
+  if (df_panic_hook) {
+    df_panic_hook();
+  }
   fflush(stdout);
   printf("Panic %lld\n", (long long)code);
   fflush(stdout);
@@ -83,7 +95,6 @@ static const df_descriptor df_desc_OverflowException = { 12, "OverflowException"
 static const df_descriptor df_desc_InvalidCastException = { 13, "InvalidCastException", &df_desc_Exception, false };
 static const df_descriptor df_desc_DivisionByZeroException = { 14, "DivisionByZeroException", &df_desc_Exception, false };
 static const df_descriptor df_desc_OutOfMemoryException = { 15, "OutOfMemoryException", &df_desc_Exception, false };
-static const df_descriptor df_desc_ChangingRefCountTypeException = { 16, "ChangingRefCountTypeException", &df_desc_Exception, false };
 static const df_descriptor df_desc_OutOfRangeCastException = { 17, "OutOfRangeCastException", &df_desc_Exception, true };
 static const df_descriptor df_desc_InvalidCharacterCodePointException = { 18, "InvalidCharacterCodePointException", &df_desc_Exception, true };
 static const df_descriptor df_desc_IndexOutOfRangeException = { 19, "IndexOutOfRangeException", &df_desc_Exception, false };
@@ -111,7 +122,10 @@ static const df_descriptor df_desc_GenericIOErrorException = { 43, "GenericIOErr
 static const df_descriptor df_desc_FileRemovedWhileOpenException = { 44, "FileRemovedWhileOpenException", &df_desc_Exception, false };
 static const df_descriptor df_desc_StreamCloseFailureException = { 45, "StreamCloseFailureException", &df_desc_Exception, false };
 static const df_descriptor df_desc_ModifyingIteratedCollectionException = { 46, "ModifyingIteratedCollectionException", &df_desc_Exception, false };
+static const df_descriptor df_desc_InvalidIteratorReleaseException = { 47, "InvalidIteratorReleaseException", &df_desc_Exception, false };
 static const df_descriptor df_desc_UsageOfDestroyedObjectException = { 48, "UsageOfDestroyedObjectException", &df_desc_Exception, false };
+static const df_descriptor df_desc_ObjectNotClonableException = { 49, "ObjectNotClonableException", &df_desc_Exception, false };
+static const df_descriptor df_desc_WritingOnRefCountWithoutLockingException = { 50, "WritingOnRefCountWithoutLockingException", &df_desc_Exception, false };
 
 /* The exception of a function is a local of that function (df_err in the generated code) and travels back to the caller as the second
    value it returns. The runtime functions written in C cannot return it that way: they leave it here, and the code generated around
@@ -200,45 +214,1016 @@ static void df_panic_unhandled(const df_exception* error) {
   df_panic(DF_PANIC_UNHANDLED);
 }
 
-/* ---- strings (never freed yet: ownership comes later) ---- */
+/* ---- strings (spec 4.4) ----
+   The class is in the low 4 bits of the first byte.
+   0-7  single block of 32 << class bytes: byte length in the high 4 bits of byte 0 and in byte 1, char length in bytes 2-3, text at byte 4
+   11   literal: char length and byte length, each as two 32-bit words (low first), at bytes 4 and 12; text at byte 20
+   13   moved: pointer to the new location at byte 4
+   15   block string: a root (df_sroot) and a chain of 4 KB blocks (df_sblock), for the strings above 4091 bytes
+   The text of classes 0-11 ends with a 0. A class 11 with the high bit of its first byte (DF_STR_HEAP) is on the heap; a literal of the
+   program has it clear and is never freed. */
 
-static df_string df_str_lit(const char* p, uint64_t len) {
-  df_string s = { p, len };
+#define DF_STR_LITERAL 11
+#define DF_STR_MOVED 13
+#define DF_STR_BLOCK 15
+#define DF_STR_SINGLE_MAX 4091
+#define DF_STR_HEAP 0x80
+#define DF_BLOCK_SIZE 4096
+
+/* the layout of spec 4.4.4: every field aligned to 32 bits (60 / 24 bytes on 64-bit targets, 48 / 12 on 32-bit targets) */
+#pragma pack(push, 4)
+typedef struct df_sblock {
+  struct df_sblock* next;
+  struct df_sblock* prev;
+  uint16_t used;       /* bytes of text in this block */
+  uint16_t chars;      /* chars in this block */
+#if UINTPTR_MAX > 0xFFFFFFFFu
+  uint32_t spare;
+#endif
+} df_sblock;
+
+typedef struct {
+  uint8_t cls;         /* 15 */
+  uint8_t flags;
+  uint16_t iters;      /* open iterators (not used yet) */
+  df_sblock* first;
+  df_sblock* last;
+  uint64_t chars;
+  uint64_t bytes;
+  df_sblock* cur;      /* cursor: the block of the last change, and where it starts */
+  uint64_t curChar;
+  uint64_t curByte;
+} df_sroot;
+#pragma pack(pop)
+
+_Static_assert(sizeof(df_sroot) == (UINTPTR_MAX > 0xFFFFFFFFu ? 60 : 48), "block string root layout (spec 4.4.4)");
+_Static_assert(sizeof(df_sblock) == (UINTPTR_MAX > 0xFFFFFFFFu ? 24 : 12), "block header layout (spec 4.4.4)");
+
+#define DF_BLOCK_PAYLOAD ((uint64_t)(DF_BLOCK_SIZE - sizeof(df_sblock)))
+#define DF_BLOCK_TEXT(b) ((char*)(b) + sizeof(df_sblock))
+
+static bool df_is_block(const uint8_t* t) {
+  return t && (t[0] & 0x0F) == DF_STR_BLOCK;
+}
+
+static void df_bs_copy_to(const df_sroot* r, char* out) {
+  for (const df_sblock* b = r->first; b; b = b->next) {
+    memcpy(out, DF_BLOCK_TEXT(b), b->used);
+    out += b->used;
+  }
+}
+
+/* the text of a block string as one piece, for the code that needs it so: a copy that lives until 16 more are made */
+#define DF_FLAT_RING 16
+static char* df_flat_ring[DF_FLAT_RING];
+static unsigned df_flat_next = 0;
+
+static const char* df_bs_flat(const df_sroot* r) {
+  char* text = (char*)malloc(r->bytes + 1);
+  if (!text) {
+    df_out_of_memory();
+  }
+  df_bs_copy_to(r, text);
+  text[r->bytes] = 0;
+  free(df_flat_ring[df_flat_next]);
+  df_flat_ring[df_flat_next] = text;
+  df_flat_next = (df_flat_next + 1) % DF_FLAT_RING;
+  return text;
+}
+
+/* the allocation that holds the text (follows a moved string); NULL for the empty string */
+static const uint8_t* df_str_res(df_string s) {
+  const uint8_t* h = (const uint8_t*)s;
+  if (h && (h[0] & 0x0F) == DF_STR_MOVED) {
+    memcpy(&h, h + 4, sizeof h);
+  }
+  return h;
+}
+
+/* a 64-bit length stored as two 32-bit words, low first */
+static uint64_t df_str_w64(const uint8_t* at) {
+  uint32_t w[2];
+  memcpy(w, at, sizeof w);
+  return (uint64_t)w[0] | ((uint64_t)w[1] << 32);
+}
+
+static df_sv df_view(df_string s) {
+  df_sv v = { "", 0 };
+  const uint8_t* h = df_str_res(s);
+  if (!h) {
+    return v;
+  }
+  if ((h[0] & 0x0F) == DF_STR_LITERAL) {
+    v.p = (const char*)h + 20;
+    v.len = df_str_w64(h + 12);
+  } else if (df_is_block(h)) {
+    v.len = ((const df_sroot*)h)->bytes;
+    v.p = v.len ? df_bs_flat((const df_sroot*)h) : "";
+  } else {
+    v.p = (const char*)h + 4;
+    v.len = (uint64_t)(h[0] >> 4) | ((uint64_t)h[1] << 4);
+  }
+  return v;
+}
+
+/* a view the caller keeps as long as it likes (a for loop over a string): *keep is freed by the caller when it is not NULL */
+static df_sv df_view_keep(df_string s, char** keep) {
+  const uint8_t* h = df_str_res(s);
+  *keep = NULL;
+  if (!df_is_block(h)) {
+    return df_view(s);
+  }
+  const df_sroot* r = (const df_sroot*)h;
+  *keep = (char*)malloc(r->bytes + 1);
+  if (!*keep) {
+    df_out_of_memory();
+  }
+  df_bs_copy_to(r, *keep);
+  (*keep)[r->bytes] = 0;
+  df_sv v = { *keep, r->bytes };
+  return v;
+}
+
+static uint64_t df_str_len(df_string s) {
+  const uint8_t* h = df_str_res(s);
+  if (df_is_block(h)) {
+    return ((const df_sroot*)h)->bytes;
+  }
+  return df_view(s).len;
+}
+
+/* character count (UTF-8 code points), kept in the header */
+static uint64_t df_str_chars(df_string s) {
+  const uint8_t* h = df_str_res(s);
+  if (!h) {
+    return 0;
+  }
+  if ((h[0] & 0x0F) == DF_STR_LITERAL) {
+    return df_str_w64(h + 4);
+  }
+  if (df_is_block(h)) {
+    return ((const df_sroot*)h)->chars;
+  }
+  uint16_t chars;
+  memcpy(&chars, h + 2, sizeof chars);
+  return chars;
+}
+
+static uint64_t df_utf8_count(const char* p, uint64_t len) {
+  uint64_t n = 0;
+  for (uint64_t i = 0; i < len; i++) {
+    if (((unsigned char)p[i] & 0xC0) != 0x80) {
+      n++;
+    }
+  }
+  return n;
+}
+
+/* a new string of `bytes` bytes and `chars` chars, in the smallest class that holds it; the caller writes the text into *text
+   (the final 0 is already there). The empty string is NULL */
+static char df_str_none[1];
+
+/* DF_STR_TRACE (a define given to the C compiler by hand): the strings still alive are printed when the program ends */
+#ifdef DF_STR_TRACE
+static int64_t df_str_live = 0;
+static void df_str_trace_report(void) {
+  fprintf(stderr, "strings alive at exit: %lld\n", (long long)df_str_live);
+}
+static bool df_str_hooked = false;
+#define DF_STR_TRACE_ALLOC() do { if (!df_str_hooked) { df_str_hooked = true; atexit(df_str_trace_report); } df_str_live++; } while (0)
+#define DF_STR_TRACE_FREE() (df_str_live--)
+#else
+#define DF_STR_TRACE_ALLOC() ((void)0)
+#define DF_STR_TRACE_FREE() ((void)0)
+#endif
+
+static df_string df_str_alloc(uint64_t bytes, uint64_t chars, char** text) {
+  if (bytes == 0) {
+    *text = df_str_none;
+    return NULL;
+  }
+  DF_STR_TRACE_ALLOC();
+  uint8_t* h;
+  if (bytes <= DF_STR_SINGLE_MAX) {
+    unsigned cls = 0;
+    while (((uint64_t)32 << cls) - 5 < bytes) {
+      cls++;
+    }
+    h = (uint8_t*)df_alloc((uint64_t)32 << cls);
+    h[0] = (uint8_t)(cls | ((bytes & 0x0F) << 4));
+    h[1] = (uint8_t)(bytes >> 4);
+    uint16_t c = (uint16_t)chars;
+    memcpy(h + 2, &c, sizeof c);
+    *text = (char*)h + 4;
+  } else {
+    h = (uint8_t*)df_alloc(20 + bytes + 1);
+    uint32_t w[4] = { (uint32_t)chars, (uint32_t)(chars >> 32), (uint32_t)bytes, (uint32_t)(bytes >> 32) };
+    h[0] = DF_STR_LITERAL | DF_STR_HEAP;
+    h[1] = h[2] = h[3] = 0;
+    memcpy(h + 4, w, sizeof w);
+    *text = (char*)h + 20;
+  }
+  (*text)[bytes] = 0;
+  return (df_string)h;
+}
+
+/* ---- block strings (spec 4.4.4): the counts are per block, a code point never straddles two blocks ---- */
+
+static df_sroot* df_bs_new(void) {
+  df_sroot* r = (df_sroot*)df_alloc(64);   /* 64 bytes: a small text can take its place as a class 1 (shrink) */
+  memset(r, 0, 64);
+  r->cls = DF_STR_BLOCK;
+  DF_STR_TRACE_ALLOC();
+  return r;
+}
+
+/* a new block after 'after' (NULL: at the start) */
+static df_sblock* df_block_add(df_sroot* r, df_sblock* after) {
+  df_sblock* b = (df_sblock*)df_alloc(DF_BLOCK_SIZE);
+  memset(b, 0, sizeof *b);
+  b->prev = after;
+  b->next = after ? after->next : r->first;
+  if (b->next) {
+    b->next->prev = b;
+  } else {
+    r->last = b;
+  }
+  if (after) {
+    after->next = b;
+  } else {
+    r->first = b;
+  }
+  return b;
+}
+
+static void df_block_unlink(df_sroot* r, df_sblock* b) {
+  if (b->prev) {
+    b->prev->next = b->next;
+  } else {
+    r->first = b->next;
+  }
+  if (b->next) {
+    b->next->prev = b->prev;
+  } else {
+    r->last = b->prev;
+  }
+  if (r->cur == b) {
+    r->cur = NULL;
+  }
+  free(b);
+}
+
+static void df_bs_free_blocks(df_sroot* r) {
+  df_sblock* b = r->first;
+  while (b) {
+    df_sblock* next = b->next;
+    free(b);
+    b = next;
+  }
+  r->first = r->last = r->cur = NULL;
+  r->chars = r->bytes = r->curChar = r->curByte = 0;
+}
+
+/* writes the bytes after the text of block b, adding blocks after it when it is full; returns the last block written */
+static df_sblock* df_bs_fill_after(df_sroot* r, df_sblock* b, const char* p, uint64_t n) {
+  while (n > 0) {
+    uint64_t room = b ? DF_BLOCK_PAYLOAD - b->used : 0;
+    uint64_t take = n <= room ? n : room;
+    if (take < n) {
+      while (take > 0 && ((unsigned char)p[take] & 0xC0) == 0x80) {
+        take--;
+      }
+    }
+    if (take == 0) {
+      b = df_block_add(r, b);
+      continue;
+    }
+    uint64_t chars = df_utf8_count(p, take);
+    memcpy(DF_BLOCK_TEXT(b) + b->used, p, take);
+    b->used = (uint16_t)(b->used + take);
+    b->chars = (uint16_t)(b->chars + chars);
+    r->bytes += take;
+    r->chars += chars;
+    p += take;
+    n -= take;
+  }
+  return b;
+}
+
+static void df_bs_push(df_sroot* r, const char* p, uint64_t n) {
+  df_bs_fill_after(r, r->last, p, n);
+}
+
+/* appends the text of any string (block by block for a block string) */
+static void df_bs_push_str(df_sroot* r, df_string s) {
+  const uint8_t* h = df_str_res(s);
+  if (df_is_block(h)) {
+    for (const df_sblock* b = ((const df_sroot*)h)->first; b; b = b->next) {
+      df_bs_push(r, DF_BLOCK_TEXT(b), b->used);
+    }
+    return;
+  }
+  df_sv v = df_view(s);
+  df_bs_push(r, v.p, v.len);
+}
+
+/* the byte offset of the k-th char of a block (the end of its text when k is past it) */
+static uint64_t df_block_offset(const df_sblock* b, uint64_t k) {
+  const char* t = DF_BLOCK_TEXT(b);
+  uint64_t n = 0;
+  for (uint64_t i = 0; i < b->used; i++) {
+    if (((unsigned char)t[i] & 0xC0) != 0x80) {
+      if (n == k) {
+        return i;
+      }
+      n++;
+    }
+  }
+  return b->used;
+}
+
+/* the block that holds char 'pos' (pos == the total: the end) and where it starts; it starts from the cursor, the first or the last
+   block, whichever is closest, and walks whole blocks by their char count. It only reads. */
+static df_sblock* df_bs_seek(const df_sroot* r, uint64_t pos, uint64_t* startChar, uint64_t* startByte) {
+  df_sblock* b = r->first;
+  uint64_t c = 0;
+  uint64_t y = 0;
+  uint64_t best = pos;
+  if (r->cur) {
+    uint64_t d = pos >= r->curChar ? pos - r->curChar : r->curChar - pos;
+    if (d < best) {
+      best = d;
+      b = r->cur;
+      c = r->curChar;
+      y = r->curByte;
+    }
+  }
+  if (r->last && r->chars - pos < best) {
+    b = r->last;
+    c = r->chars - r->last->chars;
+    y = r->bytes - r->last->used;
+  }
+  while (b && pos < c && b->prev) {
+    b = b->prev;
+    c -= b->chars;
+    y -= b->used;
+  }
+  while (b && pos >= c + b->chars && b->next) {
+    c += b->chars;
+    y += b->used;
+    b = b->next;
+  }
+  *startChar = c;
+  *startByte = y;
+  return b;
+}
+
+/* the char at a position (pos below the total) */
+static uint32_t df_bs_char_at(const df_sroot* r, uint64_t pos) {
+  uint64_t c, y;
+  df_sblock* b = df_bs_seek(r, pos, &c, &y);
+  const unsigned char* t = (const unsigned char*)DF_BLOCK_TEXT(b) + df_block_offset(b, pos - c);
+  uint32_t cp = t[0];
+  int extra = cp < 0x80 ? 0 : (cp & 0xE0) == 0xC0 ? 1 : (cp & 0xF0) == 0xE0 ? 2 : (cp & 0xF8) == 0xF0 ? 3 : 0;
+  cp &= extra == 0 ? 0xFF : (0x3F >> extra);
+  for (int k = 1; k <= extra; k++) {
+    cp = (cp << 6) | (t[k] & 0x3F);
+  }
+  return cp;
+}
+
+/* in place: 'len' chars at 'pos' are replaced by the bytes 'ins'. Only the blocks touched change: a full block is split, a block left
+   empty goes away, two neighbours that fit in one are merged. The cursor ends on the block of the change. */
+static void df_bs_splice(df_sroot* r, uint64_t pos, uint64_t len, const char* ins, uint64_t insBytes) {
+  if (pos > r->chars) {
+    pos = r->chars;
+  }
+  if (len > r->chars - pos) {
+    len = r->chars - pos;
+  }
+  uint64_t c = 0;
+  uint64_t y = 0;
+  df_sblock* b = r->first ? df_bs_seek(r, pos, &c, &y) : NULL;
+  uint64_t off = b ? df_block_offset(b, pos - c) : 0;
+  /* removal, from b on */
+  uint64_t left = len;
+  df_sblock* at = b;
+  uint64_t from = off;
+  while (left > 0 && at) {
+    char* t = DF_BLOCK_TEXT(at);
+    uint64_t end = from;
+    uint64_t n = 0;
+    while (end < at->used && n < left) {
+      end++;
+      while (end < at->used && ((unsigned char)t[end] & 0xC0) == 0x80) {
+        end++;
+      }
+      n++;
+    }
+    memmove(t + from, t + end, at->used - end);
+    at->used = (uint16_t)(at->used - (end - from));
+    at->chars = (uint16_t)(at->chars - n);
+    r->bytes -= end - from;
+    r->chars -= n;
+    left -= n;
+    df_sblock* next = at->next;
+    if (at->used == 0 && at != b) {
+      df_block_unlink(r, at);
+    }
+    at = next;
+    from = 0;
+  }
+  /* insertion at (b, off) */
+  if (insBytes > 0) {
+    if (!b) {
+      b = df_bs_fill_after(r, NULL, ins, insBytes);
+      b = r->first;
+      c = 0;
+      y = 0;
+    } else if (b->used + insBytes <= DF_BLOCK_PAYLOAD) {
+      char* t = DF_BLOCK_TEXT(b);
+      uint64_t chars = df_utf8_count(ins, insBytes);
+      memmove(t + off + insBytes, t + off, b->used - off);
+      memcpy(t + off, ins, insBytes);
+      b->used = (uint16_t)(b->used + insBytes);
+      b->chars = (uint16_t)(b->chars + chars);
+      r->bytes += insBytes;
+      r->chars += chars;
+    } else {
+      /* b keeps its text up to off; the inserted bytes and the rest of b follow, in b and in new blocks after it */
+      uint64_t tailBytes = b->used - off;
+      char* tail = (char*)malloc(tailBytes ? tailBytes : 1);
+      if (!tail) {
+        df_out_of_memory();
+      }
+      memcpy(tail, DF_BLOCK_TEXT(b) + off, tailBytes);
+      uint64_t tailChars = df_utf8_count(tail, tailBytes);
+      b->used = (uint16_t)off;
+      b->chars = (uint16_t)(b->chars - tailChars);
+      r->bytes -= tailBytes;
+      r->chars -= tailChars;
+      df_sblock* last = df_bs_fill_after(r, b, ins, insBytes);
+      df_bs_fill_after(r, last, tail, tailBytes);
+      free(tail);
+    }
+  }
+  if (!b) {
+    return;
+  }
+  /* a block left empty goes; neighbours that fit in one block are merged */
+  if (b->used == 0 && (b->prev || b->next)) {
+    df_block_unlink(r, b);
+    r->cur = NULL;
+    return;
+  }
+  if (b->next && b->used + b->next->used <= DF_BLOCK_PAYLOAD && (b->used < DF_BLOCK_PAYLOAD / 2 || b->next->used < DF_BLOCK_PAYLOAD / 2)) {
+    df_sblock* n = b->next;
+    memcpy(DF_BLOCK_TEXT(b) + b->used, DF_BLOCK_TEXT(n), n->used);
+    b->used = (uint16_t)(b->used + n->used);
+    b->chars = (uint16_t)(b->chars + n->chars);
+    df_block_unlink(r, n);
+  }
+  if (b->prev && b->prev->used + b->used <= DF_BLOCK_PAYLOAD && (b->used < DF_BLOCK_PAYLOAD / 2 || b->prev->used < DF_BLOCK_PAYLOAD / 2)) {
+    df_sblock* p = b->prev;
+    c -= p->chars;
+    y -= p->used;
+    memcpy(DF_BLOCK_TEXT(p) + p->used, DF_BLOCK_TEXT(b), b->used);
+    p->used = (uint16_t)(p->used + b->used);
+    p->chars = (uint16_t)(p->chars + b->chars);
+    df_block_unlink(r, b);
+    b = p;
+  }
+  if (r->bytes == 0) {
+    df_bs_free_blocks(r);
+    return;
+  }
+  r->cur = b;
+  r->curChar = c;
+  r->curByte = y;
+}
+
+static df_string df_bs_from(const char* p, uint64_t len) {
+  df_sroot* r = df_bs_new();
+  df_bs_push(r, p, len);
+  return (df_string)r;
+}
+
+/* a new string with a copy of the bytes */
+static df_string df_str_make(const char* p, uint64_t len) {
+  if (len > DF_STR_SINGLE_MAX) {
+    return df_bs_from(p, len);
+  }
+  char* text;
+  df_string s = df_str_alloc(len, df_utf8_count(p, len), &text);
+  memcpy(text, p, len);
   return s;
 }
 
+static df_string df_str_lit(const char* p, uint64_t len) {
+  return df_str_make(p, len);
+}
+
 static df_string df_str_concat(df_string a, df_string b) {
-  char* p = (char*)df_alloc(a.len + b.len);
-  memcpy(p, a.p, a.len);
-  memcpy(p + a.len, b.p, b.len);
-  df_string s = { p, a.len + b.len };
+  uint64_t total = df_str_len(a) + df_str_len(b);
+  if (total > DF_STR_SINGLE_MAX) {
+    df_sroot* r = df_bs_new();
+    df_bs_push_str(r, a);
+    df_bs_push_str(r, b);
+    return (df_string)r;
+  }
+  df_sv x = df_view(a), y = df_view(b);
+  char* text;
+  df_string s = df_str_alloc(x.len + y.len, df_str_chars(a) + df_str_chars(b), &text);
+  memcpy(text, x.p, x.len);
+  memcpy(text + x.len, y.p, y.len);
   return s;
 }
 
 static df_string df_str_from_buf(const char* buf) {
-  uint64_t n = strlen(buf);
-  char* p = (char*)df_alloc(n);
-  memcpy(p, buf, n);
-  df_string s = { p, n };
-  return s;
+  return df_str_make(buf, strlen(buf));
 }
 
 static df_string df_str_from_cstr(const char* text) {
-  df_string s = { text, strlen(text) };
-  return s;
+  return df_str_make(text, strlen(text));
 }
 
-/* a copy of the text: the Message of an exception stays valid after the exception is released */
+/* a copy of the text: the message of an exception stays valid after the exception is released */
 static df_string df_str_dup_cstr(const char* text) {
-  uint64_t n = strlen(text);
-  char* p = (char*)df_alloc(n);
-  memcpy(p, text, n);
-  df_string s = { p, n };
+  return df_str_make(text, strlen(text));
+}
+
+/* ---- ownership of strings (spec 4, 12) ----
+   The owner frees a string at the end of its scope; a borrower never does. A literal of the program is never freed. */
+
+static void df_str_free(df_string s) {
+  uint8_t* h = (uint8_t*)s;
+  if (!h) {
+    return;
+  }
+  if ((h[0] & 0x0F) == DF_STR_MOVED) {
+    uint8_t* to;
+    memcpy(&to, h + 4, sizeof to);
+    df_str_free((df_string)to);
+    DF_STR_TRACE_FREE();
+    free(h);
+    return;
+  }
+  if ((h[0] & 0x0F) == DF_STR_LITERAL && !(h[0] & DF_STR_HEAP)) {
+    return;
+  }
+  if (df_is_block(h)) {
+    df_bs_free_blocks((df_sroot*)h);
+  }
+  DF_STR_TRACE_FREE();
+  free(h);
+}
+
+/* a copy that its receiver owns (a literal is shared: it is never freed) */
+static df_string df_str_dup(df_string s) {
+  const uint8_t* h = df_str_res(s);
+  if (!h || ((h[0] & 0x0F) == DF_STR_LITERAL && !(h[0] & DF_STR_HEAP))) {
+    return (df_string)h;
+  }
+  if (df_is_block(h) && ((const df_sroot*)h)->bytes > DF_STR_SINGLE_MAX) {
+    df_sroot* r = df_bs_new();   /* a copy is in the smallest form: blocks packed full, or a single block */
+    df_bs_push_str(r, s);
+    return (df_string)r;
+  }
+  df_sv v = df_view(s);
+  char* text;
+  df_string r = df_str_alloc(v.len, df_str_chars(s), &text);
+  memcpy(text, v.p, v.len);
+  return r;
+}
+
+/* a variable: the old string ends when the variable owned it; 'fresh' says whether the variable owns the new one */
+static void df_str_set(df_string* slot, bool* owned, df_string value, bool fresh) {
+  df_string old = *slot;
+  if (old == value) {
+    *owned = *owned || fresh;
+    return;
+  }
+  if (*owned) {
+    df_str_free(old);
+  }
+  *slot = value;
+  *owned = fresh;
+}
+
+/* a place that always owns its string (a field, an item): a borrowed value is copied */
+static void df_str_put(df_string* slot, df_string value, bool fresh) {
+  df_string old = *slot;
+  if (old == value) {
+    return;
+  }
+  *slot = fresh ? value : df_str_dup(value);
+  df_str_free(old);
+}
+
+/* the value of an owning place: a new string is kept, a borrowed one is copied */
+static df_string df_str_own(df_string value, bool fresh) {
+  return fresh ? value : df_str_dup(value);
+}
+
+/* a + b when the result takes the place of a, which is freed (code that builds a text); catx frees b too */
+static df_string df_str_cat(df_string a, df_string b) {
+  df_string r = df_str_concat(a, b);
+  df_str_free(a);
+  return r;
+}
+
+static df_string df_str_catx(df_string a, df_string b) {
+  df_string r = df_str_concat(a, b);
+  df_str_free(a);
+  df_str_free(b);
+  return r;
+}
+
+/* the end of a variable that may own its string */
+static void df_str_drop(df_string* slot, bool* owned) {
+  if (*owned) {
+    df_str_free(*slot);
+  }
+  *slot = NULL;
+  *owned = false;
+}
+
+/* ---- changes in place (spec 4.1): the string keeps its identity (its first allocation), so a borrow sees the change ----
+   A string that outgrows its allocation moves: its first allocation becomes class 13 (the high 4 bits keep its old class) and points to
+   the new one; a second move frees the previous target. A literal of the program, or the empty string, is never written: the variable
+   gets a new string of its own instead. */
+
+/* the text bytes an allocation can hold (0 for a literal of the program, which is never written) */
+static uint64_t df_str_cap(const uint8_t* t) {
+  unsigned cls = t[0] & 0x0F;
+  if (cls <= 7) {
+    return ((uint64_t)32 << cls) - 5;
+  }
+  if (cls == DF_STR_LITERAL && (t[0] & DF_STR_HEAP)) {
+    return df_str_w64(t + 12);
+  }
+  return 0;
+}
+
+static char* df_str_text(uint8_t* t) {
+  return (char*)t + ((t[0] & 0x0F) <= 7 ? 4 : 20);
+}
+
+static void df_str_set_lens(uint8_t* t, uint64_t bytes, uint64_t chars) {
+  if ((t[0] & 0x0F) <= 7) {
+    t[0] = (uint8_t)((t[0] & 0x0F) | ((bytes & 0x0F) << 4));
+    t[1] = (uint8_t)(bytes >> 4);
+    uint16_t c = (uint16_t)chars;
+    memcpy(t + 2, &c, sizeof c);
+  } else {
+    uint32_t w[4] = { (uint32_t)chars, (uint32_t)(chars >> 32), (uint32_t)bytes, (uint32_t)(bytes >> 32) };
+    memcpy(t + 4, w, sizeof w);
+  }
+  df_str_text(t)[bytes] = 0;
+}
+
+/* the byte offset of a char position in a text (the end when the position is past it) */
+static uint64_t df_utf8_offset(const char* p, uint64_t len, uint64_t chars) {
+  uint64_t n = 0;
+  for (uint64_t i = 0; i < len; i++) {
+    if (((unsigned char)p[i] & 0xC0) != 0x80) {
+      if (n == chars) {
+        return i;
+      }
+      n++;
+    }
+  }
+  return len;
+}
+
+/* the place takes the new string 'value' as its text and keeps its identity: a block string keeps its root and takes the blocks of
+   value; a smaller form points to value from its first allocation (class 13); the empty string or a literal is simply replaced */
+static void df_str_become(df_string* slot, bool* owned, df_string value) {
+  uint8_t* f = (uint8_t*)*slot;
+  uint8_t* t = (uint8_t*)df_str_res(*slot);
+  if (!t || (!df_is_block(t) && (t[0] & 0x0F) == DF_STR_LITERAL && !(t[0] & DF_STR_HEAP))) {
+    *slot = value;
+    *owned = value != NULL;
+    return;
+  }
+  if (df_is_block(t)) {
+    df_sroot* r = (df_sroot*)t;
+    df_bs_free_blocks(r);
+    df_sroot* v = (df_sroot*)df_str_res(value);
+    if (df_is_block((const uint8_t*)v) && (uint8_t*)v == (uint8_t*)value) {
+      r->first = v->first;
+      r->last = v->last;
+      r->chars = v->chars;
+      r->bytes = v->bytes;
+      v->first = v->last = NULL;
+      df_str_free(value);
+    } else {
+      df_bs_push_str(r, value);
+      df_str_free(value);
+    }
+    return;
+  }
+  if (f != t) {
+    df_str_free((df_string)t);
+  } else {
+    unsigned old = (f[0] & 0x0F) <= 7 ? (f[0] & 0x0F) : 0x0F;
+    f[0] = (uint8_t)(DF_STR_MOVED | (old << 4));
+  }
+  memcpy(f + 4, &value, sizeof value);
+}
+
+/* room for 'bytes' bytes (4091 at most) in a string that is not a block string, keeping its first 'keep' bytes; returns the allocation
+   to write into (bytes > 0) */
+static uint8_t* df_str_room(df_string* slot, bool* owned, uint64_t bytes, uint64_t keep) {
+  uint8_t* f = (uint8_t*)*slot;
+  uint8_t* t = (uint8_t*)df_str_res(*slot);
+  if (t && bytes <= df_str_cap(t)) {
+    return t;
+  }
+  char* text;
+  uint8_t* n = (uint8_t*)df_str_alloc(bytes, 0, &text);
+  if (t && keep) {
+    memcpy(text, df_str_text(t), keep);
+  }
+  if (!t || df_str_cap(t) == 0) {
+    *slot = (df_string)n;   /* the empty string or a literal: the variable gets a string of its own */
+    *owned = true;
+    return n;
+  }
+  if (f != t) {
+    df_str_free((df_string)t);   /* moved already: the previous target was reached only through the first allocation */
+  } else {
+    unsigned old = (f[0] & 0x0F) <= 7 ? (f[0] & 0x0F) : 0x0F;
+    f[0] = (uint8_t)(DF_STR_MOVED | (old << 4));
+  }
+  memcpy(f + 4, &n, sizeof n);
+  return n;
+}
+
+static void df_str_clear(df_string* slot, bool* owned) {
+  uint8_t* t = (uint8_t*)df_str_res(*slot);
+  if (!t) {
+    return;
+  }
+  if (df_is_block(t)) {
+    df_bs_free_blocks((df_sroot*)t);   /* it stays a block string, empty */
+    return;
+  }
+  if (df_str_cap(t) == 0) {
+    *slot = NULL;   /* a literal is not written */
+    *owned = false;
+    return;
+  }
+  df_str_set_lens(t, 0, 0);
+}
+
+/* s += text */
+static void df_str_append(df_string* slot, bool* owned, df_string add) {
+  df_sv a = df_view(add);
+  if (a.len == 0) {
+    return;
+  }
+  bool same = df_str_res(add) == df_str_res(*slot);
+  df_string source = same ? df_str_dup(add) : add;   /* s += s: the text may move while it is copied */
+  uint8_t* target = (uint8_t*)df_str_res(*slot);
+  uint64_t len = df_str_len(*slot);
+  if (df_is_block(target)) {
+    df_bs_push_str((df_sroot*)target, source);   /* the end of the last block, then new blocks */
+    if (same) {
+      df_str_free(source);
+    }
+    return;
+  }
+  if (len + df_str_len(source) > DF_STR_SINGLE_MAX) {
+    df_sroot* r = df_bs_new();   /* beyond 4091 bytes it becomes a block string */
+    df_bs_push_str(r, *slot);
+    df_bs_push_str(r, source);
+    df_str_become(slot, owned, (df_string)r);
+    if (same) {
+      df_str_free(source);
+    }
+    return;
+  }
+  a = df_view(source);
+  uint64_t chars = df_str_chars(*slot) + df_str_chars(source);
+  uint8_t* t = df_str_room(slot, owned, len + a.len, len);
+  memcpy(df_str_text(t) + len, a.p, a.len);
+  df_str_set_lens(t, len + a.len, chars);
+  if (same) {
+    df_str_free(source);
+  }
+}
+
+/* the string at *slot takes the text of 'value', a new string that ends here (s.trim() and s = s.trim() in place) */
+static void df_str_take(df_string* slot, bool* owned, df_string value) {
+  const uint8_t* t = df_str_res(*slot);
+  if (t == df_str_res(value)) {
+    return;
+  }
+  if (df_is_block(t) || df_str_len(value) > DF_STR_SINGLE_MAX) {
+    df_str_become(slot, owned, value);   /* a block string stays one; a text beyond 4091 bytes is a block string */
+    return;
+  }
+  df_sv v = df_view(value);
+  if (!t || df_str_cap(t) == 0) {
+    *slot = value;   /* the empty string or a literal: the new string becomes the variable's own */
+    *owned = value != NULL;
+    return;
+  }
+  if (v.len == 0) {
+    df_str_clear(slot, owned);
+  } else {
+    uint8_t* room = df_str_room(slot, owned, v.len, 0);
+    memcpy(df_str_text(room), v.p, v.len);
+    df_str_set_lens(room, v.len, df_str_chars(value));
+  }
+  df_str_free(value);
+}
+
+/* the smallest form: a moved string goes back into its first allocation when it fits, otherwise into the smallest class */
+static void df_str_shrink(df_string* slot) {
+  uint8_t* f = (uint8_t*)*slot;
+  uint8_t* t = (uint8_t*)df_str_res(*slot);
+  if (df_is_block(t)) {
+    df_sroot* r = (df_sroot*)t;
+    if (r->bytes <= DF_STR_SINGLE_MAX) {
+      df_sv v = df_view(*slot);
+      uint64_t chars = r->chars;
+      unsigned old = f[0] >> 4;
+      if (f != t && old <= 7 && v.len <= ((uint64_t)32 << old) - 5) {
+        memmove(f + 4, v.p, v.len);   /* back into the first allocation */
+        f[0] = (uint8_t)old;
+        df_str_set_lens(f, v.len, chars);
+        df_str_free((df_string)t);
+        return;
+      }
+      if (f == t && v.len <= 59) {
+        df_bs_free_blocks(r);   /* the root takes the text as a class 1 (it has 64 bytes) */
+        memmove(f + 4, v.p, v.len);
+        f[0] = 1;
+        df_str_set_lens(f, v.len, chars);
+        return;
+      }
+      df_string n = df_str_make(v.p, v.len);
+      if (f == t) {
+        df_bs_free_blocks(r);
+        f[0] = (uint8_t)(DF_STR_MOVED | (0x0F << 4));
+        memcpy(f + 4, &n, sizeof n);
+      } else {
+        memcpy(f + 4, &n, sizeof n);
+        df_str_free((df_string)t);
+      }
+      return;
+    }
+    uint64_t blocks = 0;
+    for (df_sblock* b = r->first; b; b = b->next) {
+      blocks++;
+    }
+    if (blocks > (r->bytes + DF_BLOCK_PAYLOAD - 1) / DF_BLOCK_PAYLOAD) {
+      df_sroot* packed = df_bs_new();   /* the blocks packed full */
+      df_bs_push_str(packed, (df_string)r);
+      df_bs_free_blocks(r);
+      r->first = packed->first;
+      r->last = packed->last;
+      r->chars = packed->chars;
+      r->bytes = packed->bytes;
+      packed->first = packed->last = NULL;
+      df_str_free((df_string)packed);
+    }
+    return;
+  }
+  if (!t || t == f) {
+    return;   /* not moved: the first allocation is its identity and stays */
+  }
+  df_sv v = df_view(*slot);
+  uint64_t chars = df_str_chars(*slot);
+  unsigned old = f[0] >> 4;
+  if (old <= 7 && v.len <= ((uint64_t)32 << old) - 5) {
+    memmove(f + 4, v.p, v.len);
+    f[0] = (uint8_t)old;
+    df_str_set_lens(f, v.len, chars);
+    df_str_free((df_string)t);
+    return;
+  }
+  char* text;
+  uint8_t* n = (uint8_t*)df_str_alloc(v.len, chars, &text);
+  if (n && df_str_cap(n) >= df_str_cap(t)) {
+    df_str_free((df_string)n);
+    return;
+  }
+  memcpy(text, v.p, v.len);
+  memcpy(f + 4, &n, sizeof n);
+  df_str_free((df_string)t);
+}
+
+/* insert, remove, replaceAt and prepend in place: 'len' chars at 'pos' are replaced by the text of ins (NULL: nothing). A block string
+   changes only the blocks touched; a smaller string is rebuilt and taken */
+static void df_str_splice_in(df_string* slot, bool* owned, uint64_t pos, uint64_t len, df_string ins) {
+  uint8_t* t = (uint8_t*)df_str_res(*slot);
+  if (df_is_block(t)) {
+    df_string copy = df_str_res(ins) == t ? df_str_dup(ins) : NULL;
+    df_sv v = df_view(copy ? copy : ins);
+    df_bs_splice((df_sroot*)t, pos, len, v.p, v.len);
+    df_str_free(copy);
+    return;
+  }
+  df_sv s = df_view(*slot);
+  df_sv v = df_view(ins);
+  uint64_t from = df_utf8_offset(s.p, s.len, pos);
+  uint64_t to = from + df_utf8_offset(s.p + from, s.len - from, len);
+  uint64_t total = s.len - (to - from) + v.len;
+  char* text = (char*)malloc(total ? total : 1);
+  if (!text) {
+    df_out_of_memory();
+  }
+  memcpy(text, s.p, from);
+  memcpy(text + from, v.p, v.len);
+  memcpy(text + from + v.len, s.p + to, s.len - to);
+  df_string changed = df_str_make(text, total);
+  free(text);
+  df_str_take(slot, owned, changed);
+}
+
+/* the string an item of a collection keeps (spec 4): always its own copy, in its smallest form. A new string already in its
+   smallest form is kept; a borrowed one, a moved one or one in a bigger class than it needs is copied */
+static df_string df_str_item(df_string value, bool fresh) {
+  if (!fresh) {
+    return df_str_dup(value);
+  }
+  const uint8_t* h = (const uint8_t*)value;
+  if (!h) {
+    return value;
+  }
+  unsigned cls = h[0] & 0x0F;
+  if (cls == DF_STR_LITERAL || (cls <= 7 && (cls == 0 || df_str_len(value) > ((uint64_t)32 << (cls - 1)) - 5))) {
+    return value;
+  }
+  if (cls == DF_STR_BLOCK && ((const df_sroot*)h)->bytes > DF_STR_SINGLE_MAX) {
+    df_str_shrink(&value);   /* the blocks packed full */
+    return value;
+  }
+  df_string copy = df_str_dup(value);
+  df_str_free(value);
+  return copy;
+}
+
+/* a place that has no flag of its own (a field, an item, a tuple item): it always owns */
+static bool df_str_owner = true;
+
+/* new strings that are only read in a statement (an operand, an argument): freed when the statement ends. A function frees the
+   ones above the mark it took when it started, so the temporaries of its callers stay */
+static df_string* df_tmps = NULL;
+static bool* df_tmp_objs = NULL;   /* the entry is an object (dropped), not a string (freed) */
+static size_t df_tmp_top = 0;
+static size_t df_tmp_cap = 0;
+static void df_drop(void* obj);
+
+static void df_tmp_push(void* p, bool object) {
+  if (df_tmp_top == df_tmp_cap) {
+    df_tmp_cap = df_tmp_cap ? df_tmp_cap * 2 : 64;
+    df_tmps = (df_string*)realloc(df_tmps, df_tmp_cap * sizeof(df_string));
+    df_tmp_objs = (bool*)realloc(df_tmp_objs, df_tmp_cap * sizeof(bool));
+    if (!df_tmps || !df_tmp_objs) {
+      df_out_of_memory();
+    }
+  }
+  df_tmp_objs[df_tmp_top] = object;
+  df_tmps[df_tmp_top++] = (df_string)p;
+}
+
+static df_string df_tmp(df_string s) {
+  if (s) {
+    df_tmp_push((void*)s, false);
+  }
   return s;
 }
 
+/* a new object only used in a statement (an argument to a borrowing parameter, a receiver): it ends when the statement ends */
+static void* df_tmpo(void* o) {
+  if (o) {
+    df_tmp_push(o, true);
+  }
+  return o;
+}
+
+static void df_tmp_drop(size_t mark) {
+  while (df_tmp_top > mark) {
+    --df_tmp_top;
+    if (df_tmp_objs[df_tmp_top]) {
+      df_drop((void*)df_tmps[df_tmp_top]);
+    } else {
+      df_str_free(df_tmps[df_tmp_top]);
+    }
+  }
+}
+
+/* the same string is equal; then the byte lengths, then the bytes (spec 4) */
 static bool df_str_eq(df_string a, df_string b) {
-  return a.len == b.len && memcmp(a.p, b.p, a.len) == 0;
+  if (df_str_res(a) == df_str_res(b)) {
+    return true;
+  }
+  df_sv x = df_view(a), y = df_view(b);
+  return x.len == y.len && memcmp(x.p, y.p, x.len) == 0;
 }
 
 /* ---- objects (classes): every object starts with its class descriptor ---- */
@@ -264,6 +1249,8 @@ typedef struct df_class {
   const df_impl* impls;
   uint32_t nimpls;
   void (*drop)(void*);   /* ends the object: its atEnd, then the objects it owns */
+  df_uns (*hash)(const void*);   /* .hash (spec 6.2.1): the override of get_hash() or the default; NULL when the program uses no hash */
+  void* (*clone)(const void*);   /* .clone() (spec 12.6): a new object; NULL when the class cannot be cloned (or nothing clones) */
 } df_class;
 
 typedef struct { const df_class* cls; } df_object;
@@ -302,9 +1289,18 @@ static df_string df_dead_str(const void* obj) {
   return df_str_lit("(destroyed)", 11);
 }
 
-static const df_class df_dead_class = { 0, "(destroyed)", NULL, NULL, df_dead_str, NULL, 0, NULL };
+static const df_class df_dead_class = { 0, "(destroyed)", NULL, NULL, df_dead_str, NULL, 0, NULL, NULL, NULL };
 
 #define DF_IS_DEAD(p) (((const df_object*)(p))->cls == &df_dead_class)
+
+/* a clone of an object by its class at run time (spec 12.6): null for null, a destroyed object or a class that cannot be cloned */
+static void* df_clone_obj(const void* obj) {
+  if (obj == NULL || DF_IS_DEAD(obj)) {
+    return NULL;
+  }
+  const df_class* c = ((const df_object*)obj)->cls;
+  return c->clone != NULL ? c->clone(obj) : NULL;
+}
 
 /* releases the ownership held by a variable: the object ends; ending a destroyed object is a double free */
 static void df_drop(void* obj) {
@@ -320,6 +1316,79 @@ static void df_drop(void* obj) {
   if (c != NULL && c->drop != NULL) {
     c->drop(obj);
   }
+}
+
+/* reference counting (spec 12.7, the Rust Rc model): a counted variable holds the counting block of its object; the counting system owns the
+   object and each holder is a user. The last release ends the object; the block stays while weak references need it. A null variable holds
+   no block (NULL) and no usage */
+typedef struct df_rc { df_uns users; df_uns weaks; void* obj; } df_rc;
+
+static df_rc* df_rc_new(void* obj) {
+  if (obj == NULL) {
+    return NULL;
+  }
+  df_rc* rc = (df_rc*)df_alloc(sizeof(df_rc));
+  rc->users = 1;
+  rc->weaks = 0;
+  rc->obj = obj;
+  return rc;
+}
+
+/* one more user of the same object */
+static df_rc* df_rc_use(df_rc* rc) {
+  if (rc != NULL) {
+    rc->users++;
+  }
+  return rc;
+}
+
+/* a user releases its usage: at 0 the object ends (final, the count never rises again) */
+static void df_rc_release(df_rc* rc) {
+  if (rc == NULL || --rc->users != 0) {
+    return;
+  }
+  void* obj = rc->obj;
+  rc->obj = NULL;
+  if (rc->weaks == 0) {
+    free(rc);
+  }
+  df_drop(obj);
+}
+
+#define DF_RC_OBJ(T, rc) ((T)((rc) != NULL ? (rc)->obj : NULL))
+
+/* weak references (spec 12.7): they hold the counting block, not a usage; the object is gone when its user count is 0 */
+static df_rc* df_rc_weak(df_rc* rc) {
+  if (rc != NULL) {
+    rc->weaks++;
+  }
+  return rc;
+}
+
+static void df_rc_unweak(df_rc* rc) {
+  if (rc != NULL && --rc->weaks == 0 && rc->users == 0) {
+    free(rc);
+  }
+}
+
+#define DF_RC_ALIVE(rc) ((rc) != NULL && (rc)->users > 0)
+
+/* removeRefCounting() (spec 12.7, Rust Rc::try_unwrap): the last user takes the object out of the counting as a plain owned object and
+   its variable becomes null; the weak references see the object as gone, and the block is freed when none of them needs it. With other
+   users (or a null variable) it gives NULL and nothing changes */
+static void* df_rc_take(df_rc** slot) {
+  df_rc* rc = *slot;
+  if (rc == NULL || rc->users != 1) {
+    return NULL;
+  }
+  void* obj = rc->obj;
+  rc->obj = NULL;
+  rc->users = 0;
+  *slot = NULL;
+  if (rc->weaks == 0) {
+    free(rc);
+  }
+  return obj;
 }
 
 /* the adopted children of a parent object (spec 12.5): a child moved with -> is registered with its parent, which nulls the child's reference to it
@@ -403,6 +1472,9 @@ typedef struct { df_string* p; df_uns len; } df_arr_string;
 typedef struct { uint8_t* p; df_uns len; } df_arr_u8;
 
 static void* df_calloc(df_uns count, df_uns size) {
+  if (size != 0 && count > (df_uns)SIZE_MAX / size) {
+    df_out_of_memory();   /* count * size does not fit: reported as a failed allocation (spec 15.3) */
+  }
   void* p = calloc(count ? count : 1, size ? size : 1);
   if (!p) {
     df_out_of_memory();
@@ -429,17 +1501,6 @@ static df_uns df_idx_wide(uint64_t v) {
   return v > DF_UNS_MAX ? DF_UNS_MAX : (df_uns)v;
 }
 
-/* character count (UTF-8 code points) */
-static uint64_t df_str_chars(df_string s) {
-  uint64_t n = 0;
-  for (uint64_t i = 0; i < s.len; i++) {
-    if (((unsigned char)s.p[i] & 0xC0) != 0x80) {
-      n++;
-    }
-  }
-  return n;
-}
-
 static df_string df_str_from_i64(int64_t v) {
   char buf[32];
   snprintf(buf, sizeof buf, "%lld", (long long)v);
@@ -450,6 +1511,34 @@ static df_string df_str_from_u64(uint64_t v) {
   char buf[32];
   snprintf(buf, sizeof buf, "%llu", (unsigned long long)v);
   return df_str_from_buf(buf);
+}
+
+/* an addr prints as hex in groups of 4 digits separated by spaces (spec 2.3): 16 digits on 64 bits, 8 on 32 */
+static df_string df_str_from_addr(void* v) {
+  uint64_t a = (uint64_t)(uintptr_t)v;
+  int digits = (int)sizeof(void*) * 2;
+  char buf[48];
+  int n = 0;
+  for (int i = digits - 1; i >= 0; i--) {
+    buf[n++] = "0123456789ABCDEF"[(a >> (i * 4)) & 0xF];
+    if (i > 0 && i % 4 == 0) {
+      buf[n++] = ' ';
+    }
+  }
+  buf[n] = 0;
+  return df_str_from_buf(buf);
+}
+
+/* a printed collection shows its first DF_PRINT_ITEMS items (spec 6.1): the end is "]", or ", ...] (37 items)" when there are more */
+#define DF_PRINT_ITEMS 3
+
+static df_string df_str_coll_end(df_string r, uint64_t total) {
+  if (total <= DF_PRINT_ITEMS) {
+    return df_str_catx(r, df_str_lit("]", 1));
+  }
+  char buf[48];
+  snprintf(buf, sizeof buf, ", ...] (%llu items)", (unsigned long long)total);
+  return df_str_catx(r, df_str_from_buf(buf));
 }
 
 static df_string df_str_from_bool(bool v) {
@@ -481,10 +1570,7 @@ static df_string df_str_from_char(uint32_t c) {
     buf[3] = (char)(0x80 | (c & 0x3F));
     n = 4;
   }
-  char* p = (char*)df_alloc(n);
-  memcpy(p, buf, n);
-  df_string s = { p, n };
-  return s;
+  return df_str_make(buf, n);
 }
 
 /* shortest text that reads back as the same value (like C#) */
@@ -542,25 +1628,92 @@ static bool df_rbool(double v) {
 
 /* ---- console ---- */
 
-static void df_console_log(df_string s) {
-  fwrite(s.p, 1, (size_t)s.len, stdout);
+/* a block string is written block by block */
+static void df_str_fwrite(df_string text, FILE* out) {
+  const uint8_t* h = df_str_res(text);
+  if (df_is_block(h)) {
+    for (const df_sblock* b = ((const df_sroot*)h)->first; b; b = b->next) {
+      fwrite(DF_BLOCK_TEXT(b), 1, b->used, out);
+    }
+    return;
+  }
+  df_sv s = df_view(text);
+  fwrite(s.p, 1, (size_t)s.len, out);
+}
+
+static void df_console_log(df_string text) {
+  df_str_fwrite(text, stdout);
   fputc('\n', stdout);
 }
 
-static void df_console_log_error(df_string s) {
+static void df_console_log_error(df_string text) {
   fflush(stdout);
-  fwrite(s.p, 1, (size_t)s.len, stderr);
+  df_str_fwrite(text, stderr);
   fputc('\n', stderr);
 }
 
 /* no newline */
-static void df_console_print(df_string s) {
-  fwrite(s.p, 1, (size_t)s.len, stdout);
+static void df_console_print(df_string text) {
+  df_str_fwrite(text, stdout);
 }
+
+#ifdef _WIN32
+#include <conio.h>
+#include <io.h>
+#else
+#include <termios.h>
+#include <unistd.h>
+#include <signal.h>
+
+/* Console.read puts the terminal in raw mode (no line buffer, no echo) and leaves it so between calls, so the keys pressed meanwhile
+   are neither echoed nor held until Enter; readLine, the end of the program, a panic and the signals that stop it give it back */
+static struct termios df_tty_saved;
+static bool df_tty_raw = false;
+static bool df_tty_hooked = false;
+
+static void df_tty_restore(void) {
+  if (df_tty_raw) {
+    tcsetattr(STDIN_FILENO, TCSANOW, &df_tty_saved);
+    df_tty_raw = false;
+  }
+}
+
+static void df_tty_signal(int sig) {
+  df_tty_restore();
+  signal(sig, SIG_DFL);
+  raise(sig);
+}
+
+static void df_tty_enter_raw(void) {
+  if (df_tty_raw || tcgetattr(STDIN_FILENO, &df_tty_saved) != 0) {
+    return;
+  }
+  struct termios raw = df_tty_saved;
+  raw.c_lflag &= (tcflag_t)~(ICANON | ECHO);
+  raw.c_cc[VMIN] = 0;
+  raw.c_cc[VTIME] = 0;
+  if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) != 0) {
+    return;
+  }
+  df_tty_raw = true;
+  if (!df_tty_hooked) {
+    df_tty_hooked = true;
+    atexit(df_tty_restore);
+    df_panic_hook = df_tty_restore;
+    signal(SIGINT, df_tty_signal);
+    signal(SIGTERM, df_tty_signal);
+    signal(SIGHUP, df_tty_signal);
+    signal(SIGQUIT, df_tty_signal);
+  }
+}
+#endif
 
 /* waits for Enter; the line keeps its newline when the input has one; "" at end of input */
 static df_string df_console_get_input(void) {
   fflush(stdout);
+#ifndef _WIN32
+  df_tty_restore();
+#endif
   uint64_t capacity = 128;
   uint64_t length = 0;
   char* buffer = (char*)df_alloc(capacity);
@@ -577,8 +1730,7 @@ static df_string df_console_get_input(void) {
       break;
     }
   }
-  df_string s = { buffer, length };
-  return s;
+  return df_str_make(buffer, length);
 }
 
 /* one UTF-8 character from a byte reader; 0 at end of input */
@@ -602,79 +1754,115 @@ static int df_read_stdin_byte(void) {
   return getc(stdin);
 }
 
-#ifdef _WIN32
-#include <conio.h>
-#include <io.h>
-#else
-#include <termios.h>
-#include <unistd.h>
-#endif
-
-/* the first typable character, without waiting for Enter; '\0' at end of input */
-static uint32_t df_console_get_char(void) {
+/* Console.read (stdlib 2): the character of a key already pressed, without waiting, echo or Enter; -1 (null) when no key is
+   waiting or the key has no character (arrows, function keys). Enter is '\n' on every OS. Not a terminal: the next character
+   of the input, -1 at its end */
+static int64_t df_console_read(void) {
   fflush(stdout);
 #ifdef _WIN32
   if (_isatty(_fileno(stdin))) {
-    while (true) {
-      wint_t key = _getwch();
-      if (key == 0 || key == 0xE0) {
-        _getwch();              /* arrows and function keys: two codes */
-        continue;
-      }
-      if (key >= 0xD800 && key <= 0xDBFF) {
-        wint_t low = _getwch();
-        return 0x10000 + (((uint32_t)key - 0xD800) << 10) + ((uint32_t)low - 0xDC00);
-      }
-      if (key >= 0x20 && key != 0x7F) {
-        return (uint32_t)key;
-      }
+    if (!_kbhit()) {
+      return -1;
     }
+    wint_t key = _getwch();
+    if (key == 0 || key == 0xE0) {
+      _getwch();                /* arrows and function keys: two codes */
+      return -1;
+    }
+    if (key >= 0xD800 && key <= 0xDBFF) {
+      wint_t low = _getwch();
+      return 0x10000 + (((int64_t)key - 0xD800) << 10) + ((int64_t)low - 0xDC00);
+    }
+    return key == '\r' ? '\n' : (int64_t)key;
   }
 #else
   if (isatty(STDIN_FILENO)) {
-    struct termios saved;
-    tcgetattr(STDIN_FILENO, &saved);
-    struct termios raw = saved;
-    raw.c_lflag &= (tcflag_t)~(ICANON | ECHO);
-    raw.c_cc[VMIN] = 1;
-    raw.c_cc[VTIME] = 0;
-    tcsetattr(STDIN_FILENO, TCSANOW, &raw);
-    uint32_t result = 0;
-    while (true) {
-      int first = getc(stdin);
-      if (first == EOF) {
-        break;
-      }
-      if (first == 0x1B) {
-        /* escape sequence (arrows, function keys): skip it */
-        int second = getc(stdin);
-        if (second == '[' || second == 'O') {
-          int part;
-          while ((part = getc(stdin)) != EOF && !(part >= 0x40 && part <= 0x7E)) {
-          }
-        }
-        continue;
-      }
-      if (first < 0x20 || first == 0x7F) {
-        continue;
-      }
-      result = df_decode_utf8(first, df_read_stdin_byte);
-      break;
+    df_tty_enter_raw();
+    unsigned char first;
+    if (read(STDIN_FILENO, &first, 1) != 1) {
+      return -1;
     }
-    tcsetattr(STDIN_FILENO, TCSANOW, &saved);
-    return result;
+    if (first == 0x1B) {
+      /* an escape sequence (arrows, function keys) arrives in one piece: skip it; Esc alone is its character */
+      unsigned char next;
+      if (read(STDIN_FILENO, &next, 1) != 1) {
+        return 0x1B;
+      }
+      if (next == '[' || next == 'O') {
+        unsigned char part;
+        while (read(STDIN_FILENO, &part, 1) == 1 && !(part >= 0x40 && part <= 0x7E)) {
+        }
+      }
+      return -1;
+    }
+    if (first < 0x80) {
+      return first;
+    }
+    int extra = (first & 0xE0) == 0xC0 ? 1 : (first & 0xF0) == 0xE0 ? 2 : (first & 0xF8) == 0xF0 ? 3 : 0;
+    int64_t code = first & (0x3F >> extra);
+    for (int index = 0; index < extra; index++) {
+      unsigned char part;
+      if (read(STDIN_FILENO, &part, 1) != 1) {
+        return -1;
+      }
+      code = (code << 6) | (part & 0x3F);
+    }
+    return code;
   }
 #endif
-  /* not a terminal: the next typable character of the input */
-  while (true) {
-    int first = getc(stdin);
-    if (first == EOF) {
-      return 0;
-    }
-    if (first >= 0x20 && first != 0x7F) {
-      return df_decode_utf8(first, df_read_stdin_byte);
-    }
+  int first = getc(stdin);
+  if (first == EOF) {
+    return -1;
   }
+  return (int64_t)df_decode_utf8(first, df_read_stdin_byte);
+}
+
+/* Console.clear (stdlib 2): empties the console and puts the cursor at the top-left corner; nothing when the output is not a console */
+#if defined(_WIN32) && !defined(ENABLE_VIRTUAL_TERMINAL_PROCESSING)
+#define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x0004
+#endif
+static void df_console_clear(void) {
+  fflush(stdout);
+#ifdef _WIN32
+  HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+  DWORD mode;
+  if (!GetConsoleMode(out, &mode)) {
+    return;   // not a console (redirected output)
+  }
+  if ((mode & ENABLE_VIRTUAL_TERMINAL_PROCESSING) || SetConsoleMode(out, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING)) {
+    // home, clear the visible screen and the scrollback: the next frame starts at the top of the window
+    fputs("\x1b[H\x1b[2J\x1b[3J", stdout);
+    fflush(stdout);
+    return;
+  }
+  // an old console without escape sequences: clear the visible window and home the cursor to its top-left
+  CONSOLE_SCREEN_BUFFER_INFO info;
+  if (!GetConsoleScreenBufferInfo(out, &info)) {
+    return;
+  }
+  SHORT width = (SHORT)(info.srWindow.Right - info.srWindow.Left + 1);
+  DWORD written;
+  for (SHORT row = info.srWindow.Top; row <= info.srWindow.Bottom; row++) {
+    COORD start = { info.srWindow.Left, row };
+    FillConsoleOutputCharacterW(out, L' ', (DWORD)width, start, &written);
+    FillConsoleOutputAttribute(out, info.wAttributes, (DWORD)width, start, &written);
+  }
+  COORD home = { info.srWindow.Left, info.srWindow.Top };
+  SetConsoleCursorPosition(out, home);
+#else
+  if (!isatty(STDOUT_FILENO)) {
+    return;
+  }
+  fputs("\x1b[H\x1b[2J", stdout);
+  fflush(stdout);
+#endif
+}
+
+/* Root.exit (stdlib 1): ends the program at once; the output is flushed, atEnd blocks and destructors do not run */
+static void df_exit(int64_t code) {
+  fflush(stdout);
+  fflush(stderr);
+  exit((int)code);
 }
 
 static void df_init(void) {
@@ -706,8 +1894,7 @@ static void df_set_args(int argc, char** argv) {
       int bytes = WideCharToMultiByte(CP_UTF8, 0, wide[index], -1, NULL, 0, NULL, NULL);
       char* text = (char*)df_alloc((uint64_t)bytes);
       WideCharToMultiByte(CP_UTF8, 0, wide[index], -1, text, bytes, NULL, NULL);
-      df_args.p[index].p = text;
-      df_args.p[index].len = (uint64_t)(bytes > 0 ? bytes - 1 : 0);
+      df_args.p[index] = df_str_make(text, (uint64_t)(bytes > 0 ? bytes - 1 : 0));
     }
     LocalFree(wide);
     return;
@@ -716,8 +1903,7 @@ static void df_set_args(int argc, char** argv) {
   df_args.p = (df_string*)df_calloc((df_uns)argc, sizeof(df_string));
   df_args.len = (df_uns)argc;
   for (int index = 0; index < argc; index++) {
-    df_args.p[index].p = argv[index];
-    df_args.p[index].len = strlen(argv[index]);
+    df_args.p[index] = df_str_from_cstr(argv[index]);
   }
 }
 
@@ -951,6 +2137,81 @@ static df_string df_str_from_lapse(int64_t l) {
   return df_str_from_i64(l >> 3);
 }
 
+/* a number as a lapse in milliseconds (spec 3.4): an integer is a date lapse (a year lapse beyond +-36 million years) */
+static int64_t df_lapse_from_ms(int64_t ms) {
+  const int64_t limit = (int64_t)1 << 60;
+  if (ms > -limit && ms < limit) {
+    return ms * 8 + 2;
+  }
+  return (ms / 31556952000LL) * 8 + 4;
+}
+
+/* a real is a clock lapse (0.1 ns), a date lapse beyond the clock range (rounding away from zero); NaN is null */
+static int64_t df_lapse_from_ms_real(double ms) {
+  if (isnan(ms)) {
+    return 0;
+  }
+  const double limit = 1152921504606846976.0;   /* 2^60 */
+  double units = ms * 1e7;
+  if (units > -limit && units < limit) {
+    return (int64_t)llround(units) * 8 + 3;
+  }
+  double whole = ms > 0 ? ceil(ms) : floor(ms);
+  if (whole > -limit && whole < limit) {
+    return (int64_t)whole * 8 + 2;
+  }
+  double years = trunc(ms / 31556952000.0);
+  return years >= limit ? (int64_t)(limit - 1) * 8 + 4 : years <= -limit ? -(int64_t)(limit - 1) * 8 + 4 : (int64_t)years * 8 + 4;
+}
+
+/* Time.sleep (stdlib 3): at least the lapse; zero, negative and null return at once */
+static void df_time_sleep(int64_t l) {
+  int64_t value = l >> 3;
+  int code = (int)(l & 7);
+  if (l == 0 || (code != 7 && value <= 0)) {
+    return;
+  }
+  const uint64_t most = (uint64_t)1 << 62;      /* about 146 years */
+  uint64_t ns;
+  if (code == 2) {
+    ns = (uint64_t)value >= most / 1000000 ? most : (uint64_t)value * 1000000;
+  } else if (code == 3) {
+    ns = ((uint64_t)value + 9) / 10;
+  } else {
+    ns = most;                                    /* years and the clock overflow */
+  }
+  fflush(stdout);
+#ifdef _WIN32
+  /* a high resolution timer when the OS has one (Windows 10 1803), else Sleep, rounded up to the millisecond */
+#ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
+#define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
+#endif
+  HANDLE timer = CreateWaitableTimerExW(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+  while (ns > 0) {
+    uint64_t part = ns > 3600000000000ULL ? 3600000000000ULL : ns;   /* at most one hour per wait */
+    bool waited = false;
+    if (timer) {
+      LARGE_INTEGER due;
+      due.QuadPart = -(LONGLONG)((part + 99) / 100);                   /* relative, in 100 ns units */
+      waited = SetWaitableTimer(timer, &due, 0, NULL, NULL, FALSE) && WaitForSingleObject(timer, INFINITE) == WAIT_OBJECT_0;
+    }
+    if (!waited) {
+      Sleep((DWORD)((part + 999999) / 1000000));
+    }
+    ns -= part;
+  }
+  if (timer) {
+    CloseHandle(timer);
+  }
+#else
+  struct timespec wait = { (time_t)(ns / 1000000000ULL), (long)(ns % 1000000000ULL) };
+  struct timespec left;
+  while (nanosleep(&wait, &left) != 0 && errno == EINTR) {
+    wait = left;
+  }
+#endif
+}
+
 /* ---- random: xoshiro256**, seeded through splitmix64 ---- */
 
 static uint64_t df_rng[4];
@@ -1056,7 +2317,727 @@ DF_MATH_SIGNED(int32_t, i32)
 DF_MATH_SIGNED(int64_t, i64)
 
 /* ---- end of runtime ---- */
+/* ---- Unicode tables ---- */
+
+typedef struct { uint32_t lo, hi; int32_t delta; int32_t step; } df_case_run;
+
+static bool df_in_ranges(const uint32_t* table, int count, uint32_t cp) {
+  int low = 0;
+  int high = count - 1;
+  while (low <= high) {
+    int mid = (low + high) / 2;
+    if (cp < table[mid * 2]) {
+      high = mid - 1;
+    } else if (cp > table[mid * 2 + 1]) {
+      low = mid + 1;
+    } else {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool df_cp_is_hexdigit(uint32_t cp) {
+  return (cp >= '0' && cp <= '9') || (cp >= 'a' && cp <= 'f') || (cp >= 'A' && cp <= 'F');
+}
+
+static bool df_cp_is_ascii(uint32_t cp) {
+  return cp < 128;
+}
+
+static uint32_t df_map_case(const df_case_run* table, int count, uint32_t cp) {
+  int low = 0;
+  int high = count - 1;
+  while (low <= high) {
+    int mid = (low + high) / 2;
+    if (cp < table[mid].lo) {
+      high = mid - 1;
+    } else if (cp > table[mid].hi) {
+      low = mid + 1;
+    } else {
+      if ((cp - table[mid].lo) % (uint32_t)table[mid].step == 0) {
+        return (uint32_t)((int32_t)cp + table[mid].delta);
+      }
+      return cp;
+    }
+  }
+  return cp;
+}
+
+static const df_case_run df_u_tolower[] = {
+{0x41,0x5A,32,1},{0xC0,0xD6,32,1},{0xD8,0xDE,32,1},{0x100,0x12E,1,2},{0x132,0x136,1,2},{0x139,0x147,1,2},
+{0x14A,0x176,1,2},{0x178,0x178,-121,1},{0x179,0x17D,1,2},{0x181,0x181,210,1},{0x182,0x184,1,2},{0x186,0x186,206,1},
+{0x187,0x187,1,1},{0x189,0x18A,205,1},{0x18B,0x18B,1,1},{0x18E,0x18E,79,1},{0x18F,0x18F,202,1},{0x190,0x190,203,1},
+{0x191,0x191,1,1},{0x193,0x193,205,1},{0x194,0x194,207,1},{0x196,0x196,211,1},{0x197,0x197,209,1},{0x198,0x198,1,1},
+{0x19C,0x19C,211,1},{0x19D,0x19D,213,1},{0x19F,0x19F,214,1},{0x1A0,0x1A4,1,2},{0x1A6,0x1A6,218,1},{0x1A7,0x1A7,1,1},
+{0x1A9,0x1A9,218,1},{0x1AC,0x1AC,1,1},{0x1AE,0x1AE,218,1},{0x1AF,0x1AF,1,1},{0x1B1,0x1B2,217,1},{0x1B3,0x1B5,1,2},
+{0x1B7,0x1B7,219,1},{0x1B8,0x1B8,1,1},{0x1BC,0x1BC,1,1},{0x1C4,0x1C4,2,1},{0x1C5,0x1C5,1,1},{0x1C7,0x1C7,2,1},
+{0x1C8,0x1C8,1,1},{0x1CA,0x1CA,2,1},{0x1CB,0x1DB,1,2},{0x1DE,0x1EE,1,2},{0x1F1,0x1F1,2,1},{0x1F2,0x1F4,1,2},
+{0x1F6,0x1F6,-97,1},{0x1F7,0x1F7,-56,1},{0x1F8,0x21E,1,2},{0x220,0x220,-130,1},{0x222,0x232,1,2},{0x23A,0x23A,10795,1},
+{0x23B,0x23B,1,1},{0x23D,0x23D,-163,1},{0x23E,0x23E,10792,1},{0x241,0x241,1,1},{0x243,0x243,-195,1},{0x244,0x244,69,1},
+{0x245,0x245,71,1},{0x246,0x24E,1,2},{0x370,0x372,1,2},{0x376,0x376,1,1},{0x37F,0x37F,116,1},{0x386,0x386,38,1},
+{0x388,0x38A,37,1},{0x38C,0x38C,64,1},{0x38E,0x38F,63,1},{0x391,0x3A1,32,1},{0x3A3,0x3AB,32,1},{0x3CF,0x3CF,8,1},
+{0x3D8,0x3EE,1,2},{0x3F4,0x3F4,-60,1},{0x3F7,0x3F7,1,1},{0x3F9,0x3F9,-7,1},{0x3FA,0x3FA,1,1},{0x3FD,0x3FF,-130,1},
+{0x400,0x40F,80,1},{0x410,0x42F,32,1},{0x460,0x480,1,2},{0x48A,0x4BE,1,2},{0x4C0,0x4C0,15,1},{0x4C1,0x4CD,1,2},
+{0x4D0,0x52E,1,2},{0x531,0x556,48,1},{0x10A0,0x10C5,7264,1},{0x10C7,0x10C7,7264,1},{0x10CD,0x10CD,7264,1},{0x13A0,0x13EF,38864,1},
+{0x13F0,0x13F5,8,1},{0x1C90,0x1CBA,-3008,1},{0x1CBD,0x1CBF,-3008,1},{0x1E00,0x1E94,1,2},{0x1E9E,0x1E9E,-7615,1},{0x1EA0,0x1EFE,1,2},
+{0x1F08,0x1F0F,-8,1},{0x1F18,0x1F1D,-8,1},{0x1F28,0x1F2F,-8,1},{0x1F38,0x1F3F,-8,1},{0x1F48,0x1F4D,-8,1},{0x1F59,0x1F5F,-8,2},
+{0x1F68,0x1F6F,-8,1},{0x1F88,0x1F8F,-8,1},{0x1F98,0x1F9F,-8,1},{0x1FA8,0x1FAF,-8,1},{0x1FB8,0x1FB9,-8,1},{0x1FBA,0x1FBB,-74,1},
+{0x1FBC,0x1FBC,-9,1},{0x1FC8,0x1FCB,-86,1},{0x1FCC,0x1FCC,-9,1},{0x1FD8,0x1FD9,-8,1},{0x1FDA,0x1FDB,-100,1},{0x1FE8,0x1FE9,-8,1},
+{0x1FEA,0x1FEB,-112,1},{0x1FEC,0x1FEC,-7,1},{0x1FF8,0x1FF9,-128,1},{0x1FFA,0x1FFB,-126,1},{0x1FFC,0x1FFC,-9,1},{0x2126,0x2126,-7517,1},
+{0x212A,0x212A,-8383,1},{0x212B,0x212B,-8262,1},{0x2132,0x2132,28,1},{0x2160,0x216F,16,1},{0x2183,0x2183,1,1},{0x24B6,0x24CF,26,1},
+{0x2C00,0x2C2F,48,1},{0x2C60,0x2C60,1,1},{0x2C62,0x2C62,-10743,1},{0x2C63,0x2C63,-3814,1},{0x2C64,0x2C64,-10727,1},{0x2C67,0x2C6B,1,2},
+{0x2C6D,0x2C6D,-10780,1},{0x2C6E,0x2C6E,-10749,1},{0x2C6F,0x2C6F,-10783,1},{0x2C70,0x2C70,-10782,1},{0x2C72,0x2C72,1,1},{0x2C75,0x2C75,1,1},
+{0x2C7E,0x2C7F,-10815,1},{0x2C80,0x2CE2,1,2},{0x2CEB,0x2CED,1,2},{0x2CF2,0x2CF2,1,1},{0xA640,0xA66C,1,2},{0xA680,0xA69A,1,2},
+{0xA722,0xA72E,1,2},{0xA732,0xA76E,1,2},{0xA779,0xA77B,1,2},{0xA77D,0xA77D,-35332,1},{0xA77E,0xA786,1,2},{0xA78B,0xA78B,1,1},
+{0xA78D,0xA78D,-42280,1},{0xA790,0xA792,1,2},{0xA796,0xA7A8,1,2},{0xA7AA,0xA7AA,-42308,1},{0xA7AB,0xA7AB,-42319,1},{0xA7AC,0xA7AC,-42315,1},
+{0xA7AD,0xA7AD,-42305,1},{0xA7AE,0xA7AE,-42308,1},{0xA7B0,0xA7B0,-42258,1},{0xA7B1,0xA7B1,-42282,1},{0xA7B2,0xA7B2,-42261,1},{0xA7B3,0xA7B3,928,1},
+{0xA7B4,0xA7C2,1,2},{0xA7C4,0xA7C4,-48,1},{0xA7C5,0xA7C5,-42307,1},{0xA7C6,0xA7C6,-35384,1},{0xA7C7,0xA7C9,1,2},{0xA7D0,0xA7D0,1,1},
+{0xA7D6,0xA7D8,1,2},{0xA7F5,0xA7F5,1,1},{0xFF21,0xFF3A,32,1},{0x10400,0x10427,40,1},{0x104B0,0x104D3,40,1},{0x10570,0x1057A,39,1},
+{0x1057C,0x1058A,39,1},{0x1058C,0x10592,39,1},{0x10594,0x10595,39,1},{0x10C80,0x10CB2,64,1},{0x118A0,0x118BF,32,1},{0x16E40,0x16E5F,32,1},
+{0x1E900,0x1E921,34,1},{0,0,0,1}};
+static uint32_t df_cp_tolower(uint32_t cp) { return df_map_case(df_u_tolower, 181, cp); }
+
+static const df_case_run df_u_toupper[] = {
+{0x61,0x7A,-32,1},{0xB5,0xB5,743,1},{0xE0,0xF6,-32,1},{0xF8,0xFE,-32,1},{0xFF,0xFF,121,1},{0x101,0x12F,-1,2},
+{0x133,0x137,-1,2},{0x13A,0x148,-1,2},{0x14B,0x177,-1,2},{0x17A,0x17E,-1,2},{0x17F,0x17F,-300,1},{0x180,0x180,195,1},
+{0x183,0x185,-1,2},{0x188,0x188,-1,1},{0x18C,0x18C,-1,1},{0x192,0x192,-1,1},{0x195,0x195,97,1},{0x199,0x199,-1,1},
+{0x19A,0x19A,163,1},{0x19E,0x19E,130,1},{0x1A1,0x1A5,-1,2},{0x1A8,0x1A8,-1,1},{0x1AD,0x1AD,-1,1},{0x1B0,0x1B0,-1,1},
+{0x1B4,0x1B6,-1,2},{0x1B9,0x1B9,-1,1},{0x1BD,0x1BD,-1,1},{0x1BF,0x1BF,56,1},{0x1C5,0x1C5,-1,1},{0x1C6,0x1C6,-2,1},
+{0x1C8,0x1C8,-1,1},{0x1C9,0x1C9,-2,1},{0x1CB,0x1CB,-1,1},{0x1CC,0x1CC,-2,1},{0x1CE,0x1DC,-1,2},{0x1DD,0x1DD,-79,1},
+{0x1DF,0x1EF,-1,2},{0x1F2,0x1F2,-1,1},{0x1F3,0x1F3,-2,1},{0x1F5,0x1F5,-1,1},{0x1F9,0x21F,-1,2},{0x223,0x233,-1,2},
+{0x23C,0x23C,-1,1},{0x23F,0x240,10815,1},{0x242,0x242,-1,1},{0x247,0x24F,-1,2},{0x250,0x250,10783,1},{0x251,0x251,10780,1},
+{0x252,0x252,10782,1},{0x253,0x253,-210,1},{0x254,0x254,-206,1},{0x256,0x257,-205,1},{0x259,0x259,-202,1},{0x25B,0x25B,-203,1},
+{0x25C,0x25C,42319,1},{0x260,0x260,-205,1},{0x261,0x261,42315,1},{0x263,0x263,-207,1},{0x265,0x265,42280,1},{0x266,0x266,42308,1},
+{0x268,0x268,-209,1},{0x269,0x269,-211,1},{0x26A,0x26A,42308,1},{0x26B,0x26B,10743,1},{0x26C,0x26C,42305,1},{0x26F,0x26F,-211,1},
+{0x271,0x271,10749,1},{0x272,0x272,-213,1},{0x275,0x275,-214,1},{0x27D,0x27D,10727,1},{0x280,0x280,-218,1},{0x282,0x282,42307,1},
+{0x283,0x283,-218,1},{0x287,0x287,42282,1},{0x288,0x288,-218,1},{0x289,0x289,-69,1},{0x28A,0x28B,-217,1},{0x28C,0x28C,-71,1},
+{0x292,0x292,-219,1},{0x29D,0x29D,42261,1},{0x29E,0x29E,42258,1},{0x345,0x345,84,1},{0x371,0x373,-1,2},{0x377,0x377,-1,1},
+{0x37B,0x37D,130,1},{0x3AC,0x3AC,-38,1},{0x3AD,0x3AF,-37,1},{0x3B1,0x3C1,-32,1},{0x3C2,0x3C2,-31,1},{0x3C3,0x3CB,-32,1},
+{0x3CC,0x3CC,-64,1},{0x3CD,0x3CE,-63,1},{0x3D0,0x3D0,-62,1},{0x3D1,0x3D1,-57,1},{0x3D5,0x3D5,-47,1},{0x3D6,0x3D6,-54,1},
+{0x3D7,0x3D7,-8,1},{0x3D9,0x3EF,-1,2},{0x3F0,0x3F0,-86,1},{0x3F1,0x3F1,-80,1},{0x3F2,0x3F2,7,1},{0x3F3,0x3F3,-116,1},
+{0x3F5,0x3F5,-96,1},{0x3F8,0x3F8,-1,1},{0x3FB,0x3FB,-1,1},{0x430,0x44F,-32,1},{0x450,0x45F,-80,1},{0x461,0x481,-1,2},
+{0x48B,0x4BF,-1,2},{0x4C2,0x4CE,-1,2},{0x4CF,0x4CF,-15,1},{0x4D1,0x52F,-1,2},{0x561,0x586,-48,1},{0x10D0,0x10FA,3008,1},
+{0x10FD,0x10FF,3008,1},{0x13F8,0x13FD,-8,1},{0x1C80,0x1C80,-6254,1},{0x1C81,0x1C81,-6253,1},{0x1C82,0x1C82,-6244,1},{0x1C83,0x1C84,-6242,1},
+{0x1C85,0x1C85,-6243,1},{0x1C86,0x1C86,-6236,1},{0x1C87,0x1C87,-6181,1},{0x1C88,0x1C88,35266,1},{0x1D79,0x1D79,35332,1},{0x1D7D,0x1D7D,3814,1},
+{0x1D8E,0x1D8E,35384,1},{0x1E01,0x1E95,-1,2},{0x1E9B,0x1E9B,-59,1},{0x1EA1,0x1EFF,-1,2},{0x1F00,0x1F07,8,1},{0x1F10,0x1F15,8,1},
+{0x1F20,0x1F27,8,1},{0x1F30,0x1F37,8,1},{0x1F40,0x1F45,8,1},{0x1F51,0x1F57,8,2},{0x1F60,0x1F67,8,1},{0x1F70,0x1F71,74,1},
+{0x1F72,0x1F75,86,1},{0x1F76,0x1F77,100,1},{0x1F78,0x1F79,128,1},{0x1F7A,0x1F7B,112,1},{0x1F7C,0x1F7D,126,1},{0x1F80,0x1F87,8,1},
+{0x1F90,0x1F97,8,1},{0x1FA0,0x1FA7,8,1},{0x1FB0,0x1FB1,8,1},{0x1FB3,0x1FB3,9,1},{0x1FBE,0x1FBE,-7205,1},{0x1FC3,0x1FC3,9,1},
+{0x1FD0,0x1FD1,8,1},{0x1FE0,0x1FE1,8,1},{0x1FE5,0x1FE5,7,1},{0x1FF3,0x1FF3,9,1},{0x214E,0x214E,-28,1},{0x2170,0x217F,-16,1},
+{0x2184,0x2184,-1,1},{0x24D0,0x24E9,-26,1},{0x2C30,0x2C5F,-48,1},{0x2C61,0x2C61,-1,1},{0x2C65,0x2C65,-10795,1},{0x2C66,0x2C66,-10792,1},
+{0x2C68,0x2C6C,-1,2},{0x2C73,0x2C73,-1,1},{0x2C76,0x2C76,-1,1},{0x2C81,0x2CE3,-1,2},{0x2CEC,0x2CEE,-1,2},{0x2CF3,0x2CF3,-1,1},
+{0x2D00,0x2D25,-7264,1},{0x2D27,0x2D27,-7264,1},{0x2D2D,0x2D2D,-7264,1},{0xA641,0xA66D,-1,2},{0xA681,0xA69B,-1,2},{0xA723,0xA72F,-1,2},
+{0xA733,0xA76F,-1,2},{0xA77A,0xA77C,-1,2},{0xA77F,0xA787,-1,2},{0xA78C,0xA78C,-1,1},{0xA791,0xA793,-1,2},{0xA794,0xA794,48,1},
+{0xA797,0xA7A9,-1,2},{0xA7B5,0xA7C3,-1,2},{0xA7C8,0xA7CA,-1,2},{0xA7D1,0xA7D1,-1,1},{0xA7D7,0xA7D9,-1,2},{0xA7F6,0xA7F6,-1,1},
+{0xAB53,0xAB53,-928,1},{0xAB70,0xABBF,-38864,1},{0xFF41,0xFF5A,-32,1},{0x10428,0x1044F,-40,1},{0x104D8,0x104FB,-40,1},{0x10597,0x105A1,-39,1},
+{0x105A3,0x105B1,-39,1},{0x105B3,0x105B9,-39,1},{0x105BB,0x105BC,-39,1},{0x10CC0,0x10CF2,-64,1},{0x118C0,0x118DF,-32,1},{0x16E60,0x16E7F,-32,1},
+{0x1E922,0x1E943,-34,1},{0,0,0,1}};
+static uint32_t df_cp_toupper(uint32_t cp) { return df_map_case(df_u_toupper, 199, cp); }
+
+static const uint32_t df_u_trim[] = {
+0x0,0x20,0x7F,0xA0,0xAD,0xAD,0x600,0x605,0x61C,0x61C,0x6DD,0x6DD,0x70F,0x70F,0x890,0x891,
+0x8E2,0x8E2,0x1680,0x1680,0x180E,0x180E,0x2000,0x200F,0x2028,0x202F,0x205F,0x2064,0x2066,0x206F,0x3000,0x3000,
+0xFEFF,0xFEFF,0xFFF9,0xFFFB,0x110BD,0x110BD,0x110CD,0x110CD,0x13430,0x1343F,0x1BCA0,0x1BCA3,0x1D173,0x1D17A,0xE0001,0xE0001,
+0xE0020,0xE007F,0};
+static bool df_cp_is_trim(uint32_t cp) { return df_in_ranges(df_u_trim, 25, cp); }
+
+/* ---- text: UTF-8 strings (spec 4.2) ---- */
+
+#define DF_NOT_FOUND UINT64_MAX
+
+/* decodes the character at *i and moves past it; a stray byte is taken as a character */
+static uint32_t df_utf8_next(const char* p, uint64_t len, uint64_t* i) {
+  unsigned char c = (unsigned char)p[*i];
+  uint32_t cp;
+  int extra;
+  if (c < 0x80) {
+    cp = c;
+    extra = 0;
+  } else if ((c & 0xE0) == 0xC0) {
+    cp = c & 0x1F;
+    extra = 1;
+  } else if ((c & 0xF0) == 0xE0) {
+    cp = c & 0x0F;
+    extra = 2;
+  } else if ((c & 0xF8) == 0xF0) {
+    cp = c & 0x07;
+    extra = 3;
+  } else {
+    cp = c;
+    extra = 0;
+  }
+  (*i)++;
+  while (extra-- > 0 && *i < len && (((unsigned char)p[*i]) & 0xC0) == 0x80) {
+    cp = (cp << 6) | ((unsigned char)p[*i] & 0x3F);
+    (*i)++;
+  }
+  return cp;
+}
+
+/* moves *i (greater than 0) to the start of the previous character and returns it */
+static uint32_t df_utf8_prev(const char* p, uint64_t* i) {
+  uint64_t end = *i;
+  uint64_t start = end - 1;
+  while (start > 0 && (((unsigned char)p[start]) & 0xC0) == 0x80) {
+    start--;
+  }
+  uint64_t at = start;
+  uint32_t cp = df_utf8_next(p, end, &at);
+  *i = start;
+  return cp;
+}
+
+static int df_utf8_encode(uint32_t c, char* buf) {
+  if (c > 0x10FFFF || (c >= 0xD800 && c <= 0xDFFF)) {
+    c = 0xFFFD;
+  }
+  if (c < 0x80) {
+    buf[0] = (char)c;
+    return 1;
+  }
+  if (c < 0x800) {
+    buf[0] = (char)(0xC0 | (c >> 6));
+    buf[1] = (char)(0x80 | (c & 0x3F));
+    return 2;
+  }
+  if (c < 0x10000) {
+    buf[0] = (char)(0xE0 | (c >> 12));
+    buf[1] = (char)(0x80 | ((c >> 6) & 0x3F));
+    buf[2] = (char)(0x80 | (c & 0x3F));
+    return 3;
+  }
+  buf[0] = (char)(0xF0 | (c >> 18));
+  buf[1] = (char)(0x80 | ((c >> 12) & 0x3F));
+  buf[2] = (char)(0x80 | ((c >> 6) & 0x3F));
+  buf[3] = (char)(0x80 | (c & 0x3F));
+  return 4;
+}
+
+/* growing buffer used to build strings */
+typedef struct { char* p; uint64_t len; uint64_t cap; } df_sb;
+
+static void df_sb_bytes(df_sb* b, const char* p, uint64_t n) {
+  if (n == 0) {
+    return;
+  }
+  if (b->len + n > b->cap) {
+    uint64_t cap = b->cap ? b->cap : 32;
+    while (cap < b->len + n) {
+      cap *= 2;
+    }
+    char* bigger = (char*)df_alloc(cap);
+    if (b->len) {
+      memcpy(bigger, b->p, b->len);
+    }
+    free(b->p);
+    b->p = bigger;
+    b->cap = cap;
+  }
+  memcpy(b->p + b->len, p, n);
+  b->len += n;
+}
+
+static void df_sb_cp(df_sb* b, uint32_t cp) {
+  char buf[4];
+  int n = df_utf8_encode(cp, buf);
+  df_sb_bytes(b, buf, (uint64_t)n);
+}
+
+/* the string built; the buffer is freed */
+static df_string df_sb_done(df_sb* b) {
+  df_string s = df_str_make(b->p ? b->p : "", b->len);
+  free(b->p);
+  b->p = NULL;
+  b->len = b->cap = 0;
+  return s;
+}
+
+/* a new string with the bytes from..to of a text */
+static df_string df_str_slice(df_sv s, uint64_t from, uint64_t to) {
+  return df_str_make(s.p + from, to - from);
+}
+
+/* byte offset of a character position; the end of the string when the position is past it */
+static uint64_t df_str_offset(df_sv s, uint64_t chars) {
+  uint64_t i = 0;
+  uint64_t n = 0;
+  while (n < chars && i < s.len) {
+    df_utf8_next(s.p, s.len, &i);
+    n++;
+  }
+  return i;
+}
+
+static uint32_t df_cp_fold(uint32_t cp) {
+  return df_cp_tolower(df_cp_toupper(cp));
+}
+
+/* does the needle sit at byte offset 'at'? 'end' receives the byte offset after the match */
+static bool df_match_at(df_sv h, uint64_t at, df_sv n, bool cs, uint64_t* end) {
+  uint64_t hi = at;
+  uint64_t ni = 0;
+  while (ni < n.len) {
+    if (hi >= h.len) {
+      return false;
+    }
+    uint32_t a = df_utf8_next(h.p, h.len, &hi);
+    uint32_t b = df_utf8_next(n.p, n.len, &ni);
+    if (cs ? a != b : df_cp_fold(a) != df_cp_fold(b)) {
+      return false;
+    }
+  }
+  *end = hi;
+  return true;
+}
+
+/* first match at or after byte offset 'from' */
+static uint64_t df_find(df_sv h, df_sv n, uint64_t from, bool cs, uint64_t* end) {
+  uint64_t at = from;
+  while (true) {
+    if (df_match_at(h, at, n, cs, end)) {
+      return at;
+    }
+    if (at >= h.len) {
+      return DF_NOT_FOUND;
+    }
+    df_utf8_next(h.p, h.len, &at);
+  }
+}
+
+static int64_t df_str_indexof(df_string text, df_string value, bool cs) {
+  df_sv s = df_view(text);
+  uint64_t end;
+  uint64_t at = df_find(s, df_view(value), 0, cs, &end);
+  if (at == DF_NOT_FOUND) {
+    return -1;
+  }
+  return (int64_t)df_utf8_count(s.p, at);
+}
+
+static int64_t df_str_lastindexof(df_string text, df_string value, bool cs) {
+  df_sv s = df_view(text);
+  df_sv v = df_view(value);
+  uint64_t at = 0;
+  uint64_t last = DF_NOT_FOUND;
+  uint64_t end;
+  while (true) {
+    if (df_match_at(s, at, v, cs, &end)) {
+      last = at;
+    }
+    if (at >= s.len) {
+      break;
+    }
+    df_utf8_next(s.p, s.len, &at);
+  }
+  if (last == DF_NOT_FOUND) {
+    return -1;
+  }
+  return (int64_t)df_utf8_count(s.p, last);
+}
+
+static int64_t df_str_indexof_c(df_string s, uint32_t c, bool cs) {
+  df_string one = df_str_from_char(c);
+  int64_t at = df_str_indexof(s, one, cs);
+  df_str_free(one);
+  return at;
+}
+
+static int64_t df_str_lastindexof_c(df_string s, uint32_t c, bool cs) {
+  df_string one = df_str_from_char(c);
+  int64_t at = df_str_lastindexof(s, one, cs);
+  df_str_free(one);
+  return at;
+}
+
+static bool df_str_contains(df_string text, df_string value, bool cs) {
+  uint64_t end;
+  return df_find(df_view(text), df_view(value), 0, cs, &end) != DF_NOT_FOUND;
+}
+
+static bool df_str_startswith(df_string text, df_string value, bool cs) {
+  uint64_t end;
+  return df_match_at(df_view(text), 0, df_view(value), cs, &end);
+}
+
+static bool df_str_endswith(df_string text, df_string value, bool cs) {
+  df_sv s = df_view(text);
+  uint64_t n = df_str_chars(value);
+  uint64_t h = df_str_chars(text);
+  if (n > h) {
+    return false;
+  }
+  uint64_t end;
+  uint64_t at = df_str_offset(s, h - n);
+  return df_match_at(s, at, df_view(value), cs, &end) && end == s.len;
+}
+
+static df_string df_str_replace(df_string text, df_string toFind, df_string replacement, bool cs) {
+  df_sv s = df_view(text);
+  df_sv find = df_view(toFind);
+  df_sv repl = df_view(replacement);
+  if (find.len == 0) {
+    return df_str_dup(text);
+  }
+  df_sb b = { 0 };
+  uint64_t pos = 0;
+  uint64_t end;
+  uint64_t at;
+  bool any = false;
+  while ((at = df_find(s, find, pos, cs, &end)) != DF_NOT_FOUND) {
+    df_sb_bytes(&b, s.p + pos, at - pos);
+    df_sb_bytes(&b, repl.p, repl.len);
+    pos = end;
+    any = true;
+  }
+  if (!any) {
+    return df_str_dup(text);
+  }
+  df_sb_bytes(&b, s.p + pos, s.len - pos);
+  return df_sb_done(&b);
+}
+
+static df_arr_string df_str_split(df_string text, df_string separator) {
+  df_sv s = df_view(text);
+  df_sv sep = df_view(separator);
+  uint64_t count = 1;
+  uint64_t pos = 0;
+  uint64_t at;
+  uint64_t end;
+  if (sep.len > 0) {
+    while ((at = df_find(s, sep, pos, true, &end)) != DF_NOT_FOUND) {
+      count++;
+      pos = end;
+    }
+  }
+  df_arr_string result;
+  result.len = count;
+  result.p = (df_string*)df_calloc(count, sizeof(df_string));
+  pos = 0;
+  uint64_t k = 0;
+  if (sep.len > 0) {
+    while ((at = df_find(s, sep, pos, true, &end)) != DF_NOT_FOUND) {
+      result.p[k++] = df_str_slice(s, pos, at);
+      pos = end;
+    }
+  }
+  result.p[k] = df_str_slice(s, pos, s.len);
+  return result;
+}
+
+static bool df_in_set(df_sv set, uint32_t cp) {
+  uint64_t i = 0;
+  while (i < set.len) {
+    if (df_utf8_next(set.p, set.len, &i) == cp) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/* mode: 1 = left, 2 = right, 3 = both; the characters of 'chars' when bySet, else spaces and non-printable ones */
+static df_string df_str_trim_mode(df_string text, int mode, bool bySet, df_string chars) {
+  df_sv s = df_view(text);
+  df_sv set = df_view(chars);
+  uint64_t a = 0;
+  uint64_t b = s.len;
+  if (mode & 1) {
+    while (a < b) {
+      uint64_t j = a;
+      uint32_t cp = df_utf8_next(s.p, s.len, &j);
+      if (!(bySet ? df_in_set(set, cp) : df_cp_is_trim(cp))) {
+        break;
+      }
+      a = j;
+    }
+  }
+  if (mode & 2) {
+    while (b > a) {
+      uint64_t j = b;
+      uint32_t cp = df_utf8_prev(s.p, &j);
+      if (!(bySet ? df_in_set(set, cp) : df_cp_is_trim(cp))) {
+        break;
+      }
+      b = j;
+    }
+  }
+  return df_str_slice(s, a, b);
+}
+
+static df_string df_str_trim(df_string s) { return df_str_trim_mode(s, 3, false, NULL); }
+static df_string df_str_trim_left(df_string s) { return df_str_trim_mode(s, 1, false, NULL); }
+static df_string df_str_trim_right(df_string s) { return df_str_trim_mode(s, 2, false, NULL); }
+static df_string df_str_trim_set(df_string s, df_string set) { return df_str_trim_mode(s, 3, true, set); }
+static df_string df_str_trim_left_set(df_string s, df_string set) { return df_str_trim_mode(s, 1, true, set); }
+static df_string df_str_trim_right_set(df_string s, df_string set) { return df_str_trim_mode(s, 2, true, set); }
+
+static df_string df_str_substr(df_string text, uint32_t start, uint32_t len) {
+  df_sv s = df_view(text);
+  uint64_t a = df_str_offset(s, start);
+  uint64_t i = a;
+  uint64_t n = 0;
+  while (n < len && i < s.len) {
+    df_utf8_next(s.p, s.len, &i);
+    n++;
+  }
+  return df_str_slice(s, a, i);
+}
+
+static df_string df_str_map_case(df_string text, bool upper) {
+  df_sv s = df_view(text);
+  df_sb b = { 0 };
+  uint64_t i = 0;
+  while (i < s.len) {
+    uint32_t cp = df_utf8_next(s.p, s.len, &i);
+    df_sb_cp(&b, upper ? df_cp_toupper(cp) : df_cp_tolower(cp));
+  }
+  return df_sb_done(&b);
+}
+
+static df_string df_str_toupper(df_string s) { return df_str_map_case(s, true); }
+static df_string df_str_tolower(df_string s) { return df_str_map_case(s, false); }
+
+static df_string df_str_pad(df_string text, uint32_t width, uint32_t pad, bool left) {
+  df_sv s = df_view(text);
+  uint64_t n = df_str_chars(text);
+  if (n >= width) {
+    return df_str_dup(text);
+  }
+  df_sb b = { 0 };
+  if (!left) {
+    df_sb_bytes(&b, s.p, s.len);
+  }
+  for (uint64_t k = n; k < width; k++) {
+    df_sb_cp(&b, pad);
+  }
+  if (left) {
+    df_sb_bytes(&b, s.p, s.len);
+  }
+  return df_sb_done(&b);
+}
+
+static df_string df_str_pad_left(df_string s, uint32_t width, uint32_t pad) { return df_str_pad(s, width, pad, true); }
+static df_string df_str_pad_right(df_string s, uint32_t width, uint32_t pad) { return df_str_pad(s, width, pad, false); }
+
+/* text[pos]: the character at a position; IndexOutOfRangeException past the end */
+static uint32_t df_str_char_at(df_string text, uint64_t index, const char* function) {
+  const uint8_t* h = df_str_res(text);
+  if (df_is_block(h)) {
+    if (index < ((const df_sroot*)h)->chars) {
+      return df_bs_char_at((const df_sroot*)h, index);
+    }
+    df_raise(&df_desc_IndexOutOfRangeException, function);
+    return 0;
+  }
+  df_sv s = df_view(text);
+  uint64_t i = 0;
+  uint64_t n = 0;
+  while (i < s.len) {
+    uint32_t cp = df_utf8_next(s.p, s.len, &i);
+    if (n == index) {
+      return cp;
+    }
+    n++;
+  }
+  df_raise(&df_desc_IndexOutOfRangeException, function);
+  return 0;
+}
+
+/* a new string: the bytes of s before 'from', then 'middle', then the bytes of s from 'to' */
+static df_string df_str_splice(df_sv s, uint64_t from, uint64_t to, df_sv middle) {
+  df_sb b = { 0 };
+  df_sb_bytes(&b, s.p, from);
+  df_sb_bytes(&b, middle.p, middle.len);
+  df_sb_bytes(&b, s.p + to, s.len - to);
+  return df_sb_done(&b);
+}
+
+/* insert, remove, replaceAt, append, prepend (spec 4.3): positions in characters; a position past the end is the end */
+static df_string df_str_insert(df_string text, uint32_t pos, df_string add) {
+  df_sv s = df_view(text);
+  uint64_t at = df_str_offset(s, pos);
+  return df_str_splice(s, at, at, df_view(add));
+}
+
+static df_string df_str_remove(df_string text, uint32_t pos, uint32_t len) {
+  df_sv s = df_view(text);
+  uint64_t from = df_str_offset(s, pos);
+  uint64_t to = from;
+  for (uint32_t k = 0; k < len && to < s.len; k++) {
+    df_utf8_next(s.p, s.len, &to);
+  }
+  df_sv none = { "", 0 };
+  return df_str_splice(s, from, to, none);
+}
+
+static df_string df_str_replace_at(df_string text, uint32_t pos, uint32_t len, df_string add) {
+  df_sv s = df_view(text);
+  uint64_t from = df_str_offset(s, pos);
+  uint64_t to = from;
+  for (uint32_t k = 0; k < len && to < s.len; k++) {
+    df_utf8_next(s.p, s.len, &to);
+  }
+  return df_str_splice(s, from, to, df_view(add));
+}
+
+static df_string df_str_append_new(df_string text, df_string add) {
+  return df_str_concat(text, add);
+}
+
+static df_string df_str_prepend(df_string text, df_string add) {
+  return df_str_concat(add, text);
+}
+
+/* text[pos] = c, in place; IndexOutOfRangeException past the end */
+static void df_str_set_char(df_string* slot, bool* owned, uint64_t index, uint32_t c, const char* function) {
+  uint8_t* h = (uint8_t*)df_str_res(*slot);
+  if (df_is_block(h)) {
+    df_sroot* r = (df_sroot*)h;
+    if (index >= r->chars) {
+      df_raise(&df_desc_IndexOutOfRangeException, function);
+      return;
+    }
+    char code[4];
+    int size = df_utf8_encode(c, code);
+    uint64_t start, startByte;
+    df_sblock* b = df_bs_seek(r, index, &start, &startByte);
+    uint64_t at = df_block_offset(b, index - start);
+    uint64_t next = at + 1;
+    while (next < b->used && ((unsigned char)DF_BLOCK_TEXT(b)[next] & 0xC0) == 0x80) {
+      next++;
+    }
+    if ((uint64_t)size == next - at) {
+      memcpy(DF_BLOCK_TEXT(b) + at, code, (size_t)size);   /* same size: written where it is */
+      return;
+    }
+    df_bs_splice(r, index, 1, code, (uint64_t)size);
+    return;
+  }
+  df_sv s = df_view(*slot);
+  uint64_t i = 0;
+  uint64_t n = 0;
+  uint64_t from = UINT64_MAX;
+  uint64_t to = 0;
+  while (i < s.len) {
+    uint64_t start = i;
+    df_utf8_next(s.p, s.len, &i);
+    if (n == index) {
+      from = start;
+      to = i;
+      break;
+    }
+    n++;
+  }
+  if (from == UINT64_MAX) {
+    df_raise(&df_desc_IndexOutOfRangeException, function);
+    return;
+  }
+  char buf[4];
+  int width = df_utf8_encode(c, buf);
+  uint8_t* t = (uint8_t*)df_str_res(*slot);
+  if ((uint64_t)width == to - from && df_str_cap(t) > 0) {
+    memcpy(df_str_text(t) + from, buf, (size_t)width);   /* same size: written where it is */
+    return;
+  }
+  df_sv middle = { buf, (uint64_t)width };
+  df_str_take(slot, owned, df_str_splice(s, from, to, middle));
+}
+
+/* StringEncoding: 0 UTF8, 1 UTF16, 2 UTF32, 3 UTF16BE, 4 UTF32BE, 5 ASCII, 6 ISO88591; ends with a terminator */
+static df_arr_u8 df_str_tocstr(df_string text, int32_t encoding) {
+  df_sv s = df_view(text);
+  df_sb b = { 0 };
+  uint64_t i = 0;
+  while (i < s.len) {
+    uint32_t cp = df_utf8_next(s.p, s.len, &i);
+    switch (encoding) {
+      case 1:
+      case 3: {
+        uint16_t units[2];
+        int count = 1;
+        if (cp >= 0x10000) {
+          cp -= 0x10000;
+          units[0] = (uint16_t)(0xD800 + (cp >> 10));
+          units[1] = (uint16_t)(0xDC00 + (cp & 0x3FF));
+          count = 2;
+        } else {
+          units[0] = (uint16_t)cp;
+        }
+        for (int k = 0; k < count; k++) {
+          char pair[2];
+          pair[encoding == 1 ? 0 : 1] = (char)(units[k] & 0xFF);
+          pair[encoding == 1 ? 1 : 0] = (char)(units[k] >> 8);
+          df_sb_bytes(&b, pair, 2);
+        }
+        break;
+      }
+      case 2:
+      case 4: {
+        char quad[4];
+        for (int k = 0; k < 4; k++) {
+          quad[encoding == 2 ? k : 3 - k] = (char)((cp >> (8 * k)) & 0xFF);
+        }
+        df_sb_bytes(&b, quad, 4);
+        break;
+      }
+      case 5: {
+        char one = cp < 128 ? (char)cp : '?';
+        df_sb_bytes(&b, &one, 1);
+        break;
+      }
+      case 6: {
+        char one = cp < 256 ? (char)cp : '?';
+        df_sb_bytes(&b, &one, 1);
+        break;
+      }
+      default:
+        df_sb_cp(&b, cp);
+        break;
+    }
+  }
+  int zeros = (encoding == 1 || encoding == 3) ? 2 : (encoding == 2 || encoding == 4) ? 4 : 1;
+  for (int k = 0; k < zeros; k++) {
+    df_sb_bytes(&b, "", 1);
+  }
+  df_arr_u8 result = { (uint8_t*)b.p, b.len };
+  return result;
+}
+
+/* Fisher-Yates on any element size; the generator is the one of Root.Random */
+static void df_shuffle(void* base, uint64_t count, uint64_t size) {
+  char* items = (char*)base;
+  char* temp = (char*)df_alloc(size);
+  for (uint64_t i = count; i > 1; i--) {
+    uint64_t j = (uint64_t)df_rand_int(0, (int64_t)i - 1);
+    if (j != i - 1) {
+      memcpy(temp, items + (i - 1) * size, size);
+      memcpy(items + (i - 1) * size, items + j * size, size);
+      memcpy(items + j * size, temp, size);
+    }
+  }
+}
+
+static df_string df_str_shuffle(df_string text) {
+  df_sv s = df_view(text);
+  uint64_t n = df_str_chars(text);
+  uint32_t* cps = (uint32_t*)df_alloc(n * sizeof(uint32_t));
+  uint64_t i = 0;
+  for (uint64_t k = 0; k < n; k++) {
+    cps[k] = df_utf8_next(s.p, s.len, &i);
+  }
+  df_shuffle(cps, n, sizeof(uint32_t));
+  df_sb b = { 0 };
+  for (uint64_t k = 0; k < n; k++) {
+    df_sb_cp(&b, cps[k]);
+  }
+  return df_sb_done(&b);
+}
 /* ---- program ---- */
+
+static const struct { uint8_t h[4]; uint32_t w[4]; char t[26]; } df_lit0 = { { 11, 0, 0, 0 }, { 25u, 0, 25u, 0 }, "Hello, what is your name\077" };
+static const struct { uint8_t h[4]; uint32_t w[4]; char t[13]; } df_lit1 = { { 11, 0, 0, 0 }, { 12u, 0, 12u, 0 }, "Are you shy\077" };
+static const struct { uint8_t h[4]; uint32_t w[4]; char t[13]; } df_lit2 = { { 11, 0, 0, 0 }, { 12u, 0, 12u, 0 }, "<shy person>" };
+static const struct { uint8_t h[4]; uint32_t w[4]; char t[7]; } df_lit3 = { { 11, 0, 0, 0 }, { 6u, 0, 6u, 0 }, "Hello " };
 
 
 static const char df_fn1[] = "main()";
@@ -1073,13 +3054,32 @@ int main(int argc, char** argv) {
   bool df_err_thrown = false;
   (void)df_err;
   (void)df_err_thrown;
-  df_console_log(df_str_lit("Hello, what is your name\077", 25));
-  df_string v_name = df_console_get_input();
-  if ((df_str_chars(v_name) < ((uint64_t)2ULL))) {
-    df_console_log(df_str_lit("Are you shy\077", 12));
-    v_name = df_str_lit("<shy person>", 12);
+  df_exception* df_pend2 = NULL;
+  size_t df_tm = df_tmp_top;
+  (void)df_tm;
+  df_string v_name_2 = df_str_lit("", 0);
+  bool o_v_name_2 = false;
+  df_console_log(((df_string)&df_lit0));
+  v_name_2 = df_console_get_input();
+  o_v_name_2 = true;
+  if ((df_str_chars(df_tmp(df_str_trim(v_name_2))) < ((uint64_t)2ULL))) {
+    df_console_log(((df_string)&df_lit1));
+    df_str_set(&v_name_2, &o_v_name_2, ((df_string)&df_lit2), true);
   }
-  df_console_print(df_str_concat(df_str_lit("Hello ", 6), v_name));
+  df_tmp_drop(df_tm);
+  df_console_print(df_tmp(df_str_concat(((df_string)&df_lit3), v_name_2)));
+  df_tmp_drop(df_tm);
+  {
+    df_str_drop(&v_name_2, &o_v_name_2);
+  }
+  goto f2_done;
+  f2_exc1: if (df_err) { df_pend2 = df_err; df_err = NULL; }
+  {
+    df_str_drop(&v_name_2, &o_v_name_2);
+  }
+  f2_exc0: if (df_err == NULL) { df_err = df_pend2; } df_pend2 = NULL;
+  goto fn1_panic;
+  f2_done: ;
   return 0;
   fn1_panic: df_panic_unhandled(df_err);
   return 0;

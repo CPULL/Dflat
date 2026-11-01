@@ -1,0 +1,285 @@
+1. Hello World
+
+Keep it stupidly simple.
+
+Plain Text
+print("Hello World")
+
+Concepts:
+
+program entry point
+statements
+strings
+printing
+
+Nothing else.
+
+2. Variables and Basic Types
+Plain Text
+i32 age = 42
+string name = "John"
+bool alive = true
+
+Concepts:
+
+variable declaration
+numbers
+booleans
+strings
+
+Then simple operators:
+
+Plain Text
+age = age + 1
+
+A user should be writing tiny console programs already.
+
+3. Conditions
+Plain Text
+if age >= 18 {
+print("Adult")
+}
+else {
+print("Minor")
+}
+
+Concepts:
+
+comparison operators
+boolean expressions
+branches
+4. Loops
+Plain Text
+for i32 i = 0; i < 10; i++ {
+print(i)
+}
+
+and
+
+Plain Text
+while running {
+}
+
+A learner can now solve beginner programming exercises.
+
+5. Functions
+Plain Text
+func add(i32 a, i32 b) -> i32 {
+return a + b
+}
+
+This is the first real milestone.
+
+After this chapter users should be able to build:
+
+calculator
+guessing game
+text utilities
+6. Classes
+Plain Text
+class Dog {
+string name
+ 
+func bark() {
+print("Woof")
+}
+}
+
+Show:
+
+Plain Text
+Dog dog = Dog()
+dog.name = "Rex"
+dog.bark()
+
+Do not introduce refcounts yet.
+
+7. Collections
+
+Arrays/lists/maps.
+
+Users immediately need them.
+
+Example:
+
+Plain Text
+List<string> names
+ 
+names.add("Anna")
+names.add("Bob")
+
+Then:
+
+Plain Text
+for var name in names {
+}
+
+This is where your new iteration syntax can shine.
+
+8. Modules and Projects
+
+How to organize code.
+
+Most tutorials forget this.
+
+At this point developers start writing programs bigger than one file.
+
+9. Error Handling
+
+Whatever your exception model is.
+
+Only now.
+
+A beginner can write lots of software before worrying about exceptions.
+
+10. Reference Counting
+
+Now introduce:
+
+Plain Text
+@Dog dog = Dog()
+
+Explain:
+
+why refcounts exist
+memory management
+automatic destruction
+
+Avoid ownership initially.
+
+Think:
+
+"This is like normal objects but managed automatically."
+
+11. Ownership
+
+Now explain:
+
+Plain Text
+@
+_
+weak
+
+whatever the final syntax becomes.
+
+By now users already understand objects and refcounts.
+
+If ownership appears too early they will think the language is difficult.
+
+Rust gets away with this because ownership is the language. Yours appears to be a language first and a memory model second.
+
+12. enforce
+
+I would dedicate an entire chapter.
+
+Not a subsection.
+
+Something like:
+
+Safe Access to Shared Objects
+Plain Text
+enforce player {
+player.hp -= 10
+}
+
+Then:
+
+Plain Text
+enforce a, b {
+}
+
+Then:
+
+Plain Text
+lock failed on a
+null on b
+
+Then exceptions.
+
+This feature feels unique enough to be one of the language's selling points.
+
+13. Concurrency
+
+Only now:
+
+threads
+locks
+atomic operations
+shared refcounts
+
+Users need ownership and enforce first.
+
+14. Building a GUI
+
+This should be the first "real project".
+
+Maybe:
+
+window
+button
+label
+event loop
+
+A user gets immediate visual reward.
+
+15. Build Flappy Bird
+
+Seriously.
+
+This should be your flagship tutorial.
+
+You've already built it.
+
+A lot of language creators never show a complete project.
+
+Seeing:
+
+Plain Text
+Language X -> Flappy Bird
+
+is extremely motivating because readers know exactly how complicated Flappy Bird is.
+
+What I would NOT teach early
+
+Avoid these in the first tutorials:
+
+generics
+ownership
+weak references
+advanced collections internals
+threading
+compiler details
+memory leaks
+lifetime theory
+
+Those are interesting to language designers.
+
+They are not interesting to somebody trying to print "Hello World".
+
+If I were structuring the website today, I'd make exactly four tracks:
+
+Track 1: Learn the Language
+Hello World
+Variables
+Conditions
+Loops
+Functions
+Classes
+Collections
+Track 2: Memory Management
+Refcounts
+Ownership
+Weak References
+enforce
+Track 3: Advanced Programming
+Error Handling
+Generics
+Concurrency
+Track 4: Practical Projects
+Calculator
+Todo App
+GUI Demo
+Flappy Bird
+Mini Compiler or Parser
+
+Honestly, given everything you've told me so far, I think enforce and the ownership/refcount system are the truly distinctive features. The early tutorials should get people productive quickly, and only later reveal the sophisticated memory model. That keeps the first impression closer to "this language is easy" rather than "this language is complicated."

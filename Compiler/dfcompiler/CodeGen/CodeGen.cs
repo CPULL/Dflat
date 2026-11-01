@@ -84,6 +84,7 @@ sealed class VarInfo {
   }
 
   public bool OwnsArray { get; set; }   // a local array that ends with its scope; return moves it out (spec 6.8.1)
+  public bool BorrowsArray { get; set; }   // an array parameter, or a local made from another array: ->x cannot take its block
 
   public string Type { get; }
   public string CName { get; }
@@ -516,7 +517,7 @@ public sealed partial class CodeGen {
       // a reference parameter is a pointer in C; the body reads and writes through it, a read-only one cannot be assigned
       scope.Vars[p.Name] = IsByPointer(p)
         ? new VarInfo(p.Type, $"(*{ParamName(p)})", p.Ref == 1) { ReadOnlyRef = p.Ref == 1 && IsArr(p.Type) }
-        : StringVar(new VarInfo(p.Type, "v_" + p.Name, false) { Own = p.IsGift, ReadOnlyRef = p.Ref == 1 && IsClass(p.Type), ReadOnlyString = p.Type == "string" && !p.IsGift, IsWeak = p.IsWeak });
+        : StringVar(new VarInfo(p.Type, "v_" + p.Name, false) { Own = p.IsGift, ReadOnlyRef = p.Ref == 1 && IsClass(p.Type), ReadOnlyString = p.Type == "string" && !p.IsGift, IsWeak = p.IsWeak, BorrowsArray = IsArr(p.Type) });
       if (scope.Vars[p.Name].OwnFlag is string flag) {
         // a parameter borrows its string (one taken with -> owns it); assigned again, it may own the new one
         fn.Decls.Append($"  bool {flag} = {(p.IsGift ? "true" : "false")};\n  (void){flag};\n");
@@ -857,6 +858,9 @@ public sealed partial class CodeGen {
     if (ownedArrayDecls.Contains(s)) {
       variable.OwnsArray = true;
     }
+    if (IsArr(type) && init != null && !IsNewArray(init.Children[0])) {
+      variable.BorrowsArray = true;   // arr<T> b = a borrows (spec 6.8.1)
+    }
     scope.Vars[s.Text!] = variable;
     if (init == null) {
       assign.Unassigned.Add(variable);
@@ -1184,6 +1188,9 @@ public sealed partial class CodeGen {
     if (op == "+=" && target.Type == "string" && StrAppendAssign(targetNode, s.Children[1], scope, s) is string appended) {
       return appended;   // always in place
     }
+    if (op == "=" && IsArr(target.Type) && target.IsField && !LibraryCode) {
+      return ArrFieldAssign(target, targetNode, s.Children[1], scope, s);   // spec 6.8.1
+    }
     if (op == "=") {
       if (IsClass(target.Type)) {
         CheckNotBorrowOfCounted(s.Children[1], scope, targetNode.Text ?? "x", s);   // view = first, holder.dog = first
@@ -1393,6 +1400,10 @@ public sealed partial class CodeGen {
         }
         if (copied.Type == "string") {
           return new Expr(copied.Fresh ? copied.Code : $"df_str_dup({copied.Code})", "string", true);
+        }
+        if (IsArr(copied.Type)) {
+          cloneUsed = true;   // the items that are objects are cloned through their classes
+          return new Expr($"{ArrCloneHelper(copied.Type, n)}({copied.Code})", copied.Type, true);   // a! of an array: a new block, items cloned (12.6)
         }
         return CopyObject(n, copied, scope);   // a! of an object: a clone (spec 12.6)
       }

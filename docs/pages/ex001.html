@@ -1,11 +1,50 @@
-
 <!DOCTYPE html>
 <html>
 <head>
-	<link rel="stylesheet" href="css/css.css">
-  <title>Learn DFlat</title>
+	<link rel="stylesheet" href="../css/css.css">
+	<link rel="stylesheet" href="../css/code.css">
+	<link rel="stylesheet" href="../css/editor.css">
+	<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+	<script src="../js/codeHighlight.js"></script>
+	<script src="ex001.js"></script>
+  <title>Learn DFlat - Hello, world!</title>
 </head>
 <body>
-	Excercise 1
+	<div class="world" dir="auto">
+  <h1><img src="../imgs/Logo.png" class="logo"> D flat (D♭) Language</h1>
+  <p>Your very first program</p>
+
+<h2>Hello, world!</h2>
+  <pre><code id="editor" class="code-editor">
+Root.Console.log("Hello, NAME!")
+	</code></pre>
+
+	In DFlat, for simple programs, you do not need any special syntax like <code class="inlinecode">int main(string args)</code>.<br>
+
+	Just write the instructions you want your program to execute.
+
+
+	<h2>Replace NAME with your own name and run the program.</h2>
+<div class="dflat-editor-container">
+    <pre><code id="highlighting" class="code-editor"></code></pre>
+    <!-- Use literal '>' and '<', never &gt; or &lt; inside a textarea -->
+    <textarea id="editing" spellcheck="false">
+// Type your code here!
+</textarea>
+</div>
+
+<a id="run" class="btn">Run →</a>
+<h2>Output</h2>
+  <pre><code id="output" class="code-editor">
+	</code></pre>
+
+
+		</div>
 </body>
+<script>
+	highlightCodeNode($("#editor")[0]);
+	initDflatEditor('editing', 'highlighting');
+	$("#run").on("click", testResult)
+</script>
+
 </html>

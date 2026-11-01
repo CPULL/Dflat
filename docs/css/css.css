@@ -47,3 +47,11 @@ body {
   text-shadow: .5px 1px 1px #011080;
   background-color: #bee5f9;
 }
+
+.inlinecode {
+	font-family: 'Courier New', Courier, monospace;
+	background-color: black;
+	padding: .1em .5em;
+  color: #fcfc4a;
+  font-weight: 500;
+}

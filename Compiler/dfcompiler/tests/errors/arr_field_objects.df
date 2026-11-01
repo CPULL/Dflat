@@ -1,0 +1,10 @@
+namespace arr_field_objects
+class Dog { }
+class Kennel {
+  public arr<Dog> dogs
+}
+fun f(Kennel k) {
+  arr<Dog> pack = [Dog()]
+  k.dogs = pack
+}
+f(Kennel())

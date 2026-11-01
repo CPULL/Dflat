@@ -1,0 +1,15 @@
+fields
+  header copy 1, caller 100, names 2
+  field 7, local 70
+  moved 2, left 0
+  end rex
+  end max
+  new
+  end scores
+  end new
+board 4
+runtime read
+[1, 2, 3]
+[x, y]
+done
+---- exit code 0 ----

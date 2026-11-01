@@ -1880,3 +1880,15 @@ SMALL FIXES (2026-11-01)
 - HoistEnforceExpr also for an If or a Switch at statement level whose condition has an enforce expression.
 - Tests mapoperators (literal arguments), enforcemore (if condition); enforce_expr_condition has the new message.
 
+ARRAY FIELDS AND THE OTHER ARRAY RULES (2026-11-01, spec 6.8.1, point 20)
+- CodeGen.ArrOwnership.cs: ArrFieldAssign (AssignCode, = on an arr field outside the library): Gift ->a takes the block and empties the
+  source (refused when the source VarInfo BorrowsArray: an arr parameter, or a local made from a non-new array); null or IsNewArray as
+  it is; HasPlainItems: an ArrCloneHelper copy; otherwise an error. The old value is dropped (ArrDropHelper). EmitArrayFieldDrops in
+  EmitDropGlue for program classes; the helpers are created before the drop function (they are written to the same classCode).
+- Local arrays: ArrayUsesStayLocal also accepts a Copy (a!), obj.field = a with plain items (the field copies), and an argument of a call
+  of Root (IsRuntimeCall through the aliases). IsOwnedLocalArray accepts var x = [...] (ResolveDeclType infers arr<T> from a list
+  literal with InferArrayType).
+- Copy of an array: ArrCloneHelper (cloneUsed set for the object items).
+- Tests arrfields (fields, header copy, move, replace, runtime read, var, a field type no local uses), errors/arr_field_objects,
+  arr_field_move_borrowed; arrfree (the keeper clones).
+

@@ -981,7 +981,34 @@ flat[row * width + column] = 7          // a matrix on a flat array
 - No built-in multi-dimensional arrays: use an `arr` of `arr`, or a flat `arr` indexed by `row * width + column`.
 - Default iterator: index 0 up to `.len` - 1.
 - Trait: `IndexCollection` (6.7.1). `arr` is a class (6.1): it has ownership, a hash, methods and properties, and it can be an item (`list<arr<i32>>`). It cannot be subclassed. The code generated for it is direct.
-- Ownership: the variable that declares the array owns it and drops the items and the block at the end of its scope; `b = a` is a borrow; `->a` moves; a field that is an array is dropped by its class. The objects inside are owned by the array (12).
+- Ownership: an array owns its items (the objects inside are owned by the array, 12) and has one owner. When the owner ends, the items end and the block is freed.
+  - The variable that declares a new array owns it and the array ends with its scope: a literal, `arr<T>[n]`, a clone `a!`, or the result of a function that returns a new array. `var x = [1, 2]` is an `arr` too, owned by its scope.
+  - Borrows: an argument `f(a)` and a local `arr<T> b = a` borrow the array; the owner keeps it. An array given to the standard library (`r.Console.log(a)`) is a borrowed read as well.
+  - `return a` of an array the function owns moves it to the caller, which owns it from then on.
+  - `->a` moves the block: the receiver owns it and `a` becomes an empty array. Only an owner can be moved: `->p` on a borrowed parameter or on a borrowing local is a compile error.
+  - A field that is an array is owned by its object and ends with it. Every way into the field gives it an array of its own: a new array goes in as it is; `->a` moves one in; any other array is copied when its items are plain values (numbers, `bool`, `char`, enums, strings, tuples of natives), and the copy is exact; with other items (objects, arrays) it is a compile error, the same as for objects: `->a` to move it, `a!` to clone it. The old array of the field ends when a new one replaces it. A header parameter that fills a field follows the same rule.
+
+```
+class Scores(arr<i32> start) {      // the field gets a copy of the caller's array (plain items)
+  public arr<i32> start
+  public arr<Dog> dogs
+}
+
+arr<i32> numbers = [1, 2, 3]         // owned by this scope
+Scores s = Scores(numbers)           // s.start is a copy: numbers is still owned here
+s.start = numbers                    // a copy again; the old s.start ends
+
+arr<Dog> pack = [Dog("rex")]
+s.dogs = pack                        // compile error: write ->pack to move it, or pack! to clone it
+s.dogs = ->pack                      // moved: pack is empty now
+s.dogs = [Dog("max")]                // a new array; the old one ends, with rex
+
+fun arr<Dog> kennel() {
+  arr<Dog> made = [Dog("a"), Dog("b")]
+  return made                        // moves to the caller
+}
+arr<Dog> mine = kennel()             // mine owns it and ends it with its scope
+```
 - Differences from the trait: `c[k] = v` replaces only; `clear()` sets every item to the default value; `fill(value)` fills the whole array. `add`, `add(collection)`, `insert`, `remove`, `removeAll`, `removeAt`, `truncate` and `pop` are not available (compile error).
 - Default iterator: `IndexIterator`, keeping a `uns` position.
 
@@ -3588,3 +3615,4 @@ Level 1 = most important, level 3 = least.
 - 15.3 ID 16 retired (was `ChangingRefCountTypeException`, no use with one kind of counting); IDs 49 `ObjectNotClonableException` and 50 `WritingOnRefCountWithoutLockingException`; 99: the open item on `ChangingRefCountTypeException` removed
 - 12 A new object that nothing keeps ends when its statement ends (an argument to a borrowing parameter, a receiver); a borrow of it is valid only in that statement; 99: the open item removed
 - 7.2.7, 99 `enforce w is Blah b { }` dropped (no longer under discussion)
+- 6.8.1 Array ownership written out: the owner of a new array (also `var x = [...]`), borrows (`f(a)`, `b = a`, the standard library), `return a` moves, `->a` only from an owner, array fields own their array (a new one, `->a`, or a copy when the items are plain; objects need `->a` or `a!`), the old array of a field ends

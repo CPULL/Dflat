@@ -1,0 +1,7 @@
+namespace arr_field_move_borrowed
+class Dog { }
+class Kennel {
+  public arr<Dog> dogs
+  public fun take(arr<Dog> given) { dogs = ->given }
+}
+Kennel().take([Dog()])

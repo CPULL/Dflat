@@ -139,7 +139,8 @@ public sealed partial class CodeGen {
       if (init == null || scope == null) {
         throw Error("'var' needs a value to take its type from", decl);
       }
-      string type = ExprOf(init.Children[0], scope).Type;
+      // var x = [1, 2] is an arr of the type of the items (spec 6.8.1)
+      string type = init.Children[0].Kind == "List" && init.Children[0].Children.Count > 0 ? InferArrayType(init.Children[0], scope) : ExprOf(init.Children[0], scope).Type;
       if (type is "null" or "void" || IsMulti(type)) {
         throw Error($"cannot infer a variable type from {(type == "null" ? "null" : "this expression")}", decl);
       }

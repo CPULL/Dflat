@@ -1,0 +1,1 @@
+arr_field_move_borrowed.df(5): error: 'given' only borrows its array: ->given cannot take it; copy it with given! (spec 6.8.1)

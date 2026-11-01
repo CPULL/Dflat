@@ -123,7 +123,7 @@ What the specification decides and the compiler does not build. The point number
 
 ### arr, vec, list
 
-- 20, 73. `arr` is a class with ownership (Specs6.1, 6.8.1, 12): today it is a value `{pointer, length}` copied freely (`b = a` shares the block). Since 2026-11-01 a local array made in its scope (also by a function that returns a new array) ends with its scope (items and block) when it is used only as `a[i]`, `a.member`, in a `for`, given to functions that only read it, or returned (it moves to the caller); every other array (kept by a function, given to the runtime, assigned, moved with `->`, viewed, in a field, `var x = [...]`) still leaks until the program ends.
+- 20, 73. `arr` ownership (Specs6.8.1) is built since 2026-11-01 for local arrays (also `var x = [...]` and results of functions that return a new array), borrows to reading functions and to the standard library, `return a`, `->a` into a field, and array fields (a new array, a move, or a copy of plain items; the class frees them). Not yet: arrays held by collections (`list<arr<T>>`, a `vec` of arrays) and by tuples, `->a` into a `->arr<T>` parameter, a local that is assigned again (`a = b`) or viewed (`a[x..y]`, it stays not freed), static array fields.
 - 23. The level 1 warning for an element read before it is filled (Specs6.8.1, 19.3): arrays start as zeros.
 - 28. The compiler parameters `double-grow-limit` and `further-grow-factor` (fixed at 4mb and 1.5) and the fixed-increment growth option for small targets (Specs6.8.2).
 - 30. `arr` and `vec` sort with a stable merge sort (`sort`) and a heap sort (`sortUnstable`), not TimSort and pdqsort (Specs6.6); the class `compareTo` does not exist yet.

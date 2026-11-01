@@ -1848,3 +1848,26 @@ ARRAYS THAT END WITH THEIR SCOPE (2026-11-01, spec 6.8.1, point 20, first part)
   class), and var x = [...] arrays.
 - Test arrfree; clonecopy now shows the end of its local array y.
 
+DECLARATION ATEND, LAST ATEND, ENFORCE EXPRESSIONS EVERYWHERE (2026-11-01, spec 14.2, 7.2.3, 7.2.6)
+- Parser: after a Decl or a MultiAssign with declarations, atEnd { on the same line becomes an AtEndOf "decl" child with the declared
+  names (EndStatement lets atEnd { through; any other statement followed by atEnd { on its line is an error unless a } came before);
+  LowerEnforceExprs moves it after the declaration. NormalizeAtEndOf wraps the body in if AnyAlive(names) (an object not null and not
+  destroyed, a T? with a value, a counted or weak reference alive; other types always).
+- The last atEnd of an enforce: a flag df_fin, reset at the start of the clause block; the body as the last statement of the block (normal
+  way, its exceptions bubble), and an AtEnd "enforce-finally" guarded by the flag that EmitAtEnd places only for a return or an exception.
+- HoistEnforceExpr: an enforce expression inside an ExprStmt, Decl (also var), Assign, Return or MultiAssign moves before the statement
+  into var enforcedN = ZeroLike(E) (the zero value of the type of E) and an Enforce statement; the statement reads enforcedN. Conditions
+  and loop headers stay "not supported".
+- Tests enforcemore, errors/enforce_expr_condition (enforce_expr_var removed: var is valid now).
+
+ARRAYS, SECOND PART (2026-11-01, spec 6.8.1, point 20)
+- ArrayUsesStayLocal (CodeGen.Ownership.cs) also accepts an argument (Args of a Call) when every function the call can reach by name
+  (CalleesOf: same name or method name, same number of arguments) keeps that parameter local (ParamStaysLocal: a plain borrowed arr
+  parameter whose body uses it in the same ways, never returned; recursion assumed true), and, for the owner itself, return a.
+- IsNewArray adds a call of functions that all return a new array (ReturnsNewArray: every return is a new array or an owned local array;
+  recursion assumed false). An owned local Decl marks its VarInfo OwnsArray (ownedArrayDecls); return a copies it and empties the local
+  ({NULL, 0}) so the scope-end drop frees nothing.
+- Still leaking: arrays given to a parameter that keeps them, to the runtime (Console.log ...), assigned, moved with ->, viewed, fields,
+  var x = [...].
+- Test arrfree (reader functions, returned arrays, a keeper).
+

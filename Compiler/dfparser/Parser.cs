@@ -307,8 +307,8 @@ public sealed class Parser {
     if (IsNewline || IsOp(";") || IsOp("}") || AtEnd) {
       return;
     }
-    // File f = open() atEnd of f { ... }
-    if (IsKw("atEnd") && PeekAt(1).Kind == TokenKind.Ident && PeekAt(1).Text == "of") {
+    // File f = open() atEnd of f { ... }   |   File f = open() atEnd { ... } (ParseStatement checks that a declaration comes before it)
+    if (IsKw("atEnd") && (PeekAt(1).Kind == TokenKind.Ident && PeekAt(1).Text == "of" || PeekAt(1).Is("{"))) {
       return;
     }
     if (caseBody && IsOp(",")) {
@@ -324,6 +324,19 @@ public sealed class Parser {
   // AtEnd node with the text "trailing". An atEnd on a line of its own is the standalone block of the compiler.
   Node ParseStatement(string? ownerName = null, bool caseBody = false) {
     var statement = ParseStatementCore(ownerName, caseBody);
+    // Some a = Some() atEnd { } is atEnd of a (spec 14.2), also after a declaration that ends with } and after a multiple declaration
+    if (IsKw("atEnd") && PeekAt(1).Is("{") && pos > 0 && Peek.Line == toks[pos - 1].Line && DeclaredNames(statement) is { Count: > 0 } declared) {
+      var at = Next();
+      var of = new Node("AtEndOf", at, "decl");
+      foreach (var name in declared) {
+        of.Add(new Node("Name", at, name));
+      }
+      statement.Add(of.Add(ParseBlock()));
+      return statement;
+    }
+    if (IsKw("atEnd") && PeekAt(1).Is("{") && pos > 0 && Peek.Line == toks[pos - 1].Line && !toks[pos - 1].Is("}")) {
+      throw Error("expected end of statement: an atEnd { } on the same line follows a declaration (atEnd of x) or a closing brace");
+    }
     while (IsKw("atEnd") && PeekAt(1).Is("{") && pos > 0 && toks[pos - 1].Is("}")
            && statement.Kind is not ("AtEnd" or "AtEndOf")) {
       var t = Next();
@@ -331,6 +344,13 @@ public sealed class Parser {
     }
     return statement;
   }
+
+  // the variables a statement declares: a declaration, or the declarations of a multiple assignment
+  static List<string> DeclaredNames(Node statement) => statement.Kind switch {
+    "Decl" when statement.Text != null => new List<string> { statement.Text },
+    "MultiAssign" => statement.Children[0].Children.Where(target => target.Kind == "Decl" && target.Text != null).Select(target => target.Text!).ToList(),
+    _ => new List<string>()
+  };
 
   Node ParseStatementCore(string? ownerName, bool caseBody) {
     classMember = ownerName != null;   // a field of a class can have accessor blocks (spec 11.1.4)

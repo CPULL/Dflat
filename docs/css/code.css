@@ -1,0 +1,71 @@
+/* Code Editor Container */
+.code-editor {
+  background-color: black;
+  border: 2px solid black;
+  display: block;
+  color: white;
+  line-height: 1.5;
+  border-radius: 8px;
+  padding: 0 1em;
+}
+
+/* 1. Comments */
+.token.comment {
+    color: #6a9955;
+    font-style: italic;
+}
+
+/* 2. Preprocessor Directives */
+.token.directive {
+    color: #c586c0;
+    font-weight: bold;
+}
+
+/* 3. Labels */
+.token.label {
+    color: #d7ba7d;
+}
+
+/* 4. Strings & Characters */
+.token.string {
+    color: #ce9178;
+}
+
+/* 5. Numbers */
+.token.number {
+    color: #b5cea8;
+}
+
+/* 6. Keywords */
+.token.keyword {
+    color: #569cd6;
+    font-weight: bold;
+}
+
+/* 7. Built-in Types */
+.token.type {
+    color: #4ec9b0;
+}
+
+/* 8. Standard Library Classes */
+.token.stdlib {
+    color: #fc6c4a; /* VS Code style yellow for functions */
+    font-weight: 600;
+}
+/* 9. Standard Library Methods */
+.token.stdlib-method {
+    color: #dcdcaa; /* VS Code style yellow for functions */
+    font-weight: 600;
+}
+
+/* 10. Variables */
+.token.variable {
+    color: #13c4e7;
+    font-weight: 400;
+}
+
+/* 11. Methods */
+.token.method {
+    color: #fcfc4a; /* VS Code style yellow for functions */
+    font-weight: 600;
+}

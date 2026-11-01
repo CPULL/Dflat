@@ -232,9 +232,18 @@ public sealed partial class CodeGen {
       return block;
     }
     var outer = Synthetic("Block", s);
+    Node? finallyBody = null;
+    string? finallyFlag = null;
     if (clauses.Count > 0 && clauses[^1].Kind == "AtEnd") {
-      outer.Add(Synthetic("AtEnd", clauses[^1]).Add(clauses[^1].Children[0]));   // the finally
+      // the finally: on the normal way out it is the last statement of the block (an exception it raises bubbles up, 7.2.3); on a return or
+      // while an exception passes it is an atEnd of the block (a raise there is a Panic, 14.2). The flag keeps it from running twice
+      finallyBody = clauses[^1].Children[0];
       clauses.RemoveAt(clauses.Count - 1);
+      finallyFlag = "df_fin" + NewTemp();
+      fn!.Decls.Append($"  bool {finallyFlag} = false;\n  (void){finallyFlag};\n");
+      outer.Add(Synthetic("RawC", s, $"{finallyFlag} = false;"));
+      var guarded = Synthetic("Block", s).Add(Synthetic("RawC", s, $"if (!{finallyFlag}) {{")).Add(finallyBody).Add(Synthetic("RawC", s, "}"));
+      outer.Add(Synthetic("AtEnd", finallyBody, "enforce-finally").Add(guarded));
     }
     if (defaultClause != null) {
       // default takes the exceptions no catch matches (7.2.3), as a last catch Exception (silent exceptions stay silent, 15.4)
@@ -253,6 +262,10 @@ public sealed partial class CodeGen {
     outer.Add(block);
     foreach (var clause in clauses) {
       outer.Add(clause.Kind == "Catch" ? clause : clause.Children[0]);
+    }
+    if (finallyBody != null) {
+      outer.Add(Synthetic("RawC", s, $"{finallyFlag} = true;"));
+      outer.Add(finallyBody);
     }
     return outer;
   }

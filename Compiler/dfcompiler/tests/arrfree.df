@@ -1,5 +1,6 @@
-// A local array made in its scope ends with the scope (spec 6.8.1, point 20): its objects end, its strings and its block are freed. For now
-// only arrays used as a[i], a.member or in a for: one given to a function, assigned, moved, returned or viewed is left as before
+// A local array made in its scope ends with the scope (spec 6.8.1, point 20): its objects end, its strings and its block are freed. It can
+// be read as a[i], a.member, in a for, given to a function that only reads it, or returned (it moves to the caller, which then owns it).
+// One kept by a function, assigned, moved with ->, viewed or put in a field is left as before (not freed)
 alias Root as r
 
 public class Dog(string name) {
@@ -9,6 +10,19 @@ public class Dog(string name) {
 }
 
 fun show(arr<Dog> dogs) { r.Console.log($"  {dogs.len} dogs") }
+fun i32 count(arr<Dog> dogs) {
+  show(dogs)                          // passed on to another reader
+  (i32)dogs.len
+}
+fun arr<Dog> pack(string name) {
+  arr<Dog> made = [Dog(name + "1"), Dog(name + "2")]
+  return made                         // moves to the caller
+}
+fun arr<Dog> direct() { [Dog("direct")] }
+public class Keeper {
+  public arr<Dog> kept
+  public fun keep(arr<Dog> dogs) { kept = dogs }
+}
 
 fun objects() {
   arr<Dog> dogs = [Dog("a"), Dog("b")]
@@ -44,8 +58,19 @@ fun inLoop() {
 }
 
 fun given() {
-  arr<Dog> kept = [Dog("given")]
-  show(kept)                         // given to a function: not freed (as before)
+  arr<Dog> read = [Dog("read")]
+  r.Console.log($"  count {count(read)}")   // the function only reads it: still freed here
+}
+
+fun returned() {
+  arr<Dog> mine = pack("p")
+  arr<Dog> other = direct()
+  r.Console.log("  got " + mine[1].name + " " + other[0].name)
+}
+
+fun kept(Keeper k) {
+  arr<Dog> held = [Dog("held")]
+  k.keep(held)                        // kept by the function: not freed (as before)
 }
 
 r.Console.log("objects")
@@ -58,6 +83,10 @@ r.Console.log("sized")
 sized()
 r.Console.log("in a loop")
 inLoop()
-r.Console.log("given")
+r.Console.log("given to a reader")
 given()
+r.Console.log("returned")
+returned()
+r.Console.log("kept")
+kept(Keeper())
 r.Console.log("done")

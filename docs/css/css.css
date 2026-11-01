@@ -17,3 +17,33 @@ body {
 	width: 1em;
   vertical-align: sub;
 }
+
+.btn {
+	color:rgb(0, 0, 255);
+  text-decoration: none;
+  border: 2px solid blue;
+  border-radius: .5em;
+  padding: .4em .2em 0 .2em;
+  box-shadow: 2px 1px 1px #029ff1;
+  background-color: #aed5d9;
+	cursor: pointer;
+  font-size: 1.5em;
+  margin-block-start: 0.83em;
+  margin-block-end: 0.83em;
+  margin-inline-start: 0px;
+  margin-inline-end: 0px;
+  font-weight: bold;
+	height: 2em;
+	display: inline-block;
+	vertical-align: middle;
+}
+.btn:visited {
+	color:rgb(0, 0, 255);
+}
+.btnSel {
+	font-size: 24px;
+  vertical-align: middle;
+  color: #010880;
+  text-shadow: .5px 1px 1px #011080;
+  background-color: #bee5f9;
+}

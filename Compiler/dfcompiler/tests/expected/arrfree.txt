@@ -19,7 +19,15 @@ in a loop
   end pass 0
   pass 1
   end pass 1
-given
+given to a reader
   1 dogs
+  count 1
+  end read
+returned
+  got p2 direct
+  end direct
+  end p1
+  end p2
+kept
 done
 ---- exit code 0 ----

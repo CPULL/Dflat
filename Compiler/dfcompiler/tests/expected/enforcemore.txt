@@ -1,0 +1,17 @@
+declaration atEnd
+  body
+  multiple 3 bb
+  release a
+last atEnd raising
+  block
+  last atEnd raises
+  caught outside: from the last atEnd
+expressions
+  assigned 4
+  argument 8
+  var 4
+  assigned -1
+  argument -10
+  var 0
+done
+---- exit code 0 ----

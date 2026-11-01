@@ -548,6 +548,9 @@ public sealed partial class CodeGen {
     if (owner.AtEnds[step - 1].Text == "enforce-return" && (exceptionMode || !returnUnwinding)) {
       return;   // the success atEnd clauses of an enforce on a return only (spec 7.2.4)
     }
+    if (owner.AtEnds[step - 1].Text == "enforce-finally" && !exceptionMode && !returnUnwinding) {
+      return;   // the last atEnd of an enforce: its normal way is a statement of the block (EnforceClausesBlock)
+    }
     string pad = Pad(indent);
     var block = owner.AtEnds[step - 1].Children[0];
     int savedLoopDepth = loopDepth;

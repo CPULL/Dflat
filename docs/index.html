@@ -2,6 +2,9 @@
 <html>
 <head>
 	<link rel="stylesheet" href="css/css.css">
+	<link rel="stylesheet" href="css/code.css">
+	<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+	<script src="js/codeHighlight.js"></script>
   <title>Learn DFlat</title>
 </head>
 <body>
@@ -14,9 +17,9 @@
 <p dir="auto"><strong>Dflat (D♭)</strong> pairs the clean, expressive syntax of C# with the deterministic ownership and bare-metal speed of Rust, eliminating both garbage collection and complex lifetime annotations.</p>
 
 
-<a href="pages/ex001.html"><h2>Start learning!</h2></a>
-<a href="pages/ex001.html"><h2>I am already an expert jump to </a>
-<select>
+<a href="pages/ex001.html" class="btn">Start learning!</a>
+<p href="pages/jump.html" class="btn">I am already an expert, jump to:
+<select  class="btnSel">
 	<option value="1">Basics</option>
 	<option value="2">Variables and Types</option>
 	<option value="3">Define and Call a function</option>
@@ -31,10 +34,19 @@
 	<option value="12">Enforce</option>
 	<option value="13">Standard Library: Console</option>
 	<option value="14">Standard Library: Files</option>
-</select>	
-</h2>
+</select> </p>
+
+  <pre><code id="editor" class="code-editor">
+alias Root.Console as c
+c.log("Hello, world!")
+	</code></pre>
 
 	</div>
 </body>
+<script>
+
+	highlightCodeNode($("#editor")[0]);
+</script>
+
 </html>
 

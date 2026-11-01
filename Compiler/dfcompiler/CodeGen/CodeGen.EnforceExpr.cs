@@ -21,6 +21,10 @@ public sealed partial class CodeGen {
       if (child.Kind == "Lambda") {
         continue;
       }
+      if (child.Kind is "Decl" or "MultiAssign" && child.Children.FirstOrDefault(c => c.Kind == "AtEndOf" && c.Text == "decl") is Node own) {
+        child.Children.Remove(own);   // Some a = Some() atEnd { } is a declaration followed by atEnd of a (spec 14.2)
+        node.Children.Insert(index + 1, own);
+      }
       var lowered = LowerEnforceStatement(child, node, index, fun);
       if (lowered != null) {
         node.Children.RemoveAt(index);
@@ -34,7 +38,7 @@ public sealed partial class CodeGen {
   List<Node>? LowerEnforceStatement(Node statement, Node holder, int index, Node? fun) {
     if (statement.Kind == "Decl" && statement.Children.FirstOrDefault(child => child.Kind == "Init") is Node init && init.Children[0].Kind == "EnforceExpr") {
       if (statement.Children.FirstOrDefault(child => TypeNodeKinds.Contains(child.Kind)) is { Kind: "Type", Text: "var" }) {
-        throw Error("an enforce expression needs the type of the variable written: i32 r = enforce ... (the clauses give values of that type)", statement);
+        return HoistEnforceExpr(statement);   // var r = enforce ...: the type comes from the expression
       }
       statement.Children.Remove(init);
       return new List<Node> { statement, EnforceStatementOf(init.Children[0], statement.Text!) };
@@ -55,10 +59,51 @@ public sealed partial class CodeGen {
         Synthetic("Return", statement).Add(Synthetic("Name", statement, name))
       };
     }
+    if (statement.Kind is "ExprStmt" or "Decl" or "Assign" or "Return" or "MultiAssign" && ContainsEnforceExpr(statement)) {
+      return HoistEnforceExpr(statement);
+    }
     if (statement.Kind != "Fun" && ContainsEnforceExpr(statement)) {
-      throw NotSupported("An enforce expression here (it is built in a declaration with its type, T r = enforce ..., and in a return)", statement);
+      throw NotSupported("An enforce expression here (in a condition or a loop header: give it to a variable first)", statement);
     }
     return null;
+  }
+
+  // x = enforce ..., f(enforce ...), var r = enforce ...: the enforce expression moves before its statement into a variable that starts at
+  // the zero value of its type (what it gives when nothing handles a failure), and the statement reads that variable
+  List<Node> HoistEnforceExpr(Node statement) {
+    var found = FindEnforceExpr(statement)!.Value;
+    string name = $"enforced{++enforceTemps}";
+    var (holder, at) = found;
+    var enforceExpr = holder.Children[at];
+    holder.Children[at] = Synthetic("Name", enforceExpr, name);
+    var decl = Synthetic("Decl", enforceExpr, name).Add(Synthetic("Type", enforceExpr, "var"))
+      .Add(Synthetic("Init", enforceExpr).Add(Synthetic("ZeroLike", enforceExpr).Add(enforceExpr.Children[0])));
+    return new List<Node> { decl, EnforceStatementOf(enforceExpr, name), statement };
+  }
+
+  static (Node Holder, int Index)? FindEnforceExpr(Node node) {
+    for (int index = 0; index < node.Children.Count; index++) {
+      var child = node.Children[index];
+      if (child.Kind == "EnforceExpr") {
+        return (node, index);
+      }
+      if (child.Kind is "Block" or "Fun" or "Lambda") {
+        continue;
+      }
+      if (FindEnforceExpr(child) is { } inner) {
+        return inner;
+      }
+    }
+    return null;
+  }
+
+  // the zero or null value of the type of an expression (ZeroLike, made by HoistEnforceExpr)
+  Expr ZeroLike(Node node, Scope scope) {
+    string type = ExprOf(node.Children[0], scope).Type;
+    if (type is "void" or "null") {
+      throw Error("an enforce expression must give a value", node);
+    }
+    return new Expr(ZeroValue(type), type);
   }
 
   static bool ContainsEnforceExpr(Node node) =>

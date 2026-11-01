@@ -1,0 +1,7 @@
+namespace enforce_expr_condition
+class Box { public fun bool more() { false } }
+fun f(Box b) {
+  while enforce b.more() default { false } {
+  }
+}
+f(Box())

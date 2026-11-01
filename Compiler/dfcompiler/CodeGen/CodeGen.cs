@@ -83,6 +83,8 @@ sealed class VarInfo {
     IsConst = isConst;
   }
 
+  public bool OwnsArray { get; set; }   // a local array that ends with its scope; return moves it out (spec 6.8.1)
+
   public string Type { get; }
   public string CName { get; }
   public bool IsConst { get; }
@@ -852,6 +854,9 @@ public sealed partial class CodeGen {
     if (init != null && !weak && IsArr(type) && ConstantArrayLength(init.Children[0]) is long length && !AssignedAgain(s.Text!)) {
       variable.KnownLength = length;
     }
+    if (ownedArrayDecls.Contains(s)) {
+      variable.OwnsArray = true;
+    }
     scope.Vars[s.Text!] = variable;
     if (init == null) {
       assign.Unassigned.Add(variable);
@@ -1083,6 +1088,11 @@ public sealed partial class CodeGen {
       return CountedReturnCode(s.Children[0], scope, s);
     }
     var returned = ExprOf(s.Children[0], scope, currentRet);
+    if (s.Children[0].Kind == "Name" && scope.Find(s.Children[0].Text!) is { OwnsArray: true } owned) {
+      // return a: the array moves to the caller, the local is emptied so its end frees nothing (spec 6.8.1)
+      string moved = NewTemp();
+      returned = returned with { Code = $"({{ {CType(owned.Type)} {moved} = {owned.CName}; {owned.CName}.p = NULL; {owned.CName}.len = 0; {moved}; }})" };
+    }
     if (returned.Type == "void" && s.Text == "implicit") {
       throw Error($"this function must return {Article(currentRet!)} {currentRet}: its last expression gives nothing", s);
     }
@@ -1326,6 +1336,10 @@ public sealed partial class CodeGen {
         return CountsMember(n, scope) ?? MemberValue(n, scope);
       case "SafeMember":
         return SafeAccess(n, n, scope);
+      case "AnyAlive":
+        return AnyAlive(n, scope);   // atEnd of (spec 14.2)
+      case "ZeroLike":
+        return ZeroLike(n, scope);   // the start value of an enforce expression moved out of a statement (spec 7.2.6)
       case "SwitchExpr":
         return SwitchExpr(n, scope, expected);
       case "TypeSwitch":

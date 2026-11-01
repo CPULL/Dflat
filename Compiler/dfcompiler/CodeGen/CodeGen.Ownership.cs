@@ -296,6 +296,7 @@ public sealed partial class CodeGen {
       var statement = statements[index];
       if (statement.Kind == "Decl" && IsOwnedLocalArray(statement, statements.Skip(index + 1))) {
         owners.Add(statement);   // hoisted, so the drop at the end of the scope sees it
+        ownedArrayDecls.Add(statement);
         drops.Add(Synthetic("AtEnd", statement, "drop").Add(Synthetic("Block", statement).Add(Synthetic("ArrDrop", statement, statement.Text))));
       }
     }
@@ -306,7 +307,7 @@ public sealed partial class CodeGen {
   // an array that ends with its scope (spec 6.8.1, point 20), for now only when that is safe to see: a local declared with its type from a new
   // array (a literal, arr<T>[n], a clone), and used afterwards only as a[i], a.member (not transformTo, which moves the block) or the
   // source of a for. Any other use (an argument, an assignment, ->a, a return, a view a[x..y]) leaves it as before: not freed
-  static bool IsOwnedLocalArray(Node decl, IEnumerable<Node> after) {
+  bool IsOwnedLocalArray(Node decl, IEnumerable<Node> after) {
     if (!IsArrTypeNode(decl.Children.FirstOrDefault(child => TypeNodeKinds.Contains(child.Kind)))) {
       return false;
     }
@@ -314,19 +315,27 @@ public sealed partial class CodeGen {
       return false;
     }
     var value = decl.Children.FirstOrDefault(child => child.Kind == "Init")?.Children[0];
-    bool fresh = value is { Kind: "List" or "Copy" } || value is { Kind: "Index" } && value.Children[0].Kind == "GenericRef";
-    return fresh && after.All(node => ArrayUsesStayLocal(node, null, 0, decl.Text!));
+    return IsNewArray(value) && after.All(node => ArrayUsesStayLocal(node, null, null, 0, decl.Text!, true));
   }
+
+  // a value that is a new array nobody else holds: a literal, a clone, arr<T>[n], or a call of a function that returns a new array
+  bool IsNewArray(Node? value) =>
+    value is { Kind: "List" or "Copy" } || value is { Kind: "Index" } && value.Children[0].Kind == "GenericRef"
+    || value is { Kind: "Call" } && CalleesOf(value) is { Count: > 0 } callees && callees.All(ReturnsNewArray);
 
   static bool IsArrTypeNode(Node? type) =>
     type is { Kind: "Type", Text: "arr", Children.Count: 1 } || type is { Kind: "ResolvedType" } && type.Text!.StartsWith("arr<");
 
-  static bool ArrayUsesStayLocal(Node node, Node? parent, int position, string name) {
+  // the uses of an array that keep it local: a[i] (not a view), a.member (not transformTo), the source of a for, an argument to a parameter
+  // that keeps it local (ParamStaysLocal), and (for the owner, canReturn) return a, which moves it to the caller
+  bool ArrayUsesStayLocal(Node node, Node? parent, Node? grand, int position, string name, bool canReturn) {
     if (node.Kind == "Name" && node.Text == name) {
       return parent switch {
         { Kind: "Index" } => position == 0 && parent.Children.Count > 1 && parent.Children[1].Kind != "Range",
         { Kind: "Member" } => position == 0 && parent.Text != "transformTo",
         { Kind: "For" or "In" } => true,
+        { Kind: "Return" } => canReturn && parent.Children.Count == 1,
+        { Kind: "Args" } => grand is { Kind: "Call" } && ArgumentStaysLocal(grand, position),
         _ => false
       };
     }
@@ -334,11 +343,63 @@ public sealed partial class CodeGen {
       return true;
     }
     for (int index = 0; index < node.Children.Count; index++) {
-      if (!ArrayUsesStayLocal(node.Children[index], node, index, name)) {
+      if (!ArrayUsesStayLocal(node.Children[index], node, parent, index, name, canReturn)) {
         return false;
       }
     }
     return true;
+  }
+
+  // the functions a call can reach, by name (every overload, every class with that method); empty for the functions of the runtime
+  List<FunSig> CalleesOf(Node call) {
+    var callee = call.Children[0];
+    string? name = callee.Kind is "Name" or "Member" ? callee.Text : null;
+    if (name == null) {
+      return new List<FunSig>();
+    }
+    int count = call.Children.Count > 1 ? call.Children[1].Children.Count : 0;
+    return funs.Values.SelectMany(list => list)
+      .Where(f => (f.Name == name || f.Name.EndsWith("." + name)) && f.Params.Count == count && !f.IsExtern && !f.IsAbstract).ToList();
+  }
+
+  bool ArgumentStaysLocal(Node call, int position) {
+    var callees = CalleesOf(call);
+    return callees.Count > 0 && callees.All(f => ParamStaysLocal(f, position));
+  }
+
+  readonly Dictionary<(FunSig, int), bool> paramStaysLocal = new();
+  readonly HashSet<Node> ownedArrayDecls = new();
+
+  // a borrowed array parameter that its function only reads (the same uses, never returned): an owned array can be given to it
+  bool ParamStaysLocal(FunSig f, int position) {
+    if (paramStaysLocal.TryGetValue((f, position), out bool known)) {
+      return known;
+    }
+    var param = f.Params[position];
+    if (!IsArr(param.Type) || param.IsGift || param.Ref != 0 || param.IsVariadic || f.Node.Children.FirstOrDefault(child => child.Kind == "Block") is not Node body) {
+      return paramStaysLocal[(f, position)] = false;
+    }
+    paramStaysLocal[(f, position)] = true;   // a recursive call is assumed to keep it local
+    return paramStaysLocal[(f, position)] = ArrayUsesStayLocal(body, null, null, 0, param.Name, false);
+  }
+
+  readonly Dictionary<FunSig, bool> returnsNewArray = new();
+
+  // every return of the function gives a new array: a new value, or a local array it owns (moved out by the return)
+  bool ReturnsNewArray(FunSig f) {
+    if (returnsNewArray.TryGetValue(f, out bool known)) {
+      return known;
+    }
+    returnsNewArray[f] = false;   // a recursive call is assumed not to
+    if (!IsArr(f.Ret) || f.Node.Children.FirstOrDefault(child => child.Kind == "Block") is not Node body) {
+      return false;
+    }
+    var locals = new Dictionary<string, Node>();
+    CollectDeclarations(body, locals);
+    var returns = CollectReturns(body).ToList();
+    bool result = returns.Count > 0 && returns.All(ret => ret.Children.Count == 1 && (IsNewArray(ret.Children[0])
+      || ret.Children[0] is { Kind: "Name" } returned && locals.TryGetValue(returned.Text!, out var decl) && IsOwnedLocalArray(decl, new[] { body })));
+    return returnsNewArray[f] = result;
   }
 
   // a[i] items end with the array: objects dropped, strings freed, arrays of arrays dropped in turn; then the block is freed
@@ -376,9 +437,32 @@ public sealed partial class CodeGen {
     return new List<Node> { wrapper };
   }
 
-  // atEnd of a, b { }: runs when the scope ends (the listed names are not tracked yet)
+  // atEnd of a, b { }: runs when the scope ends, while at least one of the listed objects exists (spec 14.2): not when all are null
   static Node NormalizeAtEndOf(Node node) {
-    return Synthetic("AtEnd", node).Add(node.Children[^1]);
+    var alive = Synthetic("AnyAlive", node);
+    foreach (var name in node.Children.Where(child => child.Kind == "Name")) {
+      alive.Add(Synthetic("Name", name, name.Text));
+    }
+    var guarded = Synthetic("Block", node).Add(Synthetic("If", node).Add(alive).Add(node.Children[^1]));
+    return Synthetic("AtEnd", node).Add(guarded);
+  }
+
+  // the condition of an atEnd of: a listed variable that can be null (an object, a T?, a counted or weak reference) is alive; one that
+  // cannot be null always is
+  Expr AnyAlive(Node node, Scope scope) {
+    var tests = new List<string>();
+    foreach (var name in node.Children) {
+      var variable = scope.Find(name.Text!);
+      if (variable == null) {
+        throw Error($"unknown variable '{name.Text}' in atEnd of", name);
+      }
+      tests.Add(variable.IsCounted || variable.IsWeak ? $"DF_RC_ALIVE({variable.CName})"
+        : IsNullable(variable.Type) ? $"{variable.CName}.has"
+        : IsClass(variable.Type) && !IsTraitType(variable.Type) ? $"({variable.CName} != NULL && !DF_IS_DEAD({variable.CName}))"
+        : IsTraitType(variable.Type) ? $"({variable.CName} != NULL)"
+        : "true");
+    }
+    return new Expr(tests.Count == 0 ? "true" : "(" + string.Join(" || ", tests) + ")", "bool");
   }
 
   // ---------------------------------------------------------------- moves and finalizers

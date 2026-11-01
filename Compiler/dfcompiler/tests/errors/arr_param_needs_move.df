@@ -1,0 +1,7 @@
+namespace arr_param_needs_move
+class Dog { }
+fun take(->arr<Dog> given) { }
+fun main() {
+  arr<Dog> pack = [Dog()]
+  take(pack)
+}

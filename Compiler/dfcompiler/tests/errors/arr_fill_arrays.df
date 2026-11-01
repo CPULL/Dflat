@@ -1,0 +1,5 @@
+namespace arr_fill_arrays
+fun main() {
+  arr<arr<i32>> grid = arr<arr<i32>>[3]
+  grid.fill([0, 0])
+}

@@ -85,6 +85,7 @@ sealed class VarInfo {
 
   public bool OwnsArray { get; set; }   // a local array that ends with its scope; return moves it out (spec 6.8.1)
   public bool BorrowsArray { get; set; }   // an array parameter, or a local made from another array: ->x cannot take its block
+  public bool OwnsTuple { get; set; }   // a typed local tuple that holds arrays: its arrays are its own and end with it (spec 6.8.1)
 
   public string Type { get; }
   public string CName { get; }
@@ -271,6 +272,7 @@ public sealed partial class CodeGen {
       main.Append($"  int32_t {fn.RetVar} = 0;\n");
     }
     main.Append(mainBody);
+    main.Append(StaticEndCode());
     main.Append("  return 0;\n");
     main.Append($"  {fn.PanicLabel}: df_panic_unhandled(df_err);\n");
     main.Append("  return 0;\n}\n");
@@ -345,6 +347,7 @@ public sealed partial class CodeGen {
     } else {
       main.Append($"  int32_t code = {call};\n");
     }
+    main.Append(StaticEndCode());
     main.Append(entry.Ret == "void" ? "  return 0;\n}\n" : "  return (int)code;\n}\n");
     return main;
   }
@@ -424,7 +427,7 @@ public sealed partial class CodeGen {
       }
       ps.Add(new ParamSig(p.Text!, variadic ? "arr<" + paramType + ">" : paramType, def?.Children[0]) {
         IsVariadic = variadic,
-        IsGift = p.Kind == "GiftParam" && (IsClass(paramType) || paramType == "string"),
+        IsGift = p.Kind == "GiftParam" && (IsClass(paramType) || paramType == "string" || IsArr(paramType)),
         Ref = reference,
         IsWeak = weakParam
       });
@@ -517,7 +520,7 @@ public sealed partial class CodeGen {
       // a reference parameter is a pointer in C; the body reads and writes through it, a read-only one cannot be assigned
       scope.Vars[p.Name] = IsByPointer(p)
         ? new VarInfo(p.Type, $"(*{ParamName(p)})", p.Ref == 1) { ReadOnlyRef = p.Ref == 1 && IsArr(p.Type) }
-        : StringVar(new VarInfo(p.Type, "v_" + p.Name, false) { Own = p.IsGift, ReadOnlyRef = p.Ref == 1 && IsClass(p.Type), ReadOnlyString = p.Type == "string" && !p.IsGift, IsWeak = p.IsWeak, BorrowsArray = IsArr(p.Type) });
+        : StringVar(new VarInfo(p.Type, "v_" + p.Name, false) { Own = p.IsGift, ReadOnlyRef = p.Ref == 1 && IsClass(p.Type), ReadOnlyString = p.Type == "string" && !p.IsGift, IsWeak = p.IsWeak, BorrowsArray = IsArr(p.Type) && !p.IsGift, OwnsArray = OwnsGivenArray(f, p) });
       if (scope.Vars[p.Name].OwnFlag is string flag) {
         // a parameter borrows its string (one taken with -> owns it); assigned again, it may own the new one
         fn.Decls.Append($"  bool {flag} = {(p.IsGift ? "true" : "false")};\n  (void){flag};\n");
@@ -530,8 +533,12 @@ public sealed partial class CodeGen {
     if (trailing != null) {
       statements.Insert(0, Synthetic("AtEnd", trailing).Add(trailing.Children[0]));
     }
-    foreach (var p in f.Params.Where(p => p.IsGift && !(p.Type == "string" && !IsByPointer(p)))) {
+    foreach (var p in f.Params.Where(p => p.IsGift && !IsArr(p.Type) && !(p.Type == "string" && !IsByPointer(p)))) {
       statements.Insert(0, DropNode(p.Name, f.Node));
+    }
+    foreach (var p in f.Params.Where(p => OwnsGivenArray(f, p))) {
+      // ->arr<T> p: the array ends with the function, unless it was moved on (spec 6.8.1)
+      statements.Insert(0, Synthetic("AtEnd", f.Node, "drop").Add(Synthetic("Block", f.Node).Add(Synthetic("ArrDrop", f.Node, p.Name))));
     }
     foreach (var p in f.Params.Where(p => IsCountedType(p.Type) || IsWeakType(p.Type))) {
       statements.Insert(0, DoneDropNode(p.Name, f.Node));   // the usage or weak reference of the parameter is released when the function ends
@@ -607,6 +614,12 @@ public sealed partial class CodeGen {
 
       case "StrDrop":
         EmitStrDrop(s, sb, scope, pad);
+        return;
+
+      case "TupleDrop":
+        if (scope.Find(s.Text!) is VarInfo tuple && TupleHoldsArrays(tuple.Type)) {
+          sb.Append(pad).Append(TupleDropCode(tuple.Type, tuple.CName)).Append('\n');   // spec 6.8.1
+        }
         return;
 
       case "ArrDrop":
@@ -788,6 +801,9 @@ public sealed partial class CodeGen {
       throw NotSupported("Sized declarations (arr<T>[n] name)", s);
     }
     string type = ResolveDeclType(s, scope);
+    if (!LibraryCode) {
+      CheckTupleItems(type, s);
+    }
     if (scope.Vars.ContainsKey(s.Text!)) {
       throw Error($"'{s.Text}' is already declared in this scope", s);
     }
@@ -820,7 +836,7 @@ public sealed partial class CodeGen {
       }
       var value = ExprOf(init.Children[0], scope, type);
       initValue = value;
-      code = Convert(value, type, init);
+      code = tupleArrDecls.Contains(s) ? TupleOwnedCode(init.Children[0], value, type, init) : Convert(value, type, init);
     }
     // an owner must receive an object nobody else owns (the same decision was made when the scope was prepared)
     bool owns = declOwner.TryGetValue(s, out bool guessed) && guessed;
@@ -858,7 +874,10 @@ public sealed partial class CodeGen {
     if (ownedArrayDecls.Contains(s)) {
       variable.OwnsArray = true;
     }
-    if (IsArr(type) && init != null && !IsNewArray(init.Children[0])) {
+    if (tupleArrDecls.Contains(s)) {
+      variable.OwnsTuple = true;   // spec 6.8.1
+    }
+    if (IsArr(type) && init != null && !GivesOwnArray(init.Children[0])) {
       variable.BorrowsArray = true;   // arr<T> b = a borrows (spec 6.8.1)
     }
     scope.Vars[s.Text!] = variable;
@@ -1097,6 +1116,9 @@ public sealed partial class CodeGen {
       string moved = NewTemp();
       returned = returned with { Code = $"({{ {CType(owned.Type)} {moved} = {owned.CName}; {owned.CName}.p = NULL; {owned.CName}.len = 0; {moved}; }})" };
     }
+    if (TupleHoldsArrays(currentRet!) && !LibraryCode) {
+      returned = new Expr(TupleOwnedCode(s.Children[0], returned, currentRet!, s), currentRet!);   // the caller gets its own arrays (spec 6.8.1)
+    }
     if (returned.Type == "void" && s.Text == "implicit") {
       throw Error($"this function must return {Article(currentRet!)} {currentRet}: its last expression gives nothing", s);
     }
@@ -1108,7 +1130,7 @@ public sealed partial class CodeGen {
   }
 
   // Something that can be written: a variable or a tuple field
-  readonly record struct LValueInfo(string Code, string Type, bool IsConst, VarInfo? Variable = null, bool IsField = false, bool IsWeakField = false);
+  readonly record struct LValueInfo(string Code, string Type, bool IsConst, VarInfo? Variable = null, bool IsField = false, bool IsWeakField = false, bool IsStatic = false);
 
   LValueInfo LValue(Node target, Scope scope) {
     if (target.Kind == "RawField") {
@@ -1129,7 +1151,7 @@ public sealed partial class CodeGen {
           // the reference to the parent: set once, by the constructor
           return initializing ? new LValueInfo(bare.Code, bare.Type, false) : throw Error($"'{target.Text}' is the reference to the parent: only the constructor sets it", target);
         }
-        return new LValueInfo(bare.Code, bare.Type, ownField.IsConst && !initializing, null, !ownField.IsStatic, ownField.IsWeak);
+        return new LValueInfo(bare.Code, bare.Type, ownField.IsConst && !initializing, null, !ownField.IsStatic, ownField.IsWeak, ownField.IsStatic);
       }
       if (variable == null && globalConsts.TryGetValue(target.Text!, out var global)) {
         return new LValueInfo(global.CName, global.Type, !initializing);
@@ -1188,8 +1210,14 @@ public sealed partial class CodeGen {
     if (op == "+=" && target.Type == "string" && StrAppendAssign(targetNode, s.Children[1], scope, s) is string appended) {
       return appended;   // always in place
     }
-    if (op == "=" && IsArr(target.Type) && target.IsField && !LibraryCode) {
-      return ArrFieldAssign(target, targetNode, s.Children[1], scope, s);   // spec 6.8.1
+    if (op == "=" && IsTupleOwner(target)) {
+      return TupleAssign(target, s.Children[1], scope, s);   // the tuple owns its arrays (spec 6.8.1)
+    }
+    if (op == "=" && IsArr(target.Type) && (target.IsField || target.IsStatic || target.Variable is { OwnsArray: true } || IsOwnedTupleItem(targetNode, scope)) && !LibraryCode) {
+      return ArrFieldAssign(target, targetNode, s.Children[1], scope, s);   // spec 6.8.1: fields, statics and owned locals free their old array
+    }
+    if (op == "=" && IsArr(target.Type) && target.Variable != null && !GivesOwnArray(s.Children[1])) {
+      target.Variable.BorrowsArray = true;   // a = b: a borrows from now on (spec 6.8.1)
     }
     if (op == "=") {
       if (IsClass(target.Type)) {
@@ -1446,6 +1474,11 @@ public sealed partial class CodeGen {
     var targetNode = n.Children[0];
     if (PropertyTarget(targetNode, scope) is var (propertyObj, property)) {
       return PropertyIncDec(n, propertyObj, property, scope);
+    }
+    if (targetNode.Kind == "Index") {
+      // a[i]++, l[1][0]--: the same as a[i] += 1, as a statement (its value is not used)
+      var step = Synthetic("Assign", n, n.Kind is "PostInc" or "PreInc" ? "+=" : "-=").Add(targetNode).Add(Synthetic("Int", n, "1"));
+      return new Expr(AssignCode(step, scope), "void");
     }
     var target = LValue(targetNode, scope);
     ReadCheck(target.Variable, targetNode.Text ?? "", targetNode);

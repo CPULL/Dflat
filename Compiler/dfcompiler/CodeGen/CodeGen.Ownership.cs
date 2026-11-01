@@ -269,6 +269,11 @@ public sealed partial class CodeGen {
       owners.Add(statement);
       drops.Add(StrDropNode(statement.Text!, statement));
     }
+    foreach (var statement in statements.Where(statement => statement.Kind == "Decl" && IsTupleArrDecl(statement))) {
+      owners.Add(statement);   // a tuple that holds arrays: they end with the scope (spec 6.8.1)
+      tupleArrDecls.Add(statement);
+      drops.Add(TupleDropNode(statement.Text!, statement));
+    }
     foreach (var target in statements.Where(statement => statement.Kind == "MultiAssign")
                .SelectMany(statement => statement.Children[0].Children).Where(target => target.Kind == "Decl" && IsStringDecl(target))) {
       owners.Add(target);
@@ -299,14 +304,23 @@ public sealed partial class CodeGen {
         ownedArrayDecls.Add(statement);
         drops.Add(Synthetic("AtEnd", statement, "drop").Add(Synthetic("Block", statement).Add(Synthetic("ArrDrop", statement, statement.Text))));
       }
+      if (statement.Kind == "MultiAssign" && GivesOwnMultiValues(statement)) {
+        // arr<T> values, i32 n = f(): an array declared from the values of a function of the program is owned (spec 6.8.1)
+        foreach (var target in statement.Children[0].Children.Where(target => target.Kind == "Decl" && IsArrTypeNode(target.Children.FirstOrDefault(child => TypeNodeKinds.Contains(child.Kind)))
+            && statements.Skip(index + 1).All(node => ArrayUsesStayLocal(node, null, null, 0, target.Text!, true, false)))) {
+          owners.Add(target);
+          ownedArrayDecls.Add(target);
+          drops.Add(Synthetic("AtEnd", target, "drop").Add(Synthetic("Block", target).Add(Synthetic("ArrDrop", target, target.Text))));
+        }
+      }
     }
     frame.AtEnds.InsertRange(0, drops);
     return owners;
   }
 
   // an array that ends with its scope (spec 6.8.1, point 20), for now only when that is safe to see: a local declared with its type from a new
-  // array (a literal, arr<T>[n], a clone), and used afterwards only as a[i], a.member (not transformTo, which moves the block) or the
-  // source of a for. Any other use (an argument, an assignment, ->a, a return, a view a[x..y]) leaves it as before: not freed
+  // array (a literal, arr<T>[n], a clone, ->b) or with no value, assigned again only new arrays, and used afterwards only in the ways
+  // ArrayUsesStayLocal accepts. Any other use (b = a, a view a[x..y], an argument a function keeps) leaves it as before: not freed
   bool IsOwnedLocalArray(Node decl, IEnumerable<Node> after) {
     var typeNode = decl.Children.FirstOrDefault(child => TypeNodeKinds.Contains(child.Kind));
     var init = decl.Children.FirstOrDefault(child => child.Kind == "Init")?.Children[0];
@@ -318,8 +332,11 @@ public sealed partial class CodeGen {
       return false;
     }
     bool plain = !varLiteral && TryResolveType(typeNode!) is string arrType && IsArr(arrType) && HasPlainItems(arrType);
-    return IsNewArray(init) && after.All(node => ArrayUsesStayLocal(node, null, null, 0, decl.Text!, true, plain));
+    return (init == null || GivesOwnArray(init)) && after.All(node => ArrayUsesStayLocal(node, null, null, 0, decl.Text!, true, plain));
   }
+
+  // a value an array variable can own: a new array, a moved one (->a) or null
+  bool GivesOwnArray(Node value) => value.Kind is "Gift" or "Null" || IsNewArray(value);
 
   // a value that is a new array nobody else holds: a literal, a clone, arr<T>[n], or a call of a function that returns a new array
   bool IsNewArray(Node? value) =>
@@ -332,13 +349,20 @@ public sealed partial class CodeGen {
   // the uses of an array that keep it local: a[i] (not a view), a.member (not transformTo), the source of a for, an argument to a parameter
   // that keeps it local (ParamStaysLocal), and (for the owner, canReturn) return a, which moves it to the caller
   bool ArrayUsesStayLocal(Node node, Node? parent, Node? grand, int position, string name, bool canReturn, bool plain) {
+    if (node is { Kind: "Call" } && node.Children[0] is { Kind: "Member", Text: "pop" } && node.Children.Count > 1
+        && node.Children[1].Children is [{ Kind: "WritableAddressOf" } written] && written.Children[0] is { Kind: "Name" } popped && popped.Text == name) {
+      return canReturn && ArrayUsesStayLocal(node.Children[0], node, parent, 0, name, canReturn, plain);   // v.pop((&)a): the old array of a ends
+    }
     if (node.Kind == "Name" && node.Text == name) {
       return parent switch {
         { Kind: "Index" } => position == 0 && parent.Children.Count > 1 && parent.Children[1].Kind != "Range",
         { Kind: "Member" } => position == 0 && parent.Text != "transformTo",
         { Kind: "For" or "In" or "Copy" } => true,   // a! only reads it
-        { Kind: "Return" } => canReturn && parent.Children.Count == 1,
-        { Kind: "Args" } => grand is { Kind: "Call" } && ArgumentStaysLocal(grand, position),
+        { Kind: "Tuple" } => true,   // (a, 1): a tuple that is kept copies it, a tuple given as an argument borrows it
+        { Kind: "Gift" } => canReturn,   // ->a moves the block out and empties a
+        { Kind: "Return" } => canReturn,   // return a, or return a, n of several values: a moves out
+        { Kind: "Args" } => grand is { Kind: "Call" } && ArgumentStaysLocal(grand, position, plain),
+        { Kind: "Assign", Text: "=" } when position == 0 => canReturn && GivesOwnArray(parent.Children[1]),   // a = [..]: the old block is freed
         { Kind: "Assign", Text: "=" } => plain && position == 1 && parent.Children[0].Kind == "Member",   // obj.field = a: the field gets a copy
         _ => false
       };
@@ -378,16 +402,21 @@ public sealed partial class CodeGen {
       .Where(f => (f.Name == name || f.Name.EndsWith("." + name)) && f.Params.Count == count && !f.IsExtern && !f.IsAbstract).ToList();
   }
 
-  bool ArgumentStaysLocal(Node call, int position) {
+  // plain: the array has plain items, so a ->arr<T> (or ->T) parameter gets a copy of it and the argument is only read
+  bool ArgumentStaysLocal(Node call, int position, bool plain) {
     if (IsRuntimeCall(call)) {
       return true;   // r.Console.log(a) and the other functions of Root read their arguments (a borrowed read)
     }
     var callees = CalleesOf(call);
-    return callees.Count > 0 && callees.All(f => ParamStaysLocal(f, position));
+    return callees.Count > 0 && callees.All(f => IsGiftParamNode(f, position) ? plain : ParamStaysLocal(f, position));
   }
+
+  static bool IsGiftParamNode(FunSig f, int position) =>
+    f.Node.Children.FirstOrDefault(child => child.Kind == "Params") is Node ps && position < ps.Children.Count && ps.Children[position].Kind == "GiftParam";
 
   readonly Dictionary<(FunSig, int), bool> paramStaysLocal = new();
   readonly HashSet<Node> ownedArrayDecls = new();
+  readonly HashSet<Node> tupleArrDecls = new();
 
   // a borrowed array parameter that its function only reads (the same uses, never returned): an owned array can be given to it
   bool ParamStaysLocal(FunSig f, int position) {
@@ -404,12 +433,15 @@ public sealed partial class CodeGen {
 
   readonly Dictionary<FunSig, bool> returnsNewArray = new();
 
-  // every return of the function gives a new array: a new value, or a local array it owns (moved out by the return)
+  // every return of the function gives a new array: a new value, or a local array or ->arr<T> parameter it owns (moved out by the return)
   bool ReturnsNewArray(FunSig f) {
     if (returnsNewArray.TryGetValue(f, out bool known)) {
       return known;
     }
     returnsNewArray[f] = false;   // a recursive call is assumed not to
+    if (f.Node.Line >= LibraryLine && IsArr(f.Ret) && f.Name.Split('.')[^1] is "takeAt" or "replace" or "node_take" or "node_replace") {
+      return returnsNewArray[f] = true;   // an item handed out by a collection: the caller owns it (spec 6.8.1)
+    }
     if (!IsArr(f.Ret) || f.Node.Children.FirstOrDefault(child => child.Kind == "Block") is not Node body) {
       return false;
     }
@@ -417,7 +449,8 @@ public sealed partial class CodeGen {
     CollectDeclarations(body, locals);
     var returns = CollectReturns(body).ToList();
     bool result = returns.Count > 0 && returns.All(ret => ret.Children.Count == 1 && (IsNewArray(ret.Children[0])
-      || ret.Children[0] is { Kind: "Name" } returned && locals.TryGetValue(returned.Text!, out var decl) && IsOwnedLocalArray(decl, new[] { body })));
+      || ret.Children[0] is { Kind: "Name" } returned && (locals.TryGetValue(returned.Text!, out var decl) ? IsOwnedLocalArray(decl, new[] { body })
+        : f.Params.FirstOrDefault(p => p.Name == returned.Text) is ParamSig given && OwnsGivenArray(f, given))));
     return returnsNewArray[f] = result;
   }
 
@@ -502,6 +535,9 @@ public sealed partial class CodeGen {
       return movedString;
     }
     var value = ExprOf(operand, scope);
+    if (IsArr(value.Type) && !LibraryCode) {
+      return ArrGift(n, operand, value.Type, scope);   // spec 6.8.1
+    }
     if (!IsClass(value.Type)) {
       Warn("-> on a basic value is ignored: it is a copy", n, 1);
       return new Expr(value.Code, value.Type);
@@ -1172,6 +1208,9 @@ public sealed partial class CodeGen {
     if (cls.Node.Line < LibraryLine) {
       foreach (var field in cls.Fields.Where(field => IsArr(field.Type) && !field.IsStatic)) {
         ArrDropHelper(field.Type);   // the helpers are written before the drop function that calls them
+      }
+      foreach (var field in cls.Fields.Where(field => TupleHoldsArrays(field.Type) && !field.IsStatic)) {
+        TupleDropCode(field.Type, "self");   // the same for the arrays of a tuple field
       }
     }
     var sb = classCode;

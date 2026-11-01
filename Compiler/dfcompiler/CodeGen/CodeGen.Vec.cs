@@ -965,7 +965,7 @@ public class set<T> : SetCollection<T> {
       if (BoxInner(elem) != null) {
         item = BoxCall(item, elem);   // [first, Dog("x")] of a vec<@Dog> (spec 12.7)
       }
-      var value = Adopted(ExprOf(item, scope, elem), item);
+      var value = ArrItemValue(item, Adopted(ExprOf(item, scope, elem), item), elem, item);
       if (IsClass(elem) && !value.Fresh && value.Type != "null") {
         throw Error("a vec owns its items: put a new object in the literal, or move one in with ->x", item);
       }
@@ -1034,6 +1034,9 @@ public class set<T> : SetCollection<T> {
       throw Error("only a variable, a field or an item of an array or a vector can be moved with ->", gift);
     }
     string elem = isVec ? VecElem(obj.Type) : ArrElem(obj.Type);
+    if (IsArr(elem)) {
+      return ArrGiftIndex(obj, isVec, operand, scope, gift);   // the array leaves the slot, the slot is empty (spec 6.8.1)
+    }
     if (!IsClass(elem) && elem != "string") {
       Warn("-> on a basic value is ignored: it is a copy", gift, 1);
       return IndexExpr(operand, scope);
@@ -1059,6 +1062,10 @@ public class set<T> : SetCollection<T> {
     }
     if (VecElem(cls.Name) == "string") {
       sb.Append($"  for (df_uns i = 0; i < self->{items}.len; i++) {{ df_str_free(self->{items}.p[i]); self->{items}.p[i] = NULL; }}\n");
+    }
+    if (IsArr(VecElem(cls.Name))) {
+      // spec 6.8.1
+      sb.Append($"  for (df_uns i = 0; i < self->{items}.len; i++) {{ {ArrDropHelper(VecElem(cls.Name))}(self->{items}.p[i]); self->{items}.p[i] = {ZeroValue(VecElem(cls.Name))}; }}\n");
     }
     sb.Append($"  free(self->{items}.p);\n  self->{items}.p = NULL;\n  self->{items}.len = 0;\n  self->{count} = 0;\n");
   }
@@ -1088,11 +1095,13 @@ public class set<T> : SetCollection<T> {
     string incoming = NewTemp();
     string old = NewTemp();
     bool owned = IsClass(target.Type) && (target.Variable?.Own ?? target.IsField);
+    bool ownsArray = IsArr(target.Type) && !LibraryCode && (target.Variable is { OwnsArray: true } || target.IsField || target.IsStatic);
     string zero = ZeroValue(elem);
     string store = Convert(new Expr(incoming, elem), target.Type, at);
     string assignCode = target.Type == "string"
       ? StrAssign(target, "true", incoming) + "; "   // the item moves into the variable or the field, the old string ends
-      : $"{CType(target.Type)} {old} = {target.Code}; {target.Code} = {store}; " + (owned ? $"if ({old} != {target.Code}) {{ df_drop((void*){old}); }} " : "");
+      : $"{CType(target.Type)} {old} = {target.Code}; {target.Code} = {store}; " + (owned ? $"if ({old} != {target.Code}) {{ df_drop((void*){old}); }} " : "")
+        + (ownsArray ? $"if ({old}.p != {target.Code}.p) {{ {ArrDropHelper(target.Type)}({old}); }} " : "");   // the old array of an owner ends (spec 6.8.1)
     string code = $"({{ {CType(vec.Type)} {held} = {NullChecked(vec.Code, vec.Type)}; bool {ok} = false; {CType(elem)} {incoming} = {zero}; {LockCheck(held, vec.Type)}"
       + $"if ({held}->{count} > 0) {{ {held}->{count} -= 1; {incoming} = {held}->{items}.p[{held}->{count}]; {held}->{items}.p[{held}->{count}] = {zero}; {ok} = true; }} "
       + assignCode
@@ -1143,7 +1152,7 @@ public class set<T> : SetCollection<T> {
   Expr VecAddCollection(Expr vec, Node arg, string sourceType, Scope scope, Node at) {
     string elem = VecElem(vec.Type);
     bool moving = arg.Kind == "Gift";
-    bool cloning = IsClass(elem) && !moving;   // a plain add(other) clones the object items (spec 6.6, 12.6)
+    bool cloning = (IsClass(elem) || IsArr(elem)) && !moving;   // a plain add(other) clones the object items (spec 6.6, 12.6) and the arrays (6.8.1)
     cloneUsed |= cloning;
     var source = ExprOf(arg, scope, sourceType);   // a literal takes the type of the source (point 53)
     string held = NewTemp();
@@ -1160,7 +1169,7 @@ public class set<T> : SetCollection<T> {
     sb.Append(LockCheck(held, vec.Type));
     sb.Append($"df_uns {amount} = {SourceLength(sourceType, s)}; {VecReserve(held, vec.Type, $"{count} + {amount}")}");
     sb.Append(ForEachSourceItem(sourceType, s, "0", amount, item =>
-      $"{items}.p[{count}] = {(cloning ? CloneValue(item, elem, at) : elem == "string" && !moving ? $"df_str_dup({item})" : item)}; {count} += 1; " + (moving && (IsClass(elem) || elem == "string") ? $"{item} = NULL; " : "")));
+      $"{items}.p[{count}] = {(cloning ? CloneValue(item, elem, at) : elem == "string" && !moving ? $"df_str_dup({item})" : item)}; {count} += 1; " + (moving && (IsClass(elem) || elem == "string") ? $"{item} = NULL; " : moving && IsArr(elem) ? $"{item} = {ZeroValue(elem)}; " : "")));
     if (moving && sourceIsObject) {
       sb.Append($"df_drop((void*){s}); ");   // the collection was moved in: its items are gone and it ends
     }

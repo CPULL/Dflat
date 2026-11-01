@@ -310,6 +310,8 @@ Tuples can be also anonymous: `(i32 , string, string, r64)`
 Tuple need to have **at least 2 elements**; items can be accessed by name (`record.label`) if the names are specified or by index (`record[1]`).
 The index is a literal, a `const` or an enum value only; out of range is a compile error. Indexes apply left to right: in an array of tuples, `myTuple[2][1]` is the second item of the third tuple.
 
+A tuple that holds arrays carries its own copy of them: assigning or returning the tuple copies its arrays (6.8.1).
+
 An item of a tuple can be a writable reference `(&)Type` (`((&)Item value, bool isValid)`, the result of `writableNext()`, 6.7). The borrow lives as long as the tuple. A tuple that holds a `(&)` follows the rule of the iterators and the views (6.5): if it is not given away it lives only inside the scope that created it, so it cannot outlive the iterator it comes from.
 
 
@@ -986,7 +988,22 @@ flat[row * width + column] = 7          // a matrix on a flat array
   - Borrows: an argument `f(a)` and a local `arr<T> b = a` borrow the array; the owner keeps it. An array given to the standard library (`r.Console.log(a)`) is a borrowed read as well.
   - `return a` of an array the function owns moves it to the caller, which owns it from then on.
   - `->a` moves the block: the receiver owns it and `a` becomes an empty array. Only an owner can be moved: `->p` on a borrowed parameter or on a borrowing local is a compile error.
+  - A local that owns its array can be assigned again: the old array ends first. The new value is a new array, `->b` or `null`; `a = b` makes `a` a borrow.
+  - `->arr<T> p`: the function owns the array. The caller gives `->a`, a new array or `a!`; any other array is copied when its items are plain values, and is a compile error otherwise. The array ends with the function unless it is moved on or returned. `f(->a)` to a plain `arr<T>` parameter is a compile error: the parameter only borrows.
+  - A static array field ends when the program ends.
   - A field that is an array is owned by its object and ends with it. Every way into the field gives it an array of its own: a new array goes in as it is; `->a` moves one in; any other array is copied when its items are plain values (numbers, `bool`, `char`, enums, strings, tuples of natives), and the copy is exact; with other items (objects, arrays) it is a compile error, the same as for objects: `->a` to move it, `a!` to clone it. The old array of the field ends when a new one replaces it. A header parameter that fills a field follows the same rule.
+  - Arrays in collections (`arr<arr<T>>`, `vec<arr<T>>`, `list<arr<T>>`): the collection owns its arrays, as an object owns its array fields. Every way in follows the rule of the fields: a new array goes in as it is, `->a` moves one in, an array of plain items is copied, otherwise it is a compile error (`->a` or `a!`). `add(other)` copies the arrays of `other`, `add(->other)` moves them.
+    - `c[i]` borrows the array in place: `l[1][0]++` changes the array inside the collection, the same as `l[1].increase()` changes an object inside it.
+    - An array that is replaced (`c[i] = [..]`) or removed (`removeAt`, `remove`, `clear`, `truncate`) ends. `takeAt`, `replace` and `pop` give the array to the caller, who owns it; `->c[i]` moves it out and leaves an empty array in its place.
+    - The arrays left in the collection end with it.
+    - `fill(a)` on a collection of arrays is a compile error: one array cannot be in every item.
+    - A map with array values is not available yet.
+  - Arrays in tuples: a tuple is a value, so it carries its own copy of its arrays.
+    - A tuple literal copies the arrays that are not new: `(a, 1)` copies `a`; `([1, 2], 1)` and `(->a, 1)` do not.
+    - Assigning or returning a tuple copies its arrays: after `t2 = t`, a change through `t2` is not seen through `t`.
+    - A tuple kept in a variable (`var` too), a field or a static ends its arrays with it, or when a new value replaces it. A tuple given as an argument is borrowed.
+  - Several return values (`fun arr<Dog>, uns pack()`): each array returned is the caller's own. An array the function owns moves out (`return made, made.len`: the values are read first, then `made` is emptied); any other array is copied. A variable declared from the values (`arr<Dog> dogs, uns count = pack()`) owns its array.
+    - `t.values = a` follows the rule of the array fields.
 
 ```
 class Scores(arr<i32> start) {      // the field gets a copy of the caller's array (plain items)
@@ -1008,6 +1025,18 @@ fun arr<Dog> kennel() {
   return made                        // moves to the caller
 }
 arr<Dog> mine = kennel()             // mine owns it and ends it with its scope
+
+list<arr<i32>> rows = [[1, 2], [3]]
+rows[1][0]++                         // changes the array inside the list
+rows.add(numbers)                    // plain items: the list gets a copy
+arr<i32> last = rows.takeAt(2)       // last owns it now
+rows[0] = [5, 6]                     // the old [1, 2] ends
+
+vec<arr<Dog>> kennels = []
+kennels.add(pack)                    // compile error: write ->pack to move it, or pack! to clone it
+
+(arr<i32> values, i32 count) t = (numbers, 3)   // t has its own copy of numbers
+(arr<i32> values, i32 count) t2 = t             // and t2 its own copy of t.values
 ```
 - Differences from the trait: `c[k] = v` replaces only; `clear()` sets every item to the default value; `fill(value)` fills the whole array. `add`, `add(collection)`, `insert`, `remove`, `removeAll`, `removeAt`, `truncate` and `pop` are not available (compile error).
 - Default iterator: `IndexIterator`, keeping a `uns` position.
@@ -1496,25 +1525,124 @@ i32 r = enforce account.whatever() lockfail { -1 } default { 0 }
 Used in `$"{expr:spec}"` and `toStr("spec")`. Options in any order; letters act as separators; reserved letters as fill/separator chars are a compile error.
 
 ## 8.1 Numbers
-In formatting Numbers all letters are case-insensitive except `h` / `H`
+
+A number format is a short text of options, written after `:` in an interpolated string or given to `toStr`:
+
+```
+r64 price = 3.14159
+r.Console.log($"price {price:D02}")       // price 3.14
+string text = price.toStr("D02w8")        // "    3.14"
+```
+
+- Each option starts with its letter; the options can be written in any order (`D02w8` = `w8D02`).
+- The letters are case-insensitive, except `h` / `H` of the hex base.
+- A format written in the code is checked when compiling: an unknown option is a compile error.
+- Without a format, a real prints the shortest text that reads back as the same number (as C#): `3.14159`, `1`, `0.30000000000000004`; an integer prints all its digits.
+
+#### Decimals `D`
+
+`D` sets the digits after the decimal symbol: `D[symbol][size][rounding]`.
+
+- `size`: the most decimals; with a leading `0` it is the exact number of decimals (zeros are added). `D0` prints no decimals.
+- `symbol` (optional): the character of the decimal symbol, `.` when absent; `l` takes the symbol of the locale.
+- `rounding` (optional): `u` half-up (the default), `b` banker's (half to even), `c` ceiling, `f` floor, `t` truncate.
+- On an integer, a fixed size adds the decimals: `{5:D02}` → `5.00`.
+
+| Format | `3.14159` | `2.5` |
+|---|---|---|
+| `D2` | `3.14` | `2.5` |
+| `D02` | `3.14` | `2.50` |
+| `D0` | `3` | `3` |
+| `D2c` | `3.15` | `2.5` |
+| `D2t` | `3.14` | `2.5` |
+| `D,02` | `3,14` | `2,50` |
+
+#### Width, fill and alignment `w` `f` `a`
+
+- `w<n>`: the width in characters. A shorter number is padded; a longer one is printed whole (no truncation). Without `w` there is no padding.
+- `f<char>`: the fill character, a space when absent. It cannot be a letter (letters start options): `f0`, `f*`, `f_`.
+- `a<` left, `a>` right (the default), `a^` center.
+- `a.` puts the decimal symbol at the same place for every number, so that a column lines up on it: with `D<size>`, `size` places are kept after the symbol (spaces when the number has fewer decimals). Without a `D` size it is the same as `a>`.
+
+| Format | `255` | `3.14159` |
+|---|---|---|
+| `w6` | `   255` | `3.14159` |
+| `w6a<` | `255   ` | |
+| `w7a^` | `  255  ` | |
+| `w6f0` | `000255` | |
+| `w6f*a<` | `255***` | |
+| `w8D02` | | `    3.14` |
+| `w8f0D02` | | `00003.14` |
+
+A column with `w8a.D2`:
+```
+    3.14
+  -42.5
+  100
+```
+
+#### Sign `S`
+
+| Format | Meaning | `-7` with `w6` | `3.5` |
+|---|---|---|---|
+| `S` or `S-` | a sign only on negatives, before the first digit (the default) | `    -7` | `3.5` |
+| `S+` | a sign always, before the first digit | `    -7` | `+3.5` |
+| `St-` | a sign only on negatives, at the left edge of the width | `-    7` | `3.5` |
+| `St+` | a sign always, at the left edge of the width | `-    7` | `+3.5` |
+| `S()` | negatives in parentheses | `   (7)` | `3.5` |
+
+With a `0` fill the sign always goes before the zeros, as with `St`: `{-5:w5f0}` → `-0005`, `{5:S+w5f0}` → `+0005`, `{-5:S()w6f0}` → `(0005)`. With any other fill it stays before the first digit: `{-5:w5f*}` → `***-5`.
+
+#### Grouping `g`
+
+`g` puts a separator between the groups of digits of the integer part, counted from the right.
+
+- `g<sep><size>`: one separator and one group size, repeated: `g,3` → `1,234,567`.
+- More sizes, each followed by its separator, are used in turn from the right; the last one repeats: `g,32,` → `12,34,56,789` (Indian grouping).
+- A trailing `r` counts the groups from the left: `g,3r` → `123,456,7`.
+- `gL` takes the grouping of the locale.
+- The separator cannot be a letter or a digit.
+
+| Format | `1234567` | `1234567.891` |
+|---|---|---|
+| `g,3` | `1,234,567` | |
+| `g.3` | `1.234.567` | |
+| `g 3` | `1 234 567` | |
+| `g_3` | `1_234_567` | |
+| `g,3D2` | | `1,234,567.89` |
+| `g.3D,02` | | `1.234.567,89` |
+
+#### Base `b`
+
+`bd` decimal (the default), `bh` hex lower case, `bH` hex upper case, `bb` binary, `bo` octal, `b64` base-64 digits. Hex and binary show the raw bits (no negative hex).
+
+| Format | `255` |
+|---|---|
+| `bh` | `ff` |
+| `bH` | `FF` |
+| `bb` | `11111111` |
+| `bo` | `377` |
+
+#### Scientific `e`
+
+`e` prints the number as a mantissa and an exponent (8.2).
+
+#### Special values
+
+`NaN`, `∞`, `-∞` and `null` (a null nullable number) are printed as they are (`INF` / `-INF` on targets without Unicode).
+
+#### All the options
 
 | Option | Meaning |
 |---|---|
-| `bd` `bh` `bH` `bb` `bo` `b64` | base: decimal (default), hex lower/upper, binary, octal, base-64 digits |
-| `D[sep][size][mode]` | decimals: `sep` = symbol (`l` = locale), leading `0` on size = fixed, else max; `D0` = none; modes `u` half-up (default), `b` banker's, `c` ceil, `f` floor, `t` truncate |
-| `S` / `S-` | sign on negatives only, before the first digit (default) |
-| `S+` | sign always, before the first digit |
-| `St-` / `St+` | same, at the left edge of the width |
-| `S()` | negatives in parentheses |
-| `w<n>` | width (no width = no padding) |
+| `D[symbol][size][rounding]` | decimals |
+| `w<n>` | width |
 | `f<char>` | fill character |
-| `a<` `a>` `a^` `a.` | align left, right, center, on the decimal symbol |
-| `g<sep><size>[<size><sep>...]+` | grouping, right to left; trailing `r` = left to right; `L` = locale |
-| `e[<lit>]<min>` | scientific (8.2) |
-
-- Hex / binary show raw bits (no negative hex). Width overflow prints the full number.
-- Special values: `NaN`, `∞`, `-∞`, `null` (`INF` / `-INF` on targets without Unicode).
-- Default for reals: as C# (shortest round-trip). Example: `12345.toStr("f0w10")` → `0000012345`.
+| `a<` `a>` `a^` `a.` | alignment |
+| `S` `S-` `S+` `St-` `St+` `S()` | sign |
+| `g<sep><size>[<size><sep>...][r]`, `gL` | grouping |
+| `bd` `bh` `bH` `bb` `bo` `b64` | base |
+| `e[<text>][<min>]` | scientific (8.2) |
 
 ## 8.2 Scientific format `e`
 
@@ -3616,3 +3744,6 @@ Level 1 = most important, level 3 = least.
 - 12 A new object that nothing keeps ends when its statement ends (an argument to a borrowing parameter, a receiver); a borrow of it is valid only in that statement; 99: the open item removed
 - 7.2.7, 99 `enforce w is Blah b { }` dropped (no longer under discussion)
 - 6.8.1 Array ownership written out: the owner of a new array (also `var x = [...]`), borrows (`f(a)`, `b = a`, the standard library), `return a` moves, `->a` only from an owner, array fields own their array (a new one, `->a`, or a copy when the items are plain; objects need `->a` or `a!`), the old array of a field ends
+- 6.8.1 Arrays: an owned local assigned again ends its old array; `->arr<T>` parameters own the array (`f(->a)` to a plain `arr<T>` parameter is a compile error); static array fields end with the program
+- 6.8.1, 3.2 Arrays in collections (owned like fields, `c[i]` borrows in place, removed and replaced arrays end, `takeAt` / `replace` / `pop` give them to the caller, `fill(a)` is an error) and in tuples (a tuple carries its own copy of its arrays, also a `var` tuple); a `->arr<T>` parameter copies an array of plain items; the arrays of several return values are the caller's own
+- 8.1 Number formats rewritten with an explanation and examples for each option; with a `0` fill the sign goes before the zeros (`-0005`, was `000-5`)

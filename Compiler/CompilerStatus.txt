@@ -9,6 +9,12 @@ Changes from the previous version -----------------------
 - a size that does not fit (arr<T>[n], vec<T>[n], reserve with n * size overflowing) ends the program as a failed allocation, on every target (was left to the C library)
 - a literal as an argument takes the type of the parameter: m += [k: v], m.add([k: v]), s.add([2, 3]), v.add([2, 3]) (point 53); when several collections fit, the arr wins
 - enforce expressions also in an if condition (evaluated once, before the if); an else if and loop headers stay not supported
+- arrays: a local assigned again with a new array (or ->b, null) frees its old one; ->arr<T> parameters own the array (->a, a new array or a! to call them; freed at the end unless moved on or returned); f(->a) to a borrowing parameter is an error; static array fields are freed when the program ends
+- arrays in collections (arr, vec, list of arrays): owned like array fields (a new array as it is, ->a moved, plain items copied, otherwise ->a or a!); c[i] borrows in place; replaced and removed arrays are freed, takeAt / replace / pop hand them to the caller, ->c[i] moves one out; fill(a) on them is an error; a ->arr<T> parameter copies an array of plain items
+- tuples that hold arrays: a typed local, field or static tuple has its own copy of its arrays (t2 = t, return t, (a, 1) copy them) and frees them; collections of such tuples are an error for now
+- a[i]++ and a[i]-- on the items of arrays, vecs, lists and nested arrays (l[1][0]++), as statements
+- var tuples own their arrays like typed ones; a function with several return values gives arrays of its own (an owned local moves out after all the values are read, a borrowed one is copied) and arr<T> x, i32 n = f() owns x
+- number formats: with a 0 fill the sign goes before the zeros ({-5:w5f0} is -0005, was 000-5); parsing with such a format reads -0005
 
 Done -----------------------
 

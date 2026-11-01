@@ -1,0 +1,1 @@
+arr_param_borrows.df(5): error: 'numbers' only borrows the array: remove the ->

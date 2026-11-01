@@ -310,7 +310,7 @@ public sealed partial class CodeGen {
         if (IsClass(type) && p.Kind != "GiftParam" && !weakParam) {
           throw Error($"the object '{p.Text}' goes into a field of {cls.Name}, which owns it: write ->{type} {p.Text} (or _{type} {p.Text} for a weak reference)", p);
         }
-        cls.PrimaryParams.Add(new ParamSig(p.Text!, weakParam ? "_" + type : type, def?.Children[0]) { IsGift = p.Kind == "GiftParam" && (IsClass(type) || type == "string"), IsWeak = weakParam });
+        cls.PrimaryParams.Add(new ParamSig(p.Text!, weakParam ? "_" + type : type, def?.Children[0]) { IsGift = p.Kind == "GiftParam" && (IsClass(type) || type == "string" || IsArr(type)), IsWeak = weakParam });
         CheckFieldName(cls, p.Text!, p);
         cls.Fields.Add(new FieldInfo(p.Text!, type, cls, p) { FromParam = true, IsWeak = weakParam });
       }
@@ -1005,7 +1005,7 @@ public sealed partial class CodeGen {
       }
       CheckAccess(field.Visibility, field.Owner, parts[1], target);
       CheckReadOnlyWrite(field, target);
-      return new LValueInfo(field.CName, field.Type, field.IsConst && !initializing, null, false, field.IsWeak);   // a static: not tracked
+      return new LValueInfo(field.CName, field.Type, field.IsConst && !initializing, null, false, field.IsWeak, true);   // a static: not tracked
     }
     var owner = ExprOf(target.Children[0], scope);
     if (!IsClass(owner.Type)) {
@@ -1180,6 +1180,19 @@ public sealed partial class CodeGen {
       }
     } else if (arg.Kind == "WritableAddressOf") {
       throw Error($"'{param.Name}' is not a (&) parameter: remove the (&)", arg);
+    }
+    if (IsArr(param.Type) && !LibraryCode) {
+      // spec 6.8.1: ->arr<T> p takes the array (->a, a new array, a!, or a silent copy of plain items), arr<T> p borrows it
+      if (param.IsGift && !GivesOwnArray(arg)) {
+        if (!HasPlainItems(param.Type)) {
+          throw Error($"'{param.Name}' takes ownership of the array: write ->{arg.Text ?? "a"} to move it, or {arg.Text ?? "a"}! to give a copy", arg);
+        }
+        var copied = ExprOf(arg, scope, param.Type);
+        return $"{ArrCloneHelper(param.Type, arg)}({Convert(copied, param.Type, arg)})";
+      }
+      if (!param.IsGift && arg.Kind == "Gift") {
+        throw Error($"'{param.Name}' only borrows the array: remove the ->", arg);
+      }
     }
     // a weak parameter takes any existing object, also another weak reference (spec 12)
     var value = ExprOf(arg, scope, param.Type);

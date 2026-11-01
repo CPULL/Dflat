@@ -43,23 +43,10 @@ c.log("Hello, world!")
 // This is read only
 	</code></pre>
 
-
-<div class="dflat-editor-container">
-    <pre><code id="highlighting" class="code-editor"></code></pre>
-    <!-- Use literal '>' and '<', never &gt; or &lt; inside a textarea -->
-    <textarea id="editing" spellcheck="false">
-alias Root.Console as c
-c.log("Hello, world!")
-// You can edit this one
-</textarea>
-</div>
-
 	</div>
 </body>
 <script>
-
 	highlightCodeNode($("#editor")[0]);
-	initDflatEditor('editing', 'highlighting');
 </script>
 
 </html>

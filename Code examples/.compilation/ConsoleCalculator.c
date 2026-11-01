@@ -3315,6 +3315,9 @@ static bool df_nf_parse(df_sv s, df_nf* f) {
       f->align = '<';
     }
   }
+  if (f->fill == '0') {
+    f->signedge = true;   /* a zero fill goes after the sign: -0005, never 000-5 (spec 8.1) */
+  }
   return true;
 }
 

@@ -1,22 +1,56 @@
 <!DOCTYPE html>
 <html>
 <head>
-	<link rel="stylesheet" href="css/css.css">
-	<link rel="stylesheet" href="css/code.css">
-	<link rel="stylesheet" href="css/editor.css">
+	<link rel="stylesheet" href="../css/css.css">
+	<link rel="stylesheet" href="../css/code.css">
+	<link rel="stylesheet" href="../css/editor.css">
 	<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
-	<script src="js/codeHighlight.js"></script>
-  <title>Learn DFlat - </title>
+	<script src="../js/codeHighlight.js"></script>
+	<script src="ex002.js"></script>
+  <title>Learn DFlat - User Input</title>
 </head>
 <body>
 	<div class="world" dir="auto">
-  <h1><img src="imgs/Logo.png" class="logo"> D flat (D♭) Language</h1>
-  <p>Your very first program</p>
+  <h1><img src="../imgs/Logo.png" class="logo"> D flat (D♭) Language</h1>
+  <p>Reading user input from the Console</p>
 
-<h2>Reading an input and printing it</h2>
+<h2>Reading user input</h2>
   <pre><code id="editor" class="code-editor">
-alias Root.Console as c
-c.log("What is your name?")
-string name = c.readLine()
-c.log("Hello, " + name)
+string name = Root.Console.readLine()
+Root.Console.log("Hello, " + name)
 	</code></pre>
+
+	readLine() reads a line of text entered by the user and stores it in a variable.
+
+	The syntax is very similar to C#.
+
+<a id="run" class="btn">Run →</a>
+	<h2>Type your name</h2>
+<div id="stdin" class="dflat-editor-container" style="display: none;">
+    <pre><code id="highlighting" class="code-editor"></code></pre>
+    <!-- Use literal '>' and '<', never &gt; or &lt; inside a textarea -->
+    <textarea id="editing" spellcheck="false">
+> 
+</textarea>
+</div>
+
+<h2>Output</h2>
+<pre><code id="output" class="code-editor">
+
+</code></pre>
+
+
+</div>
+
+<div class="bottom">
+	<a href="ex001.html" class="btn">← Prev</a>
+	<a href="ex003.html" class="btn" style="float:right">Next →</a>
+</div>
+</body>
+<script>
+	highlightCodeNode($("#editor")[0]);
+	$("#output").css("display", "none");
+	$("#run").on("click", testResult)
+</script>
+
+</html>

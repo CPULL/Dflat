@@ -52,12 +52,13 @@ public sealed partial class CodeGen {
       if (single.Type != currentRet) {
         throw Error($"this function returns {elems.Count} values", s);
       }
-      return single.Code;
+      return TupleOwnedCode(s.Children[0], single, currentRet!, s);   // the arrays of a call of the library are copied (spec 6.8.1)
     }
     if (s.Children.Count != elems.Count) {
       throw Error($"this function returns {elems.Count} values, not {s.Children.Count}", s);
     }
     var temps = new List<string>();
+    var emptied = new List<VarInfo>();   // owned arrays that move out: emptied after every value is computed (return a, a.len)
     for (int index = 0; index < elems.Count; index++) {
       string temp = NewTemp();
       temps.Add(temp);
@@ -65,7 +66,17 @@ public sealed partial class CodeGen {
       if (elems[index].Type == "string") {
         value = StrReturned(value, s.Children[index], scope);
       }
+      if (IsArr(elems[index].Type) && !LibraryCode) {
+        if (s.Children[index].Kind == "Name" && scope.Find(s.Children[index].Text!) is { OwnsArray: true } owned) {
+          emptied.Add(owned);   // the array moves to the caller (spec 6.8.1)
+        } else if (!GivesOwnArray(s.Children[index])) {
+          value = new Expr($"{ArrCloneHelper(elems[index].Type, s)}({Convert(value, elems[index].Type, s)})", elems[index].Type, true);   // a copy
+        }
+      }
       sb.Append($"{pad}{CType(elems[index].Type)} {temp} = {Convert(value, elems[index].Type, s.Children[index])};\n");
+    }
+    foreach (var owned in emptied.Distinct()) {
+      sb.Append($"{pad}{owned.CName}.p = NULL;\n{pad}{owned.CName}.len = 0;\n");
     }
     return $"(({CType(currentRet!)}){{ {string.Join(", ", temps)} }})";
   }
@@ -168,6 +179,7 @@ public sealed partial class CodeGen {
       CheckNotShadowing(target.Text!, scope, target);
       if (frames.Peek().Hoisted.TryGetValue(target.Text!, out var hoisted)) {
         scope.Vars[target.Text!] = hoisted;
+        hoisted.OwnsArray = ownedArrayDecls.Contains(target);
         MarkAssigned(hoisted);
         sb.Append($"{pad}{hoisted.CName} = {Convert(value.Value, type, target)};\n");
         if (hoisted.OwnFlag != null) {
@@ -177,7 +189,7 @@ public sealed partial class CodeGen {
       }
       string cname = "v_" + target.Text;
       sb.Append($"{pad}{CType(type)} {cname} = {Convert(value.Value, type, target)};\n");
-      var declared = StringVar(new VarInfo(type, cname, false));
+      var declared = StringVar(new VarInfo(type, cname, false) { OwnsArray = ownedArrayDecls.Contains(target) });
       if (declared.OwnFlag != null) {
         sb.Append($"{pad}bool {declared.OwnFlag} = {TargetFresh(value.Value)};\n{pad}(void){declared.OwnFlag};\n");
       }

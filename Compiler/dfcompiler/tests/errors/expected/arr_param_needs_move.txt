@@ -1,0 +1,1 @@
+arr_param_needs_move.df(6): error: 'given' takes ownership of the array: write ->pack to move it, or pack! to give a copy

@@ -1,0 +1,32 @@
+removeAt 0
+  end a
+replace 0
+  end b
+pop
+  took d
+replace 0 with result
+  old b2
+end of vecs
+  end b2
+  end d
+  end b3
+  end c
+removeAt 0
+  end la
+replace 0
+  end lb
+takeAt 0
+end of lists
+  end lb2
+  end lc
+replace 0
+  end x
+end of arrays
+  end x2
+  end y
+in place
+  10 1 7 70
+  moved 1, left 0
+  end p
+done
+---- exit code 0 ----

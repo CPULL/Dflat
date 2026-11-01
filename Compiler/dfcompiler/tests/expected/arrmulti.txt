@@ -1,0 +1,14 @@
+vars
+  t 7, u m1, plain 1
+  end of vars
+  end m1
+multi
+  got 2 p2
+  back 10, numbers 1
+  end of multi
+  end p1
+  end p2
+  end p1
+  end p2
+done
+---- exit code 0 ----

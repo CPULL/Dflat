@@ -1,0 +1,15 @@
+tuples
+  a 70, t 7, t2 5
+  made 3
+  t 9 2
+  end d1
+  end of tuples
+  end d2
+holder
+  end h1
+  end h2
+  end of holder
+  end holder
+  end h3
+done
+---- exit code 0 ----

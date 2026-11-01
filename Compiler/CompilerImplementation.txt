@@ -1892,3 +1892,51 @@ ARRAY FIELDS AND THE OTHER ARRAY RULES (2026-11-01, spec 6.8.1, point 20)
 - Tests arrfields (fields, header copy, move, replace, runtime read, var, a field type no local uses), errors/arr_field_objects,
   arr_field_move_borrowed; arrfree (the keeper clones).
 
+ARRAYS ASSIGNED AGAIN, ->arr<T> PARAMETERS, STATIC ARRAYS (2026-11-01, spec 6.8.1, point 20)
+- GivesOwnArray (Ownership.cs): a new array, a Gift or null. IsOwnedLocalArray accepts it (or no value) as the start; ArrayUsesStayLocal
+  accepts a = value at position 0 when GivesOwnArray(value), and ->a (Gift parent) for the owner (canReturn). AssignCode routes = on an
+  owned local and on a static array (LValueInfo.IsStatic) to ArrFieldAssign, which frees the old block; a = b of a borrowed array sets
+  BorrowsArray on the variable.
+- ArrGift (ArrOwnership.cs): ->a on an array (GiftExpr) takes the block and empties a; refused for const, read-only and BorrowsArray.
+  ArrFieldAssign uses it for its Gift case.
+- ->arr<T> p: ParamSig.IsGift also for arrays (functions and headers). The argument must GivesOwnArray; ->a to a borrowing parameter is an
+  error (ArgConvert in Classes.cs). OwnsGivenArray(f, p): the parameter owns the array when its uses stay local (canReturn); EmitFun adds
+  an ArrDrop atEnd; ReturnsNewArray accepts return p.
+- StaticEndCode (ArrOwnership.cs): the static array fields of program classes, in reverse staticOrder, freed before main returns (top-level
+  main and the entry point); not on exit() or a panic.
+- Tests arrmoves, errors/arr_param_needs_move, arr_param_borrows.
+
+ARRAYS IN COLLECTIONS AND TUPLES (2026-11-01, spec 6.8.1, 3.2, point 20)
+- ArrItemValue (ArrOwnership.cs): the value of an array item from user code (literals of arr / vec / list, c[i] = v, replace): GivesOwnArray
+  as it is, plain items ArrCloneHelper, otherwise an error. ReplaceArrItem: the replaced array is dropped when its block differs.
+- ArrGiftIndex: ->c[i] of an arr / vec of arrays takes the item and zeroes the slot (was a copy with a warning); the library moves
+  (items[i] = ->items[i + 1], T gone = ->items[i]) rely on it.
+- Item ends: DropListItem (list nodes, vec truncate) drops arrays; the drop glue of vec and list; arr clear; the List clear reset.
+  add(other) clones array items (CloneValue -> ArrCloneHelper), add(->other) zeroes the source slots. fill(a) of array items: an error.
+- Handed out: ReturnsNewArray is true for the library takeAt / replace / node_take / node_replace returning an array, so T gone = takeAt(i)
+  (list removeAt) and arr<T> x = l.takeAt(i) own them. v.pop((&)a): VecPop drops the old array of an owner target; ArrayUsesStayLocal
+  accepts the pop((&)a) call of the owner.
+- ->arr<T> (or ->T) parameters: a plain-items argument that is not new is copied (ArgConvert); ArgumentStaysLocal takes plain and
+  IsGiftParamNode, so the source local still owns its array.
+- Tuples (CodeGen.TupleArrays.cs): TupleHoldsArrays (direct arr items). IsTupleArrDecl (typed locals) -> AddImplicitDrops (tupleArrDecls,
+  TupleDrop atEnd), VarInfo.OwnsTuple. TupleOwnedCode: a Tuple literal clones the items that are not GivesOwnArray, a call of a program
+  function is taken as it is, anything else is cloned; used by EmitDecl, TupleAssign (AssignCode: IsTupleOwner = typed local, field,
+  static), EmitReturn (a function returning such a tuple). t.0 = a of an owner goes to ArrFieldAssign (IsOwnedTupleItem). Fields:
+  EmitArrayFieldDrops + helpers before the drop function; statics: StaticEndCode. ArrayUsesStayLocal accepts a Tuple parent.
+  CheckTupleItems (EmitDecl): a collection of such tuples is NotSupported.
+- IncDec on an Index target: lowered to Assign += / -= 1 (AssignCode), void.
+- Tests arrcollections, arrtuples, errors/arr_item_objects, arr_fill_arrays, tuple_arrays_collection.
+
+
+ZERO FILL AND THE SIGN (2026-11-01, spec 8.1)
+- df_nf_parse (Runtime/RuntimeNumber.cs): a fill of 0 sets signedge, so the sign (or the parenthesis of S()) goes before the zeros; the
+  formatter and the parser (df_np_one) both follow signedge. numformat expected updated (-00042).
+
+VAR TUPLES AND SEVERAL RETURN VALUES (2026-11-01, spec 6.8.1, point 20)
+- IsTupleArrDecl also takes var with a Tuple literal (items that can hold an array) or a call of program functions returning a tuple with
+  arrays; the drop (TupleDrop) checks the real type, so a var tuple without arrays is unaffected.
+- MultiReturnCode: an arr value that is an owned local is read as it is and emptied after all the temps (return made, made.len); not
+  GivesOwnArray: ArrCloneHelper; a forwarded call (return g()) goes through TupleOwnedCode. ArrayUsesStayLocal: Return accepts any count.
+- AddImplicitDrops: a MultiAssign whose only value is a call of program functions with several values (GivesOwnMultiValues): its arr Decl
+  targets with local uses get an ArrDrop and ownedArrayDecls; AssignTarget sets OwnsArray.
+- Test arrmulti.

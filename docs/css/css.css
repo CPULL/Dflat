@@ -55,3 +55,24 @@ body {
   color: #fcfc4a;
   font-weight: 500;
 }
+
+.bottom {
+ position:fixed;
+ bottom: 1em;
+ width: 98vw;
+ margin-left: auto;
+ margin-right: auto;
+}
+
+.arrow {
+  position: absolute;
+  top: 13.7em;
+  left: 10em
+}
+
+.arrowText {
+	padding: .1em .5em;
+  border: 1px solid white;
+  border-radius: 5px;
+  background-color: cornflowerblue;
+}

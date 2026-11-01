@@ -1,0 +1,25 @@
+reassign
+  end a1
+  end a2
+  now b1
+  numbers 5
+  end b1
+  moved c1, left 0
+  end c1
+give
+  end d1
+  end d2
+  copy counted 2, still 2
+  end d1
+  end d2
+  counted 2, left 0
+  back e1
+  kennel 1, left 0
+  end e1
+  end kennel
+  end f1
+static 1
+  end static
+done
+  end static2
+---- exit code 0 ----

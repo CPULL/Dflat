@@ -1,0 +1,45 @@
+// var tuples own their arrays like typed ones; a function with several return values gives arrays of its own (an owned local moves,
+// a borrowed array is copied), and an array declared from them is owned and ends with its scope (spec 6.8.1)
+alias Root as r
+public class Dog(string name) {
+  public string name
+} atEnd {
+  r.Console.log("  end " + name)
+}
+fun (arr<Dog>, i32) make() {
+  return ([Dog("m1")], 1)
+}
+fun arr<Dog>, uns pair() {
+  arr<Dog> made = [Dog("p1"), Dog("p2")]
+  return made, made.len                 // made moves to the caller
+}
+fun arr<i32>, i32 copied(arr<i32> given) {
+  return given, 2                       // a borrowed array: the caller gets a copy
+}
+fun arr<Dog>, uns forward() {
+  return pair()
+}
+fun vars() {
+  arr<i32> a = [7, 8]
+  var t = (a, 1)                        // var tuple: its own copy of a
+  a[0] = 70
+  var u = make()
+  var plain = (1, "x")
+  r.Console.log($"  t {t.0[0]}, u {u.0[0].name}, plain {plain.0}")
+  r.Console.log("  end of vars")
+}
+fun multi() {
+  arr<Dog> dogs, uns count = pair()
+  r.Console.log($"  got {count} {dogs[1].name}")
+  arr<i32> numbers = [1, 2]
+  arr<i32> back, i32 two = copied(numbers)
+  back[0] = 10
+  r.Console.log($"  back {back[0]}, numbers {numbers[0]}")
+  arr<Dog> more, _ = forward()
+  r.Console.log("  end of multi")
+}
+r.Console.log("vars")
+vars()
+r.Console.log("multi")
+multi()
+r.Console.log("done")

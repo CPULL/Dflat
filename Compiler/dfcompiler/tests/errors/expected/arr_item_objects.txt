@@ -1,0 +1,1 @@
+arr_item_objects.df(6): error: a collection owns its arrays of Dog: write ->pack to move it in, or pack! to put a copy (spec 6.8.1)

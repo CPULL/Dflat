@@ -15,20 +15,63 @@ public sealed partial class CodeGen {
     return !IsTuple(elem) || TupleElems(elem).All(item => item.Type != "string" && !IsClass(item.Type) && !IsArr(item.Type) && !IsTuple(item.Type));
   }
 
-  // field = value for an array field; the old array of the field is freed
+  // an array that goes into an item of a collection (an arr, a vec, a list) is owned by it, as by a field: a new array or null goes in as
+  // it is, ->a moves it, plain items are copied; other items need ->a or a! (spec 6.8.1). The code of the library passes as it is
+  Expr ArrItemValue(Node valueNode, Expr value, string elem, Node at) {
+    if (!IsArr(elem) || at.Line >= LibraryLine || LibraryCode || GivesOwnArray(valueNode)) {
+      return value;
+    }
+    if (HasPlainItems(elem)) {
+      return new Expr($"{ArrCloneHelper(elem, at)}({Convert(value, elem, at)})", elem, true);
+    }
+    string name = valueNode.Text ?? "a";
+    throw Error($"a collection owns its arrays of {ArrElem(elem)}: write ->{name} to move it in, or {name}! to put a copy (spec 6.8.1)", at);
+  }
+
+  // an item that is replaced ends, unless it is the same block
+  string ReplaceArrItem(string elem, string slot, string incoming) {
+    string replaced = NewTemp();
+    return $"{CType(elem)} {replaced} = {slot}; {slot} = {incoming}; if ({replaced}.p != {incoming}.p) {{ {ArrDropHelper(elem)}({replaced}); }} ";
+  }
+
+  // ->c[i] of an array item of an arr or a vec: the array leaves the slot, which is left empty
+  Expr ArrGiftIndex(Expr obj, bool isVec, Node operand, Scope scope, Node gift) {
+    string elem = isVec ? VecElem(obj.Type) : ArrElem(obj.Type);
+    var index = ExprOf(operand.Children[1], scope, "u64");
+    string holder = NewTemp();
+    string position = NewTemp();
+    string taken = NewTemp();
+    string items = isVec ? $"{holder}->{VecField(obj.Type, "items")}" : holder;
+    string length = isVec ? $"{holder}->{VecField(obj.Type, "count")}" : $"{holder}.len";
+    string source = isVec ? NullChecked(obj.Code, obj.Type) : obj.Code;
+    string code = CheckRaise($"({{ {CType(obj.Type)} {holder} = {source}; df_uns {position} = {IndexValue(index, gift)}; {CType(elem)} {taken} = {ZeroValue(elem)}; "
+      + $"if (df_idx_ok({length}, {position}, {fn!.NameConst})) {{ {taken} = {items}.p[{position}]; {items}.p[{position}] = {ZeroValue(elem)}; }} {taken}; }})", elem);
+    return new Expr(code, elem, true);
+  }
+
+  // ->a for an array: the block moves out and a is left empty; only an owner can give it (not a borrowed parameter or local, not a const)
+  Expr ArrGift(Node gift, Node operand, string type, Scope scope) {
+    var source = LValue(operand, scope);
+    if (source.IsConst || source.Variable is { ReadOnlyRef: true }) {
+      throw Error($"'{operand.Text}' is read-only: ->{operand.Text} cannot take its array", gift);
+    }
+    if (source.Variable is { BorrowsArray: true }) {
+      throw Error($"'{operand.Text}' only borrows its array: ->{operand.Text} cannot take it; copy it with {operand.Text}! (spec 6.8.1)", gift);
+    }
+    string taken = NewTemp();
+    return new Expr($"({{ {CType(type)} {taken} = {source.Code}; {source.Code}.p = NULL; {source.Code}.len = 0; {taken}; }})", type, true);
+  }
+
+  // field = value for an array field, a static or an owned local; the old array is freed
   string ArrFieldAssign(LValueInfo target, Node targetNode, Node value, Scope scope, Node at) {
     string type = target.Type;
     string code;
     if (value.Kind == "Gift") {
-      var source = LValue(value.Children[0], scope);
-      if (source.Type != type) {
-        throw Error($"'{targetNode.Text}' is {type}, not {source.Type}", at);
+      var moved = ExprOf(value, scope);
+      if (moved.Type != type) {
+        throw Error($"'{targetNode.Text}' is {type}, not {moved.Type}", at);
       }
-      if (source.Variable is { BorrowsArray: true }) {
-        throw Error($"'{value.Children[0].Text}' only borrows its array: ->{value.Children[0].Text} cannot take it; copy it with {value.Children[0].Text}! (spec 6.8.1)", at);
-      }
-      string taken = NewTemp();
-      code = $"({{ {CType(type)} {taken} = {source.Code}; {source.Code}.p = NULL; {source.Code}.len = 0; {taken}; }})";
+      code = moved.Code;
     } else if (value.Kind == "Null" || IsNewArray(value)) {
       code = Convert(ExprOf(value, scope, type), type, at);
     } else if (HasPlainItems(type)) {
@@ -42,6 +85,11 @@ public sealed partial class CodeGen {
     return $"({{ {CType(type)} {old} = {target.Code}; {target.Code} = {code}; {ArrDropHelper(type)}({old}); }})";
   }
 
+  // a ->arr<T> parameter owns its array when its uses can be followed (as for a local, IsOwnedLocalArray); otherwise it is not freed
+  bool OwnsGivenArray(FunSig f, ParamSig p) =>
+    p.IsGift && IsArr(p.Type) && !IsByPointer(p) && !LibraryCode && f.Node.Children.FirstOrDefault(child => child.Kind == "Block") is Node body
+    && ArrayUsesStayLocal(body, null, null, 0, p.Name, true, HasPlainItems(p.Type));
+
   // the array fields of a class of the program end with its object
   void EmitArrayFieldDrops(ClassInfo cls, System.Text.StringBuilder sb) {
     if (cls.Node.Line >= LibraryLine) {
@@ -51,6 +99,21 @@ public sealed partial class CodeGen {
       sb.Append($"  {ArrDropHelper(field.Type)}(self->{field.CName});\n");
       sb.Append($"  self->{field.CName}.p = NULL;\n  self->{field.CName}.len = 0;\n");
     }
+    foreach (var field in cls.Fields.Where(field => TupleHoldsArrays(field.Type) && !field.IsStatic)) {
+      sb.Append($"  {TupleDropCode(field.Type, "self->" + field.CName)}\n");
+    }
+  }
+
+  // the static array fields of the classes of the program end with the program, in the reverse order of their start
+  string StaticEndCode() {
+    var sb = new System.Text.StringBuilder();
+    var statics = staticOrder.Where(field => (IsArr(field.Type) || TupleHoldsArrays(field.Type)) && field.Owner.Node.Line < LibraryLine).ToList();
+    for (int index = statics.Count - 1; index >= 0; index--) {
+      var field = statics[index];
+      sb.Append(IsArr(field.Type) ? $"  {ArrDropHelper(field.Type)}({field.CName});\n  {field.CName}.p = NULL;\n  {field.CName}.len = 0;\n"
+        : $"  {TupleDropCode(field.Type, field.CName)}\n");
+    }
+    return sb.ToString();
   }
 
   // the type a declaration names, or null when it cannot be resolved here

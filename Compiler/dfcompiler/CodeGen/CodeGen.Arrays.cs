@@ -91,7 +91,7 @@ public sealed partial class CodeGen {
     sb.Append($"({{ {CType(type)} {array} = {{ ({CType(elem)}*)df_calloc({list.Children.Count}, sizeof({CType(elem)})), {list.Children.Count} }}; ");
     for (int index = 0; index < list.Children.Count; index++) {
       var item = list.Children[index];
-      var itemValue = Adopted(ExprOf(item, scope, elem), item);
+      var itemValue = ArrItemValue(item, Adopted(ExprOf(item, scope, elem), item), elem, item);
       if (IsClass(elem) && !itemValue.Fresh && itemValue.Type != "null") {
         throw Error("a collection owns its items: put a new object in the literal, or move one in with ->x", item);
       }
@@ -239,7 +239,7 @@ public sealed partial class CodeGen {
     }
     string value;
     if (op == "=") {
-      var assigned = Adopted(ExprOf(s.Children[1], scope, elem), s);
+      var assigned = ArrItemValue(s.Children[1], Adopted(ExprOf(s.Children[1], scope, elem), s), elem, s);
       if (IsClass(elem) && !assigned.Fresh && assigned.Type != "null" && s.Line < LibraryLine) {
         throw Error("a collection owns its items: move an existing object in with ->x, or put a new one", s);
       }
@@ -254,6 +254,12 @@ public sealed partial class CodeGen {
       return $"({{ {CType(obj.Type)} {array} = {holder}; df_uns {position} = {IndexValue(index, target)}; {CType(elem)} {incoming} = {value}; "
         + $"if (!df_idx_ok({length}, {position}, {fn!.NameConst})) {RaiseJump} {CType(elem)} {replaced} = {slot}; {slot} = {incoming}; "
         + $"if ({replaced} != {incoming}) {{ df_drop((void*){replaced}); }} }})";
+    }
+    if (op == "=" && IsArr(elem)) {
+      // an array item that is replaced ends (spec 6.8.1)
+      string incoming = NewTemp();
+      return $"({{ {CType(obj.Type)} {array} = {holder}; df_uns {position} = {IndexValue(index, target)}; {CType(elem)} {incoming} = {value}; "
+        + $"if (!df_idx_ok({length}, {position}, {fn!.NameConst})) {RaiseJump} {ReplaceArrItem(elem, slot, incoming)}}})";
     }
     // a string item that is replaced ends
     string store = elem == "string" ? $"df_str_put(&{slot}, {value}, true);" : $"{slot} = {value};";
@@ -300,6 +306,9 @@ public sealed partial class CodeGen {
         if (IsClass(elem) && args[0].Kind != "Null") {
           throw Error("fill would put one object in every item: a class instance is not allowed, fill(null) is", at);
         }
+        if (IsArr(elem) && at.Line < LibraryLine) {
+          throw Error("fill would put one array in every item: set the items one by one (spec 6.8.1)", at);
+        }
         if (elem == "string") {
           // every item gets its own copy; the strings the items held end
           var text = ExprOf(args[0], scope, elem);
@@ -323,7 +332,8 @@ public sealed partial class CodeGen {
         // every item gets its default value; the objects the items held end (spec 6.1)
         string reset = IsClass(elem)
           ? $"if ({{0}} != NULL) {{{{ void* {gone} = (void*){{0}}; {{0}} = NULL; df_drop({gone}); }}}}"
-          : elem == "string" ? "df_str_free({0}); {0} = NULL;" : $"{{0}} = {ZeroValue(elem)};";
+          : elem == "string" ? "df_str_free({0}); {0} = NULL;"
+          : IsArr(elem) ? $"{ArrDropHelper(elem)}({{0}}); {{0}} = {ZeroValue(elem)};" : $"{{0}} = {ZeroValue(elem)};";
         string code = WithTemp(array, a =>
           $"({{ for (df_uns {i} = 0; {i} < {a}.len; {i}++) {{ {string.Format(reset, Elem(a, i))} }} }})");
         return new Expr(code, "void");
@@ -417,7 +427,7 @@ public sealed partial class CodeGen {
     string elem = ArrElem(array.Type);
     var first = ExprOf(args[0], scope, "u64");
     bool boxed = BoxInner(elem) != null;
-    var replacement = Adopted(ExprOf(boxed ? BoxCall(args[1], elem) : args[1], scope, elem), args[1]);   // vec<@T>: a new box takes a usage
+    var replacement = ArrItemValue(args[1], Adopted(ExprOf(boxed ? BoxCall(args[1], elem) : args[1], scope, elem), args[1]), elem, args[1]);   // vec<@T>: a new box takes a usage
     if (IsClass(elem) && !replacement.Fresh && replacement.Type != "null") {
       throw Error("a collection owns its items: move an existing object in with ->x, or put a new one", args[1]);
     }

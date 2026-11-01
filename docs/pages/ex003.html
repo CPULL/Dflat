@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<link rel="stylesheet" href="../css/css.css">
+	<link rel="stylesheet" href="../css/code.css">
+	<link rel="stylesheet" href="../css/editor.css">
+	<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+	<script src="../js/codeHighlight.js"></script>
+	<script src="ex003.js"></script>
+  <title>Learn DFlat - Numbers and expressions</title>
+</head>
+<body>
+	<div class="world" dir="auto">
+  <h1><img src="../imgs/Logo.png" class="logo"> D flat (D♭) Language</h1>
+  <p>Calculating values using expressions and producing formatted output</p>
+
+<h2>Working with numbers, casts, and expressions</h2>
+  <pre><code id="editor" class="code-editor">
+i32 a = 12
+r64 b = 15.5
+
+i32 allInteger = a + (i32)b * 2
+r64 allFloat = (r64)a + b * 2
+r64 complicated = (r64)a / 3 + b * 2.13
+
+Root.Console.log($"Casting to integers gives {allInteger}\nCasting to floats gives {allFloat:d4}.\nAnd the complicated number is {complicated:d5}")
+
+	</code></pre>
+
+	<code class="inlinecode">i32</code> is an integer value of 32 bits, same as <code class="inlinecode">int</code> from C#<br>
+	<code class="inlinecode">r64</code> is a floating point numeric value, same as <code class="inlinecode">double</code> from C#<br>
+  <code class="inlinecode">(i32)</code> is a <i>cast</i> it is used to transform one type to another.<br>
+
+  The final result is an <i>interpolated string</i> where some parts inside the string are replaced with variables (and formatted if needed).<br>
+	Interpolated strings start with <code class="inlinecode">$</code> and have the variables and expressions inside braces <code class="inlinecode">{</code> <code class="inlinecode">}</code>
+
+<a id="run" class="btn">Run →</a>
+
+</div>
+
+<div id="arrow" class="arrow"><img src="../imgs/arrow.png" style="vertical-align: middle;"><span id="arrowText" class="arrowText"></span></div>
+
+
+<div class="bottom">
+	<a href="ex002.html" class="btn">← Prev</a>
+	<a href="ex004.html" class="btn" style="float:right">Next →</a>
+</div>
+</body>
+<script>
+	highlightCodeNode($("#editor")[0]);
+	$("#output").css("display", "none");
+	$("#run").on("click", testResult)
+</script>
+
+</html>

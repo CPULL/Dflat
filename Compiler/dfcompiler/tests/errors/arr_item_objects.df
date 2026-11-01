@@ -1,0 +1,7 @@
+namespace arr_item_objects
+class Dog { }
+fun main() {
+  vec<arr<Dog>> v = []
+  arr<Dog> pack = [Dog()]
+  v[0] = pack
+}

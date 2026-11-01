@@ -1,0 +1,6 @@
+namespace arr_param_borrows
+fun read(arr<i32> numbers) { }
+fun main() {
+  arr<i32> numbers = [1, 2]
+  read(->numbers)
+}

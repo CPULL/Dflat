@@ -50,6 +50,9 @@ public sealed partial class CodeGen {
     if (elem == "string") {
       return $"df_str_free({slot}); {slot} = NULL; ";
     }
+    if (IsArr(elem)) {
+      return $"{ArrDropHelper(elem)}({slot}); {slot} = {ZeroValue(elem)}; ";   // spec 6.8.1
+    }
     if (!IsClass(elem)) {
       return "";
     }
@@ -86,11 +89,15 @@ public sealed partial class CodeGen {
     string head = $"({{ {CType(obj.Type)} {list} = {NullChecked(obj.Code, obj.Type)}; df_uns {position} = {IndexValue(index, target)}; ";
     string check = $"if (!df_idx_ok({list}->{VecField(obj.Type, "count")}, {position}, {fn!.NameConst})) {RaiseJump} ";
     if (op == "=") {
-      var assigned = Adopted(ExprOf(s.Children[1], scope, elem), s);
+      var assigned = ArrItemValue(s.Children[1], Adopted(ExprOf(s.Children[1], scope, elem), s), elem, s);
       if (IsClass(elem) && !assigned.Fresh && assigned.Type != "null" && s.Line < LibraryLine) {
         throw Error("a collection owns its items: move an existing object in with ->x, or put a new one", s);
       }
       string value = StrItemAs(assigned, elem, Convert(assigned, elem, s));
+      if (IsArr(elem)) {
+        string incoming = NewTemp();
+        return head + $"{CType(elem)} {incoming} = {value}; " + check + WalkToNode(list, obj.Type, node, position) + ReplaceArrItem(elem, slot, incoming) + "})";
+      }
       if (IsClass(elem)) {
         string incoming = NewTemp();
         string replaced = NewTemp();
@@ -112,7 +119,7 @@ public sealed partial class CodeGen {
     sb.Append($"({{ {CType(type)} {held} = {VecNewEmpty(type)}; ");
     foreach (var written in literal.Children) {
       var item = BoxInner(elem) != null ? BoxCall(written, elem) : written;   // [first, Dog("x")] of a list<@Dog> (spec 12.7)
-      var value = Adopted(ExprOf(item, scope, elem), item);
+      var value = ArrItemValue(item, Adopted(ExprOf(item, scope, elem), item), elem, item);
       if (IsClass(elem) && !value.Fresh && value.Type != "null") {
         throw Error("a list owns its items: put a new object in the literal, or move one in with ->x", item);
       }
@@ -157,6 +164,9 @@ public sealed partial class CodeGen {
     if (IsClass(ListElem(cls.Name))) {
       sb.Append("    if (node->value != NULL) { void* o = (void*)node->value; node->value = NULL; df_drop(o); }\n");
     }
+    if (IsArr(ListElem(cls.Name))) {
+      sb.Append($"    {ArrDropHelper(ListElem(cls.Name))}(node->value);\n");   // spec 6.8.1
+    }
     if (ListElem(cls.Name) == "string") {
       sb.Append("    df_str_free(node->value);\n");
     }
@@ -174,6 +184,9 @@ public sealed partial class CodeGen {
     }
     if (name == "fill" && IsClass(elem) && args.Count > 0 && args[^1].Kind != "Null") {
       throw Error("fill would put one object in every item: a class instance is not allowed, fill(null) is", at);
+    }
+    if (name == "fill" && IsArr(elem) && at.Line < LibraryLine) {
+      throw Error("fill would put one array in every item: set the items one by one (spec 6.8.1)", at);
     }
     if (name is "sort" or "sortUnstable") {
       // a bottom-up merge sort that relinks the nodes (spec 6.6): the items do not move
@@ -288,7 +301,7 @@ public sealed partial class CodeGen {
       }
       case "node_clear": {
         string node = NewTemp();
-        string reset = IsClass(elem) || elem == "string" ? DropListItem(elem, $"{node}->value") : $"{node}->value = {ZeroValue(elem)}; ";
+        string reset = IsClass(elem) || elem == "string" || IsArr(elem) ? DropListItem(elem, $"{node}->value") : $"{node}->value = {ZeroValue(elem)}; ";
         return new Expr(head + $"for ({nodeType}* {node} = {l}->{first}; {node} != NULL; {node} = {node}->next) {{ {reset}}} }})", "void");
       }
       case "node_fill": {
@@ -555,7 +568,7 @@ public sealed partial class CodeGen {
   Expr ListAddCollection(Expr list, Node arg, string sourceType, Scope scope, Node at) {
     string elem = ListElem(list.Type);
     bool moving = arg.Kind == "Gift";
-    bool cloning = IsClass(elem) && !moving;   // a plain add(other) clones the object items (spec 6.6, 12.6)
+    bool cloning = (IsClass(elem) || IsArr(elem)) && !moving;   // a plain add(other) clones the object items (spec 6.6, 12.6) and the arrays (6.8.1)
     cloneUsed |= cloning;
     var source = ExprOf(arg, scope, sourceType);   // a literal takes the type of the source (point 53)
     string held = NewTemp();
@@ -578,7 +591,7 @@ public sealed partial class CodeGen {
     } else {
       sb.Append(ForEachSourceItem(sourceType, s, "0", SourceLength(sourceType, s), item => {
         string node = NewTemp();
-        string take = moving && (IsClass(elem) || elem == "string") ? $"{item} = NULL; " : "";
+        string take = moving && (IsClass(elem) || elem == "string") ? $"{item} = NULL; " : moving && IsArr(elem) ? $"{item} = {ZeroValue(elem)}; " : "";
         string value = cloning ? CloneValue(item, elem, at) : elem == "string" && !moving ? $"df_str_dup({item})" : item;
         return NewListNode(list.Type, node, value) + take + AppendListNode(held, list.Type, node);
       }));

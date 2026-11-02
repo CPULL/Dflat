@@ -1,0 +1,41 @@
+nestedTuples
+  end a
+  end of nestedTuples
+  end n1
+  end b
+multiTargets
+  end old
+  end p1
+  end f0
+  end of multiTargets
+  end p2
+  end f1
+borrowed true
+  end a1
+  a is b
+  end a2
+  end of borrowed
+borrowed false
+  end a1
+  a is b
+  end of borrowed
+  end a2
+views
+  view 2 v2
+  v2
+  v3
+  end of views
+  end v1
+  end v2
+  end v3
+temporaries
+  len 1
+  end t1
+  count 1
+  end t2
+  end t3
+  end t4
+  end r1
+  end of temporaries
+done
+---- exit code 0 ----

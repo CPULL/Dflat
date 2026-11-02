@@ -1,0 +1,10 @@
+namespace rw_weak_from_readonly
+alias Root as r
+public class Player(string name) {
+  public string name
+}
+fun f() {
+  @Player reader = @Player("a")
+  (_)Player watcher = _reader
+}
+f()

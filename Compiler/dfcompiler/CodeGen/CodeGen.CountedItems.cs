@@ -9,6 +9,7 @@ namespace dfcompiler;
 // that would hand out boxes are not supported on these collections yet (CheckCountedItemsMember).
 public sealed partial class CodeGen {
   readonly Dictionary<string, string> boxInner = new();   // box class -> the counted type of its items
+  readonly HashSet<string> writableBoxes = new();          // the boxes of list<(@)T> and vec<(@)T>: read/write items with a lock
   bool rawBoxRead;                                         // CountedRef wants the box of c[i], not its object
 
   // list<@Dog> becomes list<Rc__Dog>, with the class Rc__Dog(@Dog value) added to the program. Keys of maps and sets cannot be counted
@@ -44,10 +45,15 @@ public sealed partial class CodeGen {
     if (inner is not { Kind: "Type", Children.Count: 0 } || inner.Text == null) {
       throw NotSupported("Counted items of this type", counted);
     }
-    string box = "Rc__" + inner.Text;
+    bool writable = counted.Children.Any(child => child.Kind == "ReadWrite");   // list<(@)Dog> (spec 12.7)
+    string box = (writable ? "RcRw__" : "Rc__") + inner.Text;
     if (!boxInner.ContainsKey(box)) {
       boxInner[box] = inner.Text;
       var param = Synthetic("Param", counted, "value").Add(Synthetic("Type", counted, inner.Text)).Add(Synthetic("Counted", counted));
+      if (writable) {
+        param.Add(Synthetic("ReadWrite", counted));
+        writableBoxes.Add(box);
+      }
       boxes.Add(Synthetic("Class", counted, box).Add(Synthetic("PrimaryCtor", counted).Add(param)).Add(Synthetic("Block", counted)));
     }
     return Synthetic("Type", counted, box);
@@ -173,7 +179,8 @@ public sealed partial class CodeGen {
     } finally {
       rawBoxRead = saved;
     }
-    return BoxInner(item.Type) is string inner ? new CountedRefInfo($"({item.Code})->{BoxField(item.Type)}", inner, $"{index.Children[0].Text ?? "c"}[...]", null, null) : null;
+    return BoxInner(item.Type) is string inner
+      ? new CountedRefInfo($"({item.Code})->{BoxField(item.Type)}", inner, $"{index.Children[0].Text ?? "c"}[...]", null, null, writableBoxes.Contains(item.Type)) : null;
   }
 
   // the members of a collection of counted objects that are built; the others would hand out or compare boxes (not built yet)

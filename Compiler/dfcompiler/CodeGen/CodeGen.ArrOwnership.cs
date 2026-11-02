@@ -85,6 +85,18 @@ public sealed partial class CodeGen {
     return $"({{ {CType(type)} {old} = {target.Code}; {target.Code} = {code}; {ArrDropHelper(type)}({old}); }})";
   }
 
+  // a = value for a local that owns or borrows (IsMixedLocalArray): its own old array ends; a new array, ->b or null makes it an owner
+  // again, any other array is only borrowed
+  string MixedArrAssign(LValueInfo target, Node value, Scope scope, Node at) {
+    string type = target.Type;
+    string code = Convert(ExprOf(value, scope, type), type, at);
+    MarkAssigned(target.Variable);
+    string old = NewTemp();
+    string flag = target.Variable!.ArrFlag!;
+    return $"({{ {CType(type)} {old} = {target.Code}; {target.Code} = {code}; if ({flag} && {old}.p != {target.Code}.p) {{ {ArrDropHelper(type)}({old}); }} "
+      + $"{flag} = {(GivesOwnArray(value) ? "true" : "false")}; }})";
+  }
+
   // a ->arr<T> parameter owns its array when its uses can be followed (as for a local, IsOwnedLocalArray); otherwise it is not freed
   bool OwnsGivenArray(FunSig f, ParamSig p) =>
     p.IsGift && IsArr(p.Type) && !IsByPointer(p) && !LibraryCode && f.Node.Children.FirstOrDefault(child => child.Kind == "Block") is Node body

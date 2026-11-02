@@ -1,0 +1,9 @@
+namespace rw_timeout_readonly
+alias Root as r
+public class Player(string name) {
+  public string name
+}
+fun f() {
+  @Player reader = @Player("a") timeout 10
+}
+f()

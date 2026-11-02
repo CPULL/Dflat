@@ -1177,6 +1177,7 @@ static bool df_str_owner = true;
    ones above the mark it took when it started, so the temporaries of its callers stay */
 static df_string* df_tmps = NULL;
 static bool* df_tmp_objs = NULL;   /* the entry is an object (dropped), not a string (freed) */
+static void (**df_tmp_fns)(void*) = NULL;   /* the entry is a block ended by its own function (the arrays of a tuple) */
 static size_t df_tmp_top = 0;
 static size_t df_tmp_cap = 0;
 static void df_drop(void* obj);
@@ -1186,11 +1187,13 @@ static void df_tmp_push(void* p, bool object) {
     df_tmp_cap = df_tmp_cap ? df_tmp_cap * 2 : 64;
     df_tmps = (df_string*)realloc(df_tmps, df_tmp_cap * sizeof(df_string));
     df_tmp_objs = (bool*)realloc(df_tmp_objs, df_tmp_cap * sizeof(bool));
-    if (!df_tmps || !df_tmp_objs) {
+    df_tmp_fns = (void (**)(void*))realloc(df_tmp_fns, df_tmp_cap * sizeof(void (*)(void*)));
+    if (!df_tmps || !df_tmp_objs || !df_tmp_fns) {
       df_out_of_memory();
     }
   }
   df_tmp_objs[df_tmp_top] = object;
+  df_tmp_fns[df_tmp_top] = NULL;
   df_tmps[df_tmp_top++] = (df_string)p;
 }
 
@@ -1209,10 +1212,19 @@ static void* df_tmpo(void* o) {
   return o;
 }
 
+/* a value only used in a statement that has its own way to end (a tuple that holds arrays): a copy of it in a block, ended by fn */
+static void* df_tmpf(void* p, void (*fn)(void*)) {
+  df_tmp_push(p, false);
+  df_tmp_fns[df_tmp_top - 1] = fn;
+  return p;
+}
+
 static void df_tmp_drop(size_t mark) {
   while (df_tmp_top > mark) {
     --df_tmp_top;
-    if (df_tmp_objs[df_tmp_top]) {
+    if (df_tmp_fns[df_tmp_top]) {
+      df_tmp_fns[df_tmp_top]((void*)df_tmps[df_tmp_top]);
+    } else if (df_tmp_objs[df_tmp_top]) {
       df_drop((void*)df_tmps[df_tmp_top]);
     } else {
       df_str_free(df_tmps[df_tmp_top]);
@@ -1324,7 +1336,7 @@ static void df_drop(void* obj) {
 /* reference counting (spec 12.7, the Rust Rc model): a counted variable holds the counting block of its object; the counting system owns the
    object and each holder is a user. The last release ends the object; the block stays while weak references need it. A null variable holds
    no block (NULL) and no usage */
-typedef struct df_rc { df_uns users; df_uns weaks; void* obj; } df_rc;
+typedef struct df_rc { df_uns users; df_uns weaks; void* obj; bool locked; int64_t timeout; } df_rc;
 
 static df_rc* df_rc_new(void* obj) {
   if (obj == NULL) {
@@ -1334,6 +1346,8 @@ static df_rc* df_rc_new(void* obj) {
   rc->users = 1;
   rc->weaks = 0;
   rc->obj = obj;
+  rc->locked = false;
+  rc->timeout = 0;
   return rc;
 }
 
@@ -1359,6 +1373,37 @@ static void df_rc_release(df_rc* rc) {
 }
 
 #define DF_RC_OBJ(T, rc) ((T)((rc) != NULL ? (rc)->obj : NULL))
+
+/* the lock of a read/write counted object (spec 7.2.2, 12.7). @T() timeout ms sets the default wait of the object (0: tried once) */
+static df_rc* df_rc_timeout(df_rc* rc, int64_t ms) {
+  if (rc != NULL) {
+    rc->timeout = ms < 0 ? 0 : ms;
+  }
+  return rc;
+}
+
+/* enforce takes the lock, waiting at most ms (-1: the default of the object), and holds a usage with it so the object stays while it is
+   locked. There are no threads yet: a busy lock is held by this same thread, which cannot release it while it waits, so the wait would
+   always run out; it fails at once. With threads this becomes the queue of the waiters, a timed wait and an atomic hand-over */
+static bool df_rc_lock(df_rc* rc, int64_t ms) {
+  (void)ms;
+  if (rc == NULL || rc->users == 0 || rc->locked) {
+    return false;
+  }
+  rc->locked = true;
+  rc->users++;
+  return true;
+}
+
+static void df_rc_release(df_rc* rc);
+
+static void df_rc_unlock(df_rc* rc) {
+  rc->locked = false;
+  df_rc_release(rc);
+}
+
+/* a write through a (@)T needs its lock (spec 12.7) */
+#define DF_RC_WRITABLE(rc) ((rc) == NULL || (rc)->locked)
 
 /* weak references (spec 12.7): they hold the counting block, not a usage; the object is gone when its user count is 0 */
 static df_rc* df_rc_weak(df_rc* rc) {

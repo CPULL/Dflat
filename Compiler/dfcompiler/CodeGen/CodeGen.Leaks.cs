@@ -149,6 +149,12 @@ public sealed partial class CodeGen {
           ctx.Flow.Raises.Add((AnyException, ctx.Cover));
         }
         break;
+      case "Assign" or "PostInc" or "PostDec" or "PreInc" or "PreDec" when !ctx.InCatchBody && FlowWritesThroughLock(node.Children[0], currentFlowFun):
+        ctx.Flow.Raises.Add((StandardExceptions["WritingOnRefCountWithoutLockingException"], ctx.Cover));   // spec 12.7
+        if (node.Kind == "Assign" && node.Text is "/=" or "%=") {
+          ctx.Flow.Raises.Add((StandardExceptions["DivisionByZeroException"], ctx.Cover));
+        }
+        break;
       case "Assign":
         if (!ctx.InCatchBody && node.Text is "/=" or "%=") {
           ctx.Flow.Raises.Add((StandardExceptions["DivisionByZeroException"], ctx.Cover));

@@ -1,0 +1,10 @@
+namespace rw_list_add_readonly
+public class Player(string name) {
+  public string name
+}
+fun f() {
+  list<(@)Player> team = []
+  @Player reader = @Player("a")
+  team.add(reader)
+}
+f()

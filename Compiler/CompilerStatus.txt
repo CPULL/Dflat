@@ -1,4 +1,4 @@
-Compiler version 0.0.44 alpha for version 0.0.20 of the specs 2026/11/01
+Compiler version 0.0.45 alpha for version 0.0.21 of the specs 2026/11/02
 
 Changes from the previous version -----------------------
 - a declaration can carry its own atEnd (spec 14.2): Some a = Some() atEnd { } is atEnd of a, also after a multiple declaration; atEnd of a, b { } no longer runs when all the listed variables are null
@@ -15,6 +15,9 @@ Changes from the previous version -----------------------
 - a[i]++ and a[i]-- on the items of arrays, vecs, lists and nested arrays (l[1][0]++), as statements
 - var tuples own their arrays like typed ones; a function with several return values gives arrays of its own (an owned local moves out after all the values are read, a borrowed one is copied) and arr<T> x, i32 n = f() owns x
 - number formats: with a 0 fill the sign goes before the zeros ({-5:w5f0} is -0005, was 000-5); parsing with such a format reads -0005
+- fun (@)T results (var x = f() is (@)T) and list<(@)T> / vec<(@)T> (hidden box RcRw__T; replace / takeAt / pop give a (@)T, the loop variable can be enforced) (spec 12.7)
+- read/write counted objects (spec 7.2, 12.7): (@)T and (_)T variables, parameters and fields; @T() timeout ms (default wait of the lock); enforce takes their lock (enforce p timeout 500 for one variable), lockfail [on] and default handle a busy lock, the locks end after the last atEnd; a write through a (@)T without the lock raises WritingOnRefCountWithoutLockingException; a read-only @T / _T cannot make a read/write one. No threads yet: a busy lock is held by the same thread and fails at once (no wait); writes made inside methods of the object are not checked
+- array leaks closed (spec 6.8.1): tuples inside tuples own their arrays; x, n = f() into an owner ends its old array; a local assigned a borrowed array (a = b) ends its own one and owns again a new one later (a run-time flag); views used at once (len, for, index, copy, runtime reads) no longer stop the array from ending; a new tuple nobody keeps (f().0, g(f())) ends its arrays with the statement; a result nobody keeps (f() alone) ends its new arrays
 
 Done -----------------------
 

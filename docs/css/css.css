@@ -66,8 +66,9 @@ body {
 
 .arrow {
   position: absolute;
-  top: 13.7em;
-  left: 10em
+  top: 50vh;
+  left: 50vw;
+	display: none;
 }
 
 .arrowText {

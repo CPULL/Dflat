@@ -36,6 +36,12 @@ Root.Console.log($"Casting to integers gives {allInteger}\nCasting to floats giv
 
 <a id="run" class="btn">Run →</a>
 
+<pre><code id="output" class="code-editor" style="display: none;">
+Casting to integers gives 42
+Casting to floats gives 43.0
+And the complicated number is 37.015
+</code></pre>
+
 </div>
 
 <div id="arrow" class="arrow"><img src="../imgs/arrow.png" style="vertical-align: middle;"><span id="arrowText" class="arrowText"></span></div>
@@ -48,6 +54,7 @@ Root.Console.log($"Casting to integers gives {allInteger}\nCasting to floats giv
 </body>
 <script>
 	highlightCodeNode($("#editor")[0]);
+	highlightCodeNode($("#output")[0]);
 	$("#output").css("display", "none");
 	$("#run").on("click", testResult)
 </script>

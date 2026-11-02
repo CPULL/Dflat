@@ -191,8 +191,9 @@ public sealed partial class CodeGen {
 
   // enforce a, b { } [else { } | null [on a] { } ...] (spec 7.2): each variable is checked in the order written (7.2.2): a T? has a value,
   // an object is not null and not destroyed, a counted object and a weak reference are alive. When a check fails the first null clause that
-  // names the failing variable (or names none) runs, or the else branch; with no clause for it nothing runs. Step 2: the catch and atEnd
-  // clauses (7.2.3) and lockfail with (@)T come later
+  // names the failing variable (or names none) runs, or the else branch; with no clause for it nothing runs. A (@)T or (_)T variable then
+  // takes the lock of its object (7.2.2, df_rc_lock): a failure releases the locks already taken and runs the first lockfail clause that
+  // names it, or default; on success the locks are released at the very end of the enforce (7.2.5), after the atEnd clauses
   // the catch and atEnd clauses (spec 7.2.3) become one block run when the checks pass: the enforce block as a nested statement, each
   // atEnd before the last clause as a statement (it runs when nothing is pending: an exception skips it on its way to the next catch that
   // matches), the catches where they are written (the usual catches of a block, 15.1), and an atEnd written last as the atEnd of this block
@@ -277,14 +278,37 @@ public sealed partial class CodeGen {
     block = EnforceClausesBlock(s, block);
     var elseNode = s.Children.FirstOrDefault(child => child.Kind == "Else");
     var names = s.Children.Where(child => child.Kind == "Name").ToList();
-    var checks = new List<(string Name, string Condition)>();
+    var checks = new List<(string Name, string Condition, bool Lock)>();
+    var locks = new List<(string Flag, string Held)>();
+    var locked = new HashSet<string>();
+    void AddLock(Node name, string blockCode) {
+      // the lock of a read/write object (spec 7.2.2): the timeout written for this variable, or the default of the object (-1)
+      string flag = "df_lk" + NewTemp();
+      string held = "df_lkb" + NewTemp();
+      fn!.Decls.Append($"  bool {flag} = false;\n  df_rc* {held} = NULL;\n  (void){flag};\n  (void){held};\n");
+      string ms = "-1";
+      if (name.Children.FirstOrDefault(child => child.Kind == "Timeout") is Node timeout) {
+        var wait = ExprOf(timeout.Children[0], scope, "i64");
+        if (!IsInt(wait.Type)) {
+          throw Error($"timeout takes a whole number of milliseconds, not {wait.Type}", timeout);
+        }
+        ms = wait.Code;
+      }
+      checks.Add((name.Text!, $"({flag} = df_rc_lock({held} = {blockCode}, (int64_t)({ms})))", true));
+      locks.Add((flag, held));
+      locked.Add(name.Text!);
+    }
     var unwrapped = new Scope(scope);
     foreach (var name in names) {
       var variable = scope.Find(name.Text!);
       if (WeakRef(name, scope) is CountedRefInfo weak) {
-        // a weak reference (spec 12.7): the object must still be alive; inside the block the name is a temporary usage
-        checks.Add((name.Text!, $"DF_RC_ALIVE({weak.Code})"));
-        block = EnforcedWeakBlock(block, name.Text!, weak.Type, weak.Code);
+        // a weak reference (spec 12.7): the object must still be alive; inside the block the name is a temporary usage, read/write for a (_)T,
+        // which also takes the lock
+        checks.Add((name.Text!, $"DF_RC_ALIVE({weak.Code})", false));
+        block = EnforcedWeakBlock(block, name.Text!, weak.Type, weak.Code, IsWritableRef(weak));
+        if (IsWritableRef(weak)) {
+          AddLock(name, weak.Code);
+        }
         continue;
       }
       if (s.Text == "expr" && (variable == null || variable.Type == "string" || !(IsNullable(variable.Type) || variable.IsCounted || IsClass(variable.Type)))) {
@@ -294,19 +318,33 @@ public sealed partial class CodeGen {
         throw Error($"unknown variable '{name.Text}'", name);
       }
       if (IsNullable(variable.Type)) {
-        checks.Add((name.Text!, $"{variable.CName}.has"));
+        checks.Add((name.Text!, $"{variable.CName}.has", false));
         unwrapped.Vars[name.Text!] = new VarInfo(BaseOf(variable.Type), variable.CName + ".val", variable.IsConst);
       } else if (variable.IsCounted) {
-        checks.Add((name.Text!, $"DF_RC_ALIVE({variable.CName})"));   // a counted variable: its object is alive while it holds a usage
+        checks.Add((name.Text!, $"DF_RC_ALIVE({variable.CName})", false));   // a counted variable: its object is alive while it holds a usage
+        if (variable.IsWritable) {
+          AddLock(name, variable.CName);   // (@)T: its lock (spec 7.2.2)
+        }
       } else if (IsClass(variable.Type) && !IsTraitType(variable.Type)) {
-        checks.Add((name.Text!, $"({variable.CName} != NULL && !DF_IS_DEAD({variable.CName}))"));   // objects are nullable (7.1)
+        checks.Add((name.Text!, $"({variable.CName} != NULL && !DF_IS_DEAD({variable.CName}))", false));   // objects are nullable (7.1)
       } else if (IsTraitType(variable.Type)) {
-        checks.Add((name.Text!, $"({variable.CName} != NULL)"));
+        checks.Add((name.Text!, $"({variable.CName} != NULL)", false));
       } else if (variable.Type == "string") {
         throw Error($"strings cannot be enforced ('{name.Text}')", name);
       } else {
         throw Error($"'{name.Text}' is {variable.Type}, which is never null", name);
       }
+    }
+    foreach (var name in names.Where(name => name.Children.Any(child => child.Kind == "Timeout") && !locked.Contains(name.Text!))) {
+      throw Error($"'{name.Text}' has no lock: timeout is for the (@)T and (_)T variables of the enforce (spec 7.2.1)", name);
+    }
+    if (locks.Count > 0) {
+      // the locks end at the very end, after the atEnd clauses and default, on every way out (7.2.5)
+      var unlock = Synthetic("Block", block).Add(Synthetic("RawC", block,
+        string.Join(" ", locks.Select(l => $"if ({l.Flag}) {{ {l.Flag} = false; df_rc_unlock({l.Held}); }}"))));
+      var guarded = Synthetic("Block", block).Add(Synthetic("AtEnd", block, "drop").Add(unlock));
+      guarded.Children.AddRange(block.Children);
+      block = guarded;
     }
     var known = names.Select(name => name.Text!).ToHashSet();
     var savedSource = enforceSource;
@@ -334,8 +372,14 @@ public sealed partial class CodeGen {
       }
       return on.Children.Select(child => child.Text!).ToList();
     }
-    foreach (var lockClause in s.Children.Where(child => child.Kind == "EnforceLockFail")) {
-      throw Error($"'{OnNames(lockClause)[0]}' has no lock: lockfail is for the (@)T variables of the enforce (spec 7.2.2), which are not built yet", lockClause);
+    var lockClauses = s.Children.Where(child => child.Kind == "EnforceLockFail").Select(clause => (Clause: clause, On: OnNames(clause))).ToList();
+    foreach (var (clause, on) in lockClauses) {
+      // lockfail on x names only variables with a lock; lockfail alone needs at least one
+      string? unlocked = clause.Children.Any(child => child.Kind == "On") ? on.FirstOrDefault(listed => !locked.Contains(listed))
+        : locked.Count == 0 ? on.FirstOrDefault() ?? "" : null;
+      if (unlocked != null) {
+        throw Error($"'{unlocked}' has no lock: lockfail is for the (@)T and (_)T variables of the enforce (spec 7.2.2)", clause);
+      }
     }
     var nullClauses = s.Children.Where(child => child.Kind == "EnforceNull").Select(clause => (Clause: clause, On: OnNames(clause))).ToList();
     var defaultClause = s.Children.FirstOrDefault(child => child.Kind == "EnforceDefault");
@@ -343,6 +387,10 @@ public sealed partial class CodeGen {
       ? s.Children.FirstOrDefault(child => child.Kind == "Catch" && !child.Children.Any(c => c.Kind == "On") && CatchTarget(child).Id == StandardExceptions["NullPointerException"])
       : null;
 
+    foreach (var (flag, _) in locks) {
+      sb.Append($"{pad}{flag} = false;\n");
+    }
+    string releaseLocks = string.Join(" ", locks.Select(l => $"if ({l.Flag}) {{ df_rc_unlock({l.Held}); }}"));   // a failed check: the locks taken end
     sb.Append($"{pad}if ({(checks.Count == 0 ? "1" : string.Join(" && ", checks.Select(check => check.Condition)))}) {{\n");
     var before = assign.Clone();
     try {
@@ -355,18 +403,28 @@ public sealed partial class CodeGen {
     if (elseNode != null) {
       assign = before.Clone();
       sb.Append(" else {\n");
+      if (releaseLocks != "") {
+        sb.Append(Pad(indent + 1)).Append(releaseLocks).Append('\n');
+      }
       EmitBlock(elseNode.Children[0], sb, scope, indent + 1);
       sb.Append(pad).Append('}');
       states.Add(assign);
-    } else if (nullClauses.Count > 0 || defaultClause != null) {
+    } else if (nullClauses.Count > 0 || lockClauses.Count > 0 || defaultClause != null) {
       // the first variable that fails picks the first null clause that names it (7.2.2), then (expression form) a catch
       // NullPointerException, then default
       sb.Append(" else {\n");
       string inner = Pad(indent + 1);
+      if (releaseLocks != "") {
+        sb.Append(inner).Append(releaseLocks).Append('\n');
+      }
       bool first = true;
-      foreach (var (name, condition) in checks) {
-        var chosen = nullClauses.FirstOrDefault(clause => clause.On.Contains(name)).Clause ?? nullCatch ?? defaultClause;
-        sb.Append(inner).Append(first ? "" : "} else ").Append($"if (!({condition})) {{\n");
+      int lockIndex = 0;
+      foreach (var (name, condition, isLock) in checks) {
+        // a lock check is not run again: its flag says whether the lock was taken
+        var chosen = isLock ? lockClauses.FirstOrDefault(clause => clause.On.Contains(name)).Clause ?? defaultClause
+          : nullClauses.FirstOrDefault(clause => clause.On.Contains(name)).Clause ?? nullCatch ?? defaultClause;
+        string failed = isLock ? locks[lockIndex++].Flag : $"({condition})";
+        sb.Append(inner).Append(first ? "" : "} else ").Append($"if (!{failed}) {{\n");
         first = false;
         assign = before.Clone();
         if (chosen != null) {
@@ -376,6 +434,9 @@ public sealed partial class CodeGen {
       }
       sb.Append(inner).Append("}\n").Append(pad).Append('}');
     } else {
+      if (releaseLocks != "") {
+        sb.Append($" else {{\n{Pad(indent + 1)}{releaseLocks}\n{pad}}}");
+      }
       states.Add(before);
     }
     assign = AssignState.Merge(states);

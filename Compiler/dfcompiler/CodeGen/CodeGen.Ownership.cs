@@ -299,9 +299,13 @@ public sealed partial class CodeGen {
     }
     for (int index = 0; index < statements.Count; index++) {
       var statement = statements[index];
-      if (statement.Kind == "Decl" && IsOwnedLocalArray(statement, statements.Skip(index + 1))) {
+      bool mixed = statement.Kind == "Decl" && !IsOwnedLocalArray(statement, statements.Skip(index + 1)) && IsMixedLocalArray(statement, statements.Skip(index + 1));
+      if (statement.Kind == "Decl" && (mixed || IsOwnedLocalArray(statement, statements.Skip(index + 1)))) {
         owners.Add(statement);   // hoisted, so the drop at the end of the scope sees it
         ownedArrayDecls.Add(statement);
+        if (mixed) {
+          mixedArrayDecls.Add(statement);
+        }
         drops.Add(Synthetic("AtEnd", statement, "drop").Add(Synthetic("Block", statement).Add(Synthetic("ArrDrop", statement, statement.Text))));
       }
       if (statement.Kind == "MultiAssign" && GivesOwnMultiValues(statement)) {
@@ -335,6 +339,23 @@ public sealed partial class CodeGen {
     return (init == null || GivesOwnArray(init)) && after.All(node => ArrayUsesStayLocal(node, null, null, 0, decl.Text!, true, plain));
   }
 
+  // a local array that is also assigned arrays it only borrows (a = b): a flag says at run time whether it holds its own array, which ends
+  // when it is assigned again and with the scope. Such a local cannot give its array away (return a, ->a, v.pop((&)a))
+  bool IsMixedLocalArray(Node decl, IEnumerable<Node> after) {
+    mixedPass = true;
+    try {
+      return IsOwnedLocalArray(decl, after);
+    } finally {
+      mixedPass = false;
+    }
+  }
+
+  bool mixedPass;
+
+  static bool Mentions(Node node, string name) => node is { Kind: "Name" } && node.Text == name || node.Children.Any(child => Mentions(child, name));
+
+  readonly HashSet<Node> mixedArrayDecls = new();
+
   // a value an array variable can own: a new array, a moved one (->a) or null
   bool GivesOwnArray(Node value) => value.Kind is "Gift" or "Null" || IsNewArray(value);
 
@@ -351,7 +372,17 @@ public sealed partial class CodeGen {
   bool ArrayUsesStayLocal(Node node, Node? parent, Node? grand, int position, string name, bool canReturn, bool plain) {
     if (node is { Kind: "Call" } && node.Children[0] is { Kind: "Member", Text: "pop" } && node.Children.Count > 1
         && node.Children[1].Children is [{ Kind: "WritableAddressOf" } written] && written.Children[0] is { Kind: "Name" } popped && popped.Text == name) {
-      return canReturn && ArrayUsesStayLocal(node.Children[0], node, parent, 0, name, canReturn, plain);   // v.pop((&)a): the old array of a ends
+      return canReturn && !mixedPass && ArrayUsesStayLocal(node.Children[0], node, parent, 0, name, canReturn, plain);   // v.pop((&)a): the old array of a ends
+    }
+    if (node is { Kind: "Index", Children: [{ Kind: "Name" } viewed, { Kind: "Range" } range] } && viewed.Text == name) {
+      // a view a[x..y] used at once (its len, a copy, the source of a for, an index, a read of the runtime) does not outlive a
+      bool used = parent switch {
+        { Kind: "Member", Text: "len" } or { Kind: "Copy" or "For" or "In" } => true,
+        { Kind: "Index" } => position == 0,
+        { Kind: "Args" } => grand is { Kind: "Call" } && IsRuntimeCall(grand),
+        _ => false
+      };
+      return used && ArrayUsesStayLocal(range, node, parent, 1, name, canReturn, plain);
     }
     if (node.Kind == "Name" && node.Text == name) {
       return parent switch {
@@ -359,10 +390,12 @@ public sealed partial class CodeGen {
         { Kind: "Member" } => position == 0 && parent.Text != "transformTo",
         { Kind: "For" or "In" or "Copy" } => true,   // a! only reads it
         { Kind: "Tuple" } => true,   // (a, 1): a tuple that is kept copies it, a tuple given as an argument borrows it
-        { Kind: "Gift" } => canReturn,   // ->a moves the block out and empties a
-        { Kind: "Return" } => canReturn,   // return a, or return a, n of several values: a moves out
+        { Kind: "Gift" } => canReturn && !mixedPass,   // ->a moves the block out and empties a
+        { Kind: "Return" } => canReturn && !mixedPass,   // return a, or return a, n of several values: a moves out
+        { Kind: "Targets" } => canReturn && grand is { Kind: "MultiAssign" } && GivesOwnMultiValues(grand),   // a, n = f(): the old block is freed
         { Kind: "Args" } => grand is { Kind: "Call" } && ArgumentStaysLocal(grand, position, plain),
-        { Kind: "Assign", Text: "=" } when position == 0 => canReturn && GivesOwnArray(parent.Children[1]),   // a = [..]: the old block is freed
+        { Kind: "Assign", Text: "=" } when position == 0 => canReturn && (GivesOwnArray(parent.Children[1])
+          || mixedPass && !Mentions(parent.Children[1], name)),   // a = [..]: the old block is freed; a = b: a borrows from now on
         { Kind: "Assign", Text: "=" } => plain && position == 1 && parent.Children[0].Kind == "Member",   // obj.field = a: the field gets a copy
         _ => false
       };
@@ -666,7 +699,9 @@ public sealed partial class CodeGen {
     if (node.Kind == "Decl") {
       var init = node.Children.FirstOrDefault(child => child.Kind == "Init");
       if (init?.Children[0] is { Kind: "CountedOf" } marked) {
-        init.Children[0] = marked.Children[0];
+        if (marked.Children.Count == 1) {
+          init.Children[0] = marked.Children[0];   // @T() timeout 100 keeps its marker node for the timeout (CountedValue)
+        }
         init.Text = "marked";
         if (!node.Children.Any(child => child.Kind == "Counted")) {
           node.Add(Synthetic("Counted", node));
@@ -684,6 +719,9 @@ public sealed partial class CodeGen {
     if (node.Kind == "Decl" && !IsCountedDecl(node) && node.Children.FirstOrDefault(child => TypeNodeKinds.Contains(child.Kind)) is { Kind: "Type", Text: "var", Children.Count: 0 }
         && node.Children.FirstOrDefault(child => child.Kind == "Init")?.Children[0] is { Kind: "Call" } call && CallReturnsCounted(call)) {
       node.Add(Synthetic("Counted", node));
+      if (CalleesOf(call) is { Count: > 0 } callees && callees.All(f => f.RetWritable)) {
+        node.Add(Synthetic("ReadWrite", node));   // var x = make() with fun (@)T make(): x is (@)T
+      }
     }
     foreach (var child in node.Children) {
       LowerCountedVars(child);
@@ -714,7 +752,7 @@ public sealed partial class CodeGen {
   }
 
   // a counted variable or a counted field named by a value (through parentheses); Code is the C lvalue of its counting block
-  readonly record struct CountedRefInfo(string Code, string Type, string Name, VarInfo? Variable, FieldInfo? Field);
+  readonly record struct CountedRefInfo(string Code, string Type, string Name, VarInfo? Variable, FieldInfo? Field, bool Writable = false);
 
   // LValue gives the counting block of a counted field only to the counted assignment and to is done. (spec 12.7)
   bool countedFieldWrite;
@@ -765,13 +803,99 @@ public sealed partial class CodeGen {
   // another counted result)
   string CountedReturnCode(Node value, Scope scope, Node at) {
     string type = CountedBase(currentRet!);
+    bool writable = currentFun?.RetWritable == true;   // fun (@)T: only read/write usages go out (spec 12.7)
     if (CountedRef(value, scope) is CountedRefInfo counted) {
       if (!IsSubtype(counted.Type, type)) {
         throw Error($"'{counted.Name}' is a {counted.Type}, not a {type}", at);
       }
+      CheckWritableSource(counted, writable, at);
       return counted.Variable != null ? TakeUsage(counted.Variable) : $"df_rc_use({counted.Code})";
     }
-    return CountedValue(value, scope, type, false, at);
+    return CountedValue(value, scope, type, false, at, writable);
+  }
+
+  // a variable, parameter or field declared (@)T or (_)T: read/write, its object has a lock (spec 12.7)
+  static bool IsWritableRef(CountedRefInfo info) => info.Writable || info.Variable?.IsWritable == true || info.Field?.IsWritable == true;
+
+  // a value that gives a read/write usage of its own: a call of functions that return (@)T, or an item handed out by a collection of
+  // read/write objects (replace, takeAt, pop on list<(@)T>)
+  bool GivesWritableUsage(Node value, Scope scope) {
+    if (value.Kind == "CValue") {
+      return true;   // made by the compiler: the read/write usage that enforce takes of a (_)T
+    }
+    if (value.Kind != "Call") {
+      return false;
+    }
+    if (value.Children[0] is { Kind: "Member", Text: "replace" or "takeAt" or "pop" } member) {
+      try {
+        var receiver = ExprOf(member.Children[0], scope);
+        string? elem = IsVec(receiver.Type) ? VecElem(receiver.Type) : IsList(receiver.Type) ? ListElem(receiver.Type) : null;
+        if (elem != null && BoxInner(elem) != null) {
+          return writableBoxes.Contains(elem);
+        }
+      } catch (CompileException) {
+        return false;
+      }
+    }
+    return CalleesOf(value) is { Count: > 0 } callees && callees.All(f => f.RetWritable);
+  }
+
+  // x.name = v through a (@)T x, or through the read/write usage of a (_)T in its enforce: the lock must be held, otherwise the write raises
+  // WritingOnRefCountWithoutLockingException (spec 12.7). Writes made by the methods of the object are not checked yet
+  string? WriteLockCheck(Node target, Scope scope) {
+    if (LibraryCode || target.Kind is not ("Member" or "Index")) {
+      return null;
+    }
+    for (var node = target.Children[0]; ; node = node.Children[0]) {
+      if (node.Kind is "Name" or "Member" && CountedRef(node, scope) is CountedRefInfo counted && IsWritableRef(counted)) {
+        return $"if (!DF_RC_WRITABLE({counted.Code})) {{ df_raise(&df_desc_WritingOnRefCountWithoutLockingException, {fn!.NameConst}); {RaiseJump} }} ";
+      }
+      if (node.Kind is not ("Member" or "Index" or "Paren") || node.Children.Count == 0) {
+        return null;
+      }
+    }
+  }
+
+  // the same seen by the analysis of the exceptions (CodeGen.Leaks.cs): a write whose target goes through a name or a field declared
+  // (@)T or (_)T
+  bool FlowWritesThroughLock(Node target, FunSig? fun) {
+    if (target.Kind is not ("Member" or "Index")) {
+      return false;
+    }
+    bool WritableField(string name) =>
+      classes.Values.Any(cls => cls.Fields.Any(field => field.Name == name && field.IsWritable && (field.IsCounted || field.IsWeak)));
+    bool WritableName(string name) {
+      if (fun == null) {
+        return false;
+      }
+      if (fun.Params.FirstOrDefault(p => p.Name == name) is ParamSig param) {
+        return param.IsWritable;
+      }
+      bool found = false;
+      void Walk(Node node) {
+        found |= node.Kind == "Decl" && node.Text == name && node.Children.Any(child => child.Kind == "ReadWrite");
+        foreach (var child in node.Children) {
+          Walk(child);
+        }
+      }
+      Walk(fun.Node);
+      return found || fun.Class != null && WritableField(name);
+    }
+    for (var node = target.Children[0]; ; node = node.Children[0]) {
+      if (node.Kind == "Name" && WritableName(node.Text!) || node.Kind == "Member" && node.Text != null && WritableField(node.Text)) {
+        return true;
+      }
+      if (node.Kind is not ("Member" or "Index" or "Paren") || node.Children.Count == 0) {
+        return false;
+      }
+    }
+  }
+
+  // a read/write target takes only read/write sources: a read-only usage cannot become a writing one (spec 12.7)
+  void CheckWritableSource(CountedRefInfo source, bool writable, Node at) {
+    if (writable && !IsWritableRef(source)) {
+      throw Error($"'{source.Name}' is read-only (@{source.Type}): only a (@){source.Type} or a (_){source.Type} gives a read/write one (spec 12.7)", at);
+    }
   }
 
   // the usage of a counted variable leaves it: the variable becomes null
@@ -781,17 +905,18 @@ public sealed partial class CodeGen {
   }
 
   // an argument for a @T parameter: f(rc) adds a user for the call, f(->rc) gives the caller's usage, f(Dog()) and f(@plain) start a block
-  string CountedArg(Node arg, string type, Scope scope) {
+  string CountedArg(Node arg, string type, Scope scope, bool writable = false) {
     if (arg.Kind == "Gift" && CountedRef(arg.Children[0], scope) is CountedRefInfo given) {
       if (!IsSubtype(given.Type, type)) {
         throw Error($"'{given.Name}' is a {given.Type}, not a {type}", arg);
       }
+      CheckWritableSource(given, writable, arg);
       if (given.Variable == null) {
         throw NotSupported("Moving the usage out of a counted field (->k.field)", arg);
       }
       return TakeUsage(given.Variable);
     }
-    return CountedValue(arg, scope, type, false, arg);
+    return CountedValue(arg, scope, type, false, arg, writable);
   }
 
   // the cost of an argument in the overload choice for the counted cases: -1 not a counted case (the usual rules decide), -2 it cannot be
@@ -832,7 +957,18 @@ public sealed partial class CodeGen {
 
   // the code of the counting block a counted variable or field receives: a new object starts a block (1 user), another counted variable or
   // field adds a user, null holds nothing
-  string CountedValue(Node value, Scope scope, string type, bool marked, Node at) {
+  string CountedValue(Node value, Scope scope, string type, bool marked, Node at, bool writable = false) {
+    if (value is { Kind: "CountedOf", Children.Count: 2 } timed) {
+      // @Player() timeout 100: the default wait for the lock of a read/write object, in milliseconds (spec 12.7)
+      if (!writable) {
+        throw Error($"timeout is the wait for a lock: only a read/write (@){type} has one (spec 12.7)", at);
+      }
+      var ms = ExprOf(timed.Children[1].Children[0], scope, "i64");
+      if (!IsInt(ms.Type)) {
+        throw Error($"timeout takes a whole number of milliseconds, not {ms.Type}", at);
+      }
+      return $"df_rc_timeout({CountedValue(timed.Children[0], scope, type, true, at, writable)}, (int64_t)({ms.Code}))";
+    }
     if (value.Kind == "CountedOf") {
       value = value.Children[0];
       marked = true;
@@ -844,6 +980,7 @@ public sealed partial class CodeGen {
       if (!IsSubtype(other.Type, type)) {
         throw Error($"'{other.Name}' is a {other.Type}, not a {type}", at);
       }
+      CheckWritableSource(other, writable, at);
       return $"df_rc_use({other.Code})";   // another user of the same object; @x on a counted x changes nothing
     }
     if (marked && value is { Kind: "Name", Text: "this" }) {
@@ -866,6 +1003,9 @@ public sealed partial class CodeGen {
       if (!IsSubtype(CountedBase(given.Type), type)) {
         throw Error($"this is a counted {CountedBase(given.Type)}, not a {type}", at);
       }
+      if (writable && !GivesWritableUsage(value, scope)) {
+        throw Error($"this is a read-only @{CountedBase(given.Type)}: a read/write (@){type} needs a (@)T result (spec 12.7)", at);
+      }
       return given.Code;
     }
     if (!given.Fresh) {
@@ -884,7 +1024,7 @@ public sealed partial class CodeGen {
     if (variable.IsConst) {
       throw Error($"'{s.Children[0].Text}' is const", s);
     }
-    string code = CountedValue(s.Children[1], scope, variable.Type, false, s);
+    string code = CountedValue(s.Children[1], scope, variable.Type, false, s, variable.IsWritable);
     string fresh = NewTemp();
     string old = NewTemp();
     MarkAssigned(variable);
@@ -910,7 +1050,8 @@ public sealed partial class CodeGen {
     if (target.IsConst) {
       throw Error($"'{s.Children[0].Text}' is const", s);
     }
-    string code = CountedValue(s.Children[1], scope, target.Type, false, s);
+    bool writableField = CountedRef(s.Children[0], scope) is CountedRefInfo field && IsWritableRef(field);
+    string code = CountedValue(s.Children[1], scope, target.Type, false, s, writableField);
     string fresh = NewTemp();
     string slot = NewTemp();
     string old = NewTemp();
@@ -948,7 +1089,7 @@ public sealed partial class CodeGen {
     if (!frames.Peek().Hoisted.TryGetValue(s.Text!, out var variable) || !variable.IsCounted) {
       throw NotSupported("A counted variable in this place (only in blocks and function bodies for now)", s);
     }
-    string code = init == null ? "NULL" : CountedValue(init.Children[0], scope, type, init.Text == "marked", init);
+    string code = init == null ? "NULL" : CountedValue(init.Children[0], scope, type, init.Text == "marked", init, variable.IsWritable);
     sb.Append($"{pad}{variable.CName} = {code};\n");
     scope.Vars[s.Text!] = variable;
     assign.Unassigned.Remove(variable);
@@ -1086,7 +1227,7 @@ public sealed partial class CodeGen {
 
   // the counting block a weak reference receives (one more weak reference on it): _x of a counted variable or field, another weak reference
   // (copied without enforce), or null
-  string WeakValue(Node value, Scope scope, string type, Node at) {
+  string WeakValue(Node value, Scope scope, string type, Node at, bool writable = false) {
     if (value.Kind == "Null") {
       return "NULL";
     }
@@ -1099,12 +1240,14 @@ public sealed partial class CodeGen {
       if (!IsSubtype(found.Type, type)) {
         throw Error($"'{found.Name}' is a {found.Type}, not a {type}", at);
       }
+      CheckWritableSource(found, writable, at);   // (_)T w = _x: x is (@)T or (_)T
       return $"df_rc_weak({found.Code})";
     }
     if (WeakRef(value, scope) is CountedRefInfo weak) {
       if (!IsSubtype(weak.Type, type)) {
         throw Error($"'{weak.Name}' is a {weak.Type}, not a {type}", at);
       }
+      CheckWritableSource(weak, writable, at);
       return $"df_rc_weak({weak.Code})";
     }
     if (CountedRef(value, scope) is CountedRefInfo counted) {
@@ -1122,7 +1265,7 @@ public sealed partial class CodeGen {
     if (target.IsConst) {
       throw Error($"'{s.Children[0].Text}' is const", s);
     }
-    string code = WeakValue(s.Children[1], scope, target.Type, s);
+    string code = WeakValue(s.Children[1], scope, target.Type, s, WeakRef(s.Children[0], scope) is CountedRefInfo weakTarget && IsWritableRef(weakTarget));
     string fresh = NewTemp();
     string slot = NewTemp();
     string old = NewTemp();
@@ -1138,7 +1281,7 @@ public sealed partial class CodeGen {
     if (!frames.Peek().Hoisted.TryGetValue(s.Text!, out var variable) || !variable.IsWeak) {
       throw NotSupported("A weak variable in this place (only in blocks and function bodies for now)", s);
     }
-    string code = init == null || init.Text == "default" ? "NULL" : WeakValue(init.Children[0], scope, type, init);
+    string code = init == null || init.Text == "default" ? "NULL" : WeakValue(init.Children[0], scope, type, init, variable.IsWritable);
     sb.Append($"{pad}{variable.CName} = {code};\n");
     scope.Vars[s.Text!] = variable;
     assign.Unassigned.Remove(variable);
@@ -1146,9 +1289,12 @@ public sealed partial class CodeGen {
 
   // enforce w { }: inside the block w is a counted variable of its own, a temporary usage taken when the block starts and released on every
   // way out of it (the usual release of a counted variable at the end of its scope)
-  Node EnforcedWeakBlock(Node block, string name, string type, string blockCode) {
+  Node EnforcedWeakBlock(Node block, string name, string type, string blockCode, bool writable) {
     var use = Synthetic("Decl", block, name).Add(Synthetic("Type", block, type)).Add(Synthetic("Counted", block)).Add(Synthetic("EnforceUse", block))
       .Add(Synthetic("Init", block).Add(Synthetic("CValue", block, $"df_rc_use({blockCode})").Add(Synthetic("Type", block, "@" + type))));
+    if (writable) {
+      use.Add(Synthetic("ReadWrite", block));   // (_)T: the temporary usage is read/write, the enforce holds the lock (spec 12.7)
+    }
     var wrapped = Synthetic("Block", block).Add(use);
     wrapped.Children.AddRange(block.Children);
     return wrapped;

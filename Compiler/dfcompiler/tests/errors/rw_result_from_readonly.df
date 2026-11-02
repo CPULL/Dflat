@@ -1,0 +1,11 @@
+namespace rw_result_from_readonly
+public class Player(string name) {
+  public string name
+}
+fun @Player make() {
+  return Player("a")
+}
+fun f() {
+  (@)Player p = make()
+}
+f()

@@ -1,7 +1,7 @@
 # Dflat Language
 A new language D♭ that is the same as C# but easier to write and faster to execute
 
-**Version** 0.0.20  2026/11/01 by CPU
+**Version** 0.0.21  2026/11/02 by CPU
 
 ## D♭ — Dflat Language Specification (draft)
 
@@ -985,10 +985,10 @@ flat[row * width + column] = 7          // a matrix on a flat array
 - Trait: `IndexCollection` (6.7.1). `arr` is a class (6.1): it has ownership, a hash, methods and properties, and it can be an item (`list<arr<i32>>`). It cannot be subclassed. The code generated for it is direct.
 - Ownership: an array owns its items (the objects inside are owned by the array, 12) and has one owner. When the owner ends, the items end and the block is freed.
   - The variable that declares a new array owns it and the array ends with its scope: a literal, `arr<T>[n]`, a clone `a!`, or the result of a function that returns a new array. `var x = [1, 2]` is an `arr` too, owned by its scope.
-  - Borrows: an argument `f(a)` and a local `arr<T> b = a` borrow the array; the owner keeps it. An array given to the standard library (`r.Console.log(a)`) is a borrowed read as well.
+  - Borrows: an argument `f(a)` and a local `arr<T> b = a` borrow the array; the owner keeps it. An array given to the standard library (`r.Console.log(a)`) is a borrowed read as well. A view `a[x..y]` borrows from the array too: the array still ends with its owner.
   - `return a` of an array the function owns moves it to the caller, which owns it from then on.
   - `->a` moves the block: the receiver owns it and `a` becomes an empty array. Only an owner can be moved: `->p` on a borrowed parameter or on a borrowing local is a compile error.
-  - A local that owns its array can be assigned again: the old array ends first. The new value is a new array, `->b` or `null`; `a = b` makes `a` a borrow.
+  - A local that owns its array can be assigned again: the old array ends first. The new value is a new array, `->b` or `null`; `a = b` makes `a` a borrow. Its own old array still ends, and a new array assigned later (`a = [..]`) is owned again.
   - `->arr<T> p`: the function owns the array. The caller gives `->a`, a new array or `a!`; any other array is copied when its items are plain values, and is a compile error otherwise. The array ends with the function unless it is moved on or returned. `f(->a)` to a plain `arr<T>` parameter is a compile error: the parameter only borrows.
   - A static array field ends when the program ends.
   - A field that is an array is owned by its object and ends with it. Every way into the field gives it an array of its own: a new array goes in as it is; `->a` moves one in; any other array is copied when its items are plain values (numbers, `bool`, `char`, enums, strings, tuples of natives), and the copy is exact; with other items (objects, arrays) it is a compile error, the same as for objects: `->a` to move it, `a!` to clone it. The old array of the field ends when a new one replaces it. A header parameter that fills a field follows the same rule.
@@ -1002,7 +1002,10 @@ flat[row * width + column] = 7          // a matrix on a flat array
     - A tuple literal copies the arrays that are not new: `(a, 1)` copies `a`; `([1, 2], 1)` and `(->a, 1)` do not.
     - Assigning or returning a tuple copies its arrays: after `t2 = t`, a change through `t2` is not seen through `t`.
     - A tuple kept in a variable (`var` too), a field or a static ends its arrays with it, or when a new value replaces it. A tuple given as an argument is borrowed.
-  - Several return values (`fun arr<Dog>, uns pack()`): each array returned is the caller's own. An array the function owns moves out (`return made, made.len`: the values are read first, then `made` is emptied); any other array is copied. A variable declared from the values (`arr<Dog> dogs, uns count = pack()`) owns its array.
+    - A tuple inside a tuple follows the same rules: `((arr<i32>, i32), i32)` carries its own copies of the arrays of the inner tuple.
+    - A new tuple that nothing keeps (the result of a function read at once: `make().values.len`, `g(make())`) ends its arrays when the statement ends, as a new object does (12).
+  - A result nobody keeps (`make()` alone as a statement) ends its new arrays at once, also those of a tuple or of several return values.
+  - Several return values (`fun arr<Dog>, uns pack()`): each array returned is the caller's own. An array the function owns moves out (`return made, made.len`: the values are read first, then `made` is emptied); any other array is copied. A variable declared from the values (`arr<Dog> dogs, uns count = pack()`) owns its array; an existing owner that receives one (`dogs, count = pack()`) ends its old array first.
     - `t.values = a` follows the rule of the array fields.
 
 ```
@@ -1333,7 +1336,7 @@ atEnd {
 ### 7.2.1 Form
 
 ```
-enforce <var>[, <var> ...] { ... }
+enforce <var> [timeout <ms>][, <var> [timeout <ms>] ...] { ... }
 null      [on <var>[, <var> ...]] { }
 lockfail  [on <var>[, <var> ...]] { }
 catch <Exception> [<name>] [on <var>[, <var> ...]] { }
@@ -1344,6 +1347,7 @@ default { }
 - The clauses follow the block, in any number. `null` and `lockfail` can be written anywhere among them; the order of the catches and of the `atEnd` clauses matters (7.2.3).
 - `on` limits a clause to the listed variables; without `on` the clause covers all of them. `catch` keeps its usual parts (15.1): the exception type, an optional variable, `catch all`.
 - `default` is the catch-all, the last resort: when it is written, it handles every problem that no other clause handles, a failed check without its clause (7.2.2) and an exception that no catch matches (7.2.3). There is at most one.
+- `timeout <ms>` sets how long the `enforce` waits at most for the lock of the variable written just before it, in milliseconds (7.2.2). It is valid only after a `(@)T` or `(_)T` variable (compile error otherwise). `enforce a, b timeout 500` waits up to 500 ms for `b` only; `a` uses its own default; `enforce a timeout 100, b timeout 500` gives both.
 - `else` is the short form: `enforce a, b { } else { }` runs the else branch when any check fails. It is valid only when no other clause is written.
 - Strings cannot be enforced.
 
@@ -1368,7 +1372,9 @@ null { log("something is null") }   // any other case: here none is left, it nev
 - Before the block, each variable is checked in the order written:
   - not null: `T?`, objects, null pointers;
   - still alive: a weak reference whose object is gone (12.7), an orphaned child (12.5);
-  - for a `(@)T`, its lock is taken. The locks are taken in the order of the variables.
+  - for a `(@)T` or a `(_)T`, its lock is taken. The locks are taken in the order of the variables.
+- Waiting for a lock: when the lock is free it is taken at once. When it is busy, the `enforce` waits, in the queue of the object's waiters, at most for its timeout: the `timeout` written in the `enforce` for that variable; when none is written, the default timeout of the object (12.7); when the object has none either, 0. A timeout of 0 tries the lock once and does not wait. There is no infinite wait.
+- The waiting `enforce` checks its own timeout. When the lock is released, it goes to the first waiter of the queue. When the timeout runs out first, the waiter leaves the queue and the lock check fails: the lock failure goes to its `lockfail` clause, or to `default` (as below). A release and a timeout at the same moment are decided atomically: either the waiter gets the lock (and does not time out) or it times out (and the lock goes to the next waiter); the lock is never lost or held twice.
 - There are no other checks: `enforce` knows only nullability, liveness and locks (it does not know whether a stream is "ready").
 - When a check fails, every lock already taken is released, then the first `null` / `lockfail` clause that matches the failing variable runs; when none matches, `default` runs if it is written. When neither is written, nothing runs and the execution goes on after the `enforce`. In both cases the block, the catches and the `atEnd` clauses do not run: the `enforce` never started.
 
@@ -1390,6 +1396,12 @@ enforce first, second {             // first is locked, then second
 }
 lockfail on first { }               // first is busy: nothing was locked
 lockfail on second { }              // second is busy: the lock of first is released before this runs
+
+(@)Player player = @Player() timeout 100   // the default wait for its lock: 100 ms
+enforce player { }                  // waits up to 100 ms
+enforce player timeout 500 { }      // waits up to 500 ms: the timeout of the enforce wins
+enforce first, player timeout 0 { } // first waits its default; player is tried once
+lockfail on player { log("player busy") }
 ```
 
 ### 7.2.3 The block and the clauses after it
@@ -1516,6 +1528,7 @@ i32 r = enforce account.whatever() lockfail { -1 } default { 0 }
 ### 7.2.7 Under discussion
 
 - The order of the locks across threads (with multithreading).
+- `timeout` in the expression form (7.2.6).
 
 ---
 
@@ -2326,6 +2339,7 @@ Rust model, Dflat syntax.
 | `(@)T name` | a reference counted object, read/write, with a lock (12.7) |
 | `@a` | a plain object starts reference counting; `a` is lost, as after a move (12.7) |
 | `_T name` | a weak reference to a counted object (Rust `Weak<T>`): a field, a variable or a parameter (`public _Texture2D texture`, 12.7) |
+| `(_)T name` | a weak reference to a read/write counted object: through `enforce` it writes, holding the lock (12.7) |
 | `_a` | makes a weak reference to the counted object `a`: `_Dog w = _a` (12.7) |
 | `x is done.` | releases a usage or a weak reference (12.7) |
 
@@ -2523,6 +2537,7 @@ pack.add(first)                      // the list holds its own usage
 
 (@)Dog dogRw = Dog("Max")            // read/write counted object
 enforce dogRw { dogRw.name = "Rex" } // the lock is held until the enforce ends (7.2.5)
+(@)Dog patient = @Dog("Bob") timeout 100   // its lock is waited for up to 100 ms by default
 
 class Node(string name) {
   _Node parent                       // weak to the parent
@@ -2551,6 +2566,7 @@ Functions
 - `f(->rc)` gives the caller's usage to the function: no count change on the call, `rc` cannot be used afterwards, and the usage is released when the function is done, unless it passes it on. Other users are never affected.
 - A method call on a counted object (`first.bark()`) is a usage until the method returns, so the object cannot be released while the method runs. The compiler may leave out the count when another usage of the caller already keeps the object alive for the whole call (the variable it is called on, a field of an object the caller holds).
 - A function returning `@Dog` passes the usage of the returned variable to the caller (`return dog` moves it, the count does not change).
+- `fun (@)Dog make()` returns a read/write usage: it returns a `(@)T` (or a `(_)T` made into one by its `enforce`) or a new object, never a read-only `@T`. Its result can be kept in a `(@)T` or an `@T`; `var x = make()` is a `(@)T`. The result of a `fun @Dog` cannot be kept in a `(@)T` (compile error).
 
 Releasing
 - A variable that holds a usage or a weak reference releases it automatically when its scope ends. `x is done.` releases it early; it works only on `@`, `(@)` and `_` variables (on a plain owned object it is a compile error: `is atEnd.` destroys it, 12.4).
@@ -2561,17 +2577,33 @@ Releasing
 Weak references
 - A weak reference exists only on a counted object; it does not count as a user. It is made with `_` in the type and in the expression (`_Dog weak = _first`, `var weak2 = _first`); `=` assigns it. Each weak reference adds one to `weakrefsCount`.
 - It is used only through `enforce` (7.2): inside the block it is a temporary usage of the object, released when the `enforce` ends; `null on w` (or `else`) runs when the object is gone (its user count reached 0).
+- `_T` is read-only, also when its object is a `(@)T`: inside the `enforce` it is a temporary `@T` usage.
+- `(_)T` is a weak reference to a read/write object. It is made only from a `(@)T` or another `(_)T` (`(_)Player watcher = _player`); from a read-only `@T` or `_T` it is a compile error. `enforce watcher { }` checks that the object is alive, takes a temporary read/write usage and takes the lock, with the object's default timeout or the `timeout` written in the `enforce` (7.2.2); inside the block `watcher` writes as a `(@)T`. A `(_)T` field and a `(_)T` parameter follow the same rules.
+
+```
+(@)Player player = @Player() timeout 100
+(_)Player watcher = _player          // read/write weak reference
+_Player viewer = _player             // read-only weak reference
+enforce watcher timeout 500 {
+  watcher.score += 1                 // the lock is held
+}
+lockfail on watcher { log("busy") }
+null on watcher { log("gone") }
+```
 
 Fields and collections
 - An `@T` or `(@)T` field is a user like any other: it releases its usage when its object dies. A `_T` field is a weak reference, seen as gone once the object is destroyed. A `&T` field is not allowed (a borrow cannot outlive its lender, 12).
 - A collection of counted objects (`list<@Dog>`) holds its own usage for each item (`pack.add(first)` adds a user). Collections are structurally immutable while being iterated (6.4); the loop variable is a temporary usage, acquired at the start of each iteration and released at its end, with no borrow involved: `for var dog in pack { }` and `for @Dog dog in pack { }` are the same. The collection keeps its own usage of the item and cannot change while the loop runs, so the compiler may leave out the count of the loop variable.
 - The members that search (`has`, `indexOf`, `remove`, `removeAll`) take a counted object or null; a plain object is a compile error. The items compare by the rules of their objects (`equals`, `==`, or identity, 11.1.3). The value searched is only looked at: it gains no usage.
+- `list<(@)Dog>` and `vec<(@)Dog>` hold read/write usages: only a `(@)T`, a new object or a `(@)T` result goes in (`add`, `insert`, `replace`, `fill`), and the members that give an item (`replace`, `takeAt`, `pop`) give a read/write usage (`(@)Dog old = team.takeAt(0)`). The loop variable is read/write: `for p in team { enforce p { p.score++ } }` takes the lock of each item; a write without it raises `WritingOnRefCountWithoutLockingException`.
 - The members that give an item pass its usage to the caller: `@Dog old = pack.replace(0, other)`. A counted `var` comes only from a function that returns `@T` (`var x = f()`); for a counted item the type is written (`var old = pack.replace(0, other)` is a compile error that asks for `@Dog old`).
 
 Read-only and read/write
 - `@T` is a read-only counted object, `(@)T` a read/write one. `(@)T` includes a lock in its runtime representation, so it is a distinct counted type.
 - Reads never need the lock; a write needs the caller to hold the object's lock, and writing without it raises `WritingOnRefCountWithoutLockingException` (not silent, 15.3). `enforce x { }` takes the lock and releases it when the `enforce` ends, after its last `atEnd` (7.2.2, 7.2.5); `lockfail on x { }` runs when the lock cannot be taken.
 - Reads without the lock always see a valid state of the object, but not necessarily the latest one; several reads that must be consistent hold the lock.
+- The lock lives in the counting block of the object, with the queue of the callers waiting for it and the default timeout. The default timeout is set where the read/write counted object is made: `(@)Player player = @Player() timeout 100` (milliseconds), also when the class has no parameter of that name (`timeout` is not an argument of the constructor). Without it the default is 0: the lock is tried once. A `timeout` written in an `enforce` replaces the default for that `enforce` (7.2.2). `timeout` after a creation is valid only when the result is a `(@)T` (compile error otherwise).
+- Every change of the lock state (taking, releasing, joining or leaving the queue, a timeout) is exclusive and atomic: two `enforce` never change it at the same time.
 
 Cycles
 - As in Rust, nothing at runtime: an object does not know who counts it (it holds only the two counts), and the developer breaks a cycle with a weak reference (the `Node` above). Where the compiler can detect a possible cycle (two classes with `@` fields of each other's type, or a class with an `@` field of its own type) it gives a level 1 warning for possible zombie objects (19.3).
@@ -2604,10 +2636,11 @@ The definition says how a parameter is passed, ownership included. The call mark
 | `f(->Item o)` | `f(->o)` | ownership moves; `->` required in the call |
 | `f(@Item o)` | `f(o)` | a usage of a counted object, read-only: count +1 for the call (12.7) |
 | `f(@Item o)` | `f(->o)` | the caller's usage is given to the function, count unchanged (12.7) |
-| `f((@)Item o)` | | a usage of a counted object, read/write (12.7) |
+| `f((@)Item o)` | `f(o)` | a usage of a counted object, read/write; the argument is a `(@)T` (12.7) |
+| `f((_)Item o)` | `f(w)`, `f(_o)` | a weak reference to a read/write object; the argument is a `(_)T`, or `_o` of a `(@)T` (12.7) |
 
 - Native data: integers, reals, chars, bools, enums, pointers. Objects: class instances.
-- A counted argument is accepted only by `@` and `(@)` parameters; `f(Item o)`, `f(&Item o)` and `f((&)Item o)` with a counted argument are compile errors (12.7).
+- A counted argument is accepted only by `@` and `(@)` parameters; `f(Item o)`, `f(&Item o)` and `f((&)Item o)` with a counted argument are compile errors (12.7). A `(@)T` argument can go to an `@T` parameter (read-only); an `@T` argument to a `(@)T` parameter is a compile error.
 - A mismatched call is a compile error.
 - Defaults anywhere; named arguments when needed (`hello(age: 27)`).
 - Positional arguments stay in the order of the parameters; named arguments can be written in any position.
@@ -3747,3 +3780,11 @@ Level 1 = most important, level 3 = least.
 - 6.8.1 Arrays: an owned local assigned again ends its old array; `->arr<T>` parameters own the array (`f(->a)` to a plain `arr<T>` parameter is a compile error); static array fields end with the program
 - 6.8.1, 3.2 Arrays in collections (owned like fields, `c[i]` borrows in place, removed and replaced arrays end, `takeAt` / `replace` / `pop` give them to the caller, `fill(a)` is an error) and in tuples (a tuple carries its own copy of its arrays, also a `var` tuple); a `->arr<T>` parameter copies an array of plain items; the arrays of several return values are the caller's own
 - 8.1 Number formats rewritten with an explanation and examples for each option; with a `0` fill the sign goes before the zeros (`-0005`, was `000-5`)
+
+## Changes in 0.0.21
+
+- 12.7 `fun (@)T` results (a read/write usage; `var x = f()` is `(@)T`; an `@T` result cannot become `(@)T`) and `list<(@)T>` / `vec<(@)T>` (read/write items, the members that give an item give a read/write usage, the loop variable is enforced for the lock of each item)
+- 12.7, 12, 7.2.1, 7.2.2, 13.1 `(_)T`: a weak reference to a read/write object, made only from a `(@)T` or a `(_)T`; through `enforce` it takes a read/write usage and the lock (with `timeout`); `_T` stays read-only also on a `(@)T`; a `(@)T` source is needed for every read/write target (variable, field, parameter)
+- 7.2.1, 7.2.2, 12.7 Lock timeouts: `@Player() timeout 100` sets the default wait for the lock of a `(@)T` (milliseconds; 0 when not written: tried once); `enforce p timeout 500 { }` sets it for the variable just before it and wins over the default; no infinite wait; the waiting `enforce` checks its timeout, the waiters are served in order, a timeout is a lock failure (`lockfail` / `default`); every change of the lock state is atomic; 7.2.7: `timeout` in the expression form is open
+
+- 6.8.1 Arrays: a view `a[x..y]` borrows (the array still ends with its owner); a local made a borrow by `a = b` still ends its own old array, and owns again a new array assigned later; tuples inside tuples carry their own arrays; a new tuple nobody keeps ends its arrays with the statement; a result nobody keeps ends its new arrays at once; an existing owner receiving an array from several return values (`dogs, count = pack()`) ends its old one

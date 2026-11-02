@@ -827,6 +827,11 @@ public sealed partial class CodeGen {
     }
     string type = loopVars[0].Type;
     string cname = "v_" + loopVars[0].Node.Text;
+    bool writableItem = boxedElem != null && writableBoxes.Contains(boxedElem);
+    if (writableItem) {
+      // list<(@)T>: the loop variable is read/write and can be enforced (its lock, spec 12.7); the collection keeps the usage of the item
+      innerScope.Vars[loopVars[0].Node.Text!] = new VarInfo(type, cname, false) { IsCounted = true, IsWritable = true };
+    }
     var body = PrepareFrame(LoopStatements(block.Children), innerScope, FrameKind.LoopBody);
     bool cleanup = body.AtEnds.Count > 0;
 
@@ -892,10 +897,14 @@ public sealed partial class CodeGen {
     if (cleanup) {
       sb.Append($"{innerPad}  {body.RanFlag} = true;\n");
     }
-    if (boxedElem != null) {
-      itemCode = $"DF_RC_OBJ({CType(elem)}, ({itemCode})->{BoxField(boxedElem)})";
+    if (writableItem) {
+      sb.Append($"{innerPad}  df_rc* {cname} = ({itemCode})->{BoxField(boxedElem!)};\n");
+    } else {
+      if (boxedElem != null) {
+        itemCode = $"DF_RC_OBJ({CType(elem)}, ({itemCode})->{BoxField(boxedElem)})";
+      }
+      sb.Append($"{innerPad}  {CType(type)} {cname} = {Convert(new Expr(itemCode, elem), type, s)};\n");
     }
-    sb.Append($"{innerPad}  {CType(type)} {cname} = {Convert(new Expr(itemCode, elem), type, s)};\n");
     if (overMap && mapPart == null) {
       var (valueNode, valueType, valueElem) = loopVars[1];
       sb.Append($"{innerPad}  {CType(valueType)} v_{valueNode.Text} = {Convert(new Expr(ReadSlot(collection.Type, CursorValue(whole, collection.Type, position)), valueElem), valueType, s)};\n");

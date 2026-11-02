@@ -306,7 +306,7 @@ public sealed partial class CodeGen {
   }
 
   void EmitTmpRelease(StringBuilder sb, int from, string pad) {
-    if (fn != null && sb.Length > from && sb.ToString(from, sb.Length - from) is string code && (code.Contains("df_tmp(") || code.Contains("df_tmpo("))) {
+    if (fn != null && sb.Length > from && sb.ToString(from, sb.Length - from) is string code && (code.Contains("df_tmp(") || code.Contains("df_tmpo(") || code.Contains("df_tmpf("))) {
       fn.UsesTmp = true;
       sb.Append($"{pad}df_tmp_drop(df_tm);\n");
     }

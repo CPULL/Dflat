@@ -31,6 +31,7 @@ sealed class FieldInfo {
   public bool IsReadOnly { get; set; }       // readonly (spec 11.1.4): read with its visibility, written only by the class
   public bool IsWeak { get; set; }           // _T name (spec 12.7): does not own its object, read through enforce, set with = _x
   public bool IsCounted { get; set; }        // @T name (spec 12.7): a user of a counted object, the C field holds the counting block (df_rc*)
+  public bool IsWritable { get; set; }       // (@)T name, (_)T name (spec 12.7): read/write, its object has a lock
   public bool HasAccessors { get; set; }     // a property with R: / W: blocks (spec 11.1.4): read and written through get_ and set_
   public bool CanRead { get; set; } = true;
   public bool CanWrite { get; set; } = true;
@@ -304,15 +305,18 @@ public sealed partial class CodeGen {
           string counted = CountedTypeOf(type, p);
           cls.PrimaryParams.Add(new ParamSig(p.Text!, counted, def?.Children[0]));
           CheckFieldName(cls, p.Text!, p);
-          cls.Fields.Add(new FieldInfo(p.Text!, type, cls, p) { FromParam = true, IsCounted = true });
+          bool writableParam = p.Children.Any(child => child.Kind == "ReadWrite");
+          cls.PrimaryParams[^1] = new ParamSig(p.Text!, counted, def?.Children[0]) { IsWritable = writableParam };
+          cls.Fields.Add(new FieldInfo(p.Text!, type, cls, p) { FromParam = true, IsCounted = true, IsWritable = writableParam });
           continue;
         }
         if (IsClass(type) && p.Kind != "GiftParam" && !weakParam) {
           throw Error($"the object '{p.Text}' goes into a field of {cls.Name}, which owns it: write ->{type} {p.Text} (or _{type} {p.Text} for a weak reference)", p);
         }
-        cls.PrimaryParams.Add(new ParamSig(p.Text!, weakParam ? "_" + type : type, def?.Children[0]) { IsGift = p.Kind == "GiftParam" && (IsClass(type) || type == "string" || IsArr(type)), IsWeak = weakParam });
+        bool writableWeak = weakParam && p.Children.Any(child => child.Kind == "ReadWrite");
+        cls.PrimaryParams.Add(new ParamSig(p.Text!, weakParam ? "_" + type : type, def?.Children[0]) { IsGift = p.Kind == "GiftParam" && (IsClass(type) || type == "string" || IsArr(type)), IsWeak = weakParam, IsWritable = writableWeak });
         CheckFieldName(cls, p.Text!, p);
-        cls.Fields.Add(new FieldInfo(p.Text!, type, cls, p) { FromParam = true, IsWeak = weakParam });
+        cls.Fields.Add(new FieldInfo(p.Text!, type, cls, p) { FromParam = true, IsWeak = weakParam, IsWritable = writableWeak });
       }
     }
 
@@ -366,6 +370,7 @@ public sealed partial class CodeGen {
             IsReadOnly = ModsOf(member).Contains("readonly"),
             IsWeak = weakField,
             IsCounted = countedField,
+            IsWritable = member.Children.Any(child => child.Kind == "ReadWrite"),
             Init = init?.Children[0]
           };
           if (countedField && !IsClass(type)) {
@@ -1152,10 +1157,10 @@ public sealed partial class CodeGen {
       arg = BoxCall(arg, param.Type);   // pack.add(first): a new box takes a usage (spec 12.7)
     }
     if (IsCountedType(param.Type)) {
-      return CountedArg(arg, CountedBase(param.Type), scope);   // @T name (spec 12.7)
+      return CountedArg(arg, CountedBase(param.Type), scope, param.IsWritable);   // @T name, (@)T name (spec 12.7)
     }
     if (IsWeakType(param.Type)) {
-      return WeakValue(arg, scope, param.Type[1..], arg);   // _T name: one more weak reference for the call (spec 12.7)
+      return WeakValue(arg, scope, param.Type[1..], arg, param.IsWritable);   // _T name: one more weak reference for the call (spec 12.7)
     }
     if (IsClass(param.Type) && CountedRef(arg.Kind == "WritableAddressOf" ? arg.Children[0] : arg, scope) is CountedRefInfo counted) {
       throw arg.Kind == "WritableAddressOf"
@@ -1210,6 +1215,9 @@ public sealed partial class CodeGen {
       if (!param.IsGift) {
         value = TempObject(value);   // f(Dog("a")): the new object is borrowed by the call and ends with the statement
       }
+    }
+    if (!param.IsGift) {
+      value = TempTuple(value, arg);   // g(f()): a borrowed tuple copies what it keeps, so its arrays end with the statement (spec 6.8.1)
     }
     return Convert(value, param.Type, arg);
   }

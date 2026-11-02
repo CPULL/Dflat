@@ -1,0 +1,12 @@
+  users of ann 2
+  ann 11
+  bob 12
+  cid 10
+  taken cid2
+  view bob
+  caught: loop write without the lock
+  end of run
+  end cid2
+  end bob
+  end ann
+---- exit code 0 ----

@@ -1,0 +1,11 @@
+namespace rw_lockfail_readonly
+public class Player(string name) {
+  public string name
+}
+fun f() {
+  @Player reader = @Player("a")
+  enforce reader {
+  }
+  lockfail on reader { }
+}
+f()

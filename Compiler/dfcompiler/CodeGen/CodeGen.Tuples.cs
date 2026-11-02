@@ -138,8 +138,9 @@ public sealed partial class CodeGen {
       }
     }
 
+    bool ownValues = GivesOwnMultiValues(s);   // the arrays are new: an owner that receives one ends its old array (spec 6.8.1)
     for (int index = 0; index < targets.Count; index++) {
-      AssignTarget(targets[index], resolved[index], sb, scope, pad);
+      AssignTarget(targets[index], resolved[index], sb, scope, pad, ownValues);
     }
     stringFresh.Clear();
   }
@@ -163,7 +164,7 @@ public sealed partial class CodeGen {
     return LValue(target, scope).Type;
   }
 
-  void AssignTarget(Node target, Expr? value, StringBuilder sb, Scope scope, string pad) {
+  void AssignTarget(Node target, Expr? value, StringBuilder sb, Scope scope, string pad, bool ownValues = false) {
     if (target.Kind == "Discard" || value == null) {
       return;
     }
@@ -203,6 +204,17 @@ public sealed partial class CodeGen {
     MarkAssigned(lvalue.Variable);
     if (lvalue.Type == "string") {
       sb.Append($"{pad}{StrAssign(lvalue, TargetFresh(value.Value), Convert(value.Value, lvalue.Type, target))};\n");
+      return;
+    }
+    if (ownValues && IsArr(lvalue.Type) && !LibraryCode && (lvalue.Variable is { OwnsArray: true } || lvalue.IsField || lvalue.IsStatic)) {
+      // x, n = f() where x owns its array: the old one ends, the new one is its own
+      string old = NewTemp();
+      string flag = lvalue.Variable?.ArrFlag is string arrFlag ? arrFlag : "true";
+      sb.Append($"{pad}{{ {CType(lvalue.Type)} {old} = {lvalue.Code}; {lvalue.Code} = {Convert(value.Value, lvalue.Type, target)}; "
+        + $"if ({flag} && {old}.p != {lvalue.Code}.p) {{ {ArrDropHelper(lvalue.Type)}({old}); }} }}\n");
+      if (lvalue.Variable?.ArrFlag != null) {
+        sb.Append($"{pad}{lvalue.Variable.ArrFlag} = true;\n");
+      }
       return;
     }
     sb.Append($"{pad}{lvalue.Code} = {Convert(value.Value, lvalue.Type, target)};\n");

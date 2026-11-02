@@ -43,6 +43,7 @@ sealed class FunSig {
   public Vis Visibility { get; set; } = Vis.Public;
   public int Slot { get; set; } = -1;
   public bool ReturnsOwned { get; set; }      // returns new or moved objects (false: borrowed ones)
+  public bool RetWritable { get; set; }       // fun (@)T make(): the counted result is read/write (spec 12.7)
   public bool ReturnsOwnedSet { get; set; }
   public bool IsDtor { get; set; }            // the atEnd of a class
   public bool IsAccessor { get; set; }        // get_ / set_ of a property with accessor blocks: no error part, what it lets out is a Panic (spec 11.1.4)
@@ -74,6 +75,7 @@ sealed class ParamSig {
   public bool IsGift { get; init; }       // ->T name: the function owns the object it is given
   public int Ref { get; init; }           // 0 a copy, 1 &T name (read-only reference), 2 (&)T name (writable reference, the call writes (&)x)
   public bool IsWeak { get; init; }       // _T name (spec 12): a weak reference, used through enforce
+  public bool IsWritable { get; init; }   // (@)T name, (_)T name (spec 12.7): read/write, the object has a lock
 }
 
 sealed class VarInfo {
@@ -84,6 +86,7 @@ sealed class VarInfo {
   }
 
   public bool OwnsArray { get; set; }   // a local array that ends with its scope; return moves it out (spec 6.8.1)
+  public string? ArrFlag { get; set; }   // an owned local array that is also assigned borrowed ones (a = b): the C flag "it holds its own array"
   public bool BorrowsArray { get; set; }   // an array parameter, or a local made from another array: ->x cannot take its block
   public bool OwnsTuple { get; set; }   // a typed local tuple that holds arrays: its arrays are its own and end with it (spec 6.8.1)
 
@@ -93,6 +96,7 @@ sealed class VarInfo {
   public bool Own { get; set; }       // the variable owns its object: it is destroyed when the scope ends
   public bool IsWeak { get; set; }    // a weak reference: used only through enforce
   public bool IsCounted { get; set; } // @T name (spec 12.7): the C variable holds the counting block (df_rc*); reading it gives the object
+  public bool IsWritable { get; set; } // (@)T name, (_)T name (spec 12.7): read/write, its object has a lock taken by enforce
   public bool ReadOnlyRef { get; set; }   // &Item o: a read-only reference to an object or a collection (spec 1.6.2)
   public long? KnownLength { get; set; }   // an array that starts from a literal or arr<T>[n] and is never assigned again: its length is known
   public string? OwnFlag { get; set; }     // a string variable: the C flag that says whether it owns its string (CodeGen.Strings.cs)
@@ -383,7 +387,7 @@ public sealed partial class CodeGen {
         // the exit code of main is an int, given to the system as an i32
         bool isMainInt = enumName == null && funNode.Text == "main" && rets.Children[0] is { Kind: "Type", Text: "int" };
         ret = isMainInt ? "i32" : ResolveType(rets.Children[0]);
-        if (rets.Text == "counted") {
+        if (rets.Text is "counted" or "counted-rw") {
           ret = CountedTypeOf(ret, rets);   // fun @Dog make(): the caller receives the usage (spec 12.7)
         }
       } else {
@@ -426,6 +430,7 @@ public sealed partial class CodeGen {
         paramType = "_" + paramType;   // _Dog dog: the function holds its own weak reference (spec 12.7)
       }
       ps.Add(new ParamSig(p.Text!, variadic ? "arr<" + paramType + ">" : paramType, def?.Children[0]) {
+        IsWritable = p.Children.Any(child => child.Kind == "ReadWrite"),
         IsVariadic = variadic,
         IsGift = p.Kind == "GiftParam" && (IsClass(paramType) || paramType == "string" || IsArr(paramType)),
         Ref = reference,
@@ -457,7 +462,7 @@ public sealed partial class CodeGen {
     if (ret != "void" && !IsMulti(ret) && !isExtern && !noBody) {
       MarkImplicitReturn(funNode);   // before ClassifyReturns, so a last expression that makes an object moves it
     }
-    var fun = new FunSig(name, ret, ps, funNode, enumName) { OverloadIndex = overloads.Count, IsExtern = isExtern };
+    var fun = new FunSig(name, ret, ps, funNode, enumName) { OverloadIndex = overloads.Count, IsExtern = isExtern, RetWritable = rets?.Text == "counted-rw" };
     overloads.Add(fun);
     return fun;
   }
@@ -510,11 +515,11 @@ public sealed partial class CodeGen {
     }
     foreach (var p in f.Params) {
       if (IsCountedType(p.Type)) {
-        scope.Vars[p.Name] = new VarInfo(CountedBase(p.Type), "v_" + p.Name, false) { IsCounted = true };   // spec 12.7
+        scope.Vars[p.Name] = new VarInfo(CountedBase(p.Type), "v_" + p.Name, false) { IsCounted = true, IsWritable = p.IsWritable };   // spec 12.7
         continue;
       }
       if (IsWeakType(p.Type)) {
-        scope.Vars[p.Name] = new VarInfo(p.Type[1..], "v_" + p.Name, false) { IsWeak = true };   // spec 12.7
+        scope.Vars[p.Name] = new VarInfo(p.Type[1..], "v_" + p.Name, false) { IsWeak = true, IsWritable = p.IsWritable };   // spec 12.7
         continue;
       }
       // a reference parameter is a pointer in C; the body reads and writes through it, a read-only one cannot be assigned
@@ -624,7 +629,8 @@ public sealed partial class CodeGen {
 
       case "ArrDrop":
         if (scope.Find(s.Text!) is VarInfo array && IsArr(array.Type)) {
-          sb.Append(pad).Append($"{ArrDropHelper(array.Type)}({array.CName}); {array.CName}.p = NULL; {array.CName}.len = 0;\n");   // spec 6.8.1
+          string drop = array.ArrFlag != null ? $"if ({array.ArrFlag}) {{ {ArrDropHelper(array.Type)}({array.CName}); }} {array.ArrFlag} = false;" : $"{ArrDropHelper(array.Type)}({array.CName});";
+          sb.Append(pad).Append($"{drop} {array.CName}.p = NULL; {array.CName}.len = 0;\n");   // spec 6.8.1
         }
         return;
 
@@ -666,7 +672,9 @@ public sealed partial class CodeGen {
           return;
         }
         string k = s.Children[0].Kind;
-        if (k == "Call" && e.Fresh && IsClass(e.Type)) {
+        if (DroppedResultCode(s.Children[0], e) is string dropped) {
+          sb.Append(pad).Append(dropped).Append(";\n");   // the new arrays of a result nobody keeps end here (spec 6.8.1)
+        } else if (k == "Call" && e.Fresh && IsClass(e.Type)) {
           // a new object nobody keeps ends here
           sb.Append(pad).Append(CheckRaise($"df_drop((void*)({e.Code}))", "void")).Append(";\n");
         } else if (k == "Call" && e.Type == "string") {
@@ -856,6 +864,9 @@ public sealed partial class CodeGen {
       sb.Append($"{pad}{hoisted.CName} = {code};\n");
       if (hoisted.OwnFlag != null) {
         sb.Append($"{pad}{hoisted.OwnFlag} = {ownsString};\n");
+      }
+      if (hoisted.ArrFlag != null) {
+        sb.Append($"{pad}{hoisted.ArrFlag} = true;\n");   // a new array, a moved one or null: its own
       }
     } else {
       variable = StringVar(new VarInfo(type, "v_" + s.Text, isConst));
@@ -1183,6 +1194,11 @@ public sealed partial class CodeGen {
   }
 
   string AssignCode(Node s, Scope scope) {
+    string code = AssignCodeOf(s, scope);
+    return WriteLockCheck(s.Children[0], scope) is string check ? $"({{ {check}{code}; }})" : code;
+  }
+
+  string AssignCodeOf(Node s, Scope scope) {
     var targetNode = s.Children[0];
     if (targetNode.Kind == "Index") {
       return IndexAssign(s, scope);
@@ -1212,6 +1228,9 @@ public sealed partial class CodeGen {
     }
     if (op == "=" && IsTupleOwner(target)) {
       return TupleAssign(target, s.Children[1], scope, s);   // the tuple owns its arrays (spec 6.8.1)
+    }
+    if (op == "=" && target.Variable is { ArrFlag: not null } && !LibraryCode) {
+      return MixedArrAssign(target, s.Children[1], scope, s);   // a local that owns or borrows (spec 6.8.1)
     }
     if (op == "=" && IsArr(target.Type) && (target.IsField || target.IsStatic || target.Variable is { OwnsArray: true } || IsOwnedTupleItem(targetNode, scope)) && !LibraryCode) {
       return ArrFieldAssign(target, targetNode, s.Children[1], scope, s);   // spec 6.8.1: fields, statics and owned locals free their old array
@@ -1471,6 +1490,11 @@ public sealed partial class CodeGen {
   }
 
   Expr IncDec(Node n, Scope scope) {
+    var e = IncDecOf(n, scope);
+    return n.Children[0].Kind == "Member" && WriteLockCheck(n.Children[0], scope) is string check ? e with { Code = $"({{ {check}{e.Code}; }})" } : e;
+  }
+
+  Expr IncDecOf(Node n, Scope scope) {
     var targetNode = n.Children[0];
     if (PropertyTarget(targetNode, scope) is var (propertyObj, property)) {
       return PropertyIncDec(n, propertyObj, property, scope);
@@ -2147,7 +2171,7 @@ public sealed partial class CodeGen {
     if (n.Text == "len" && MapViewOf(n.Children[0], scope) is (Expr viewMap, _)) {
       return MapLen(viewMap);   // m.keys.len: the map itself, no view object (CodeGen.Map.cs)
     }
-    var obj = TempObject(ExprOf(n.Children[0], scope));   // Dog("a").name: the new object ends with the statement
+    var obj = TempTuple(TempObject(ExprOf(n.Children[0], scope)), n.Children[0]);   // Dog("a").name, f().0: the new value ends with the statement
     if (n.Text == "hash") {
       return HashOf(obj, n);   // every type has it, the nullable ones too (CodeGen.Hash.cs)
     }

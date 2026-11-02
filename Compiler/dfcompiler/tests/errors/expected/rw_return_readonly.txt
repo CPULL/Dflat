@@ -1,0 +1,1 @@
+rw_return_readonly.df(6): error: 'p' is read-only (@Player): only a (@)Player or a (_)Player gives a read/write one (spec 12.7)

@@ -1,0 +1,1 @@
+rw_lockfail_readonly.df(9): error: 'reader' has no lock: lockfail is for the (@)T and (_)T variables of the enforce (spec 7.2.2)

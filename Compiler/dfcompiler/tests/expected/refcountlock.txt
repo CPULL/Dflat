@@ -1,0 +1,11 @@
+  score 11
+  after add 16
+  outer holds the lock
+  inner: lockfail
+  name bob
+  reader bob
+  caught: write without the lock
+  locked write 5
+  end of main
+  end bob
+---- exit code 0 ----

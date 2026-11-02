@@ -110,6 +110,11 @@ public sealed class Parser {
       && PeekAt(2).Kind == TokenKind.Ident && PeekAt(2).Line == Peek.Line;
   }
 
+  // (@) or (_) before a type: the read/write marker of (@)T name and (_)T name (spec 12.7)
+  bool IsReadWriteMarker(string marker) {
+    return IsOp("(") && PeekAt(1).Is(marker) && PeekAt(2).Is(")") && PeekAt(3).Kind == TokenKind.Ident && PeekAt(3).Line == Peek.Line;
+  }
+
   // '@' touching a type: the counted marker of @T name (spec 12.7)
   bool IsCountedMarker() {
     return IsOp("@") && PeekAt(1).Kind == TokenKind.Ident && PeekAt(1).Line == Peek.Line && PeekAt(1).Col == Peek.Col + 1;
@@ -442,7 +447,7 @@ public sealed class Parser {
         case "atEnd":
           return PeekAt(1).Kind == TokenKind.Ident && PeekAt(1).Text == "of" ? ParseAtEndOf() : ParseAtEnd();
         case "enforce":
-          if (PeekAt(1).Kind == TokenKind.Ident && (PeekAt(2).Is(",") || PeekAt(2).Is("{"))) {
+          if (PeekAt(1).Kind == TokenKind.Ident && (PeekAt(2).Is(",") || PeekAt(2).Is("{") || PeekAt(2).Kind == TokenKind.Ident && PeekAt(2).Text == "timeout")) {
             return ParseEnforce();
           }
           break;   // enforce <expression> as a statement (spec 7.2.6): ParseSimple reads it
@@ -836,7 +841,16 @@ public sealed class Parser {
     var node = new Node("Enforce", t);
     do {
       var n = ExpectIdent();
-      node.Add(new Node("Name", n, n.Text));
+      var name = new Node("Name", n, n.Text);
+      if (Peek.Kind == TokenKind.Ident && Peek.Text == "timeout") {
+        // enforce p timeout 500: the longest wait for the lock of p (spec 7.2.1)
+        var word = Next();
+        bool savedBrace = noBrace;
+        noBrace = true;
+        name.Add(new Node("Timeout", word).Add(ParseUnary()));
+        noBrace = savedBrace;
+      }
+      node.Add(name);
     } while (AcceptOp(","));
     node.Add(ParseBlock());
     if (AcceptElse()) {
@@ -981,14 +995,19 @@ public sealed class Parser {
   // Speculative: "Type name" followed by '=', '_=', ',', or end of statement
   Node? TryParseDecl() {
     // _Texture2D texture: a weak reference (spec 12); the '_' touches the type
-    bool weak = IsWeakMarker();
-    bool counted = IsCountedMarker();   // @Dog first: a counted object (spec 12.7)
+    bool readWrite = IsReadWriteMarker("@") || IsReadWriteMarker("_");   // (@)Dog first, (_)Dog watcher: read/write (spec 12.7)
+    bool weak = readWrite ? PeekAt(1).Is("_") : IsWeakMarker();
+    bool counted = readWrite ? PeekAt(1).Is("@") : IsCountedMarker();   // @Dog first: a counted object (spec 12.7)
     bool startsType = weak || counted || Peek.Kind == TokenKind.Ident || IsOp("(") || IsOp("*") || IsKw("fun");
     if (!startsType) {
       return null;
     }
     int save = pos;
     try {
+      if (readWrite) {
+        Next();
+        Next();
+      }
       if (weak || counted) {
         Next();
       }
@@ -1016,6 +1035,9 @@ public sealed class Parser {
           }
           if (counted) {
             decl.Add(new Node("Counted", name));
+          }
+          if (readWrite) {
+            decl.Add(new Node("ReadWrite", name));
           }
           return size == null ? decl : decl.Add(size);
         }
@@ -1109,6 +1131,13 @@ public sealed class Parser {
       var marker = Next();
       return new Node("CountedType", marker).Add(ParseType());
     }
+    if (IsOp("(") && PeekAt(1).Is("@") && PeekAt(2).Is(")") && PeekAt(3).Kind == TokenKind.Ident) {
+      // list<(@)Dog>: a collection of read/write counted objects (spec 12.7)
+      var marker = Next();
+      Next();
+      Next();
+      return new Node("CountedType", marker).Add(ParseType()).Add(new Node("ReadWrite", marker));
+    }
     int save = pos;
     try {
       var type = ParseType();
@@ -1168,14 +1197,19 @@ public sealed class Parser {
     var rets = new Node("Returns", t);
     while (!(Peek.Kind == TokenKind.Ident && (PeekAt(1).Is("(") || PeekAt(1).Is("=") || IsGenericCallAhead(0)))
            && !((IsOp("==") || IsOp("!=")) && PeekAt(1).Is("("))) {
-      if (IsCountedMarker()) {
-        // fun @Dog make(): a counted result (spec 12.7)
+      if (IsCountedMarker() || IsReadWriteMarker("@")) {
+        // fun @Dog make(), fun (@)Dog make(): a counted result, read-only or read/write (spec 12.7)
+        bool readWrite = IsOp("(");
         Next();
+        if (readWrite) {
+          Next();
+          Next();
+        }
         if (rets.Children.Count > 0) {
           throw Error("a counted result (@T) is the only result of its function");
         }
-        rets.Text = "counted";
-      } else if (rets.Text == "counted") {
+        rets.Text = readWrite ? "counted-rw" : "counted";
+      } else if (rets.Text is "counted" or "counted-rw") {
         throw Error("a counted result (@T) is the only result of its function");
       }
       rets.Add(ParseType(false));
@@ -1321,10 +1355,13 @@ public sealed class Parser {
           isVolatile = true;
         }
         string kind = "Param";
-        if (IsOp("(") && PeekAt(1).Is("@")) {
-          throw Error("read/write counted parameters ((@)T, spec 12.7) are not built yet");
+        bool readWriteParam = IsReadWriteMarker("@") || IsReadWriteMarker("_");   // (@)T name, (_)T name (spec 12.7)
+        bool readWriteWeak = readWriteParam && PeekAt(1).Is("_");
+        if (readWriteParam) {
+          Next();
+          Next();
         }
-        bool countedParam = IsCountedMarker();   // @T name (spec 12.7)
+        bool countedParam = readWriteParam ? !readWriteWeak : IsCountedMarker();   // @T name (spec 12.7)
         if (countedParam) {
           Next();
         }
@@ -1338,7 +1375,7 @@ public sealed class Parser {
         } else if (AcceptOp("->")) {
           kind = "GiftParam";
         }
-        bool weakParam = kind == "Param" && IsWeakMarker();   // _T name (spec 12)
+        bool weakParam = readWriteWeak || kind == "Param" && IsWeakMarker();   // _T name (spec 12)
         if (weakParam) {
           Next();
         }
@@ -1373,6 +1410,9 @@ public sealed class Parser {
             throw ErrorAt("a weak parameter is _T name, with no other marker", name);
           }
           p.Add(new Node("Weak", name));
+        }
+        if (readWriteParam) {
+          p.Add(new Node("ReadWrite", name));
         }
         if (isVolatile) {
           p.Add(new Node("Volatile", name));
@@ -1858,7 +1898,11 @@ public sealed class Parser {
           return new Node("BitNot", t).Add(ParseUnary());
         case "@":
           Next();
-          return new Node("CountedOf", t).Add(ParseUnary());   // @Dog(), @plain (spec 12.7)
+          var countedOf = new Node("CountedOf", t).Add(ParseUnary());   // @Dog(), @plain (spec 12.7)
+          if (Peek.Kind == TokenKind.Ident && Peek.Text == "timeout" && Peek.Line == t.Line) {
+            countedOf.Add(new Node("Timeout", Next()).Add(ParseUnary()));   // @Player() timeout 100: the default wait for its lock (spec 12.7)
+          }
+          return countedOf;
         case "_":
           Next();
           if (StartsOperand(Peek)) {

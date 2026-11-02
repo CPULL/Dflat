@@ -281,7 +281,9 @@ public sealed partial class CodeGen {
       frame.Hoisted[name] = StringVar(new VarInfo(type, $"v_{name}_{frame.Id}", isConst) {
         Own = declOwner.TryGetValue(decl, out bool owns) && owns,
         IsWeak = decl.Children.Any(child => child.Kind == "WeakInit"),
-        IsCounted = IsCountedDecl(decl)
+        IsCounted = IsCountedDecl(decl),
+        IsWritable = decl.Children.Any(child => child.Kind == "ReadWrite"),
+        ArrFlag = mixedArrayDecls.Contains(decl) ? $"oa_v_{name}_{frame.Id}" : null
       });
       typingScope.Vars[name] = frame.Hoisted[name];
     }
@@ -318,6 +320,9 @@ public sealed partial class CodeGen {
       sb.Append(variable.IsCounted || variable.IsWeak ? $"{pad}df_rc* {variable.CName} = NULL;\n" : $"{pad}{CType(variable.Type)} {variable.CName} = {ZeroValue(variable.Type)};\n");
       if (variable.OwnFlag != null) {
         sb.Append($"{pad}bool {variable.OwnFlag} = false;\n");
+      }
+      if (variable.ArrFlag != null) {
+        sb.Append($"{pad}bool {variable.ArrFlag} = false;\n");
       }
     }
     if (frame.RanFlag != null) {

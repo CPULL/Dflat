@@ -1,4 +1,4 @@
-# Specs progress (Specs0.0.20, compiler 0.0.43alpha, 2026/11/01)
+# Specs progress (Specs0.0.22, compiler 0.0.45alpha, 2026/11/03)
 
 What is left of the design work and what the compiler does not build yet. It replaces `To_discuss_for_collections.txt` and `ownership-management.md`; everything decided there is in the specification (Specs<section> is a section of dflat-spec.md). The point numbers of the collections are kept from the old file.
 
@@ -9,13 +9,6 @@ Tags: TOBEDISCUSSED (open, needed shortly), UNDERDISCUSSION (being discussed), P
 ### NEXT WEEK (from 2026-11-02): custom collections (Specs6.9, marked "partial")
 
 - The members and the cursor types of the map iterator (`MapIterator`); subclassing of the default collections (`vec`, `list`, `map`, `hmap`, `set`, `hset`; `arr` cannot) and the dispatch of the overridden methods; how a custom class receives the literals; `get_view` for custom collections (point 34); lists of pointers and references (with the pointers work).
-
-### 36. [TOBEDISCUSSED] sort(lambda) and lambdas
-
-Specs6.6: `sort(lambda)` uses a temporary custom sorter; the lambda returns a bool (true is -1) or a number. Lambdas and function types are in Specs13 and are not built, so `sort(lambda)` and every functional member are "feature not supported".
-Question: the order of the lambda work against the collections work.
-PROPOSAL: lambdas before `sort(lambda)`; the default comparer for objects with the class `compareTo` (Specs6.2.2).
-Open gaps of the lambda semantics: what a bool lambda returns for false (0 or 1), and whether a numeric lambda is judged only by its sign.
 
 ### 45. [TOBEDISCUSSED] Code size of the generic maps
 
@@ -80,7 +73,6 @@ Decided (Specs12.7): `@T` read-only, `(@)T` read/write with a lock in the object
 
 - Generics with counted type arguments (`Stack<@MyRC>`, not needed for Specs0.1.0). Design recorded: generics are allowed but not mixed: a generic declares in its header whether its type parameter is plain or counted (`class Cache<T>` with `->T`, the cache owns the objects; `class SharedCache<@T>` with `map<string, @T> items`, `put(string key, @T value)`, `get(string key) @T`), so they are two generics and the arguments must match. New construct proposed: named type sets, `generic NotRCs { i32, string, MyObj }` and `generic SomeRCs { @MyObj, @AnotherObj, @string }`, used as `class Stack<T in NotRCs>` (no refcounts, moves are moves) and `class StackRefs<T in SomeRCs>` (everything counted, assignment adds a usage, weak references and `is done.` legal); a set that mixes plain and counted types is a compile error. Open: the list is closed (the user writes a set for their own classes), the relation with trait constraints (`:`). Considered: no special rule (`push` makes the stack a user, `pop` hands the usage to the caller), but `=` in a generic body means different things for `Dog` and `@Dog`, and errors would surface at the instantiation.
 - The `Rc` / `Arc` split (single-thread and thread-safe counting), after threads; and `(@)T` used in parallel (Rust `Arc<Mutex<T>>`).
-- The capture forms of lambdas (Specs13.3: borrow, copy, move, weak) have no counted form; the weak capture `(x; _limit)` of a plain variable does not match "weak references exist only on counted objects".
 
 # Part 3 - Later versions (left on purpose)
 
@@ -90,7 +82,7 @@ Decided (Specs12.7): `@T` read-only, `(@)T` read/write with a lock in the object
 - 64. Subclassing the default collections: the compiler's direct code for `c[i]`, `for` and the hot paths does not call methods; if a class overrides `add`, which one runs? PROPOSAL: a subclass loses the direct paths and goes through the virtual calls. `arr` cannot be subclassed.
 - 67. Structs in collections (Specs11.1.5): a `vec<Point>` of structs holds values inline, which changes the ownership and the drop code.
 - 68. Lists of pointers and references, after the pointers work (Specs12.1).
-- 69. Functional members (`filter`, `map`, `reduce`) and queue / stack; they need lambdas (point 36).
+- 69. Functional members (`filter`, `map`, `reduce`) and queue / stack; they need lambdas (Specs13.3, decided, not built).
 - 71. Embedded Dflat classes against hand-written C: `vec` and `list` (and the maps) are Dflat classes in a prelude with C hot paths; you asked for hand-written C versions too, to compare. PROPOSAL: finish the surface of the language first, then write the C versions of `vec`, `list`, `hmap`, `hset` and compare on a fixed set of programs.
 - 72. Code size: a copy per type or shared helpers working on byte sizes and a comparer (Specs11.3.12). PROPOSAL: copies per type for numbers and small value types; shared helpers for objects when the output size becomes a problem.
 - 74. Small architectures (Specs15.7.5, 6.1): collections need a heap; does a small target get only `arr`, or `vec` with a fixed capacity? There `null.hash` is 0 and multi-type keys are not available.
@@ -117,7 +109,7 @@ What the specification decides and the compiler does not build. The point number
 - 18. A failed allocation ends the program (a panic) instead of raising `OutOfMemoryException` in Debug (Specs6.1, 15.3); a size that does not fit (`n * size` overflowing) ends it the same way since 2026-11-01.
 - 34. `c[a..b]!` (clone is built, the copy of a view is not) and `get_view` for custom collections (Specs6.5).
 - 35. Cloning (Specs12.6) is built for objects, `vec`, `list` (also of counted items), and since 2026-10-31 `map`, `hmap`, `set`, `hset` (a new collection, then `add(this)`), the plain `add(other)` and `copyFrom` (object items cloned, the items written over end); `tryClone()` since 2026-10-31; not yet: tuple fields with strings or objects, the object items of the set operations (sets hold no objects yet). `fill` of an object stays a compile error (Specs6.6).
-- 36. Lambdas and function types (Specs13.3), so `sort(lambda)` and the functional members; sorting objects and tuples with the default comparer.
+- 36. Lambdas and function types (Specs13.3, decided in Specs0.0.22), so `sort(lambda)` and the functional members; sorting objects and tuples with the default comparer.
 - 37. Conversion of collections of related types (Specs11.3.10, 11.3.7), for any generic class.
 - 40. Destructuring tuples other than `(k, v)` of a map in the header of a `for`.
 
@@ -146,5 +138,5 @@ What the specification decides and the compiler does not build. The point number
 - Reference counting (Specs12.7, phase 4b). Steps 1 to 7 are built (2026-10-30): `list<@T>` and `vec<@T>` (step 7; since 2026-10-31 also `has`, `indexOf`, `remove`, `removeAll`, `replace`, `pop`, `fill`, `transformTo`, `reverse`; not yet `sort`, `resize`, `fillAtCapacity`, views, `getIterator`, `->c[i]` (open, Specs99), `map<K, @T>` (maps hold no objects yet) and `arr<@T>`), `removeRefCounting()` (step 6), weak references (step 5, see below), `@T` fields (body and header), their assignments and release with the holder, the cycle warning (level 1, also for a field of the class's own type), `@T` local variables, `var x = @T()`, `=` between counted variables, the release at the end of the scope, `is done.`, `usersCount`, `weakrefsCount`, `@plain`, the errors for borrowing a counted object, `@this` and `@` on a borrow, `@T` parameters, `f(->rc)`, `@T` results (also `var x = f()`), the errors for a counted argument to a plain, `&`, `(&)` or `->T` parameter. Built 2026-11-02: `(@)T` and `(_)T` (variables, parameters, fields), `@T() timeout`, the lock in `enforce` with `timeout`, `lockfail`, the write check (`WritingOnRefCountWithoutLockingException`); not yet: the queue of waiters and timed waits (no threads: a busy lock fails at once), the check of writes made by methods, `timeout` in the expression form (`(@)T` results and `list<(@)T>` / `vec<(@)T>` built later the same day). Not built: `@T` in traits, overrides and extern functions, `->k.field`, static counted fields and counted properties, a counted result used directly in an expression (`make().bark()`), counted keys (`@T` is not a type argument yet), local `&T` declarations (not parsed), a method call taking a usage, counted variables in multiple assignments and inside `atEnd` blocks. The old `.asRefCount`, `.asSharedRefCount` and `.isRC` were never built.
 - Weak references are built on the Specs0.0.19 rules (2026-10-30). The Gfx library (Libraries/Gfx), its Demo and Dha Flatty Bird still use the old weak references on plain objects and `_=`, so they do not compile until they are redone.
 - DECIDED (2026-11-01, written in Specs12, built, point 85): a new object that nothing keeps (an argument to a borrowing parameter, a receiver) ends when its statement ends, as the full expressions of C++.
-- Phase 4a gaps: objects in tuples are not owned and not destroyed (in arrays: point 20); static fields are not tracked; constructor `atEnd` fragments (need secondary constructors); use after a move is found at run time (`NullPointerException`), not at compile time; no lifetime check for borrows.
+- Phase 4a gaps: objects in tuples are not owned and not destroyed (in arrays: point 20); static fields are not tracked; use after a move is found at run time (`NullPointerException`), not at compile time; no lifetime check for borrows.
 - Phase 4c: collections that own their elements fully (the drop of `arr`, point 20), compile-time use-after-move and lifetimes.

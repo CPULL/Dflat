@@ -1,0 +1,1 @@
+ctor_parent_needed.df(6): error: a constructor of B must call a constructor of A (it has none without parameters): write : A(...) after its parameters

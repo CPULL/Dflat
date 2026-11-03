@@ -1,0 +1,1 @@
+traitctor_not_called.df(6): error: a constructor of C must call the constructor of the trait Named (it takes parameters): write : Named(...) after its parameters

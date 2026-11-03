@@ -1,0 +1,91 @@
+// Destructor fragments (spec 11.4, step 5): the atEnd after a constructor runs when the object dies; it sees the class members and
+// the locals and parameters of its constructor; the fragments run in reverse order of registration, then the class atEnd
+alias Root as r
+
+class Res {
+  public string name
+  public Res(string name) { this.name = name }
+} atEnd {
+  r.Console.log("  Res " + name + " ends")
+}
+
+public class Foo {
+  public i32 a
+  public string log = ""
+
+  public Foo(string path, i32 n) {
+    Res res = Res(path)
+    a = n
+    log += "two"
+  } atEnd {
+    r.Console.log($"  fragment Foo(string, i32): {res.name} {n} {a}")
+    res is atEnd.
+  }
+  public Foo(i32 n) : Foo("chained", n * 10) {
+    i32 local = n + 1
+    log += ">one"
+  } atEnd {
+    r.Console.log($"  fragment Foo(i32): local {local}")
+  }
+  public Foo() {
+    log = "plain"
+  }
+} atEnd {
+  r.Console.log("  class atEnd of Foo, log " + log)
+}
+
+// a parameter taken with -> lives in the object until the fragment
+public class Holder {
+  public Holder(->Res keep) {
+    r.Console.log("  holding " + keep.name)
+  } atEnd {
+    r.Console.log("  fragment Holder: " + keep.name)
+  }
+}
+
+// a constructor that fails after its fragment is registered: the fragment runs with what was reached
+public class Partial {
+  public Partial(i32 v) {
+    Res first = Res("first")
+    if v < 0 then throw Exception("negative")
+    Res second = Res("second")
+  } atEnd {
+    r.Console.log("  fragment Partial")
+    first is atEnd.
+    second is atEnd.
+  }
+}
+
+fun scope1() {
+  r.Console.log("Foo(\"p\", 3):")
+  Foo x = Foo("p", 3)
+}
+fun scope2() {
+  r.Console.log("Foo(4):")
+  Foo y = Foo(4)
+}
+fun scope3() {
+  r.Console.log("Foo():")
+  Foo z = Foo()
+}
+fun scope4() {
+  r.Console.log("Holder:")
+  Res res = Res("kept")
+  Holder h = Holder(->res)
+  r.Console.log("  after the constructor")
+}
+fun string scope5(i32 v) {
+  Partial p = Partial(v)
+  return "made"
+  catch Exception ex {
+    return "failed: " + ex.message
+  }
+}
+scope1()
+scope2()
+scope3()
+scope4()
+r.Console.log("Partial(1):")
+r.Console.log(scope5(1))
+r.Console.log("Partial(-1):")
+r.Console.log(scope5(-1))

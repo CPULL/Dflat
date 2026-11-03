@@ -1,7 +1,7 @@
 # Dflat Language
 A new language D♭ that is the same as C# but easier to write and faster to execute
 
-**Version** 0.0.21  2026/11/02 by CPU
+**Version** 0.0.22  2026/11/03 by CPU
 
 ## D♭ — Dflat Language Specification (draft)
 
@@ -838,7 +838,7 @@ A member marked `–` is a compile error on that collection (for example `hasKey
 - The value of `fill` can be any value: basic values, strings (each item gets its own copy, shrunk, 4), dates, times and every other type that is not a class. `null` is allowed: every item becomes null and the objects they held are no longer owned by the collection (they end, running their `atEnd` if they have one). A class instance is a compile error (the items would share one object).
 - `list` also has `fill(count, value)`: it adds `count` items with that value, under the same rules (`myList.fill(256, 'c')`).
 - `resize(newLen, value)`: sets `.len`; new items get `value`, extra items are cut. `truncate(len)`: cuts the `vec` or the `list` to `len` items (no effect if shorter; the items cut end); on a `vec` the capacity is unchanged.
-- Sorting: `sort(SortDirection.ASC)` sorts in place with the default comparer (`compareTo` of the items, 6.2); `sort()` is ascending. `sort(lambda)` uses a temporary custom sorter. `SortDirection` has the entries `ASC` and `DESC`. The lambda returns a bool (true is -1, "first goes before second"; false is 1) or a number (negative, zero, positive). `sort` is stable; `sortUnstable` is not (it needs no extra memory). `reverse()` flips the current order in place.
+- Sorting: `sort(SortDirection.ASC)` sorts in place with the default comparer (`compareTo` of the items, 6.2); `sort()` is ascending. `sort(lambda)` uses a temporary custom sorter (a lambda, 13.3). `SortDirection` has the entries `ASC` and `DESC`. The lambda returns an int and only its sign counts: negative, the first goes before the second; positive, the second goes before the first; zero, the values are equal. `sort` is stable; `sortUnstable` is not (it needs no extra memory). `reverse()` flips the current order in place.
 - Sorting algorithms: on `arr` and `vec`, `sort` (stable) is a merge sort with run detection (TimSort style) and `sortUnstable` is pdqsort (as Rust and Go). On `list`, `sort` and `sortUnstable` are both a bottom-up merge sort that relinks the nodes directly, with no temporary array: only the pointers move. The comparison goes through `compareTo` (6.2), or through the function given to `sort`.
 - `copyFrom(dstIndex, srcCollection, srcIndex, count)` and `copyFrom(dstIndex, srcCollection, range)`: copy items from another index collection into this one; it works between any index collections (`arr`, `vec`, `list`). It copies for real (object items are cloned, 12), it is not a move. A range outside either collection raises `IndexOutOfRangeException`, or is a compile error when it can be detected at compile time; this check must always be there. Using the same collection as source and destination is a compile error when detectable, otherwise a non-silent `ModifyingProtectedSourceException` is raised.
 - On `vec` and `list`, `dstIndex` goes from `0` to `.len`: the items past the end are appended, so `copyFrom` is the only way to write past the end and it never leaves gaps; a larger `dstIndex` raises `IndexOutOfRangeException`.
@@ -1849,9 +1849,14 @@ Foo foo = Foo(5, "a")
 - Primary constructor: written in the class header; its parameters become private fields. Redeclaring a name in the body (with or without `public`) does not create a new field: it sets the visibility of the existing one. The same name with a different type is a compile error. An initializer on the redeclaration is allowed (level 3 warning, the value in the body wins).
 - Primary constructors are better without default values in the parameters; secondary constructors can have them (style, not enforced).
 - Secondary constructors chain `: Class(...)`, plus parent and trait constructors, and can have a body with their own initialization code.
+- When the class has a primary constructor, every secondary constructor must reach it, directly or through other secondary constructors; one that does not is a compile error (no field is left in an unpredictable state).
+- A cycle in the chains of the constructors is a compile error.
+- A chain names at most one other constructor of the class and at most one constructor of the parent, not both: the other constructor of the class already calls the parent. When a constructor names no constructor of the parent, the parent's constructor without parameters runs; when the parent has none, it is a compile error.
+- The same holds for the traits the class introduces: a chain names at most one constructor of each (`: Named("x")`), and without one the trait's constructor without parameters runs. A trait whose constructors all take parameters must be named, so it needs a constructor in the class body (the primary constructor cannot pass arguments). A trait can have several constructors (overloads, 13.2); its property initializers run before the body of its constructor. The traits a parent class already implements are set up by the parent's constructor.
+- The field initializers run before the body of a constructor.
 - Default constructor: generated like in C#, when the class declares no constructor.
 - Construction order: parent, traits in listed order, class body.
-- Private constructors are allowed; only the class body (its static functions included) can call them. A subclass cannot, so a class with only private constructors cannot be inherited.
+- Private constructors are allowed; only the class body (its static functions included) can call them. A subclass cannot, so a class with only private constructors cannot be inherited. A constructor written without a visibility keyword is private, like every member (1.6.1). When the parent's constructor without parameters is private, a child constructor must name another one of the parent (`: Parent(...)`).
 - A constructor that throws: the exception propagates and the object is destroyed; the `atEnd` blocks registered so far run, and fields not yet reached hold their zero value (null for objects).
 - A trailing `atEnd` after a constructor is a destructor fragment (11.4, 14.2). An `atEnd` written inside the constructor body is a normal scope cleanup.
 
@@ -2306,7 +2311,7 @@ public class Foo(i32 a) {
     logs2 is atEnd.
   }
 } atEnd {
-  Root.Console.Log("Goodbye!")
+  Root.Console.log("Goodbye!")
   file is atEnd.
 }
 ```
@@ -2314,7 +2319,7 @@ public class Foo(i32 a) {
 - The destructor of a class is the `atEnd` written after the closing brace of the class. It is private (cannot be called) and runs when the object is freed; it follows Rust `Drop` rules (the last owner going away, moves, reference counting).
 - A constructor can also have a trailing `atEnd`: a destructor fragment, registered when that constructor runs and executed when the object dies. It sees what is new inside that constructor (locals and parameters) and the class members, not the locals of other constructors.
 - Order when an object dies: the destructor fragments in reverse order of registration (the last constructor registered runs first, up to the first one encountered), then the class `atEnd` as the last one. A subclass runs all its own blocks first, then the parent's, then the traits' (the reverse of construction).
-- The variables used by a destructor fragment stay alive until it runs; the compiler sees which ones from the block.
+- The variables used by a destructor fragment stay alive until it runs; the compiler sees which ones from the block. A fragment is registered when its constructor starts its own body (after the chain, the traits and the fields), so with `Foo() : Foo(5)` the fragment of `Foo()` runs first, then the one of `Foo(5)`. A borrowed object parameter cannot be kept by a fragment (take it with `->`), and a local it uses is declared with its type, not `var`.
 - Fields and constructor locals not reached (for example when a constructor throws) hold their zero value, so cleanup code uses `x is atEnd.`, which does nothing on null (12.4).
 - Order at scope end: scope `atEnd` blocks from last to first, then the class `atEnd` of every owned object still alive.
 - Once the final result is decided, ordinary exceptions raised by later class cleanup are ignored. A double free is a `Panic`.
@@ -2655,26 +2660,118 @@ The definition says how a parameter is passed, ownership included. The call mark
 
 ## 13.3 Lambdas
 
+A lambda is a function with captures. Every rule that applies to functions (13.1 parameter modes, 13.2 overloading, return values) applies to lambdas.
+
 ```
-fun string greet = (string name) { "hello " + name }
-sort(items, (a, b) { a < b })
-list.Filter((x; limit) { x < limit })      // limit borrowed
-list.Filter((x; limit!) { x < limit })     // copied
-list.Filter((x; ->limit) { x < limit })    // moved in
-list.Filter((x; _limit) { x < limit })     // weak
+(i32 a, string b; (&)c, ->d, e!) { ... }
 ```
 
-- Parameters before `;`, captures after it. **Captures are mandatory**: using an unlisted outer variable is a compile error.
-- Constants need no listing; an unlisted local `const` is copied in automatically (level 1 warning).
-- Function types: `i32(string, u8)`, `fun(i32)` for void.
+- Parameters come before the `;`. Their types are always written; they cannot be inferred.
+- Captures come after the `;`. The `;` and the list are omitted when the lambda has no explicit captures.
+- A single expression body returns its value, as for functions.
+- A lambda is called like a function, `f(3)`, also where it is written: `(i32 a) { Root.Console.log(a) }(42)` prints 42.
+
+### 13.3.1 Capture modes
+
+| Form | Meaning |
+|---|---|
+| `a` (unlisted) | Read-only borrow. Automatic; never written in the list. The lambda cannot modify `a` or anything reachable through it. |
+| `(&)a` | Read/write borrow. |
+| `->a` | Ownership moves into the lambda; the lambda is the new owner and the outer `a` is null. For a counted `a`, its usage moves into the lambda and the count does not change (as `f(->rc)`, 12.7). |
+| `a!` | A copy is made and stored in the lambda. |
+| `@a` | The lambda holds its own usage of the counted `a`, read-only: +1 when the lambda is created, -1 when it ends. |
+| `(@)a` | The same for a read/write `(@)T` `a`. A write inside the body needs `enforce a`, which takes the lock then (7.2), not at the capture. |
+| `_a` | A weak reference to the counted `a`: only the count of weak references changes, so the object can end while the lambda lives. The body reaches it through `enforce a`. |
+| `(_)a` | A weak reference to a read/write `(@)T` `a` (12.7). |
+
+- Constants and enums need no listing and give no warning (their value is fixed).
+- Modifying an outer variable that is not listed `(&)` is a compile error.
+- A counted object used without being listed is a compile error that asks for `@a` or `_a`: a counted object cannot be borrowed (12.7).
+- Inside the body the captures are used as any other variable, with everything that is legal on them: a copy can always be made; ownership can be passed on only when the lambda owns the object (`->a`, `a!`).
+- There is no `this` in a lambda. Inside a method the fields are captured by their bare names, like locals (`(; (&)val)`, `val!`). Under the hood a field capture borrows the object, so the lambda cannot be stored past the object (13.3.4).
+
+### 13.3.2 Function types
+
+```
+fun(i32)               // returns void, takes one i32
+string(char, char)     // returns string, takes two chars
+string((&)MyObj)       // returns string, takes a writable MyObj
+```
+
+- Form: `<return type | fun>(<parameter type>, ...)`. The parameter modes of 13.1 are part of the type: `string((&)MyObj)`, `fun(->Dog)`, `fun(@Dog)`.
+- Captures are not part of a function type. A parameter, field or variable of type `fun(i32)` accepts any lambda with that call signature, whatever it captures, provided the lifetime rules are satisfied.
+- The user of a lambda does not see or care about its captures. A parameter that the caller of the lambda must see is a real parameter (`(&)`, `->` marked at the call), not a capture.
+- Function types are nullable by default: a variable, field or parameter of a function type that holds no function is null. Calling it raises `UnassignedFunctionCallException`, a child of `NullPointerException` (15.3), so a null lambda can be told apart from a null object.
+
+```
+fun test() {
+  i32(string) aFunction
+  if false then aFunction = (string s) { s.len }
+  aFunction("I am going to crash")    // UnassignedFunctionCallException
+}
+```
+
+### 13.3.3 Lambdas as values
+
+A lambda is a pointer to a function with a bit of context. Without captures it is a plain function pointer; with captures its context holds them and is shared like a counted object.
+
+```
+string readOnlyBorrow = "readOnlyBorrow"
+fun(i32) f1 = (i32 a) { c.log(a + readOnlyBorrow) }    // an implicit capture: f1 has a context
+fun(i32) f2 = f1                                       // the same lambda
+fun(i32) f3 = f1!                                      // a copy
+```
+
+- `f2 = f1`: the same lambda and the same context, with one more usage. The holders share the state of the `a!` and `->a` captures, and that state stays between calls.
+- `f3 = f1!`: a new context. The owned captures (`a!`, `->a`) are cloned, the borrows point to the same variable, the counted captures add a usage, the weak ones stay weak. Without captures `f1!` is the same as `f1`.
+- `f1!` on a lambda with a `(&)` capture is a compile error: two writable borrows of one variable. `f2 = f1` is allowed (one context, one borrow).
+
+### 13.3.4 Lifetime rules
+
+- An unlisted (read-only) capture and a `(&)` capture are borrows. They cannot outlive the captured variable, so a lambda holding one cannot be stored or returned unless the compiler can prove the variable lives long enough (the check of borrow lifetimes, point 83 and Phase 4c).
+- While a lambda with a `(&)a` capture lives, the outer code cannot use `a`, until the last use of the lambda.
+- To store or return a lambda, its captures are owned or counted: `a!`, `->a`, `@a`, `(@)a`, `_a`, `(_)a`.
+- Rust model: the lifetime of borrows is checked at compile time.
+
+### 13.3.5 Implementation
+
+- A value of a function type is a pair `{ code, context }`. A lambda without captures has a null context. The code receives the context as a hidden first parameter: a call is `f.code(f.context, args)`. A null `code` raises `UnassignedFunctionCallException`.
+- For each lambda expression the compiler writes two pieces of code: the creation code, where the lambda is written (once: it takes the borrows, makes the copies, does the moves, adds the usages), and the end code, when the last holder of the context lets it go (once: it ends the owned values and gives back the usages and the weak references). A call only passes the context.
+- A lambda that does not escape (given to a call, not stored and not returned) has its context on the stack, with no allocation and no count. A lambda that is stored or returned has its context on the heap, with a count. The code written by the user is the same.
+
+### 13.3.6 Examples
+
+```
+char z = 'z'
+() { Root.Console.log(z) }          // z: read-only borrow
+
+A a = A()
+() { a.val++ }                      // compile error: not listed (&)
+(; (&)a) { a.val++ }                // explicit mutable borrow
+(; ->a) { ... }                     // the lambda owns a
+(; a!) { ... }                      // the lambda owns a copy of a
+
+@Dog d = @Dog()
+() { d.bark() }                     // compile error: list @d or _d
+(; @d) { d.bark() }                 // the lambda holds a usage of d
+(; _d) { enforce d { d.bark() } }   // weak: d may be gone
+
+(i32 a) { Root.Console.log(a) }(42) // prints 42
+
+// accepted by fun(i32):
+(i32 x) { }
+(i32 x; (&)a) { }
+(i32 x; ->a) { }
+(i32 x; a!) { }
+```
 
 ## 13.4 Variadic parameters
 
 ```
-fun LogAll(string level, string messages...) {
-  for string message in messages { r.Console.Log($"{level}: {message}") }
+fun logAll(string level, string messages...) {
+  for string message in messages { r.Console.log($"{level}: {message}") }
 }
-LogAll("info", "started", "ready")
+logAll("info", "started", "ready")
 ```
 
 - `T name...` accepts any number of `T` arguments; it is equivalent to passing a collection of them.
@@ -2848,6 +2945,7 @@ class Exception {
 | 48 | `UsageOfDestroyedObjectException` (12.4, 12.5) | |
 | 49 | `ObjectNotClonableException` (12.6) | |
 | 50 | `WritingOnRefCountWithoutLockingException` (12.7) | |
+| 51 | `UnassignedFunctionCallException` (13.3.2), a child of `NullPointerException` | |
 
 - The list grows during development; each new standard exception takes the next ID.
 - `UsageOfDestroyedObjectException`: raised when an object that is gone is used: a child whose parent ended (12.5), or a variable released with `->` or `is atEnd.` (12.4). It is not silent and is catchable in Debug and Release builds (no `Panic` in Release).
@@ -3171,7 +3269,6 @@ Level 1 = most important, level 3 = least.
 | Level | Warning | Section |
 |---|---|---|
 | 1 | Skipped root file | 19 |
-| 1 | Unlisted local `const` auto-copied into a lambda | 13.3 |
 | 1 | Jump loop between switch cases | 10.5 |
 | 1 | Variable read before assignment | 1.5 |
 | 1 | Array element read before fill or assignment | 6.8.1 |
@@ -3235,7 +3332,7 @@ Level 1 = most important, level 3 = least.
 - Ownership: when a local borrow ends (last use or end of scope)
 - Reference counting (12.7): `->` from a counted variable into a `->T` parameter or a plain receiver (removing the counting); `->pack[0]` on a list of counted items; counted natives and strings (`@i32`, `@string`); counted traits and downcasts; `&` parameters of a primary constructor; whether a weak reference can be made without `_` in the expression; which methods a read-only `@T` can call; the call form of a `(@)T` parameter
 - Reference counting: the order of the locks, waiting and deadlocks with threads; nested locking of the same `(@)T`
-- Reference counting: generics with counted type arguments (`Stack<@Dog>`), after 0.1.0; the `Rc` / `Arc` split, with threads; counted captures of lambdas, and the weak capture of a plain variable (13.3)
+- Reference counting: generics with counted type arguments (`Stack<@Dog>`), after 0.1.0; the `Rc` / `Arc` split, with threads
 - Properties: position of `readonly` / `readwrite` / `writeonly` next to `public` and `static`, and their use together with a body (11.1.4); `override` of a property with only one half; access to a property through a trait-typed value (`any`), left to the compiler
 - DateTime library: import path, timezone database, parsing for `CalendarDate` / `ZonedDateTime`
 - Import paths of the standard library parts (`import stdrnd`)
@@ -3788,3 +3885,15 @@ Level 1 = most important, level 3 = least.
 - 7.2.1, 7.2.2, 12.7 Lock timeouts: `@Player() timeout 100` sets the default wait for the lock of a `(@)T` (milliseconds; 0 when not written: tried once); `enforce p timeout 500 { }` sets it for the variable just before it and wins over the default; no infinite wait; the waiting `enforce` checks its timeout, the waiters are served in order, a timeout is a lock failure (`lockfail` / `default`); every change of the lock state is atomic; 7.2.7: `timeout` in the expression form is open
 
 - 6.8.1 Arrays: a view `a[x..y]` borrows (the array still ends with its owner); a local made a borrow by `a = b` still ends its own old array, and owns again a new array assigned later; tuples inside tuples carry their own arrays; a new tuple nobody keeps ends its arrays with the statement; a result nobody keeps ends its new arrays at once; an existing owner receiving an array from several return values (`dogs, count = pack()`) ends its old one
+
+## Changes in 0.0.22
+
+- 13.3 Lambdas rewritten: parameter types always written, captures after the `;`, a lambda called like a function (also where it is written); the old examples removed
+- 13.3.1 Counted captures `@a`, `(@)a` (writes through `enforce a`), `_a`, `(_)a`, and `->a` of a counted object (its usage moves); an unlisted counted object is a compile error; constants need no listing and give no warning (the level 1 warning of 19.3 is removed); no `this`: fields are captured by their bare names and borrow the object; inside the body the captures are used as any variable (ownership passed on only when the lambda owns the object)
+- 13.3.2 Function types `<return type | fun>(<parameter type>, ...)` with the parameter modes of 13.1 (`string((&)MyObj)`); nullable by default; calling a null one raises `UnassignedFunctionCallException` (15.3, ID 51, a child of `NullPointerException`)
+- 13.3.3 A lambda is a function pointer with a context: `f2 = f1` shares the context and its state, `f1!` makes a new context (owned captures cloned); `f1!` with a `(&)` capture is a compile error
+- 13.3.4, 13.3.5 A `(&)a` capture blocks `a` until the last use of the lambda; storable lambdas have owned or counted captures; the implementation as `{ code, context }` with creation and end code, the context on the stack when the lambda does not escape
+- 6.6 The `sort` lambda returns an int; only its sign counts
+- 13.4 `logAll`, `r.Console.log` (camelCase)
+- 11.1.1 Every secondary constructor reaches the primary one (compile error otherwise); a cycle of constructor chains is a compile error; field initializers run before the constructor body; a chain names one constructor of the class or one of the parent, not both; without one the parent's constructor without parameters runs (none: compile error); the same for the constructors of the traits, which can have overloads and parameters; a constructor without a visibility keyword is private
+- 11.4 A destructor fragment is registered when its constructor starts its own body (the outer constructor of a chain runs its fragment first); it cannot keep a borrowed object parameter; its locals are declared with their type

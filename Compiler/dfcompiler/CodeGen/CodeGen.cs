@@ -39,6 +39,9 @@ sealed class FunSig {
   public bool IsOverride { get; set; }
   public bool IsCtor { get; set; }
   public bool IsInit { get; set; }
+  public FunSig? CtorInit { get; set; }       // a constructor: the init function it runs on the new object (spec 11.1.1)
+  public FunSig? ParentInit { get; set; }     // an init function: the init function of the parent its prologue runs (null: none, or a chain calls one)
+  public bool ChainsToSelf { get; set; }      // an init function that starts with : Foo(...), another constructor of its class
   public bool IsStaticInit { get; set; }
   public Vis Visibility { get; set; } = Vis.Public;
   public int Slot { get; set; } = -1;
@@ -555,7 +558,7 @@ public sealed partial class CodeGen {
     root.OuterHandler = fn.FailLabel;
     var body = new StringBuilder();
     if (f.IsInit) {
-      body.Append(InitPrologue(f.Class!));
+      body.Append(InitPrologue(f));
     }
     EmitHoists(root, body, "  ");
     EmitFrameBody(root, body, 1);
@@ -680,7 +683,7 @@ public sealed partial class CodeGen {
         } else if (k == "Call" && e.Type == "string") {
           // a string nobody keeps ends here
           sb.Append(pad).Append(e.Fresh ? $"df_str_free({e.Code});\n" : $"(void)({e.Code});\n");
-        } else if (k is "Call" or "PostInc" or "PostDec" or "PreInc" or "PreDec") {
+        } else if (k is "Call" or "CtorChain" or "PostInc" or "PostDec" or "PreInc" or "PreDec") {
           // a result nobody keeps: say so to the C compiler (a call that checks an exception is a statement expression)
           sb.Append(pad).Append(e.Type == "void" || IsMulti(e.Type) ? e.Code : $"(void)({e.Code})").Append(";\n");
         } else {
@@ -1386,6 +1389,8 @@ public sealed partial class CodeGen {
         return Transmute(n, scope);
       case "Call":
         return RemoveCountingCall(n, scope) ?? CloneCall(n, scope) ?? Call(n, scope);
+      case "CtorChain":
+        return CtorChainCall(n, scope);
       case "Member":
         return CountsMember(n, scope) ?? MemberValue(n, scope);
       case "SafeMember":
@@ -2131,6 +2136,10 @@ public sealed partial class CodeGen {
 
   // positional arguments in order, named ones anywhere, defaults for the rest
   Expr UserCall(FunSig f, List<Node> args, Scope scope, Node at) {
+    if (f.IsCtor && f.Visibility == Vis.Private && currentClass != f.Class && !LibraryCode) {
+      // a private constructor (spec 11.1.1): only the code of its class calls it, its static functions included
+      throw Error($"this constructor of {DisplayName(f.Class!.Name)} is private: only the code of {DisplayName(f.Class.Name)} can call it", at);
+    }
     var (slots, problem) = MapArgs(f, args);
     if (slots == null) {
       throw Error(problem!, at);

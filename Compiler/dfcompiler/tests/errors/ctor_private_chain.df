@@ -1,0 +1,8 @@
+class A {
+  A(i32 v) { }
+  public A() { }
+}
+class B : A {
+  public B() : A(1) { }
+}
+B b = B()

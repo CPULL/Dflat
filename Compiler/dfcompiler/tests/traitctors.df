@@ -1,0 +1,87 @@
+// Trait constructors with parameters (spec 11.1.1, 11.2, step 3): a constructor of the class calls them in its chain,
+// : Trait(args); overloads; the property initializers of the trait run before its constructor body; order parent, traits, class
+alias Root as r
+
+trait Named {
+  string name
+  public string trail
+  Named(string name) {
+    this.name = name
+    trail += "Named(s)"
+  }
+  Named(string first, string last) {
+    name = first + " " + last
+    trail += "Named(s,s)"
+  }
+  public fun string title() { "~" + name + "~" }
+}
+
+trait Scored {
+  i32 score
+  Scored() {
+    score = 1
+  }
+  Scored(i32 start) {
+    score = start
+  }
+  public fun i32 points() { score }
+}
+
+// a trait with a constructor without parameters only: it runs by itself
+trait Stamped {
+  i32 stamp
+  Stamped() { stamp = 77 }
+  public fun i32 when() { stamp }
+}
+
+public class Player : Named, Scored, Stamped {
+  public i32 level = 1
+
+  public Player(string name) : Named(name) {
+    trail += ">Player(s)"
+  }
+  public Player(string first, string last, i32 points) : Named(first, last), Scored(points) {
+    trail += ">Player(s,s,i)"
+  }
+  public Player() : Player("anon") {
+    level = 0
+  }
+  public fun string show() { $"{title()} {points()} {when()} {level} {trail}" }
+}
+
+// a parent with a constructor, a trait with parameters in the child
+public class Base {
+  public string from = "?"
+  public Base(string from) { this.from = from }
+}
+public class Hero : Base, Named {
+  public Hero(string name) : Base("base"), Named(name) { }
+  public fun string show() { $"{title()} {from} {trail}" }
+}
+
+// the trait constructor fails: the exception reaches the caller
+trait Positive {
+  i32 v
+  Positive(i32 v) {
+    if v < 0 then throw Exception("negative")
+    this.v = v
+  }
+  public fun i32 value() { v }
+}
+public class Amount : Positive {
+  public Amount(i32 v) : Positive(v) { }
+}
+
+r.Console.log(Player("Ann").show())
+r.Console.log(Player("Bob", "Lee", 9).show())
+r.Console.log(Player().show())
+r.Console.log(Hero("Zed").show())
+fun string tryAmount(i32 v) {
+  Amount a = Amount(v)
+  return "made " + a.value().toStr()
+  catch Exception ex {
+    return "failed: " + ex.message
+  }
+}
+r.Console.log(tryAmount(4))
+r.Console.log(tryAmount(-4))

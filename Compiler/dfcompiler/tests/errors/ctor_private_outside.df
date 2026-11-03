@@ -1,0 +1,6 @@
+class A {
+  public i32 v
+  A(i32 v) { this.v = v }
+  public static fun A make() { A(1) }
+}
+A a = A(2)

@@ -1,0 +1,9 @@
+trait Named {
+  string name
+  Named(string name) { this.name = name }
+}
+class C : Named {
+  public C(string s) : Named(s) { }
+  public C() : C("a"), Named("b") { }
+}
+C c = C()

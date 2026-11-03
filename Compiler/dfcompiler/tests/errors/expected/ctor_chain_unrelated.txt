@@ -1,0 +1,1 @@
+ctor_chain_unrelated.df(4): error: 'C' is not A, its parent or one of its traits: a constructor chain calls only their constructors

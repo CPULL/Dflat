@@ -1,0 +1,1 @@
+traitctor_self_and_trait.df(7): error: a constructor that calls another constructor of C cannot also call Named: the other constructor does it

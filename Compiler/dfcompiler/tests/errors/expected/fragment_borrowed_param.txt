@@ -1,0 +1,1 @@
+fragment_borrowed_param.df(6): error: the destructor fragment keeps 'res' until the object dies: a borrowed object cannot be kept, take it with ->Res res

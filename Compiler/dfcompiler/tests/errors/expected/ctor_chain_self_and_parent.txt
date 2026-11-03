@@ -1,0 +1,1 @@
+ctor_chain_self_and_parent.df(7): error: a constructor that calls another constructor of B cannot also call A: the other constructor does it

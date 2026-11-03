@@ -1,0 +1,5 @@
+class A {
+  public i32 v
+  public A(i32 x) : A(x + 1) { }
+}
+A a = A(1)

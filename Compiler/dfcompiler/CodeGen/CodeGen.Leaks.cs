@@ -173,6 +173,12 @@ public sealed partial class CodeGen {
           ctx.Flow.Raises.Add((StandardExceptions["NullPointerException"], ctx.Cover));
         }
         break;
+      case "CtorChain":
+        if (!ctx.InCatchBody) {
+          // any constructor of that class or trait (spec 11.1.1)
+          ctx.Flow.Calls.Add((new HashSet<string> { node.Text + (traits.ContainsKey(node.Text!) ? TraitInitSuffix : InitsSuffix) }, ctx.Cover));
+        }
+        break;
       case "Call":
         if (!ctx.InCatchBody) {
           var names = new HashSet<string>();
@@ -320,13 +326,13 @@ public sealed partial class CodeGen {
           }
         }
         // a constructor runs its init function; an init function runs the init function of its parent
-        if (fun.IsCtor && fun.Class!.Init != null) {
-          foreach (int exception in leaks[fun.Class.Init].Where(leaked => leaked != SilentLeak).ToList()) {
+        if (fun.IsCtor && (fun.CtorInit ?? fun.Class!.Init) is FunSig ctorInit) {
+          foreach (int exception in leaks[ctorInit].Where(leaked => leaked != SilentLeak).ToList()) {
             Add(exception);
           }
         }
-        if (fun.IsInit && fun.Class!.Parent?.Init != null) {
-          foreach (int exception in leaks[fun.Class.Parent.Init].Where(leaked => leaked != SilentLeak).ToList()) {
+        if (fun.IsInit && fun.ParentInit != null) {
+          foreach (int exception in leaks[fun.ParentInit].Where(leaked => leaked != SilentLeak).ToList()) {
             Add(exception);
           }
         }

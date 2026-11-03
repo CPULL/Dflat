@@ -1,0 +1,1 @@
+ctor_no_default.df(5): error: missing argument 'a' for 'Foo'

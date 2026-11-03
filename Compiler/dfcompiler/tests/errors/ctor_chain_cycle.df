@@ -1,0 +1,6 @@
+class A {
+  public i32 v
+  public A(i32 x) : A("s") { }
+  public A(string s) : A(1) { }
+}
+A a = A(1)

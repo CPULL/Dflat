@@ -1,0 +1,126 @@
+// Constructor chains (spec 11.1.1, step 2): : Foo(...) to another constructor of the class (primary or body),
+// : Parent(...) to a constructor of the parent, the parent's constructor without parameters when none is named
+alias Root as r
+
+// a primary constructor reached by every other constructor, directly or through another one
+public class Foo(i32 bar, string baz) {
+  public i32 bar
+  public string baz
+  public u64 doubled = 2 * 2
+  public string log = "primary"
+
+  public Foo(i32 total) : Foo(total, "x") {
+    doubled = 7
+    log += ">total"
+  }
+  public Foo() : Foo(5) {
+    log += ">empty"
+  }
+  public Foo(string only) : Foo((i32)only.len, only) { }
+  public fun string show() { $"{bar} {baz} {doubled} {log}" }
+}
+
+// body constructors only, chained among themselves
+public class Range {
+  public i32 low
+  public i32 high
+  public i32 steps = 0
+
+  public Range(i32 low, i32 high) {
+    this.low = low
+    this.high = high
+    steps++
+  }
+  public Range(i32 high) : Range(0, high) {
+    steps++
+  }
+  public Range() : Range(10) {
+    steps++
+  }
+  public fun string show() { $"{low}..{high} steps {steps}" }
+}
+
+// a parent with constructors in its body: the child names one, or the one without parameters runs
+public class Animal {
+  public string name
+  public i32 legs = 4
+  public string trail = ""
+
+  public Animal() {
+    name = "nobody"
+    trail += "A()"
+  }
+  public Animal(string name, i32 legs) {
+    this.name = name
+    this.legs = legs
+    trail += "A(n,l)"
+  }
+  public fun string show() { $"{name} {legs} {trail}" }
+}
+
+public class Bird : Animal {
+  public bool flies = true
+
+  public Bird(string name) : Animal(name, 2) {
+    trail += ">Bird"
+  }
+  public Bird(string name, bool flies) : Bird(name) {
+    this.flies = flies
+    trail += ">flies"
+  }
+  public Bird() {
+    trail += ">plain"
+  }
+  public fun string all() { show() + " " + flies.toStr() }
+}
+
+// a child with a primary constructor: the parent's constructor without parameters runs
+public class Dog(string nick) : Animal {
+  public string nick
+}
+
+// a parent with a primary constructor that takes parameters: the child passes them through its chain
+public class Shape(string kind) {
+  public string kind
+}
+public class Square : Shape {
+  public i32 side
+  public Square(i32 side) : Shape("square") {
+    this.side = side
+  }
+}
+
+// a chained constructor that fails: the exception reaches the caller
+public class Strict {
+  public i32 v
+  public Strict(i32 v) {
+    if v < 0 then throw Exception("negative")
+    this.v = v
+  }
+  public Strict(string s) : Strict((i32)s.len - 3) { }
+}
+
+r.Console.log(Foo(1, "a").show())
+r.Console.log(Foo(2).show())
+r.Console.log(Foo().show())
+r.Console.log(Foo("word").show())
+r.Console.log(Range(3, 4).show())
+r.Console.log(Range(8).show())
+r.Console.log(Range().show())
+r.Console.log(Animal().show())
+r.Console.log(Bird("Tweety").all())
+r.Console.log(Bird("Pingu", false).all())
+r.Console.log(Bird().all())
+Dog d = Dog("Rex")
+r.Console.log(d.show() + " " + d.nick)
+Square sq = Square(3)
+r.Console.log(sq.kind + " " + sq.side.toStr())
+fun string tryStrict(string s) {
+  Strict x = Strict(s)
+  return "made " + x.v.toStr()
+  catch Exception ex {
+    return "failed: " + ex.message
+  }
+}
+r.Console.log(tryStrict("hello"))
+r.Console.log(tryStrict("hi"))

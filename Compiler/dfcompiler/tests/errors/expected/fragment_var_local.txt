@@ -1,0 +1,1 @@
+fragment_var_local.df(3): error: the destructor fragment keeps 'n': write its type instead of var

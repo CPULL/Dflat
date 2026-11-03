@@ -1,0 +1,6 @@
+trait Named {
+  string name
+  Named(string name) { this.name = name }
+}
+class C(i32 x) : Named { }
+C c = C(1)

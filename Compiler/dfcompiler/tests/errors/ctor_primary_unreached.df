@@ -1,0 +1,7 @@
+class Foo(i32 bar) {
+  public i32 bar
+  public Foo(string s) {
+    bar = s.len
+  }
+}
+Foo f = Foo("abc")

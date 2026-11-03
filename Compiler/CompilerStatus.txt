@@ -1,4 +1,4 @@
-Compiler version 0.0.45 alpha for version 0.0.21 of the specs 2026/11/02
+Compiler version 0.0.50 alpha for version 0.0.22 of the specs 2026/11/03
 
 Changes from the previous version -----------------------
 - a declaration can carry its own atEnd (spec 14.2): Some a = Some() atEnd { } is atEnd of a, also after a multiple declaration; atEnd of a, b { } no longer runs when all the listed variables are null
@@ -18,6 +18,11 @@ Changes from the previous version -----------------------
 - fun (@)T results (var x = f() is (@)T) and list<(@)T> / vec<(@)T> (hidden box RcRw__T; replace / takeAt / pop give a (@)T, the loop variable can be enforced) (spec 12.7)
 - read/write counted objects (spec 7.2, 12.7): (@)T and (_)T variables, parameters and fields; @T() timeout ms (default wait of the lock); enforce takes their lock (enforce p timeout 500 for one variable), lockfail [on] and default handle a busy lock, the locks end after the last atEnd; a write through a (@)T without the lock raises WritingOnRefCountWithoutLockingException; a read-only @T / _T cannot make a read/write one. No threads yet: a busy lock is held by the same thread and fails at once (no wait); writes made inside methods of the object are not checked
 - array leaks closed (spec 6.8.1): tuples inside tuples own their arrays; x, n = f() into an owner ends its old array; a local assigned a borrowed array (a = b) ends its own one and owns again a new one later (a run-time flag); views used at once (len, for, index, copy, runtime reads) no longer stop the array from ending; a new tuple nobody keeps (f().0, g(f())) ends its arrays with the statement; a result nobody keeps (f() alone) ends its new arrays
+- constructors in the class body (spec 11.1.1, step 1): public Foo(params) { body }, overloads, defaults, named arguments; the field initializers run before the body; no default constructor when one is written. A class with a primary constructor must reach it (compile error until chains are built); chains, private constructors, atEnd fragments, exception classes and subclasses of such a class are not supported yet
+- constructor chains (spec 11.1.1, step 2): : Foo(...) to another constructor of the class (primary or body), : Parent(...) to a constructor of the parent (also one with header parameters); without one the parent's constructor without parameters runs (none: compile error); a cycle of chains is a compile error; a subclass of a class with body constructors works. Not yet: trait constructors in a chain, private constructors, atEnd fragments, constructors in exception classes
+- trait constructors with parameters (spec 11.1.1, 11.2, step 3): a trait can have several constructors (overloads); a constructor in the class body calls one with : Trait(args) in its chain; a trait whose constructors all take parameters must be named there (a primary or default constructor runs only one without parameters: compile error otherwise); the property initializers of the trait run before its constructor body. Not yet: a trait constructor that chains to its parent trait
+- private constructors (spec 11.1.1, step 4): a constructor in the body without public is private; only the code of its class calls it (static functions, methods, other constructors through a chain); a subclass cannot call it (chain or implicit: compile error); a class with only private constructors cannot be inherited
+- destructor fragments (spec 11.4, step 5): } atEnd { } after a constructor in the body runs when the object dies, in reverse order of registration (registered after the chain, the traits and the fields), before the class atEnd; the locals and parameters it uses live in hidden fields of the object until then (a borrowed object parameter must be taken with ->, a var local needs its type); a constructor that fails still runs the fragments it registered. Not yet: array, counted, weak or reference variables in a fragment
 
 Done -----------------------
 
@@ -123,7 +128,16 @@ Phase 1  Classes core                                              DONE
   statics: properties, static const, static functions, initialized at program start in dependency order (cycle = error)
   ?. on objects, NullPointerException on null access (catchable), identity ==, objects in arrays, tuples, parameters
   default toStr: Px { a: .., b: .., c: .., ... } (first 3 fields, dots when more)
-  not yet: secondary constructors, constructor chains, class atEnd, private constructors, operator ==
+  constructors in the body (2026-11-03): public Foo(params) { }, overloads, defaults, named and reference parameters, ->T parameters, a body after
+  the field initializers, no default constructor; a class with a primary constructor must reach it (error); each one has its own init function
+  chains (2026-11-03): : Foo(...) to another constructor of the class, : Parent(...) to one of the parent; one of each, not both; the parent's
+  constructor without parameters runs when none is named (none: error); cycles are errors (found when the chain is compiled)
+  trait constructors (2026-11-03): : Trait(args) in the chain of a body constructor, overloads in the trait; without one the trait's
+  constructor without parameters runs (none: error); a trait of the parent is set up by the parent's constructor
+  private constructors (2026-11-03): only the code of the class calls them; a subclass cannot; only private ones: cannot be inherited
+  destructor fragments (2026-11-03): the variables they use become hidden fields (__f<n>_<name>), __fseq orders them
+  not yet: trait constructors that chain to the parent trait, constructors in exception classes,
+  variadic constructor parameters, arguments to the parent from a primary constructor (the header has no syntax for it), operator ==
 Phase 2  Inheritance                                               DONE
   single parent (Root.Class in a header is a level 1 warning), fields of the parent first, construction order parent -> class
   override (mandatory; the visibility of the original; same return type), parent.Method(), virtual calls through a vtable
@@ -144,7 +158,7 @@ Phase 3  Traits                                                    DONE
   2026-10-25 (spec 0.0.15): private trait members (only the trait and, read-only for fields, its sub-traits), asparent / unrestricted in traits,
   executeBefore / executeAfter (one trait per method: a sub-trait cannot redeclare the method, so the chain has one link)
   not yet: the check that every constructor sets the public trait fields, the diamond errors (two defaults, two constructor calls)
-  limits: generic traits, placeholders, trait constructors with parameters (they need secondary constructors),
+  limits: generic traits, placeholders, trait constructors that chain to the parent trait,
   a trait redeclaring a function of its parent trait, static members in traits, static / specific dispatch is not chosen (always dynamic)
 Phase 4  Ownership                                                 IN PROGRESS
  4a  one owner, destruction, moves                                 DONE
@@ -162,7 +176,7 @@ Phase 4  Ownership                                                 IN PROGRESS
   atEnd after a function (final cleanup, runs before the objects of the function end), atEnd of a, b { } (as a scope atEnd)
   a result that nobody keeps (a call used as a statement) ends at once
   not yet in 4a: temporaries inside an expression (they are never destroyed), objects in arrays and tuples (not owned,
-  not destroyed), static fields (not tracked), constructor atEnd fragments (need secondary constructors), atEnd after other statements (form 3),
+  not destroyed), static fields (not tracked), atEnd after other statements (form 3),
   use after a move is found when it runs (NullPointerException), not at compile time, no lifetime check for borrows
  4b  reference counting (spec 12.7), .clone(), x! copy                                                                 IN PROGRESS
   clone (2026-10-30, spec 12.6): a!, a.clone(), the default clone, a clone() of the class, notclonable; maps and sets, add(other) and copyFrom (2026-10-31); tryClone() (2026-10-31); not yet: c[a..b]!, tuple fields with strings or objects

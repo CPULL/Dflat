@@ -1,0 +1,5 @@
+class Foo {
+  public i32 bar
+  public Foo(i32 a) { bar = a }
+}
+Foo f = Foo()

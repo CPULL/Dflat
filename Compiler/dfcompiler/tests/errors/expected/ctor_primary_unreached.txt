@@ -1,0 +1,1 @@
+ctor_primary_unreached.df(3): error: a constructor of Foo must reach the primary constructor: write : Foo(...) after its parameters

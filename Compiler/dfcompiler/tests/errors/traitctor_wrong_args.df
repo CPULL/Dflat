@@ -1,0 +1,8 @@
+trait Named {
+  string name
+  Named(string name) { this.name = name }
+}
+class C : Named {
+  public C() : Named(1) { }
+}
+C c = C()

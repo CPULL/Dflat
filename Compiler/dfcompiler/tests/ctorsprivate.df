@@ -1,0 +1,47 @@
+// Private constructors (spec 11.1.1, step 4): a constructor without 'public' is private; only the code of its class calls it
+// (its static functions, methods, other constructors); the public constructors of the class can chain to it
+alias Root as r
+
+public class Token {
+  public string text
+  public i32 serial
+  static i32 made = 0
+
+  Token(string text, i32 serial) {
+    this.text = text
+    this.serial = serial
+  }
+  public Token(string text) : Token(text, 0) { }
+  public static fun Token next(string text) {
+    made++
+    return Token(text, made)
+  }
+  public fun Token copy() { Token(text + "'", serial) }
+  public fun string show() { $"{text}#{serial}" }
+}
+
+// only private constructors: made through a static function (a factory)
+public class Config {
+  public string mode
+  Config(string mode) { this.mode = mode }
+  public static fun Config debug() { Config("debug") }
+  public static fun Config release() { Config("release") }
+}
+
+// a parent with a private constructor and a public one: the child uses the public one
+public class Shape {
+  public string kind = "?"
+  Shape() { kind = "secret" }
+  public Shape(string kind) : Shape() { this.kind = kind + "!" }
+}
+public class Circle : Shape {
+  public Circle() : Shape("circle") { }
+}
+
+r.Console.log(Token("plain").show())
+r.Console.log(Token.next("a").show())
+r.Console.log(Token.next("b").show())
+r.Console.log(Token.next("c").copy().show())
+r.Console.log(Config.debug().mode + " " + Config.release().mode)
+r.Console.log(Shape("square").kind)
+r.Console.log(Circle().kind)

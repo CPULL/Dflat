@@ -176,15 +176,14 @@ public sealed partial class CodeGen {
           break;
         }
         case "Constructor": {
-          var parameters = member.Children.First(child => child.Kind == "Params");
-          if (parameters.Children.Count > 0) {
-            throw NotSupported("Trait constructors with parameters (they need secondary constructors)", member);
+          if (member.Children.FirstOrDefault(child => child.Kind == "Chain") is Node chain) {
+            throw NotSupported("Trait constructors that chain (: Super(...))", chain);
           }
-          if (member.Children.Any(child => child.Kind == "Chain") || trait.CtorBlock != null) {
-            throw NotSupported("Trait constructors that chain or repeat", member);
+          if (member.Children.First(child => child.Kind == "Params").Children.FirstOrDefault(p => p.Kind == "VariadicParam") is Node variadic) {
+            throw NotSupported("Variadic constructor parameters", variadic);
           }
-          trait.CtorBlock = member.Children.FirstOrDefault(child => child.Kind == "Block");
           RejectAtEnd(member);
+          trait.CtorNodes.Add(member);              // overloads, like the constructors of a class (spec 11.1.1, 11.2)
           break;
         }
         case "Fun":
@@ -318,26 +317,49 @@ public sealed partial class CodeGen {
   }
 
   // the property initializers and the constructor of a trait run in a function of the trait (__tinit), so they see its private members
+  // a constructor with parameters is one more __tinit (overloads); the class names it with : Trait(...) (spec 11.1.1)
   void RegisterTraitInit(ClassInfo trait) {
     var statements = new List<Node>();
     foreach (var field in trait.Fields.Where(field => field.Init != null)) {
       statements.Add(Assignment(field.Name, field.Init!, field.At, false));
     }
-    if (trait.CtorBlock != null) {
-      statements.AddRange(trait.CtorBlock.Children);
-    }
-    if (statements.Count == 0) {
+    if (trait.CtorNodes.Count == 0) {
+      if (statements.Count == 0) {
+        return;
+      }
+      var block = Synthetic("Block", trait.Node);
+      foreach (var statement in statements) {
+        block.Add(statement);
+      }
+      var node = Synthetic("Fun", trait.Node, "__tinit").Add(Synthetic("Params", trait.Node)).Add(block);
+      var f = RegisterFun(node, null, trait)!;
+      f.Class = trait;
+      trait.InitFun = f;
       return;
     }
-    var block = Synthetic("Block", trait.Node);
-    foreach (var statement in statements) {
-      block.Add(statement);
+    foreach (var member in trait.CtorNodes) {
+      var block = Synthetic("Block", member);
+      foreach (var statement in statements) {
+        block.Add(CloneNode(statement));
+      }
+      if (member.Children.FirstOrDefault(child => child.Kind == "Block") is Node body) {
+        foreach (var statement in body.Children) {
+          block.Add(statement);
+        }
+      }
+      var node = Synthetic("Fun", member, "__tinit").Add(member.Children.First(child => child.Kind == "Params")).Add(block);
+      FunSig f;
+      try {
+        f = RegisterFun(node, null, trait)!;
+      } catch (CompileException e) {
+        throw new CompileException(e.Message.Replace($"function '{trait.Name}{TraitInitSuffix}'", $"a constructor of the trait {trait.Name}"), e.Line);
+      }
+      f.Class = trait;
+      trait.InitFun ??= f;
     }
-    var node = Synthetic("Fun", trait.Node, "__tinit").Add(Synthetic("Params", trait.Node)).Add(block);
-    var f = RegisterFun(node, null, trait)!;
-    f.Class = trait;
-    trait.InitFun = f;
   }
+
+  const string TraitInitSuffix = ".__tinit";
 
   // for every class: what answers each method of each trait it implements
   void BuildImpls(ClassInfo cls) {
@@ -431,10 +453,21 @@ public sealed partial class CodeGen {
 
   // ---------------------------------------------------------------- construction
 
-  // the traits this class introduces, parent traits first: a call of TraitName.__tinit() each (property initializers, then the constructor body)
-  List<Node> TraitInitStatements(ClassInfo cls, Node at) {
+  // the traits this class introduces, parent traits first: a call of TraitName.__tinit() each (property initializers, then the constructor body).
+  // named: the trait constructors a constructor of the class calls in its chain (: Trait(args)); null for the primary constructor, which
+  // can only run the constructors without parameters
+  List<Node> TraitInitStatements(ClassInfo cls, Node at, Dictionary<string, Node>? named) {
     var statements = new List<Node>();
     foreach (var trait in IntroducedTraits(cls).Where(trait => trait.InitFun != null)) {
+      if (named != null && named.TryGetValue(trait.Name, out var call)) {
+        statements.Add(Synthetic("ExprStmt", call).Add(Synthetic("CtorChain", call, trait.Name).Add(call.Children[0])));
+        continue;
+      }
+      if (!funs[trait.Name + TraitInitSuffix].Any(init => init.Params.Count == 0)) {
+        throw Error(named == null
+          ? $"the constructor of the trait {trait.Name} takes parameters: {cls.Name} must call it from a constructor in its body, with : {trait.Name}(...)"
+          : $"a constructor of {cls.Name} must call the constructor of the trait {trait.Name} (it takes parameters): write : {trait.Name}(...) after its parameters", at);
+      }
       var callee = Synthetic("Member", at, "__tinit").Add(Synthetic("Name", at, trait.Name));
       statements.Add(Synthetic("ExprStmt", at).Add(Synthetic("Call", at).Add(callee).Add(Synthetic("Args", at))));
     }

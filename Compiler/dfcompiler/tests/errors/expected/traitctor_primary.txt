@@ -1,0 +1,1 @@
+traitctor_primary.df(5): error: the constructor of the trait Named takes parameters: C must call it from a constructor in its body, with : Named(...)

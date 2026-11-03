@@ -1,0 +1,1 @@
+ctor_duplicate.df(4): error: a constructor of Foo with these parameter types is already defined

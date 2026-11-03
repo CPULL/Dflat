@@ -1,0 +1,12 @@
+class Res {
+  public i32 v
+}
+class A {
+  public i32 last
+  public A(Res res) {
+  } atEnd {
+    last = res.v
+  }
+}
+Res x = Res()
+A a = A(x)

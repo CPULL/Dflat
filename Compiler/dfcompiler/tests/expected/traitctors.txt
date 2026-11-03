@@ -1,0 +1,7 @@
+~Ann~ 1 77 1 Named(s)>Player(s)
+~Bob Lee~ 9 77 1 Named(s,s)>Player(s,s,i)
+~anon~ 1 77 0 Named(s)>Player(s)
+~Zed~ base Named(s)
+made 4
+failed: negative
+---- exit code 0 ----

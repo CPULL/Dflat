@@ -1,0 +1,8 @@
+class A {
+  A(i32 v) { }
+  public A() { }
+}
+class B : A {
+  public fun A make() { A(3) }
+}
+B b = B()

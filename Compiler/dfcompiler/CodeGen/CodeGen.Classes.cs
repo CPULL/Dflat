@@ -58,6 +58,8 @@ sealed class ClassInfo {
   public List<FunSig> Vtable { get; } = new();                // virtual slots, the parent's first
   public FunSig? Ctor { get; set; }
   public FunSig? Init { get; set; }
+  public List<Node> CtorNodes { get; } = new();              // the constructors written in the body (spec 11.1.1)
+  public List<Node> Fragments { get; } = new();              // the atEnd blocks after its constructors: destructor fragments (spec 11.4)
 
   // traits: a trait is a ClassInfo that is never instantiated
   public bool IsException { get; set; }                       // derives (directly or not) from Exception
@@ -68,7 +70,6 @@ sealed class ClassInfo {
   public List<ClassInfo> Traits { get; } = new();             // the traits a class lists in its header
   public List<ImplInfo> Impls { get; } = new();
   public List<FunSig> TraitMethods { get; } = new();          // the methods of a trait, in slot order
-  public Node? CtorBlock { get; set; }                        // the body of the constructor of a trait
   public FunSig? InitFun { get; set; }                        // a trait: its property initializers and constructor body (__tinit)
   public HashSet<string> Hooked { get; } = new();             // a trait: the methods with executeBefore / executeAfter (the class implements __impl_<name>)
   public FieldInfo? ParentField { get; set; }                 // a child class: its reference to the parent (spec 12.5)
@@ -397,7 +398,8 @@ public sealed partial class CodeGen {
         case "FunVar":
           break;                                // registered after all fields
         case "Constructor":
-          throw NotSupported("Secondary constructors", member);
+          cls.CtorNodes.Add(member);            // built with the constructor (BuildConstructor)
+          break;
         case "Class":
         case "Trait":
         case "Enum":
@@ -631,15 +633,9 @@ public sealed partial class CodeGen {
   // The primary constructor: an init function (fills the fields of one class on an existing object) and the
   // constructor that allocates the object and calls it. Construction order: parent, then the class body.
   void BuildConstructor(ClassInfo cls) {
-    if (cls.Parent != null && cls.Parent.PrimaryParams.Count > 0) {
-      throw NotSupported($"Passing arguments to the constructor of the parent class {cls.Parent.Name}", cls.Node);
-    }
     var at = cls.Node;
     var block = Synthetic("Block", at);
     var ctorFields = cls.Fields.Where(field => !field.IsStatic).ToList();
-    foreach (var statement in TraitInitStatements(cls, at)) {
-      block.Add(statement);
-    }
     foreach (var field in ctorFields.Where(field => field.FromParam)) {
       Node source = Synthetic("Name", at, field.Name);
       if (cls.PrimaryParams.First(param => param.Name == field.Name).IsGift) {
@@ -655,28 +651,65 @@ public sealed partial class CodeGen {
       }
       block.Add(Assignment(field.Name, field.Init!, at, false, field.IsWeak));
     }
-    var initNode = Synthetic("Fun", at, "__init").Add(Synthetic("Params", at)).Add(block);
+    // the init functions of the class (Foo.__ctor, what a chain : Foo(...) calls) and its constructors (Foo)
+    var inits = new List<FunSig>();
+    var ctors = new List<FunSig>();
+    funs[cls.Name + InitsSuffix] = inits;
+    funs[cls.Name] = ctors;
+    if (cls.Parent != null && !cls.Parent.IsException && funs[cls.Parent.Name].All(ctor => ctor.Visibility == Vis.Private)) {
+      throw Error($"{DisplayName(cls.Parent.Name)} has only private constructors: it cannot be inherited", cls.Node);
+    }
+    var implicitParent = ImplicitParentInit(cls);
+    bool hasPrimary = cls.Node.Children.Any(child => child.Kind == "PrimaryCtor");
+    if (hasPrimary || cls.CtorNodes.Count == 0) {
+      if (cls.Parent != null && implicitParent == null && PrivateParentInit(cls)) {
+        throw Error($"the constructor of {DisplayName(cls.Parent.Name)} without parameters is private: a subclass cannot call it", cls.Node);
+      }
+      if (cls.Parent != null && implicitParent == null) {
+        throw NotSupported($"Passing arguments to the constructor of the parent class {cls.Parent.Name}", cls.Node);
+      }
+      // the traits first (their constructors without parameters), then the fields
+      var primaryBlock = Synthetic("Block", at);
+      foreach (var statement in TraitInitStatements(cls, at, null).Concat(block.Children)) {
+        primaryBlock.Add(statement);
+      }
+      var initNode = Synthetic("Fun", at, "__init").Add(Synthetic("Params", at)).Add(primaryBlock);
 
-    var ctorParams = cls.IsException ? ExceptionConstructorParams(cls) : cls.PrimaryParams.ToList();
-    var initSig = new FunSig(cls.Name + ".__init", "void", ctorParams, initNode, null) {
-      Class = cls,
-      IsInit = true,
-      Visibility = Vis.Public
-    };
-    funs[initSig.Name] = new List<FunSig> { initSig };
-    var ctorSig = new FunSig(cls.Name, cls.Name, ctorParams.ToList(), initNode, null) {
-      Class = cls,
-      IsCtor = true,
-      Visibility = Vis.Public
-    };
-    funs[cls.Name] = new List<FunSig> { ctorSig };
-    cls.Init = initSig;
-    cls.Ctor = ctorSig;
+      var ctorParams = cls.IsException ? ExceptionConstructorParams(cls) : cls.PrimaryParams.ToList();
+      var initSig = new FunSig(cls.Name + ".__init", "void", ctorParams, initNode, null) {
+        Class = cls,
+        IsInit = true,
+        Visibility = Vis.Public,
+        ParentInit = implicitParent
+      };
+      inits.Add(initSig);
+      var ctorSig = new FunSig(cls.Name, cls.Name, ctorParams.ToList(), initNode, null) {
+        Class = cls,
+        IsCtor = true,
+        Visibility = Vis.Public,
+        CtorInit = initSig
+      };
+      ctors.Add(ctorSig);
+    }
+    if (cls.CtorNodes.Count > 0) {
+      BuildBodyConstructors(cls, block, hasPrimary, implicitParent, inits, ctors);
+    }
+    // what a child runs when its constructor names no constructor of this class: the one without parameters
+    cls.Init = inits.FirstOrDefault(init => init.Params.Count == 0) ?? (cls.IsException ? inits[0] : null);
+    cls.Ctor = ctors[0];
 
     // the atEnd after the class is its destructor: a function of the object, run when it ends
+    // the destructor fragments run first, the last registered first, then the atEnd of the class (spec 11.4)
     var trailing = cls.Node.Children.FirstOrDefault(child => child.Kind == "AtEnd" && child.Text == "trailing");
-    if (trailing != null) {
-      var dtorNode = Synthetic("Fun", at, "__dtor").Add(Synthetic("Params", at)).Add(trailing.Children[0]);
+    if (trailing != null || cls.Fragments.Count > 0) {
+      var dtorBlock = Synthetic("Block", at);
+      if (cls.Fragments.Count > 0) {
+        dtorBlock.Add(FragmentRunner(cls, at));
+      }
+      foreach (var statement in trailing?.Children[0].Children ?? new List<Node>()) {
+        dtorBlock.Add(statement);
+      }
+      var dtorNode = Synthetic("Fun", at, "__dtor").Add(Synthetic("Params", at)).Add(dtorBlock);
       var dtor = new FunSig(cls.Name + ".__dtor", "void", new List<ParamSig>(), dtorNode, null) {
         Class = cls,
         IsDtor = true,
@@ -699,6 +732,285 @@ public sealed partial class CodeGen {
       funs[staticSig.Name] = new List<FunSig> { staticSig };
       field.StaticInit = staticSig;
     }
+  }
+
+  // The constructors written in the class body (spec 11.1.1): overloads of the class name (13.2). Each one has its own init
+  // function. Without a chain: the parent's constructor without parameters, the fields as in the primary constructor (traits,
+  // initializers), then its body. With : Foo(...): that constructor of the class does all of it, then the body. With : Parent(...):
+  // that constructor of the parent, the fields, then the body. There is no default constructor.
+  void BuildBodyConstructors(ClassInfo cls, Node fieldBlock, bool hasPrimary, FunSig? implicitParent, List<FunSig> inits, List<FunSig> ctors) {
+    if (cls.IsException) {
+      throw NotSupported("Constructors in the body of an exception class", cls.CtorNodes[0]);
+    }
+    int index = 0;
+    foreach (var member in cls.CtorNodes) {
+      Node? selfCall = null;
+      Node? parentCall = null;
+      var traitCalls = new Dictionary<string, Node>();
+      var chain = member.Children.FirstOrDefault(child => child.Kind == "Chain");
+      foreach (var call in chain?.Children ?? new List<Node>()) {
+        string target = call.Text!;
+        if (target == cls.Name) {
+          selfCall = selfCall == null ? call : throw Error($"a constructor calls one other constructor of {cls.Name}", call);
+        } else if (cls.Parent != null && target == cls.Parent.Name) {
+          parentCall = parentCall == null ? call : throw Error($"a constructor calls one constructor of {cls.Parent.Name}", call);
+        } else if (IntroducedTraits(cls).Any(trait => trait.Name == target)) {
+          if (!traitCalls.TryAdd(target, call)) {
+            throw Error($"a constructor calls one constructor of the trait {target}", call);
+          }
+        } else if (AllTraits(cls).Any(trait => trait.Name == target)) {
+          throw Error($"the trait {target} comes from {cls.Parent!.Name}: its constructor runs in the constructor of {cls.Parent.Name}", call);
+        } else {
+          throw Error($"'{target}' is not {cls.Name}, its parent or one of its traits: a constructor chain calls only their constructors", call);
+        }
+      }
+      if (selfCall != null && (parentCall ?? traitCalls.Values.FirstOrDefault()) is Node extra) {
+        throw Error($"a constructor that calls another constructor of {cls.Name} cannot also call {extra.Text}: the other constructor does it", extra);
+      }
+      if (hasPrimary && selfCall == null) {
+        // no field may be left in an unpredictable state: every constructor reaches the primary one
+        throw Error($"a constructor of {cls.Name} must reach the primary constructor: write : {cls.Name}(...) after its parameters", member);
+      }
+      if (cls.Parent != null && selfCall == null && parentCall == null && implicitParent == null && PrivateParentInit(cls)) {
+        throw Error($"the constructor of {DisplayName(cls.Parent.Name)} without parameters is private: a constructor of {cls.Name} must call another one, with : {cls.Parent.Name}(...)", member);
+      }
+      if (cls.Parent != null && selfCall == null && parentCall == null && implicitParent == null) {
+        throw Error($"a constructor of {cls.Name} must call a constructor of {cls.Parent.Name} (it has none without parameters): write : {cls.Parent.Name}(...) after its parameters", member);
+      }
+      var (visibility, _, isStatic, isConst, isOverride) = ReadMods(member);
+      if (isStatic || isConst || isOverride || ModsOf(member).Any(mod => mod is "readonly" or "asparent" or "unrestricted" or "extern")) {
+        throw Error("a constructor takes only a visibility (public, internal or private)", member);
+      }
+      var paramsNode = member.Children.First(child => child.Kind == "Params");
+      if (paramsNode.Children.FirstOrDefault(p => p.Kind == "VariadicParam") is Node variadic) {
+        throw NotSupported("Variadic constructor parameters", variadic);
+      }
+      var block = Synthetic("Block", member);
+      if ((selfCall ?? parentCall) is Node called) {
+        block.Add(Synthetic("ExprStmt", called).Add(Synthetic("CtorChain", called, called.Text).Add(called.Children[0])));
+      }
+      if (selfCall == null) {
+        foreach (var statement in TraitInitStatements(cls, member, traitCalls)) {
+          block.Add(statement);
+        }
+        foreach (var statement in fieldBlock.Children) {
+          block.Add(CloneNode(statement));
+        }
+      }
+      // } atEnd { }: registered here, after the chain, the traits and the fields, before the body (spec 11.4)
+      foreach (var statement in DestructorFragment(cls, member, paramsNode)) {
+        block.Add(statement);
+      }
+      if (member.Children.FirstOrDefault(child => child.Kind == "Block") is Node body) {
+        foreach (var statement in body.Children) {
+          block.Add(statement);
+        }
+      }
+      var initNode = Synthetic("Fun", member, "__init" + index++).Add(paramsNode).Add(block);
+      var init = RegisterFun(initNode, null, cls)!;
+      funs.Remove(init.Name);           // listed with the other init functions of the class
+      init.Class = cls;
+      init.IsInit = true;
+      init.Visibility = visibility == Vis.Private ? Vis.Private : Vis.Public;   // private: only the code of the class calls it (spec 11.1.1)
+      init.ChainsToSelf = selfCall != null;
+      init.ParentInit = selfCall == null && parentCall == null ? implicitParent : null;
+      if (ctors.Any(existing => existing.Params.Select(param => param.Type).SequenceEqual(init.Params.Select(param => param.Type)))) {
+        throw Error($"a constructor of {cls.Name} with these parameter types is already defined", member);
+      }
+      inits.Add(init);
+      ctors.Add(new FunSig(cls.Name, cls.Name, init.Params.ToList(), initNode, null) {
+        Class = cls,
+        IsCtor = true,
+        Visibility = init.Visibility,
+        CtorInit = init,
+        OverloadIndex = ctors.Count
+      });
+    }
+  }
+
+  const string InitsSuffix = ".__ctor";
+
+  // A destructor fragment (spec 11.4): the atEnd after a constructor. It runs when the object dies and sees the class members and the
+  // parameters and locals of its constructor: the ones it uses become hidden fields of the object (__f<n>_<name>), so they live until it
+  // runs; the constructor uses those fields in their place. Registering it stamps the order (__fseq): at death the last one runs first.
+  // Gives the statements that register it and keep its parameters; the fragment itself goes to cls.Fragments.
+  List<Node> DestructorFragment(ClassInfo cls, Node member, Node paramsNode) {
+    var statements = new List<Node>();
+    if (member.Children.FirstOrDefault(child => child.Kind == "AtEnd") is not Node trailing) {
+      return statements;
+    }
+    var fragment = trailing.Children[0];
+    var body = member.Children.FirstOrDefault(child => child.Kind == "Block");
+    int number = cls.Fragments.Count;
+    string Hidden(string name) => $"__f{number}_{name}";
+    var used = new HashSet<string>();
+    CollectNames(fragment, used);
+    var renames = new Dictionary<string, string>();
+
+    foreach (var p in paramsNode.Children.Where(p => used.Contains(p.Text!))) {
+      if (p.Kind is not ("Param" or "GiftParam") || p.Children.Any(child => child.Kind is "Counted" or "Weak")) {
+        throw NotSupported("A destructor fragment that uses a reference, counted or weak parameter", p);
+      }
+      string type = ResolveType(p.Children[0]);
+      if (IsArr(type)) {
+        throw NotSupported("A destructor fragment that uses an array parameter", p);
+      }
+      if (IsClass(type) && p.Kind != "GiftParam") {
+        throw Error($"the destructor fragment keeps '{p.Text}' until the object dies: a borrowed object cannot be kept, take it with ->{type} {p.Text}", p);
+      }
+      AddHiddenField(cls, Hidden(p.Text!), type, p);
+      Node source = Synthetic("Name", p, p.Text);
+      if (p.Kind == "GiftParam" && (IsClass(type) || type == "string")) {
+        source = Synthetic("Gift", p).Add(source);   // the object moves into the object, for the fragment
+      }
+      statements.Add(Assignment(Hidden(p.Text!), source, p, false));
+      renames[p.Text!] = Hidden(p.Text!);
+    }
+
+    if (body != null) {
+      var decls = new List<(Node Parent, Node Decl)>();
+      CollectDecls(body, decls);
+      foreach (var group in decls.Where(d => used.Contains(d.Decl.Text!) && !renames.ContainsKey(d.Decl.Text!)).GroupBy(d => d.Decl.Text!)) {
+        if (group.Count() > 1) {
+          throw NotSupported("A destructor fragment that uses a name declared twice in its constructor", group.Last().Decl);
+        }
+        var (parent, decl) = group.First();
+        var typeNode = decl.Children[0];
+        if (typeNode is { Kind: "Type", Text: "var" }) {
+          throw Error($"the destructor fragment keeps '{decl.Text}': write its type instead of var", decl);
+        }
+        if (decl.Children.Any(child => child.Kind is "Counted" or "Weak" or "Size")) {
+          throw NotSupported("A destructor fragment that uses a counted, weak or sized local", decl);
+        }
+        string type = ResolveType(typeNode);
+        if (IsArr(type)) {
+          throw NotSupported("A destructor fragment that uses an array local", decl);
+        }
+        AddHiddenField(cls, Hidden(decl.Text!), type, decl);
+        renames[decl.Text!] = Hidden(decl.Text!);
+        // the declaration becomes the assignment of the hidden field (nothing when it has no value: the field starts as zero)
+        int at = parent.Children.IndexOf(decl);
+        parent.Children.RemoveAt(at);
+        if (decl.Children.FirstOrDefault(child => child.Kind == "Init") is Node init) {
+          parent.Children.Insert(at, Assignment(Hidden(decl.Text!), init.Children[0], decl, false));
+        }
+      }
+      RenameToFields(body, renames);
+    }
+    RenameToFields(fragment, renames);
+
+    if (FindField(cls, "__fseq") == null) {
+      AddHiddenField(cls, "__fseq", "i32", member);
+    }
+    AddHiddenField(cls, Hidden("at"), "i32", member);
+    Node Field(string name) => Synthetic("Member", member, name).Add(Synthetic("Name", member, "this"));
+    statements.Insert(0, Assignment("__fseq", Synthetic("Binary", member, "+").Add(Field("__fseq")).Add(Synthetic("Int", member, "1")), member, false));
+    statements.Insert(1, Assignment(Hidden("at"), Field("__fseq"), member, false));
+    cls.Fragments.Add(fragment);
+    return statements;
+  }
+
+  // while __fseq > 0 { if __f0_at == __fseq { fragment 0 } ... __fseq = __fseq - 1 }: the fragments in reverse order of registration
+  Node FragmentRunner(ClassInfo cls, Node at) {
+    Node Field(string name) => Synthetic("Member", at, name).Add(Synthetic("Name", at, "this"));
+    var loop = Synthetic("Block", at);
+    for (int number = 0; number < cls.Fragments.Count; number++) {
+      var test = Synthetic("Binary", at, "==").Add(Field($"__f{number}_at")).Add(Field("__fseq"));
+      loop.Add(Synthetic("If", at).Add(test).Add(cls.Fragments[number]));
+    }
+    loop.Add(Assignment("__fseq", Synthetic("Binary", at, "-").Add(Field("__fseq")).Add(Synthetic("Int", at, "1")), at, false));
+    return Synthetic("While", at).Add(Synthetic("Binary", at, ">").Add(Field("__fseq")).Add(Synthetic("Int", at, "0"))).Add(loop);
+  }
+
+  static void AddHiddenField(ClassInfo cls, string name, string type, Node at) {
+    cls.Fields.Add(new FieldInfo(name, type, cls, at) { Hidden = true });
+  }
+
+  static void CollectNames(Node node, HashSet<string> names) {
+    if (node.Kind == "Name") {
+      names.Add(node.Text!);
+    }
+    foreach (var child in node.Children) {
+      CollectNames(child, names);
+    }
+  }
+
+  static void CollectDecls(Node node, List<(Node Parent, Node Decl)> decls) {
+    foreach (var child in node.Children) {
+      if (child.Kind == "Decl") {
+        decls.Add((node, child));
+      }
+      CollectDecls(child, decls);
+    }
+  }
+
+  // name -> this.__f<n>_name, wherever the variable is read, written, moved or ended
+  static void RenameToFields(Node node, Dictionary<string, string> renames) {
+    if (node.Kind == "Name" && renames.TryGetValue(node.Text!, out var field)) {
+      node.Kind = "Member";
+      node.Text = field;
+      node.Children.Add(Synthetic("Name", node, "this"));
+      return;
+    }
+    foreach (var child in node.Children) {
+      RenameToFields(child, renames);
+    }
+  }
+
+
+  // the init function a constructor of the child runs when it names no constructor of the parent: the one without parameters
+  // (an exception class: its own, which receives the message)
+  FunSig? ImplicitParentInit(ClassInfo cls) {
+    if (cls.Parent == null) {
+      return null;
+    }
+    return cls.Parent.IsException ? (cls.Parent.PrimaryParams.Count == 0 ? cls.Parent.Init : null)
+      : funs[cls.Parent.Name + InitsSuffix].FirstOrDefault(init => init.Params.Count == 0 && init.Visibility != Vis.Private);
+  }
+
+  // the parent has a constructor without parameters, but it is private (a subclass cannot call it)
+  bool PrivateParentInit(ClassInfo cls) =>
+    !cls.Parent!.IsException && funs[cls.Parent.Name + InitsSuffix].Any(init => init.Params.Count == 0 && init.Visibility == Vis.Private);
+
+  // : Foo(args) or : Parent(args) at the start of a constructor: the init function of that constructor, on the same object
+  readonly Dictionary<FunSig, FunSig> ctorChains = new();
+  Expr CtorChainCall(Node n, Scope scope) {
+    var args = n.Children[0].Children;
+    if (traits.TryGetValue(n.Text!, out var trait)) {
+      // : Trait(args): the init function of that constructor of the trait (its property initializers, then its body)
+      FunSig tinit;
+      List<string> traitCodes;
+      try {
+        tinit = ResolveOverload(funs[trait.Name + TraitInitSuffix], args, scope, n);
+        traitCodes = ArgCodes(tinit, args, scope, n);
+      } catch (CompileException e) {
+        throw new CompileException(e.Message.Replace($"'{trait.Name}{TraitInitSuffix}'", $"'{trait.Name}'"), e.Line);
+      }
+      traitCodes.Insert(0, "(void*)self");
+      return new Expr(UserCallCode(tinit, $"{tinit.CName}({string.Join(", ", traitCodes)})"), "void");
+    }
+    var target = classes[n.Text!];
+    var chosenCtor = ResolveOverload(funs[target.Name], args, scope, n);
+    if (target != currentClass && chosenCtor.Visibility == Vis.Private) {
+      throw Error($"this constructor of {DisplayName(target.Name)} is private: a subclass cannot call it", n);
+    }
+    var chosen = chosenCtor.CtorInit!;
+    if (target == currentClass && currentFun != null) {
+      // a cycle of chains would never end: a compile error (spec 11.1.1)
+      ctorChains[currentFun] = chosen;
+      for (var next = chosen; ; ) {
+        if (next == currentFun) {
+          throw Error($"the constructors of {DisplayName(target.Name)} call each other in a cycle", n);
+        }
+        if (!ctorChains.TryGetValue(next, out var after)) {
+          break;
+        }
+        next = after;
+      }
+    }
+    var codes = ArgCodes(chosen, args, scope, n);
+    codes.Insert(0, $"(({CType(target.Name)})self)");
+    return new Expr(UserCallCode(chosen, $"{chosen.CName}({string.Join(", ", codes)})"), "void");
   }
 
   // this.name = value for an instance field, name = value for a static one; _= for a weak field
@@ -1445,7 +1757,8 @@ public sealed partial class CodeGen {
   // the C function that allocates an object and runs the init functions (parents first)
   string EmitConstructor(FunSig ctor) {
     var cls = ctor.Class!;
-    var args = ctor.Params.Select(param => $"v_{param.Name}");
+    var init = ctor.CtorInit ?? cls.Init!;
+    var args = ctor.Params.Select(ParamName);
     var callArgs = string.Join(", ", new[] { "self" }.Concat(args));
     var sb = new StringBuilder();
     sb.Append(Signature(ctor)).Append(" {\n");
@@ -1455,8 +1768,8 @@ public sealed partial class CodeGen {
       sb.Append($"  self->descriptor = &df_desc_{cls.Name};\n  self->id = df_desc_{cls.Name}.id;\n");
     }
     // a constructor returns the object with its exception when the init functions can let one out
-    string initCall = $"{cls.Init!.CName}({callArgs})";
-    if (PairReturn(cls.Init)) {
+    string initCall = $"{init.CName}({callArgs})";
+    if (PairReturn(init)) {
       sb.Append($"  df_exception* error = {initCall};\n");
       sb.Append(PairReturn(ctor)
         ? $"  if (error) {{\n    df_drop((void*)self);   /* the half-built object ends: the objects its fields already hold are dropped */\n    return ({ResultPair(CType(cls.Name))}){{ NULL, error }};\n  }}\n"
@@ -1469,17 +1782,21 @@ public sealed partial class CodeGen {
   }
 
   // at the start of an init function: the parent's init, then the zero values that are not all-zero bits
-  string InitPrologue(ClassInfo cls) {
+  string InitPrologue(FunSig f) {
+    var cls = f.Class!;
     var sb = new StringBuilder();
+    if (f.ChainsToSelf) {
+      return "";   // the other constructor of the class did all of it
+    }
     if (cls.IsException && cls.Parent == null) {
       sb.Append("  df_exc_live++;\n");
       sb.Append("  self->message = df_cstr_truncated(df_view(v_message).p, df_str_len(v_message), 2048);\n");
       sb.Append("  self->function = df_cstr_truncated(\"\", 0, 1024);\n");
     }
-    if (cls.Parent != null) {
-      string forwarded = cls.Parent.IsException ? ", v_message" : "";
-      string parentInit = $"{cls.Parent.Init!.CName}(({CType(cls.Parent.Name)})self{forwarded})";
-      if (PairReturn(cls.Parent.Init)) {
+    if (f.ParentInit != null) {
+      string forwarded = cls.Parent!.IsException ? ", v_message" : "";
+      string parentInit = $"{f.ParentInit.CName}(({CType(cls.Parent.Name)})self{forwarded})";
+      if (PairReturn(f.ParentInit)) {
         sb.Append($"  df_err = {parentInit};\n");
         sb.Append($"  if (df_err) {{ df_err_thrown = false; goto {fn!.FailLabel}; }}\n");
       } else {

@@ -1,0 +1,6 @@
+class Foo {
+  public i32 bar
+  public Foo(i32 a) { bar = a }
+  public Foo(i32 b) { bar = b * 2 }
+}
+Foo f = Foo(1)

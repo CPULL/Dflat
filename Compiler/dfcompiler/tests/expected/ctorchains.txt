@@ -1,0 +1,16 @@
+1 a 4 primary
+2 x 7 primary>total
+5 x 7 primary>total>empty
+4 word 4 primary
+3..4 steps 1
+0..8 steps 2
+0..10 steps 3
+nobody 4 A()
+Tweety 2 A(n,l)>Bird true
+Pingu 2 A(n,l)>Bird>flies false
+nobody 4 A()>plain true
+nobody 4 A() Rex
+square 3
+made 2
+failed: negative
+---- exit code 0 ----

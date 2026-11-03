@@ -1,0 +1,1 @@
+ctor_chain_self.df(3): error: the constructors of A call each other in a cycle

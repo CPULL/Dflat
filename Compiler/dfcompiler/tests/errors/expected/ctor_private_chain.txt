@@ -1,0 +1,1 @@
+ctor_private_chain.df(6): error: this constructor of A is private: a subclass cannot call it

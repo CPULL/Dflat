@@ -1,0 +1,8 @@
+plain#0
+a#1
+b#2
+c'#3
+debug release
+square!
+circle!
+---- exit code 0 ----

@@ -1,0 +1,97 @@
+// Constructors written in the class body (spec 11.1.1, step 1): overloads, defaults, named arguments, bodies,
+// field initializers before the body, objects moved in, no default constructor
+alias Root as r
+
+class Dog {
+  public string name = "?"
+  public fun string bark() { name + " barks" }
+}
+
+public class Point {
+  public i32 x
+  public i32 y
+  public string tag = "point"
+  public i32 made = 1
+
+  public Point() {
+    tag = "origin"
+  }
+  public Point(i32 x, i32 y = 7) {
+    this.x = x
+    this.y = y
+    made += 10
+  }
+  public Point(string label, i32 v) {
+    tag = label + "/" + tag
+    x = v
+    y = v * 2
+    if v < 0 {
+      return
+    }
+    made = 99
+  }
+  public fun string show() { $"{tag} ({x}, {y}) {made}" }
+}
+
+public class Kennel {
+  public Dog dog
+  public i32 count = 0
+
+  public Kennel(->Dog d) {
+    dog = ->d
+    count++
+  }
+  public fun string describe() { dog.bark() + " " + count.toStr() }
+}
+
+public class Checked {
+  public i32 v
+  public Part part = Part()
+  public Checked(i32 v) {
+    if v < 0 then throw Exception("negative")
+    this.v = v
+  }
+}
+
+class Part {
+  public i32 id = 4
+}
+
+public class Total {
+  public i32 sum
+  public Total(&i32 a, i32 b) {
+    sum = a + b
+  }
+}
+
+r.Console.log(Point().show())
+r.Console.log(Point(3).show())
+r.Console.log(Point(3, 4).show())
+r.Console.log(Point(y: 1, x: 2).show())
+r.Console.log(Point("p", 5).show())
+r.Console.log(Point("neg", -1).show())
+Point p = Point(10, 20)
+p.x++
+r.Console.log(p.show())
+Dog rex = Dog()
+rex.name = "Rex"
+Kennel k = Kennel(->rex)
+r.Console.log(k.describe())
+r.Console.log(rex == null)
+i32 a = 5
+r.Console.log(Total(a, 6).sum)
+r.Console.log(Point(1, 1))
+Checked good = Checked(3)
+r.Console.log(good.v + good.part.id)
+catch Exception {
+  r.Console.log("never")
+}
+fun string tryChecked(i32 v) {
+  Checked c = Checked(v)
+  return "made " + c.v.toStr()
+  catch Exception ex {
+    return "failed: " + ex.message
+  }
+}
+r.Console.log(tryChecked(2))
+r.Console.log(tryChecked(-2))

@@ -1,0 +1,1 @@
+traitctor_wrong_args.df(6): error: cannot convert i64 to string implicitly; use a cast

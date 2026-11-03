@@ -1,0 +1,26 @@
+Foo("p", 3):
+  fragment Foo(string, i32): p 3 3
+  Res p ends
+  class atEnd of Foo, log two
+Foo(4):
+  fragment Foo(i32): local 5
+  fragment Foo(string, i32): chained 40 40
+  Res chained ends
+  class atEnd of Foo, log two>one
+Foo():
+  class atEnd of Foo, log plain
+Holder:
+  holding kept
+  after the constructor
+  fragment Holder: kept
+  Res kept ends
+Partial(1):
+  fragment Partial
+  Res first ends
+  Res second ends
+made
+Partial(-1):
+  fragment Partial
+  Res first ends
+failed: negative
+---- exit code 0 ----

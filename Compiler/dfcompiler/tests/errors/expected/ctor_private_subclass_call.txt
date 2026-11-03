@@ -1,0 +1,1 @@
+ctor_private_subclass_call.df(6): error: this constructor of A is private: only the code of A can call it

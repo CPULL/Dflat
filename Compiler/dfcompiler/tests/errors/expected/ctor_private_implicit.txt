@@ -1,0 +1,1 @@
+ctor_private_implicit.df(6): error: the constructor of A without parameters is private: a constructor of B must call another one, with : A(...)

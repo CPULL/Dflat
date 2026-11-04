@@ -1,1 +1,1 @@
-class Box((&)i32 size) { }
+class Box(&i32 size) { }

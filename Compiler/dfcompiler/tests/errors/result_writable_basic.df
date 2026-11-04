@@ -1,0 +1,5 @@
+public class Dog(string name) {
+  public string name
+}
+const string KEY = "k"
+fun &i32 number() { 5 }

@@ -1,0 +1,4 @@
+class Dog { }
+@Dog rex = Dog()
+list<@Dog> pack = []
+pack.add(rex)

@@ -42,7 +42,7 @@ r.Console.log(slots)
 // pop, ->c[i] and replace give the item to the receiver
 vec<string> stack = ["a", "b" + "b", "c" + "c"]
 string top = ""
-bool popped = stack.pop((&)top)
+bool popped = stack.pop(&top)
 string moved = ->stack[0]
 string old = stack.replace(1, "new")
 r.Console.log($"{popped} {top} {moved} {old} {stack}")

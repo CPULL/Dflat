@@ -1,0 +1,1 @@
+result_new_array_multi.df(2): error: this result is a new arr<i32> that the caller owns: write ->arr<i32> for this result (spec 13.1.1)

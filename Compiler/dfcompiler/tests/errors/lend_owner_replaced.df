@@ -1,0 +1,15 @@
+alias Root as r
+public class Dog(string name) {
+  public string name
+}
+public class Kennel {
+  public Dog boss = Dog("Boss")
+  public fun Dog leader() { boss }
+}
+fun f() {
+  Dog rex = Dog("Rex")
+  Dog view = rex
+  rex = Dog("New")
+  r.Console.log(view.name)
+}
+f()

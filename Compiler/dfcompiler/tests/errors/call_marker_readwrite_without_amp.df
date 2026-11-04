@@ -1,0 +1,4 @@
+class Dog { }
+fun train(&@Dog d) { }
+&@Dog rex = Dog()
+train(@rex)

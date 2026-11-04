@@ -48,7 +48,7 @@ trait Visited {
 
 public class Home : Visited { }
 
-public class Guest(&Home home as parent) {
+public class Guest(Home home as parent) {
   public fun visit() { home.ping() }
 }
 
@@ -85,7 +85,7 @@ public class Lazy : Worker {
   override fun i32 work(i32 n) { parent.work(n) + 1 }
 }
 
-fun string attempt(Logged job, i32 n) {
+fun ->string attempt(Logged job, i32 n) {
   return $"result {job.work(n)}"
   catch NegativeWork { return "failed: no executeAfter" }
 }
@@ -106,7 +106,7 @@ public class Bag : IndexCollection<i32> {
   override fun bool has(i32 value) { items.has(value) }
   override fun clear() { items.clear() }
 
-  override fun IndexIterator<i32> getIterator() {
+  override fun ->IndexIterator<i32> getIterator() {
     BagIterator iterator = BagIterator(this)
     return ->iterator
   }
@@ -122,7 +122,7 @@ public class Bag : IndexCollection<i32> {
   }
 }
 
-public class BagIterator(&Bag collection as parent) : IndexIterator<i32> {
+public class BagIterator(Bag collection as parent) : IndexIterator<i32> {
   uns cursor = 0
 
   override fun (i32 value, bool isValid) next() {

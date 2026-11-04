@@ -20,7 +20,7 @@ fun vecs() {
   v[0] = [Dog("b2")]
   r.Console.log("pop")
   arr<Dog> got
-  v.pop((&)got)
+  v.pop(&got)
   r.Console.log("  took " + got[0].name)
   r.Console.log("replace 0 with result")
   arr<Dog> old = v.replace(0, [Dog("b3")])

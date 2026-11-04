@@ -1,0 +1,15 @@
+alias Root as r
+public class Dog(string name) {
+  public string name
+}
+public class Kennel {
+  public Dog boss = Dog("Boss")
+  public fun Dog leader() { boss }
+}
+fun f() {
+  arr<Dog> pack = [Dog("a")]
+  Dog first = pack[0]
+  pack[0] = Dog("b")
+  r.Console.log(first.name)
+}
+f()

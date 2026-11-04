@@ -2,7 +2,7 @@ namespace rw_return_readonly
 public class Player(string name) {
   public string name
 }
-fun (@)Player give(@Player p) {
+fun &@Player give(@Player p) {
   return p
 }
 give(@Player("a"))

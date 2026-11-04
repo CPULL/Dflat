@@ -6,4 +6,4 @@ public class Dog(string name) {
 
 list<i32> numbers = [1]
 i32 last
-numbers.pop((&)last)
+numbers.pop(&last)

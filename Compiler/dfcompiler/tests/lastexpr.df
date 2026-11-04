@@ -3,7 +3,7 @@ alias Root as r
 
 public class R(string name) {
   public string name
-  public fun R copyNamed() { R("copy of " + name) }
+  public fun ->R copyNamed() { R("copy of " + name) }
 } atEnd {
   r.Console.log("  end " + name)
 }
@@ -18,22 +18,22 @@ fun i32 afterCall() {
   one()
   6
 }
-fun string text() {
+fun ->string text() {
   string s = "ab"
   s + "cd"
 }
-fun R single() { R("single") }
-fun R make() {
+fun ->R single() { R("single") }
+fun ->R make() {
   one()
   R("made")
 }
-fun R pick(bool first) {
+fun ->R pick(bool first) {
   if first {
     return R("early")
   }
   R("late")
 }
-fun R allocate() { R("alloc") }
+fun ->R allocate() { R("alloc") }
 public class Holder {
   public R a = allocate()                    // a field from a call: the result moves into it
   public R c = a.copyNamed()

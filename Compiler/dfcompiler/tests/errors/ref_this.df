@@ -1,0 +1,4 @@
+public class Dog {
+  public fun reset() { swap(&this) }
+}
+fun swap(&Dog d) { d = Dog() }

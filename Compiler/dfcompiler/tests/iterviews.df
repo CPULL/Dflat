@@ -43,13 +43,13 @@ words.add("d")
 r.Console.log(words)
 
 // an iterator that outlives its collection
-fun IndexIterator<i32> orphan() {
+fun ->IndexIterator<i32> orphan() {
   vec<i32> local = [7, 8]
   var iterator = local.getIterator()
   return ->iterator
 }
 var lost = orphan()
-fun string tryNext(IndexIterator<i32> iterator) {
+fun ->string tryNext(IndexIterator<i32> iterator) {
   var got = iterator.next()
   return $"{got.value}"
   catch UsageOfDestroyedObjectException { return "the vec is gone" }

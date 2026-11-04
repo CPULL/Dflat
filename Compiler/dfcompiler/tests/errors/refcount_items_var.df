@@ -3,6 +3,6 @@ class Dog { }
 fun f() {
   @Dog rex = Dog()
   vec<@Dog> kennel = [rex]
-  var old = kennel.replace(0, rex)
+  var old = kennel.replace(0, @rex)
 }
 f()

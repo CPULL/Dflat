@@ -1,0 +1,1 @@
+result_writable_new.df(5): error: this result is a new Dog: a & result lends something that exists; a new value is given with ->Dog (spec 13.1.1)

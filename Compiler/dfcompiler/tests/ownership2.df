@@ -28,7 +28,7 @@ public class Circle : Shape {
   r.Console.log("  circle ends")
 }
 
-fun Shape pick(bool square) {
+fun ->Shape pick(bool square) {
   if square { return Square() }
   return Circle()
 }
@@ -53,10 +53,15 @@ pick(true)
 r.Console.log("  after the statement")
 
 r.Console.log("a dead object")
-Square sq = Square()
-Square view = sq
-sq is atEnd.
-r.Console.log("  the owner is null: " + (sq == null))
+// the compiler stops a release it can see while a borrow is alive (spec 12); one inside a method is found at run time
+public class Holder {
+  public Square sq = Square()
+  public fun drop() { sq is atEnd. }
+}
+Holder holder = Holder()
+Square view = holder.sq
+holder.drop()
+r.Console.log("  the owner is null: " + (holder.sq == null))
 i32 caught = 0
 r.Console.log(view.Name())
 catch NullPointerException {

@@ -1,0 +1,47 @@
+// Call markers of counted and weak arguments (spec 13.1): the call repeats the marker of the parameter
+alias Root as r
+
+public class Dog(string name) {
+  public string name
+  public i32 level = 0
+}
+
+fun keep(@Dog d) { r.Console.log($"keep {d.name}, users {d.usersCount}") }
+fun train(&@Dog d) {
+  enforce d { d.level++ }
+}
+fun watch(%Dog d) {
+  enforce d { r.Console.log($"watch {d.name}") } else { r.Console.log("watch: gone") }
+}
+fun heal(&%Dog d) {
+  enforce d { d.level += 10 } else { r.Console.log("heal: gone") }
+}
+
+fun run() {
+  @Dog rex = Dog("Rex")
+  keep(@rex)                       // a new usage for the call
+  keep(Dog("Fido"))                // a new object needs no marker
+
+  &@Dog max = Dog("Max")
+  train(&@max)
+  keep(@max)                       // a read/write usage goes to a read-only parameter
+  r.Console.log($"max level {max.level}")
+
+  watch(%rex)                      // from a counted variable
+  %Dog seen = %rex
+  watch(%seen)                     // from a weak variable
+
+  heal(&%max)                      // from a read/write counted variable
+  &%Dog nurse = %max
+  heal(&%nurse)                    // from a read/write weak variable
+  r.Console.log($"max level {max.level}")
+
+  list<@Dog> pack = [rex]          // a literal needs no marker
+  pack.add(@rex)
+  @Dog old = pack.replace(0, @max)
+  r.Console.log($"pack {pack.len}, old {old.name}, rex users {rex.usersCount}")
+
+  keep(->rex)                      // the caller gives its usage
+  r.Console.log($"rex given: {rex == null}")
+}
+run()

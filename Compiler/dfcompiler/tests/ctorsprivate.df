@@ -12,20 +12,20 @@ public class Token {
     this.serial = serial
   }
   public Token(string text) : Token(text, 0) { }
-  public static fun Token next(string text) {
+  public static fun ->Token next(string text) {
     made++
     return Token(text, made)
   }
-  public fun Token copy() { Token(text + "'", serial) }
-  public fun string show() { $"{text}#{serial}" }
+  public fun ->Token copy() { Token(text + "'", serial) }
+  public fun ->string show() { $"{text}#{serial}" }
 }
 
 // only private constructors: made through a static function (a factory)
 public class Config {
   public string mode
   Config(string mode) { this.mode = mode }
-  public static fun Config debug() { Config("debug") }
-  public static fun Config release() { Config("release") }
+  public static fun ->Config debug() { Config("debug") }
+  public static fun ->Config release() { Config("release") }
 }
 
 // a parent with a private constructor and a public one: the child uses the public one

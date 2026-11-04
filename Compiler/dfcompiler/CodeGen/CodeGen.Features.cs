@@ -45,6 +45,7 @@ public sealed partial class CodeGen {
     ["ValueArg"] = "Generics",
     ["AddressOf"] = "Pointers",
     ["WritableAddressOf"] = "Pointers",
+    ["WritablePointerOf"] = "Pointers",
     ["Pointer"] = "Pointers",
     ["WritablePointer"] = "Pointers",
     ["Volatile"] = "Pointers",
@@ -161,7 +162,7 @@ public sealed partial class CodeGen {
   // cost of passing this argument to this parameter type (spec 9.2), null when it can't be passed
   int? ArgCost(Node arg, string paramType, Scope scope) {
     string target = BaseOf(paramType);
-    var valueNode = arg.Kind == "Paren" ? arg.Children[0] : arg;
+    var valueNode = arg.Kind is "Paren" or "Boxed" ? arg.Children[0] : arg;
     int counted = BoxArgCost(valueNode, paramType, scope);
     if (counted == -1) {
       counted = CountedArgCost(valueNode, paramType, scope);
@@ -186,7 +187,7 @@ public sealed partial class CodeGen {
       return target == "r64" ? 0 : target == "r32" ? 1 : target == "lapse" ? 3 : null;
     }
     if (valueNode.Kind == "WritableAddressOf") {
-      valueNode = valueNode.Children[0];   // (&)x: the type of x
+      valueNode = valueNode.Children[0];   // &x: the type of x
     }
     if (valueNode.Kind is "List" or "MapLit") {
       // a literal has the type of what receives it (spec 6.3): typed as this parameter, or it does not fit (point 53)

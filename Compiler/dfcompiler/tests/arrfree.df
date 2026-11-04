@@ -14,11 +14,11 @@ fun i32 count(arr<Dog> dogs) {
   show(dogs)                          // passed on to another reader
   (i32)dogs.len
 }
-fun arr<Dog> pack(string name) {
+fun ->arr<Dog> pack(string name) {
   arr<Dog> made = [Dog(name + "1"), Dog(name + "2")]
   return made                         // moves to the caller
 }
-fun arr<Dog> direct() { [Dog("direct")] }
+fun ->arr<Dog> direct() { [Dog("direct")] }
 public class Keeper {
   public arr<Dog> kept
   public fun keep(arr<Dog> dogs) { kept = dogs! }   // a clone: the caller keeps its own array

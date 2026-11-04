@@ -9,7 +9,7 @@ public class Dog(string name) {
 fun (arr<Dog>, i32) make() {
   return ([Dog("m1")], 1)
 }
-fun arr<Dog>, uns pair() {
+fun ->arr<Dog>, uns pair() {
   arr<Dog> made = [Dog("p1"), Dog("p2")]
   return made, made.len                 // made moves to the caller
 }

@@ -13,7 +13,7 @@ class Dog(string name) {
   public i32 age = 3
   public Collar collar = Collar("red")      // an owned object: cloned
   public @Dog friend                        // counted: another user
-  public _Dog watcher                       // weak: another weak reference
+  public %Dog watcher                       // weak: another weak reference
   public vec<i32> scores = [1, 2, 3]        // a collection: a new one with copies
   public list<string> tags = ["good", "loud"]
 } atEnd {
@@ -24,7 +24,7 @@ fun plainClone() {
   Dog rex = Dog("Rex")
   @Dog pal = Dog("Pal")
   rex.friend = pal
-  rex.watcher = _pal
+  rex.watcher = %pal
   Dog copy = rex!
   copy.name = "Copy"
   copy.age = 9
@@ -57,7 +57,7 @@ fun dynamicClone() {
 // a clone() of the program replaces the default
 class Token(i32 id) {
   public i32 id = id
-  public fun Token clone() {
+  public fun ->Token clone() {
     return Token(id + 100)
   }
 }
@@ -80,7 +80,7 @@ fun countedClone() {
   packCopy[0].name = "PackedCopy"
   r.Console.log($"{pack[0].name} {packCopy[0].name}")
   list<@Dog> shared = []
-  shared.add(first)
+  shared.add(@first)
   list<@Dog> sharedCopy = shared!          // the items are counted: the copy is another user
   r.Console.log($"first users {first.usersCount}, {sharedCopy.len}")
 }

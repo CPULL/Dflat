@@ -1,0 +1,1 @@
+pointer_writable.df(2): error: feature not supported: Pointers

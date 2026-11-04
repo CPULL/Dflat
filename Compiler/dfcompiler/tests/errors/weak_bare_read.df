@@ -3,6 +3,6 @@ class C {
   public i32 id
 }
 class H {
-  _C c
+  %C c
   public fun i32 f() { c.id }
 }

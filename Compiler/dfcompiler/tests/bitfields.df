@@ -38,14 +38,14 @@ fs.StreamReadWriteAccessMode access = fs.StreamReadWriteAccessMode.Shared
 r.Console.log($"access = {access}, overwrite = {fs.OverwriteOptions.Overwrite}")
 
 // the new exceptions
-fun string first() {
+fun ->string first() {
   throw FileNotFoundException("no such file")
   return "none"
   catch FileNotFoundException ex {
     return $"caught {ex.message}, id {ex.id}"                          // id 25
   }
 }
-fun string second() {
+fun ->string second() {
   throw Root.StreamCloseFailureException("close failed")
   return "none"
   catch Exception ex {

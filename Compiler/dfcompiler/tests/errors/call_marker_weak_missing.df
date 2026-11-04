@@ -1,0 +1,4 @@
+class Dog { }
+fun watch(%Dog d) { }
+@Dog rex = Dog()
+watch(rex)

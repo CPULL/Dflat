@@ -17,7 +17,7 @@ public class Foo(i32 bar, string baz) {
     log += ">empty"
   }
   public Foo(string only) : Foo((i32)only.len, only) { }
-  public fun string show() { $"{bar} {baz} {doubled} {log}" }
+  public fun ->string show() { $"{bar} {baz} {doubled} {log}" }
 }
 
 // body constructors only, chained among themselves
@@ -37,7 +37,7 @@ public class Range {
   public Range() : Range(10) {
     steps++
   }
-  public fun string show() { $"{low}..{high} steps {steps}" }
+  public fun ->string show() { $"{low}..{high} steps {steps}" }
 }
 
 // a parent with constructors in its body: the child names one, or the one without parameters runs
@@ -55,7 +55,7 @@ public class Animal {
     this.legs = legs
     trail += "A(n,l)"
   }
-  public fun string show() { $"{name} {legs} {trail}" }
+  public fun ->string show() { $"{name} {legs} {trail}" }
 }
 
 public class Bird : Animal {
@@ -71,7 +71,7 @@ public class Bird : Animal {
   public Bird() {
     trail += ">plain"
   }
-  public fun string all() { show() + " " + flies.toStr() }
+  public fun ->string all() { show() + " " + flies.toStr() }
 }
 
 // a child with a primary constructor: the parent's constructor without parameters runs
@@ -115,7 +115,7 @@ Dog d = Dog("Rex")
 r.Console.log(d.show() + " " + d.nick)
 Square sq = Square(3)
 r.Console.log(sq.kind + " " + sq.side.toStr())
-fun string tryStrict(string s) {
+fun ->string tryStrict(string s) {
   Strict x = Strict(s)
   return "made " + x.v.toStr()
   catch Exception ex {

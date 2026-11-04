@@ -1,0 +1,1 @@
+call_marker_readwrite_without_amp.df(4): error: 'd' takes &@: write &@rex (spec 13.1)

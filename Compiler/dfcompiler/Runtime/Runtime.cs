@@ -1402,7 +1402,7 @@ static void df_rc_unlock(df_rc* rc) {
   df_rc_release(rc);
 }
 
-/* a write through a (@)T needs its lock (spec 12.7) */
+/* a write through a &@T needs its lock (spec 12.7) */
 #define DF_RC_WRITABLE(rc) ((rc) == NULL || (rc)->locked)
 
 /* weak references (spec 12.7): they hold the counting block, not a usage; the object is gone when its user count is 0 */

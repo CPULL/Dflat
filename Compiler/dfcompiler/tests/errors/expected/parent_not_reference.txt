@@ -1,1 +1,1 @@
-parent_not_reference.df(9): error: 'as parent' goes on a reference parameter: &Library library as parent
+parent_not_reference.df(9): error: 'as parent' goes on a borrowed parameter: Library library as parent, or &Library library as parent

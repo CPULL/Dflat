@@ -4,15 +4,15 @@ alias Root as r
 
 public class Dog(string name) {
   public string name
-  public fun string bark() { name + " barks" }
+  public fun ->string bark() { name + " barks" }
   public fun Dog same() { this }
 } atEnd {
   r.Console.log("  end " + name)
 }
 
-fun string show(Dog d) { "show " + d.name }
-fun string both(Dog a, Dog b) { a.name + " and " + b.name }
-fun Dog make(string name) { Dog(name) }
+fun ->string show(Dog d) { "show " + d.name }
+fun ->string both(Dog a, Dog b) { a.name + " and " + b.name }
+fun ->Dog make(string name) { Dog(name) }
 fun keep(->Dog d) { r.Console.log("  kept " + d.name) }
 
 r.Console.log("argument")

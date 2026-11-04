@@ -1,0 +1,2 @@
+(i32, string) t = (1, "a")
+Root.Console.log(t[2])

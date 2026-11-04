@@ -35,7 +35,7 @@ fun uns count(->arr<Dog> given) {
   given.len                             // given ends with the function, with its dogs
 }
 
-fun arr<Dog> pass(->arr<Dog> given) {
+fun ->arr<Dog> pass(->arr<Dog> given) {
   return given                          // moved on to the caller
 }
 

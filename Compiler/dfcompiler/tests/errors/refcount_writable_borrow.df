@@ -1,8 +1,8 @@
 namespace refcount_writable_borrow
 class Dog { }
-fun g((&)Dog d) { }
+fun g(&Dog d) { }
 fun f() {
   @Dog first = Dog()
-  g((&)first)
+  g(&first)
 }
 f()

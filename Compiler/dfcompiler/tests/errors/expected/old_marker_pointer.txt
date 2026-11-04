@@ -1,0 +1,1 @@
+old_marker_pointer.df(2,1): error: (*) is now written &* (spec 13.1), found '('

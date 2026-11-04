@@ -13,7 +13,7 @@ trait Named {
     name = first + " " + last
     trail += "Named(s,s)"
   }
-  public fun string title() { "~" + name + "~" }
+  public fun ->string title() { "~" + name + "~" }
 }
 
 trait Scored {
@@ -46,7 +46,7 @@ public class Player : Named, Scored, Stamped {
   public Player() : Player("anon") {
     level = 0
   }
-  public fun string show() { $"{title()} {points()} {when()} {level} {trail}" }
+  public fun ->string show() { $"{title()} {points()} {when()} {level} {trail}" }
 }
 
 // a parent with a constructor, a trait with parameters in the child
@@ -56,7 +56,7 @@ public class Base {
 }
 public class Hero : Base, Named {
   public Hero(string name) : Base("base"), Named(name) { }
-  public fun string show() { $"{title()} {from} {trail}" }
+  public fun ->string show() { $"{title()} {from} {trail}" }
 }
 
 // the trait constructor fails: the exception reaches the caller
@@ -76,7 +76,7 @@ r.Console.log(Player("Ann").show())
 r.Console.log(Player("Bob", "Lee", 9).show())
 r.Console.log(Player().show())
 r.Console.log(Hero("Zed").show())
-fun string tryAmount(i32 v) {
+fun ->string tryAmount(i32 v) {
   Amount a = Amount(v)
   return "made " + a.value().toStr()
   catch Exception ex {

@@ -4,7 +4,7 @@ class C {
 }
 fun f() {
   @C c = C()
-  _C w = _c
+  %C w = %c
   i32 n = w.id
 }
 f()

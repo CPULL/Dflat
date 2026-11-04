@@ -1,4 +1,4 @@
-// Read-only references & (spec 1.6.2): through &Item o only the unrestricted functions can be called and the fields can be read; through (&)Item o
+// Read-only references & (spec 1.6.2): through &Item o only the unrestricted functions can be called and the fields can be read; through &Item o
 // and an owned variable everything visible can be used. For the collections of the compiler a & reference can read, has, indexOf and loop
 alias Root as r
 
@@ -6,20 +6,20 @@ public class Counter(string name) {
   public string name
   public i32 count = 0
   public fun add(i32 amount) { count += amount }
-  unrestricted fun string shown() { $"{name} {count}" }
+  unrestricted fun ->string shown() { $"{name} {count}" }
   unrestricted fun touch() { count += 100 }   // it changes the object: the developer takes the responsibility
   public static fun string kind() { "counter" }
 }
 
-fun string look(&Counter counter) {
+fun ->string look(Counter counter) {
   counter.touch()
   return $"{counter.shown()} {counter.name} {Counter.kind()}"
 }
-fun change((&)Counter counter) {
+fun change(&Counter counter) {
   counter.add(5)
   counter.name = "changed"
 }
-fun i32 sum(&vec<i32> values, &list<i32> more, &arr<i32> fixed) {
+fun i32 sum(vec<i32> values, list<i32> more, arr<i32> fixed) {
   i32 total = 0
   for i32 v in values {
     total += v
@@ -35,7 +35,7 @@ fun i32 sum(&vec<i32> values, &list<i32> more, &arr<i32> fixed) {
 }
 
 Counter c = Counter("c")
-change((&)c)
+change(&c)
 r.Console.log(look(c))
 vec<i32> v = [1, 2]
 list<i32> l = [8, 9]

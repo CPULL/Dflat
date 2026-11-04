@@ -6,4 +6,4 @@ public class Library(string name) {
   public fun string title() { name }
 }
 
-public class Reader(&Library library as parent, &Library other as parent) { }
+public class Reader(Library library as parent, Library other as parent) { }

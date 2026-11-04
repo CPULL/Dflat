@@ -92,27 +92,35 @@ public sealed class Parser {
     return Next();
   }
 
-  // '_' touching a name: a name cannot start with '_' (spec 1.1). Before a type and a name it is the weak marker of a declaration (_Texture2D t,
-  // spec 12), which is not built yet
+  // '_' touching a name: a name cannot start with '_' (spec 1.1). Before a type and a name it was the old weak marker, now % (spec 12)
   void CheckUnderscoreName() {
     if (!IsOp("_") || PeekAt(1).Kind != TokenKind.Ident || PeekAt(1).Line != Peek.Line || PeekAt(1).Col != Peek.Col + 1) {
       return;
     }
-    if (IsWeakMarker()) {
-      return;   // _T name: a weak declaration
+    if (PeekAt(2).Kind == TokenKind.Ident && PeekAt(2).Line == Peek.Line) {
+      throw ErrorAt($"a weak reference is written with %: %{PeekAt(1).Text} {PeekAt(2).Text} (spec 12.7)", Peek);
     }
     throw ErrorAt($"a name cannot start with '_': _{PeekAt(1).Text} (spec 1.1)", Peek);
   }
 
-  // '_' touching a type that is followed by a name on the same line: the weak marker of _T name (spec 12)
+  // '%' touching a type that is followed by a name on the same line: the weak marker of %T name (spec 12)
   bool IsWeakMarker() {
-    return IsOp("_") && PeekAt(1).Kind == TokenKind.Ident && PeekAt(1).Line == Peek.Line && PeekAt(1).Col == Peek.Col + 1
+    return IsOp("%") && PeekAt(1).Kind == TokenKind.Ident && PeekAt(1).Line == Peek.Line && PeekAt(1).Col == Peek.Col + 1
       && PeekAt(2).Kind == TokenKind.Ident && PeekAt(2).Line == Peek.Line;
   }
 
-  // (@) or (_) before a type: the read/write marker of (@)T name and (_)T name (spec 12.7)
+  // &@ or &% before a type: the read/write marker of &@T name and &%T name (spec 12.7)
   bool IsReadWriteMarker(string marker) {
-    return IsOp("(") && PeekAt(1).Is(marker) && PeekAt(2).Is(")") && PeekAt(3).Kind == TokenKind.Ident && PeekAt(3).Line == Peek.Line;
+    return IsOp("&") && PeekAt(1).Is(marker) && PeekAt(1).Line == Peek.Line && PeekAt(1).Col == Peek.Col + 1
+      && PeekAt(2).Kind == TokenKind.Ident && PeekAt(2).Line == Peek.Line;
+  }
+
+  // the old markers ( & ), ( @ ), ( _ ), ( * ) written together are now &, &@, &%, &* (spec 13.1)
+  void CheckOldMarker() {
+    if (IsOp("(") && PeekAt(1).Text is "&" or "@" or "_" or "*" && PeekAt(2).Is(")")) {
+      string now = PeekAt(1).Text switch { "&" => "&", "@" => "&@", "_" => "&%", _ => "&*" };
+      throw Error($"({PeekAt(1).Text}) is now written {now} (spec 13.1)");
+    }
   }
 
   // '@' touching a type: the counted marker of @T name (spec 12.7)
@@ -177,11 +185,6 @@ public sealed class Parser {
       return ">>=";
     }
     return null;
-  }
-
-  // '(' '&' ')' or '(' '*' ')' written together
-  bool PeekMarker(string middle) {
-    return IsOp("(") && PeekAt(1).Is(middle) && PeekAt(2).Is(")");
   }
 
   // the next token touches the previous one: *i32{count}
@@ -293,7 +296,7 @@ public sealed class Parser {
     var mods = new List<Token>();
     // readonly is a modifier only before a declaration and extern only before fun, so they are not reserved words (spec 11.1.4, 15.9)
     while (Peek.Kind == TokenKind.Keyword && Modifiers.Contains(Peek.Text)
-           || Peek.Kind == TokenKind.Ident && Peek.Text is "readonly" or "readwrite" or "writeonly" && (PeekAt(1).Kind is TokenKind.Ident or TokenKind.Keyword || PeekAt(1).Is("_"))
+           || Peek.Kind == TokenKind.Ident && Peek.Text is "readonly" or "readwrite" or "writeonly" && (PeekAt(1).Kind is TokenKind.Ident or TokenKind.Keyword || PeekAt(1).Is("%"))
            || Peek.Kind == TokenKind.Ident && Peek.Text == "extern" && PeekAt(1).Kind == TokenKind.Keyword && PeekAt(1).Text == "fun"
            || Peek.Kind == TokenKind.Ident && Peek.Text == "notclonable" && PeekAt(1).Kind == TokenKind.Keyword && PeekAt(1).Text == "class") {   // spec 11.1, 12.6
       mods.Add(Next());
@@ -361,7 +364,7 @@ public sealed class Parser {
     classMember = ownerName != null;   // a field of a class can have accessor blocks (spec 11.1.4)
     var mods = ParseModifiers();
     if (IsOp("_") && PeekAt(2).Kind == TokenKind.Ident && PeekAt(2).Line == Peek.Line) {
-      CheckUnderscoreName();   // _Texture2D t: a weak declaration
+      CheckUnderscoreName();   // _Texture2D t: the old weak marker
     }
     if (IsKw("fun")) {
       return WithMods(ParseFun(), mods);
@@ -588,7 +591,7 @@ public sealed class Parser {
     if (Peek.Kind == TokenKind.Ident && PeekAt(1).Is("in")) {
       var n = Next();
       node.Add(new Node("Var", n, n.Text));
-    } else if (IsOp("(") && !PeekMarker("&")) {
+    } else if (IsOp("(")) {
       // for (string key, i32 value) in m: the items of each tuple go into separate variables (spec 6.4)
       node.Add(ParseForDestructure(null));
     } else if (Peek.Kind == TokenKind.Ident && Peek.Text == "var" && PeekAt(1).Is("(")) {
@@ -621,19 +624,14 @@ public sealed class Parser {
     return node;
   }
 
-  // (type name, (&)type name, name, ...) of a for header: a Destructure node with one Var per name (WritableVar for (&)); a Var without a type
+  // (type name, &type name, name, ...) of a for header: a Destructure node with one Var per name (WritableVar for &); a Var without a type
   // takes the type given (var) or none
   Node ParseForDestructure(Node? sharedType) {
     var open = ExpectOp("(");
     var list = new Node("Destructure", open);
     do {
-      bool writable = false;
-      if (PeekMarker("&")) {
-        Next();
-        Next();
-        Next();
-        writable = true;
-      }
+      CheckOldMarker();
+      bool writable = AcceptOp("&");
       Node? type = sharedType;
       if (!(Peek.Kind == TokenKind.Ident && (PeekAt(1).Is(",") || PeekAt(1).Is(")")))) {
         if (sharedType != null) {
@@ -942,7 +940,7 @@ public sealed class Parser {
         ParseAccessors(first);
       }
       if (IsOp("_=")) {
-        throw Error("'_=' is removed: a weak reference is made with _ in the expression, _Dog w = _first (spec 12.7)");
+        throw Error("'_=' is removed: a weak reference is made with % in the expression, %Dog w = %first (spec 12.7)");
       }
       if (IsOp("=")) {
         var op = Next();
@@ -959,7 +957,7 @@ public sealed class Parser {
       opText = Peek.Text;
     }
     if (opText == "_=") {
-      throw Error("'_=' is removed: a weak reference is assigned with =, w = _first (spec 12.7)");
+      throw Error("'_=' is removed: a weak reference is assigned with =, w = %first (spec 12.7)");
     }
     if (opText != null) {
       var opTok = Next();
@@ -994,18 +992,18 @@ public sealed class Parser {
 
   // Speculative: "Type name" followed by '=', '_=', ',', or end of statement
   Node? TryParseDecl() {
-    // _Texture2D texture: a weak reference (spec 12); the '_' touches the type
-    bool readWrite = IsReadWriteMarker("@") || IsReadWriteMarker("_");   // (@)Dog first, (_)Dog watcher: read/write (spec 12.7)
-    bool weak = readWrite ? PeekAt(1).Is("_") : IsWeakMarker();
+    // %Texture2D texture: a weak reference (spec 12); the '%' touches the type
+    CheckOldMarker();
+    bool readWrite = IsReadWriteMarker("@") || IsReadWriteMarker("%");   // &@Dog first, &%Dog watcher: read/write (spec 12.7)
+    bool weak = readWrite ? PeekAt(1).Is("%") : IsWeakMarker();
     bool counted = readWrite ? PeekAt(1).Is("@") : IsCountedMarker();   // @Dog first: a counted object (spec 12.7)
-    bool startsType = weak || counted || Peek.Kind == TokenKind.Ident || IsOp("(") || IsOp("*") || IsKw("fun");
+    bool startsType = weak || counted || Peek.Kind == TokenKind.Ident || IsOp("(") || IsOp("*") || IsOp("&") && PeekAt(1).Is("*") || IsKw("fun");
     if (!startsType) {
       return null;
     }
     int save = pos;
     try {
       if (readWrite) {
-        Next();
         Next();
       }
       if (weak || counted) {
@@ -1052,7 +1050,7 @@ public sealed class Parser {
   // ---------------------------------------------------------------- types
 
   static bool StartsTypeToken(Token token) {
-    return token.Kind == TokenKind.Ident || token.Is("(") || token.Is("*") || token.Is("fun");
+    return token.Kind == TokenKind.Ident || token.Is("(") || token.Is("*") || token.Is("&") || token.Is("fun");
   }
 
   Node ParseType(bool allowCallback = true) {
@@ -1068,12 +1066,12 @@ public sealed class Parser {
       };
       return new Node(kind, word).Add(ParseType(allowCallback));
     }
-    // *T read-only pointer, (*)T writable pointer, optional bound: *i32{count}
-    if (IsOp("*") || PeekMarker("*")) {
-      bool writable = !IsOp("*");
+    // *T read-only pointer, &*T writable pointer, optional bound: *i32{count}
+    CheckOldMarker();
+    if (IsOp("*") || IsOp("&") && PeekAt(1).Is("*")) {
+      bool writable = IsOp("&");
       Next();
       if (writable) {
-        Next();
         Next();
       }
       type = new Node(writable ? "WritablePointer" : "Pointer", start).Add(ParseType(false));
@@ -1131,10 +1129,10 @@ public sealed class Parser {
       var marker = Next();
       return new Node("CountedType", marker).Add(ParseType());
     }
-    if (IsOp("(") && PeekAt(1).Is("@") && PeekAt(2).Is(")") && PeekAt(3).Kind == TokenKind.Ident) {
-      // list<(@)Dog>: a collection of read/write counted objects (spec 12.7)
+    CheckOldMarker();
+    if (IsReadWriteMarker("@")) {
+      // list<&@Dog>: a collection of read/write counted objects (spec 12.7)
       var marker = Next();
-      Next();
       Next();
       return new Node("CountedType", marker).Add(ParseType()).Add(new Node("ReadWrite", marker));
     }
@@ -1195,14 +1193,27 @@ public sealed class Parser {
   Node ParseFun() {
     var t = Next();
     var rets = new Node("Returns", t);
+    var marks = new List<string>();   // fun ->Dog make() gives "g0", fun &Dog at(uns i) lends read/write "w0" (spec 13.1.1)
     while (!(Peek.Kind == TokenKind.Ident && (PeekAt(1).Is("(") || PeekAt(1).Is("=") || IsGenericCallAhead(0)))
            && !((IsOp("==") || IsOp("!=")) && PeekAt(1).Is("("))) {
+      if (AcceptOp("->")) {
+        if (IsCountedMarker() || IsReadWriteMarker("@")) {
+          throw Error("a counted result gives its usage already: write fun @T name(), without ->");
+        }
+        if (IsOp("&")) {
+          throw Error("a result is given (->T) or lent read/write (&T), not both");
+        }
+        marks.Add("g" + rets.Children.Count);
+      } else if (IsOp("&") && !PeekAt(1).Is("*") && !IsReadWriteMarker("@") && !IsReadWriteMarker("%")) {
+        Next();
+        marks.Add("w" + rets.Children.Count);   // &T: the caller writes the result in place (spec 13.1.1)
+      }
+      CheckOldMarker();
       if (IsCountedMarker() || IsReadWriteMarker("@")) {
-        // fun @Dog make(), fun (@)Dog make(): a counted result, read-only or read/write (spec 12.7)
-        bool readWrite = IsOp("(");
+        // fun @Dog make(), fun &@Dog make(): a counted result, read-only or read/write (spec 12.7)
+        bool readWrite = IsOp("&");
         Next();
         if (readWrite) {
-          Next();
           Next();
         }
         if (rets.Children.Count > 0) {
@@ -1223,6 +1234,9 @@ public sealed class Parser {
     }
     var name = IsOp("==") ? Next() : ExpectIdent();
     var node = new Node("Fun", name, name.Text);
+    if (marks.Count > 0) {
+      rets.Text = "marks:" + string.Join(",", marks);
+    }
     if (rets.Children.Count > 0) {
       node.Add(rets);
     }
@@ -1340,7 +1354,7 @@ public sealed class Parser {
     return node;
   }
 
-  // (type name [= default], &type name, (&)type name, volatile &type name, ->type name, ...)
+  // (type name [= default], &type name, volatile type name, ->type name, @type name, %type name, ...) (spec 13.1)
   Node ParseParams() {
     var open = ExpectOp("(");
     var ps = new Node("Params", open);
@@ -1350,32 +1364,28 @@ public sealed class Parser {
         SkipNewlines();
         bool isVariadic = AcceptOp("...");
         bool isVolatile = false;
-        if (Peek.Kind == TokenKind.Ident && Peek.Text == "volatile" && (PeekAt(1).Is("&") || (PeekAt(1).Is("(") && PeekAt(2).Is("&")))) {
+        if (Peek.Kind == TokenKind.Ident && Peek.Text == "volatile" && PeekAt(1).Kind == TokenKind.Ident && PeekAt(2).Kind == TokenKind.Ident) {
           Next();
-          isVolatile = true;
+          isVolatile = true;   // volatile clock now: read through the reference every time (spec 12.3)
         }
+        CheckOldMarker();
         string kind = "Param";
-        bool readWriteParam = IsReadWriteMarker("@") || IsReadWriteMarker("_");   // (@)T name, (_)T name (spec 12.7)
-        bool readWriteWeak = readWriteParam && PeekAt(1).Is("_");
+        bool readWriteParam = IsReadWriteMarker("@") || IsReadWriteMarker("%");   // &@T name, &%T name (spec 12.7)
+        bool readWriteWeak = readWriteParam && PeekAt(1).Is("%");
         if (readWriteParam) {
-          Next();
           Next();
         }
         bool countedParam = readWriteParam ? !readWriteWeak : IsCountedMarker();   // @T name (spec 12.7)
         if (countedParam) {
           Next();
         }
-        if (PeekMarker("&")) {
+        if (!readWriteParam && IsOp("&") && !PeekAt(1).Is("*")) {
           Next();
-          Next();
-          Next();
-          kind = "WritableRefParam";
-        } else if (AcceptOp("&")) {
-          kind = "RefParam";
+          kind = "WritableRefParam";   // &T name: a writable lend (spec 13.1)
         } else if (AcceptOp("->")) {
           kind = "GiftParam";
         }
-        bool weakParam = readWriteWeak || kind == "Param" && IsWeakMarker();   // _T name (spec 12)
+        bool weakParam = readWriteWeak || kind == "Param" && IsWeakMarker();   // %T name (spec 12)
         if (weakParam) {
           Next();
         }
@@ -1407,7 +1417,7 @@ public sealed class Parser {
         }
         if (weakParam) {
           if (kind != "Param") {
-            throw ErrorAt("a weak parameter is _T name, with no other marker", name);
+            throw ErrorAt("a weak parameter is %T name, with no other marker", name);
           }
           p.Add(new Node("Weak", name));
         }
@@ -1417,7 +1427,7 @@ public sealed class Parser {
         if (isVolatile) {
           p.Add(new Node("Volatile", name));
         }
-        // &Collection collection as parent (spec 12.5): parent is a keyword only right after as
+        // Collection collection as parent (spec 12.5): parent is a keyword only right after as
         if (IsKw("as") && PeekAt(1).Kind == TokenKind.Ident && PeekAt(1).Text == "parent") {
           var asWord = Next();
           Next();
@@ -1889,7 +1899,17 @@ public sealed class Parser {
           return new Node("PreDec", t).Add(ParseUnary());
         case "&":
           Next();
-          return new Node("AddressOf", t).Add(ParseUnary());
+          if (IsOp("*") && Peek.Line == t.Line && Peek.Col == t.Col + 1) {
+            Next();
+            return new Node("WritablePointerOf", t).Add(ParseUnary());   // &*x: a writable pointer (spec 12.1)
+          }
+          return new Node("WritableAddressOf", t).Add(ParseUnary());   // &x: a writable lend (spec 13.1)
+        case "*":
+          Next();
+          return new Node("AddressOf", t).Add(ParseUnary());   // *x: a read-only pointer (spec 12.1)
+        case "%":
+          Next();
+          return new Node("WeakOf", t).Add(ParseUnary());   // %first: a weak reference to a counted object (spec 12.7)
         case "->":
           Next();
           return new Node("Gift", t).Add(ParseUnary());
@@ -1904,10 +1924,10 @@ public sealed class Parser {
           }
           return countedOf;
         case "_":
-          Next();
-          if (StartsOperand(Peek)) {
-            return new Node("WeakOf", t).Add(ParseUnary());   // _first: a weak reference to a counted object (spec 12.7; the bitwise not is ~x)
+          if (PeekAt(1).Kind == TokenKind.Ident && PeekAt(1).Line == t.Line && PeekAt(1).Col == t.Col + 1) {
+            throw ErrorAt($"a weak reference is made with %: %{PeekAt(1).Text} (spec 12.7)", t);
           }
+          Next();
           return new Node("Discard", t);
         case "[":
           var transmute = TryParseTransmute();
@@ -1916,12 +1936,7 @@ public sealed class Parser {
           }
           break;
         case "(":
-          if (PeekMarker("&")) {
-            Next();
-            Next();
-            Next();
-            return new Node("WritableAddressOf", t).Add(ParseUnary());
-          }
+          CheckOldMarker();
           var cast = TryParseCast();
           if (cast != null) {
             return cast;
@@ -1936,7 +1951,7 @@ public sealed class Parser {
   Node? TryParseTransmute() {
     int save = pos;
     var open = Next();
-    if (Peek.Kind == TokenKind.Ident || IsOp("*") || PeekMarker("*")) {
+    if (Peek.Kind == TokenKind.Ident || IsOp("*") || IsOp("&") && PeekAt(1).Is("*")) {
       try {
         var type = ParseType(false);
         if (IsOp("]") && StartsCastOperand(PeekAt(1))) {
@@ -2066,11 +2081,12 @@ public sealed class Parser {
       }
       if (IsOp(">") && PeekAt(1).Is("(")) {
         Next();
-        // a<b>(c) also reads as two comparisons: warn when every argument could be a value (arr is a type too: c.transformTo<arr>())
+        // a<b>(c) also reads as two comparisons when every argument could be a value (arr is a type too: c.transformTo<arr>()):
+        // marked, so the compiler can say so if a is not a generic after all (no warning when it is)
         bool ambiguous = generic.Children.Skip(1).All(arg =>
           (arg.Kind == "Type" && arg.Children.Count == 0 && !BuiltinTypes.Contains(arg.Text!) && arg.Text != "arr") || arg.Kind == "Count");
         if (ambiguous) {
-          Warnings.Add($"({open.Line}): warning L3: read as a generic call; use parentheses for comparisons");
+          generic.Text = "ambiguous";
         }
         return generic;
       }
@@ -2239,13 +2255,13 @@ public sealed class Parser {
     return new Node("Param", name, name.Text).Add(type);
   }
 
-  // limit (borrow) | limit! (copy) | ->limit (move) | _limit (weak)
+  // limit (borrow) | limit! (copy) | ->limit (move) | %limit (weak)
   Node ParseCapture() {
     if (AcceptOp("->")) {
       var n = ExpectIdent();
       return new Node("MoveCapture", n, n.Text);
     }
-    if (AcceptOp("_")) {
+    if (AcceptOp("%")) {
       var n = ExpectIdent();
       return new Node("WeakCapture", n, n.Text);
     }

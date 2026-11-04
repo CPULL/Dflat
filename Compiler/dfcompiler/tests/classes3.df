@@ -6,11 +6,11 @@ public class Box(i32 width, i32 height) {
   public i32 height
   public static i32 made = 0
   public fun i32 Area() { width * height }
-  public fun Box Grow(i32 by) { Box(width + by, height + by) }
-  public fun Box Grow(i32 w, i32 h) { Box(width + w, height + h) }
-  public fun string Show(string prefix = "box", i32 times = 1) { prefix + ":" + Area() * times }
-  public static fun Box Unit() { made += 1; return Box(1, 1) }
-  public static fun Box Two() { return Unit().Grow(1) }
+  public fun ->Box Grow(i32 by) { Box(width + by, height + by) }
+  public fun ->Box Grow(i32 w, i32 h) { Box(width + w, height + h) }
+  public fun ->string Show(string prefix = "box", i32 times = 1) { prefix + ":" + Area() * times }
+  public static fun ->Box Unit() { made += 1; return Box(1, 1) }
+  public static fun ->Box Two() { return Unit().Grow(1) }
   public static fun i32 Count() { made }
 }
 

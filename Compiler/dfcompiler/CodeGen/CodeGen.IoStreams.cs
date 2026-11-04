@@ -6,13 +6,13 @@ namespace dfcompiler;
 public sealed partial class CodeGen {
   // File.open (6.3.2, 6.3.3): shortcuts for the FileStream constructor
   const string IoOpenStatic = """
-  public static fun FileStream open(string path, Root.IO.StreamReadWriteAccessMode readMode, Root.IO.StreamReadWriteAccessMode writeMode, Root.IO.StreamOpenMode openMode) {
+  public static fun ->FileStream open(string path, Root.IO.StreamReadWriteAccessMode readMode, Root.IO.StreamReadWriteAccessMode writeMode, Root.IO.StreamOpenMode openMode) {
     return FileStream(path, readMode, writeMode, openMode)
   }
 """;
 
   const string IoOpenObject = """
-  public fun FileStream open(Root.IO.StreamReadWriteAccessMode readMode, Root.IO.StreamReadWriteAccessMode writeMode, Root.IO.StreamOpenMode openMode) {
+  public fun ->FileStream open(Root.IO.StreamReadWriteAccessMode readMode, Root.IO.StreamReadWriteAccessMode writeMode, Root.IO.StreamOpenMode openMode) {
     return FileStream(full, readMode, writeMode, openMode)
   }
 """;

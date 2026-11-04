@@ -65,7 +65,7 @@ modes.close()
 r.Console.log($"after close: {modes.readMode}, {modes.writeMode}")                                // the modes stay: Shared, Exclusive
 
 // errors
-fun string tryOpen(string p, fs.StreamOpenMode mode) {
+fun ->string tryOpen(string p, fs.StreamOpenMode mode) {
   FileStream s = FileStream(p, fs.StreamReadWriteAccessMode.Shared, fs.StreamReadWriteAccessMode.None, mode)
   return "opened"
   catch FileNotFoundException ex { return "FileNotFoundException " + ex.id }
@@ -74,21 +74,21 @@ fun string tryOpen(string p, fs.StreamOpenMode mode) {
 r.Console.log(tryOpen(File.combinePaths(base, "nothing.bin"), fs.StreamOpenMode.OpenExisting))
 r.Console.log(tryOpen(path, fs.StreamOpenMode.CreateIfMissing))
 
-fun string badModes(string p) {
+fun ->string badModes(string p) {
   FileStream s = FileStream(p, fs.StreamReadWriteAccessMode.Shared, fs.StreamReadWriteAccessMode.None, fs.StreamOpenMode.AppendExisting)
   return "opened"
   catch InvalidStreamModesException ex { return "InvalidStreamModesException " + ex.id }
 }
 r.Console.log(badModes(path))
 
-fun string directory(string p) {
+fun ->string directory(string p) {
   FileStream s = FileStream(p, fs.StreamReadWriteAccessMode.Shared, fs.StreamReadWriteAccessMode.None, fs.StreamOpenMode.OpenExisting)
   return "opened"
   catch FileAccessToADirectoryException ex { return "FileAccessToADirectoryException " + ex.id }
 }
 r.Console.log(directory(base))
 
-fun string usage(string p) {
+fun ->string usage(string p) {
   FileStream s = FileStream(p, fs.StreamReadWriteAccessMode.Shared, fs.StreamReadWriteAccessMode.None, fs.StreamOpenMode.OpenExisting)
   arr<u8> small = arr<u8>[2]
   s.write(small)
@@ -97,7 +97,7 @@ fun string usage(string p) {
 }
 r.Console.log(usage(path))
 
-fun string range(string p) {
+fun ->string range(string p) {
   FileStream s = FileStream(p, fs.StreamReadWriteAccessMode.Shared, fs.StreamReadWriteAccessMode.None, fs.StreamOpenMode.OpenExisting)
   arr<u8> small = arr<u8>[2]
   s.read(small, 1, 5)
@@ -106,7 +106,7 @@ fun string range(string p) {
 }
 r.Console.log(range(path))
 
-fun string closed(string p) {
+fun ->string closed(string p) {
   FileStream s = FileStream(p, fs.StreamReadWriteAccessMode.Shared, fs.StreamReadWriteAccessMode.None, fs.StreamOpenMode.OpenExisting)
   s.close()
   s.readByte()

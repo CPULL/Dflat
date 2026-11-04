@@ -3,11 +3,11 @@ alias Root as r
 public class Player(string name) {
   public string name
 }
-fun g((@)Player p) {
+fun g(&@Player p) {
   r.Console.log(p.name)
 }
 fun f() {
   @Player reader = @Player("a")
-  g(reader)
+  g(&@reader)
 }
 f()

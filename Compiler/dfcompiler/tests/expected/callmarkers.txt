@@ -1,0 +1,11 @@
+keep Rex, users 2
+keep Fido, users 1
+keep Max, users 2
+max level 1
+watch Rex
+watch Rex
+max level 21
+pack 2, old Rex, rex users 3
+keep Rex, users 3
+rex given: true
+---- exit code 0 ----

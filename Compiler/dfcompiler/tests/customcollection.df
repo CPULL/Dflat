@@ -7,7 +7,7 @@ public class Evens(uns limit) : IndexCollection<u64> {
   override fun uns get_len() { limit }
   override fun bool has(u64 value) { value % 2 == 0 && value < limit * 2 }
   override fun clear() { }
-  override fun IndexIterator<u64> getIterator() {
+  override fun ->IndexIterator<u64> getIterator() {
     return EvenIterator(limit)
   }
 }

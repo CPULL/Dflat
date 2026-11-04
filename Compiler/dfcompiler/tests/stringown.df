@@ -6,7 +6,7 @@ class Person {
   public string tag
 }
 
-fun string greet(string who) {
+fun ->string greet(string who) {
   return "Hello " + who
 }
 
@@ -14,7 +14,7 @@ fun string keep(string who) {
   return who
 }
 
-fun string upperName(Person p) {
+fun ->string upperName(Person p) {
   p.name.toUpper()
 }
 
@@ -23,7 +23,7 @@ fun string retag(string text) {
   return text
 }
 
-fun string, u64 pair(string text) {
+fun ->string, u64 pair(string text) {
   string local = text + "?"
   return local, local.len
 }
@@ -116,7 +116,7 @@ string blank = ""
 string named = blank ?? "anon" + "ymous"
 fun Item same<Item>(Item value) { value }
 string generic = same("gen" + "eric")
-fun string firstLong(arr<string> words) {
+fun ->string firstLong(arr<string> words) {
   for string w in words {
     string upper = w.toUpper()
     if upper.len > 3 {

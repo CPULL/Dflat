@@ -1,0 +1,9 @@
+32 6
+7
+seven
+7.5
+seven
+(70, seventy, 7.75)
+three
+5
+---- exit code 0 ----

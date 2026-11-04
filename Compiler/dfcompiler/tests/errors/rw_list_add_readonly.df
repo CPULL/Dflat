@@ -3,8 +3,8 @@ public class Player(string name) {
   public string name
 }
 fun f() {
-  list<(@)Player> team = []
+  list<&@Player> team = []
   @Player reader = @Player("a")
-  team.add(reader)
+  team.add(&@reader)
 }
 f()

@@ -11,7 +11,7 @@ public sealed partial class CodeGen {
 public class File(string path) {
   string full = File.fixPath(path)
 
-  public static fun string fixPath(string path) {
+  public static fun ->string fixPath(string path) {
     string result = Root.IO.Native.Normalize(path)
     File.check(path)
     return result
@@ -94,7 +94,7 @@ public class File(string path) {
     if silent == 28 then throw DirectoryNotEmptyException("The folder is not empty: " + p)
     return result
   }
-  public static fun File copy(string from, string to, Root.IO.OverwriteOptions options = Root.IO.OverwriteOptions.None) {
+  public static fun ->File copy(string from, string to, Root.IO.OverwriteOptions options = Root.IO.OverwriteOptions.None) {
     string source = File.fixPath(from)
     string target = File.fixPath(to)
     bool done = Root.IO.Native.Copy(source, target, options == Root.IO.OverwriteOptions.Overwrite)
@@ -103,7 +103,7 @@ public class File(string path) {
     if done then return File(target)
     return null
   }
-  public static fun File move(string from, string to, Root.IO.OverwriteOptions options = Root.IO.OverwriteOptions.None) {
+  public static fun ->File move(string from, string to, Root.IO.OverwriteOptions options = Root.IO.OverwriteOptions.None) {
     string source = File.fixPath(from)
     string target = File.fixPath(to)
     bool done = Root.IO.Native.Move(source, target, options == Root.IO.OverwriteOptions.Overwrite)
@@ -112,14 +112,14 @@ public class File(string path) {
     if done then return File(target)
     return null
   }
-  public static fun File createDirectory(string path) {
+  public static fun ->File createDirectory(string path) {
     string p = File.fixPath(path)
     Root.IO.Native.MakeDir(p)
     u64 silent = File.check(p)
     if silent == 29 then throw FileNameAlreadyExistsException("The name already exists: " + p)
     return File(p)
   }
-  public static fun arr<File> getAllFiles(string path, bool recursive = false, Root.IO.FileSystemObjectsType itemType = Root.IO.FileSystemObjectsType.Files, string match = "*") {
+  public static fun ->arr<File> getAllFiles(string path, bool recursive = false, Root.IO.FileSystemObjectsType itemType = Root.IO.FileSystemObjectsType.Files, string match = "*") {
     string p = File.fixPath(path)
     arr<string> names = Root.IO.Native.List(p, recursive, (i32)itemType, match)
     File.check(p)
@@ -129,15 +129,15 @@ public class File(string path) {
     }
     return files
   }
-  public static fun File getTempFile() { File(Root.IO.Native.TempName()) }
-  public static fun string getTempFileName() { Root.IO.Native.TempName() }
-  public static fun string getTempDir() { Root.IO.Native.TempDir() }
-  public static fun string combinePaths(string path1, string path2) {
+  public static fun ->File getTempFile() { File(Root.IO.Native.TempName()) }
+  public static fun ->string getTempFileName() { Root.IO.Native.TempName() }
+  public static fun ->string getTempDir() { Root.IO.Native.TempDir() }
+  public static fun ->string combinePaths(string path1, string path2) {
     Root.IO.Native.Combine(File.fixPath(path1), File.fixPath(path2))
   }
 
   // Root.IO.getCurrentDir, setCurrentDir, getFullPath, getRelativePath (stdlib 6.2): the calls are sent here (LibraryStaticPath)
-  public static fun File getCurrentDir() {
+  public static fun ->File getCurrentDir() {
     string path = Root.IO.Native.CurrentDir()
     File.check(path)
     return File(path)
@@ -150,12 +150,12 @@ public class File(string path) {
   public static fun setCurrentDir(File directory) {
     File.setCurrentDir(directory.path)
   }
-  public static fun string getFullPath(string path) {
+  public static fun ->string getFullPath(string path) {
     string result = Root.IO.Native.FullPath(File.fixPath(path))
     File.check(path)
     return result
   }
-  public static fun string getRelativePath(string from, string to) {
+  public static fun ->string getRelativePath(string from, string to) {
     string result = Root.IO.Native.RelativePath(File.fixPath(from), File.fixPath(to))
     File.check(to)
     return result
@@ -171,19 +171,19 @@ public class File(string path) {
     return File.delete(full, options)
     catch SilentException e { throw e }
   }
-  public fun File copyTo(string to, Root.IO.OverwriteOptions options = Root.IO.OverwriteOptions.None) {
+  public fun ->File copyTo(string to, Root.IO.OverwriteOptions options = Root.IO.OverwriteOptions.None) {
     return File.copy(full, to, options)
     catch SilentException e { throw e }
   }
-  public fun File moveTo(string to, Root.IO.OverwriteOptions options = Root.IO.OverwriteOptions.None) {
+  public fun ->File moveTo(string to, Root.IO.OverwriteOptions options = Root.IO.OverwriteOptions.None) {
     return File.move(full, to, options)
     catch SilentException e { throw e }
   }
-  public fun File createDirectory() {
+  public fun ->File createDirectory() {
     return File.createDirectory(full)
     catch SilentException e { throw e }
   }
-  public fun arr<File> getAllFiles(bool recursive = false, Root.IO.FileSystemObjectsType itemType = Root.IO.FileSystemObjectsType.Files, string match = "*") {
+  public fun ->arr<File> getAllFiles(bool recursive = false, Root.IO.FileSystemObjectsType itemType = Root.IO.FileSystemObjectsType.Files, string match = "*") {
     File.getAllFiles(full, recursive, itemType, match)
   }
   public fun arr<u8> readAll() {
@@ -191,7 +191,7 @@ public class File(string path) {
     File.check(full)
     return bytes
   }
-  public fun string readAllText(String.StringEncoding encoding = String.StringEncoding.UTF8) {
+  public fun ->string readAllText(String.StringEncoding encoding = String.StringEncoding.UTF8) {
     string text = Root.IO.Native.ReadAllText(full, (i32)encoding)
     File.check(full)
     return text

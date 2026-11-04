@@ -191,7 +191,7 @@ public sealed partial class CodeGen {
 
   // enforce a, b { } [else { } | null [on a] { } ...] (spec 7.2): each variable is checked in the order written (7.2.2): a T? has a value,
   // an object is not null and not destroyed, a counted object and a weak reference are alive. When a check fails the first null clause that
-  // names the failing variable (or names none) runs, or the else branch; with no clause for it nothing runs. A (@)T or (_)T variable then
+  // names the failing variable (or names none) runs, or the else branch; with no clause for it nothing runs. A &@T or &%T variable then
   // takes the lock of its object (7.2.2, df_rc_lock): a failure releases the locks already taken and runs the first lockfail clause that
   // names it, or default; on success the locks are released at the very end of the enforce (7.2.5), after the atEnd clauses
   // the catch and atEnd clauses (spec 7.2.3) become one block run when the checks pass: the enforce block as a nested statement, each
@@ -302,7 +302,7 @@ public sealed partial class CodeGen {
     foreach (var name in names) {
       var variable = scope.Find(name.Text!);
       if (WeakRef(name, scope) is CountedRefInfo weak) {
-        // a weak reference (spec 12.7): the object must still be alive; inside the block the name is a temporary usage, read/write for a (_)T,
+        // a weak reference (spec 12.7): the object must still be alive; inside the block the name is a temporary usage, read/write for a &%T,
         // which also takes the lock
         checks.Add((name.Text!, $"DF_RC_ALIVE({weak.Code})", false));
         block = EnforcedWeakBlock(block, name.Text!, weak.Type, weak.Code, IsWritableRef(weak));
@@ -323,7 +323,7 @@ public sealed partial class CodeGen {
       } else if (variable.IsCounted) {
         checks.Add((name.Text!, $"DF_RC_ALIVE({variable.CName})", false));   // a counted variable: its object is alive while it holds a usage
         if (variable.IsWritable) {
-          AddLock(name, variable.CName);   // (@)T: its lock (spec 7.2.2)
+          AddLock(name, variable.CName);   // &@T: its lock (spec 7.2.2)
         }
       } else if (IsClass(variable.Type) && !IsTraitType(variable.Type)) {
         checks.Add((name.Text!, $"({variable.CName} != NULL && !DF_IS_DEAD({variable.CName}))", false));   // objects are nullable (7.1)
@@ -336,7 +336,7 @@ public sealed partial class CodeGen {
       }
     }
     foreach (var name in names.Where(name => name.Children.Any(child => child.Kind == "Timeout") && !locked.Contains(name.Text!))) {
-      throw Error($"'{name.Text}' has no lock: timeout is for the (@)T and (_)T variables of the enforce (spec 7.2.1)", name);
+      throw Error($"'{name.Text}' has no lock: timeout is for the &@T and &%T variables of the enforce (spec 7.2.1)", name);
     }
     if (locks.Count > 0) {
       // the locks end at the very end, after the atEnd clauses and default, on every way out (7.2.5)
@@ -378,7 +378,7 @@ public sealed partial class CodeGen {
       string? unlocked = clause.Children.Any(child => child.Kind == "On") ? on.FirstOrDefault(listed => !locked.Contains(listed))
         : locked.Count == 0 ? on.FirstOrDefault() ?? "" : null;
       if (unlocked != null) {
-        throw Error($"'{unlocked}' has no lock: lockfail is for the (@)T and (_)T variables of the enforce (spec 7.2.2)", clause);
+        throw Error($"'{unlocked}' has no lock: lockfail is for the &@T and &%T variables of the enforce (spec 7.2.2)", clause);
       }
     }
     var nullClauses = s.Children.Where(child => child.Kind == "EnforceNull").Select(clause => (Clause: clause, On: OnNames(clause))).ToList();

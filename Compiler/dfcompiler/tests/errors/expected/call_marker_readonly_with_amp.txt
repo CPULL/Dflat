@@ -1,0 +1,1 @@
+call_marker_readonly_with_amp.df(4): error: 'd' is read-only: write @rex, without & (spec 13.1)

@@ -340,7 +340,7 @@ public sealed partial class CodeGen {
   }
 
   // a local array that is also assigned arrays it only borrows (a = b): a flag says at run time whether it holds its own array, which ends
-  // when it is assigned again and with the scope. Such a local cannot give its array away (return a, ->a, v.pop((&)a))
+  // when it is assigned again and with the scope. Such a local cannot give its array away (return a, ->a, v.pop(&a))
   bool IsMixedLocalArray(Node decl, IEnumerable<Node> after) {
     mixedPass = true;
     try {
@@ -370,9 +370,14 @@ public sealed partial class CodeGen {
   // the uses of an array that keep it local: a[i] (not a view), a.member (not transformTo), the source of a for, an argument to a parameter
   // that keeps it local (ParamStaysLocal), and (for the owner, canReturn) return a, which moves it to the caller
   bool ArrayUsesStayLocal(Node node, Node? parent, Node? grand, int position, string name, bool canReturn, bool plain) {
+    if (node is { Kind: "WritableAddressOf", Children: [{ Kind: "Name" } handed] } && handed.Text == name) {
+      // f(&a) to a &arr<T> parameter: the function may replace the array, the variable still owns the one it ends with (spec 13.1)
+      return !mixedPass && parent is { Kind: "Args" } && grand is { Kind: "Call" } && CalleesOf(grand) is { Count: > 0 } writers
+        && writers.All(f => IsWritableRefParamNode(f, position));
+    }
     if (node is { Kind: "Call" } && node.Children[0] is { Kind: "Member", Text: "pop" } && node.Children.Count > 1
         && node.Children[1].Children is [{ Kind: "WritableAddressOf" } written] && written.Children[0] is { Kind: "Name" } popped && popped.Text == name) {
-      return canReturn && !mixedPass && ArrayUsesStayLocal(node.Children[0], node, parent, 0, name, canReturn, plain);   // v.pop((&)a): the old array of a ends
+      return canReturn && !mixedPass && ArrayUsesStayLocal(node.Children[0], node, parent, 0, name, canReturn, plain);   // v.pop(&a): the old array of a ends
     }
     if (node is { Kind: "Index", Children: [{ Kind: "Name" } viewed, { Kind: "Range" } range] } && viewed.Text == name) {
       // a view a[x..y] used at once (its len, a copy, the source of a for, an index, a read of the runtime) does not outlive a
@@ -389,6 +394,7 @@ public sealed partial class CodeGen {
         { Kind: "Index" } => position == 0 && parent.Children.Count > 1 && parent.Children[1].Kind != "Range",
         { Kind: "Member" } => position == 0 && parent.Text != "transformTo",
         { Kind: "For" or "In" or "Copy" } => true,   // a! only reads it
+        { Kind: "Hole" } => position == 0,   // $"{a}" prints it
         { Kind: "Tuple" } => true,   // (a, 1): a tuple that is kept copies it, a tuple given as an argument borrows it
         { Kind: "Gift" } => canReturn && !mixedPass,   // ->a moves the block out and empties a
         { Kind: "Return" } => canReturn && !mixedPass,   // return a, or return a, n of several values: a moves out
@@ -443,6 +449,9 @@ public sealed partial class CodeGen {
     var callees = CalleesOf(call);
     return callees.Count > 0 && callees.All(f => IsGiftParamNode(f, position) ? plain : ParamStaysLocal(f, position));
   }
+
+  static bool IsWritableRefParamNode(FunSig f, int position) =>
+    f.Node.Children.FirstOrDefault(child => child.Kind == "Params") is Node ps && position < ps.Children.Count && ps.Children[position].Kind == "WritableRefParam";
 
   static bool IsGiftParamNode(FunSig f, int position) =>
     f.Node.Children.FirstOrDefault(child => child.Kind == "Params") is Node ps && position < ps.Children.Count && ps.Children[position].Kind == "GiftParam";
@@ -644,9 +653,9 @@ public sealed partial class CodeGen {
   // target = value, for a variable or field that owns (the old object ends) or borrows
   string OwnedAssign(LValueInfo target, Node targetNode, Expr value, Node at) {
     var variable = target.Variable;
-    bool owns = variable != null ? variable.Own : target.IsField;
+    bool owns = variable != null ? variable.Own || variable.RefSlot : target.IsField;   // a & parameter replaces the caller's object (spec 13.1)
     if (variable is { IsWeak: true }) {
-      throw Error($"'{targetNode.Text}' is a weak reference: it takes a counted object marked with _ ({targetNode.Text} = _x) or another weak reference (spec 12.7)", at);
+      throw Error($"'{targetNode.Text}' is a weak reference: it takes a counted object marked with % ({targetNode.Text} = %x) or another weak reference (spec 12.7)", at);
     }
     bool movesIn = value.Fresh || value.Type == "null";
     if (owns && !movesIn) {
@@ -720,7 +729,7 @@ public sealed partial class CodeGen {
         && node.Children.FirstOrDefault(child => child.Kind == "Init")?.Children[0] is { Kind: "Call" } call && CallReturnsCounted(call)) {
       node.Add(Synthetic("Counted", node));
       if (CalleesOf(call) is { Count: > 0 } callees && callees.All(f => f.RetWritable)) {
-        node.Add(Synthetic("ReadWrite", node));   // var x = make() with fun (@)T make(): x is (@)T
+        node.Add(Synthetic("ReadWrite", node));   // var x = make() with fun &@T make(): x is &@T
       }
     }
     foreach (var child in node.Children) {
@@ -803,7 +812,7 @@ public sealed partial class CodeGen {
   // another counted result)
   string CountedReturnCode(Node value, Scope scope, Node at) {
     string type = CountedBase(currentRet!);
-    bool writable = currentFun?.RetWritable == true;   // fun (@)T: only read/write usages go out (spec 12.7)
+    bool writable = currentFun?.RetWritable == true;   // fun &@T: only read/write usages go out (spec 12.7)
     if (CountedRef(value, scope) is CountedRefInfo counted) {
       if (!IsSubtype(counted.Type, type)) {
         throw Error($"'{counted.Name}' is a {counted.Type}, not a {type}", at);
@@ -814,14 +823,14 @@ public sealed partial class CodeGen {
     return CountedValue(value, scope, type, false, at, writable);
   }
 
-  // a variable, parameter or field declared (@)T or (_)T: read/write, its object has a lock (spec 12.7)
+  // a variable, parameter or field declared &@T or &%T: read/write, its object has a lock (spec 12.7)
   static bool IsWritableRef(CountedRefInfo info) => info.Writable || info.Variable?.IsWritable == true || info.Field?.IsWritable == true;
 
-  // a value that gives a read/write usage of its own: a call of functions that return (@)T, or an item handed out by a collection of
-  // read/write objects (replace, takeAt, pop on list<(@)T>)
+  // a value that gives a read/write usage of its own: a call of functions that return &@T, or an item handed out by a collection of
+  // read/write objects (replace, takeAt, pop on list<&@T>)
   bool GivesWritableUsage(Node value, Scope scope) {
     if (value.Kind == "CValue") {
-      return true;   // made by the compiler: the read/write usage that enforce takes of a (_)T
+      return true;   // made by the compiler: the read/write usage that enforce takes of a &%T
     }
     if (value.Kind != "Call") {
       return false;
@@ -840,7 +849,7 @@ public sealed partial class CodeGen {
     return CalleesOf(value) is { Count: > 0 } callees && callees.All(f => f.RetWritable);
   }
 
-  // x.name = v through a (@)T x, or through the read/write usage of a (_)T in its enforce: the lock must be held, otherwise the write raises
+  // x.name = v through a &@T x, or through the read/write usage of a &%T in its enforce: the lock must be held, otherwise the write raises
   // WritingOnRefCountWithoutLockingException (spec 12.7). Writes made by the methods of the object are not checked yet
   string? WriteLockCheck(Node target, Scope scope) {
     if (LibraryCode || target.Kind is not ("Member" or "Index")) {
@@ -857,7 +866,7 @@ public sealed partial class CodeGen {
   }
 
   // the same seen by the analysis of the exceptions (CodeGen.Leaks.cs): a write whose target goes through a name or a field declared
-  // (@)T or (_)T
+  // &@T or &%T
   bool FlowWritesThroughLock(Node target, FunSig? fun) {
     if (target.Kind is not ("Member" or "Index")) {
       return false;
@@ -894,7 +903,7 @@ public sealed partial class CodeGen {
   // a read/write target takes only read/write sources: a read-only usage cannot become a writing one (spec 12.7)
   void CheckWritableSource(CountedRefInfo source, bool writable, Node at) {
     if (writable && !IsWritableRef(source)) {
-      throw Error($"'{source.Name}' is read-only (@{source.Type}): only a (@){source.Type} or a (_){source.Type} gives a read/write one (spec 12.7)", at);
+      throw Error($"'{source.Name}' is read-only (@{source.Type}): only a &@{source.Type} or a &%{source.Type} gives a read/write one (spec 12.7)", at);
     }
   }
 
@@ -922,6 +931,9 @@ public sealed partial class CodeGen {
   // the cost of an argument in the overload choice for the counted cases: -1 not a counted case (the usual rules decide), -2 it cannot be
   // passed (a counted argument to a plain parameter, a plain object to a @T parameter)
   int CountedArgCost(Node arg, string paramType, Scope scope) {
+    if (arg.Kind == "WritableAddressOf" && arg.Children[0].Kind is "CountedOf" or "WeakOf") {
+      arg = arg.Children[0];   // &@x, &%x: the marker of a read/write parameter (spec 13.1)
+    }
     if (IsWeakType(paramType)) {
       string weakType = paramType[1..];
       var source = arg.Kind == "WeakOf" ? CountedRef(arg.Children[0], scope) ?? WeakRef(arg.Children[0], scope) : WeakRef(arg, scope);
@@ -961,7 +973,7 @@ public sealed partial class CodeGen {
     if (value is { Kind: "CountedOf", Children.Count: 2 } timed) {
       // @Player() timeout 100: the default wait for the lock of a read/write object, in milliseconds (spec 12.7)
       if (!writable) {
-        throw Error($"timeout is the wait for a lock: only a read/write (@){type} has one (spec 12.7)", at);
+        throw Error($"timeout is the wait for a lock: only a read/write &@{type} has one (spec 12.7)", at);
       }
       var ms = ExprOf(timed.Children[1].Children[0], scope, "i64");
       if (!IsInt(ms.Type)) {
@@ -1004,7 +1016,7 @@ public sealed partial class CodeGen {
         throw Error($"this is a counted {CountedBase(given.Type)}, not a {type}", at);
       }
       if (writable && !GivesWritableUsage(value, scope)) {
-        throw Error($"this is a read-only @{CountedBase(given.Type)}: a read/write (@){type} needs a (@)T result (spec 12.7)", at);
+        throw Error($"this is a read-only @{CountedBase(given.Type)}: a read/write &@{type} needs a &@T result (spec 12.7)", at);
       }
       return given.Code;
     }
@@ -1070,7 +1082,7 @@ public sealed partial class CodeGen {
       return;
     }
     if (CountedRef(subject, scope) is not CountedRefInfo counted) {
-      throw Error("'is done.' releases a usage or a weak reference (@T, _T); a plain object ends with 'is atEnd.' (spec 12.7)", done);
+      throw Error("'is done.' releases a usage or a weak reference (@T, %T); a plain object ends with 'is atEnd.' (spec 12.7)", done);
     }
     string slot = NewTemp();
     string taken = NewTemp();
@@ -1102,10 +1114,10 @@ public sealed partial class CodeGen {
     }
   }
 
-  // (&) on a counted object is a compile error: writing needs a read/write usage, (@)T (spec 12.7)
+  // & on a counted object is a compile error: writing needs a read/write usage, &@T (spec 12.7)
   void CheckNotWritableBorrowOfCounted(Node value, Scope scope, Node at) {
     if (CountedRef(value, scope) is CountedRefInfo counted) {
-      throw Error($"(&) is not allowed on the counted object '{counted.Name}': writing needs a read/write usage, (@)T (spec 12.7)", at);
+      throw Error($"& is not allowed on the counted object '{counted.Name}': writing needs a read/write usage, &@T (spec 12.7)", at);
     }
   }
 
@@ -1165,7 +1177,7 @@ public sealed partial class CodeGen {
         if (FindCountedCycle(first.Type, start, path, new HashSet<string>())
             && reported.Add(string.Join(",", path.Select(field => field.Owner.Name + "." + field.Name).Order()))) {
           string links = string.Join(" -> ", path.Select(field => $"{field.Owner.Name}.{field.Name}")) + $" -> {start.Name}";
-          Warn($"possible cycle of counted objects: {links}; objects in a cycle are never destroyed (zombie objects): make one of the links a weak reference (_T)", first.At, 1);
+          Warn($"possible cycle of counted objects: {links}; objects in a cycle are never destroyed (zombie objects): make one of the links a weak reference (%T)", first.At, 1);
         }
       }
     }
@@ -1240,7 +1252,7 @@ public sealed partial class CodeGen {
       if (!IsSubtype(found.Type, type)) {
         throw Error($"'{found.Name}' is a {found.Type}, not a {type}", at);
       }
-      CheckWritableSource(found, writable, at);   // (_)T w = _x: x is (@)T or (_)T
+      CheckWritableSource(found, writable, at);   // &%T w = _x: x is &@T or &%T
       return $"df_rc_weak({found.Code})";
     }
     if (WeakRef(value, scope) is CountedRefInfo weak) {
@@ -1251,9 +1263,9 @@ public sealed partial class CodeGen {
       return $"df_rc_weak({weak.Code})";
     }
     if (CountedRef(value, scope) is CountedRefInfo counted) {
-      throw Error($"a weak reference is made with the marker: _{counted.Name} (spec 12.7)", at);
+      throw Error($"a weak reference is made with the marker: %{counted.Name} (spec 12.7)", at);
     }
-    throw Error("a weak reference takes _x of a counted object, another weak reference or null (spec 12.7)", at);
+    throw Error("a weak reference takes %x of a counted object, another weak reference or null (spec 12.7)", at);
   }
 
   // w = value for a weak variable, parameter or field: the new block is taken before the old one is let go
@@ -1293,7 +1305,7 @@ public sealed partial class CodeGen {
     var use = Synthetic("Decl", block, name).Add(Synthetic("Type", block, type)).Add(Synthetic("Counted", block)).Add(Synthetic("EnforceUse", block))
       .Add(Synthetic("Init", block).Add(Synthetic("CValue", block, $"df_rc_use({blockCode})").Add(Synthetic("Type", block, "@" + type))));
     if (writable) {
-      use.Add(Synthetic("ReadWrite", block));   // (_)T: the temporary usage is read/write, the enforce holds the lock (spec 12.7)
+      use.Add(Synthetic("ReadWrite", block));   // &%T: the temporary usage is read/write, the enforce holds the lock (spec 12.7)
     }
     var wrapped = Synthetic("Block", block).Add(use);
     wrapped.Children.AddRange(block.Children);
@@ -1304,7 +1316,7 @@ public sealed partial class CodeGen {
   void CheckWeakFieldRead(FieldInfo? field, Node at) {
     if (field is { IsWeak: true }) {
       throw at.Kind == "Member"
-        ? Error($"'{field.Name}' is a weak reference: copy it into a weak variable (_{field.Type} {field.Name} = ...) and use that through enforce", at)
+        ? Error($"'{field.Name}' is a weak reference: copy it into a weak variable (%{field.Type} {field.Name} = ...) and use that through enforce", at)
         : Error($"'{field.Name}' is a weak reference: use it through enforce {at.Text} {{ }} else {{ }}", at);
     }
   }

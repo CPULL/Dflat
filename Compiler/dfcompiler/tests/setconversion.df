@@ -23,7 +23,7 @@ public class Square : Shape {
 
 public class Box<Item>(->Item value) {
   public Item value
-  public fun string Show() { $"{value}" }
+  public fun ->string Show() { $"{value}" }
 }
 
 var a = Box<ABC>((u8)200)

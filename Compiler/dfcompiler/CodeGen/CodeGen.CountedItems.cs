@@ -9,7 +9,7 @@ namespace dfcompiler;
 // that would hand out boxes are not supported on these collections yet (CheckCountedItemsMember).
 public sealed partial class CodeGen {
   readonly Dictionary<string, string> boxInner = new();   // box class -> the counted type of its items
-  readonly HashSet<string> writableBoxes = new();          // the boxes of list<(@)T> and vec<(@)T>: read/write items with a lock
+  readonly HashSet<string> writableBoxes = new();          // the boxes of list<&@T> and vec<&@T>: read/write items with a lock
   bool rawBoxRead;                                         // CountedRef wants the box of c[i], not its object
 
   // list<@Dog> becomes list<Rc__Dog>, with the class Rc__Dog(@Dog value) added to the program. Keys of maps and sets cannot be counted
@@ -45,7 +45,7 @@ public sealed partial class CodeGen {
     if (inner is not { Kind: "Type", Children.Count: 0 } || inner.Text == null) {
       throw NotSupported("Counted items of this type", counted);
     }
-    bool writable = counted.Children.Any(child => child.Kind == "ReadWrite");   // list<(@)Dog> (spec 12.7)
+    bool writable = counted.Children.Any(child => child.Kind == "ReadWrite");   // list<&@Dog> (spec 12.7)
     string box = (writable ? "RcRw__" : "Rc__") + inner.Text;
     if (!boxInner.ContainsKey(box)) {
       boxInner[box] = inner.Text;
@@ -65,8 +65,9 @@ public sealed partial class CodeGen {
   string BoxField(string box) => FindField(classes[box], "value")!.CName;
 
   // a value given as an item: a new box that takes the usage (the header parameter of the box is @T)
+  // the value goes in a Boxed node: its call marker (spec 13.1) was checked by the member that takes it, and a literal or c[i] = x needs none
   Node BoxCall(Node value, string box) =>
-    Synthetic("Call", value).Add(Synthetic("Name", value, box)).Add(Synthetic("Args", value).Add(value));
+    Synthetic("Call", value).Add(Synthetic("Name", value, box)).Add(Synthetic("Args", value).Add(Synthetic("Boxed", value).Add(value)));
 
   // c[i] of a collection of counted objects reads the object of the box
   Expr UnboxRead(Expr item) {
@@ -138,7 +139,7 @@ public sealed partial class CodeGen {
     return new Expr(CheckRaise(code, "void"), "void");
   }
 
-  // v.pop((&)x) of a vec<@T>: the usage of the last item passes to the counted x, the usage x had is released; false and null when empty
+  // v.pop(&x) of a vec<@T>: the usage of the last item passes to the counted x, the usage x had is released; false and null when empty
   Expr CountedVecPop(Expr vec, Node targetNode, Scope scope, Node at) {
     string box = VecElem(vec.Type);
     string inner = boxInner[box];

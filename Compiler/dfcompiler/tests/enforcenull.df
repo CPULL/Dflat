@@ -50,7 +50,7 @@ fun shortForm(i32? a) {
 
 fun weak() {
   @Dog first = Dog("rex")
-  _Dog w = _first
+  %Dog w = %first
   enforce w {
     r.Console.log("  alive: " + w.name)
   }

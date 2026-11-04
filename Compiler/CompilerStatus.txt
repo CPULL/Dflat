@@ -1,6 +1,17 @@
-Compiler version 0.0.50 alpha for version 0.0.22 of the specs 2026/11/03
+Compiler version 0.0.52 alpha for version 0.0.23 of the specs 2026/11/04
 
 Changes from the previous version -----------------------
+- tuple items by index (spec 3.2): t[1], t[SECOND] (a const), t[Slot.Second] (an enum value), read and assigned (t[0] = v, t[2] += x); nested (pairs[2][1]); a variable index or one out of range is a compile error (was "feature not supported: Collections")
+- no more "warning L3: read as a generic call" on calls like FixedSlot<64>("x"): when the name is not a generic, the error says that a<b>(c) is read as a generic call and how to write the comparisons
+- new passing markers (spec 13.1): &T and &x write (was (&)), the old read-only &T is written plain T (read-only only for as parent so far), &@T (was (@)T), %T and %x weak (was _T, _x), &%T (was (_)T), *x and &*x / &*T pointers (still not supported); the old markers give an error that names the new one
+- counted and weak arguments repeat the marker of the parameter (spec 13.1): keep(@rex), train(&@max), watch(%rex), heal(&%max), pack.add(@rex), pack.replace(0, @max); a new object, a result and null need none; a missing or wrong marker is a compile error that shows the right one
+- & replaces the caller's value (spec 13.1) also for objects and collections (vec, list, maps, sets), and the old value ends for every kind (objects, strings, arrays: they leaked before); &x needs what owns its value (owning variable, field, array item, & parameter); &this is an error; an array printed with $"{a}" is now freed at the end of its scope
+- -> results (spec 13.1.1): fun ->Dog make(), fun ->arr<Dog>, uns pack(); a plain result that returns a new object, string or array (or a local that owns one) is an error that asks for ->; -> on a basic result is a level 1 warning; R accessors need none; the IO library functions that build values are now ->
+- borrow locks (spec 12): while a local borrows an object or an array (Dog view = rex, Dog d = k.leader(), Dog f = pack[0]), what it borrows from cannot be assigned, ended, moved or passed as & until its last use (inside one function); a plain result that lends from a local is an error; s.trim() and the other runtime results are new values (fun ->string)
+- while a borrow is alive the fields of its lender cannot be written either (Rust style): k.boss = x, k.visits++, k.dogs[0] = x
+- &T results (spec 13.1.1): fun &Dog at(uns i) { dogs[i] } lends read/write, k.at(0).name = "Max" writes in place; only from this, its fields, a & parameter, a global or another &T result; objects, collections and arrays (basic values and strings: not supported yet)
+- a real ending in a dot (0., 2. + x) is a compile error that shows 0.0 (spec 1.3); it was read as a member access, also across a line end
+- not built yet: plain object parameters read-only (5 tests parked in tests/pending)
 
 Done -----------------------
 

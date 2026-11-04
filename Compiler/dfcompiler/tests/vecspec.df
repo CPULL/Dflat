@@ -34,14 +34,14 @@ fun string replaceWhileLooping(vec<i32> source) {
   return "an item can be replaced while iterated"
   catch ModifyingIteratedCollectionException { return "never" }
 }
-fun string sortWhileLooping(vec<i32> source) {
+fun ->string sortWhileLooping(vec<i32> source) {
   for i32 n in source {
     source.reverse()
   }
   return "no exception"
   catch ModifyingIteratedCollectionException e { return "reordered: " + e.message }
 }
-fun string readOnly(vec<i32> source) {
+fun ->string readOnly(vec<i32> source) {
   i32 total = 0
   for i32 n in source {
     total += n

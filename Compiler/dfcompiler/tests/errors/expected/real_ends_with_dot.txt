@@ -1,0 +1,1 @@
+real_ends_with_dot.df(1,9): error: a real needs a digit after the dot: 0.0 (spec 1.3)

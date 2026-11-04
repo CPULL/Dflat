@@ -64,7 +64,7 @@ r.Console.log(target)                                      // [2, 3, 4, 5, 1, 2]
 target.copyFrom(6, source, 0, 0)                           // nothing to copy at the end: allowed
 r.Console.log(target.len)                                  // 6
 
-fun string tryCopy(arr<i32> to, arr<i32> from, i32 dst, i32 src, i32 count) {
+fun ->string tryCopy(arr<i32> to, arr<i32> from, i32 dst, i32 src, i32 count) {
   to.copyFrom(dst, from, src, count)
   return "copied"
   catch IndexOutOfRangeException ex { return "IndexOutOfRangeException " + ex.id }

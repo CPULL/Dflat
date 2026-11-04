@@ -1,0 +1,1 @@
+fun twice((&)i32 value) { value *= 2 }

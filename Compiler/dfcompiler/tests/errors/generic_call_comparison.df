@@ -1,0 +1,4 @@
+i32 a = 1
+i32 b = 2
+bool c = true
+Root.Console.log(a<b>(c))

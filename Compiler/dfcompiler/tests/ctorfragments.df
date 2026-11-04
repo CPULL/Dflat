@@ -74,7 +74,7 @@ fun scope4() {
   Holder h = Holder(->res)
   r.Console.log("  after the constructor")
 }
-fun string scope5(i32 v) {
+fun ->string scope5(i32 v) {
   Partial p = Partial(v)
   return "made"
   catch Exception ex {

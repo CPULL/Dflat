@@ -6,6 +6,6 @@ fun @Player make() {
   return Player("a")
 }
 fun f() {
-  (@)Player p = make()
+  &@Player p = make()
 }
 f()

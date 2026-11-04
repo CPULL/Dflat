@@ -15,7 +15,7 @@ public class RunResult(int code, string outputText, string errorText, bool stopp
 }
 
 public class ExecProcess {
-  public static fun RunResult run(string program, arr<string> args = [], string workDir = "", string input = "", lapse timeout = null) {
+  public static fun ->RunResult run(string program, arr<string> args = [], string workDir = "", string input = "", lapse timeout = null) {
     int code = (int)Root.ExecProcess.Native.Run(program, args, workDir, input, timeout)
     Exception failure = Root.ExecProcess.Native.Failure(program, workDir)
     return RunResult(code, Root.ExecProcess.Native.Output(), Root.ExecProcess.Native.Errors(), Root.ExecProcess.Native.TimedOut(), failure)

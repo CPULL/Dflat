@@ -5,6 +5,6 @@ public class Player(string name) {
 }
 fun f() {
   @Player reader = @Player("a")
-  (_)Player watcher = _reader
+  &%Player watcher = %reader
 }
 f()

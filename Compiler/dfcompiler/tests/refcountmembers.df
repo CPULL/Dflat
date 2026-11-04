@@ -23,11 +23,11 @@ fun give() {
   @Dog b = Dog("b")
   list<@Dog> pack = [a, b]
   vec<@Dog> kennel = [a]
-  @Dog old = pack.replace(0, b)
+  @Dog old = pack.replace(0, @b)
   r.Console.log($"old {old.name}, users a {a.usersCount}, b {b.usersCount}")
   @Dog old2 = kennel.replace(0, Dog("fresh"))
   r.Console.log($"old2 {old2.name}, users a {a.usersCount}, kennel[0] {kennel[0].name}")
-  pack.replace(1, a)
+  pack.replace(1, @a)
   r.Console.log($"ignored, users a {a.usersCount}, b {b.usersCount}")
 }
 fun share() {
@@ -35,9 +35,9 @@ fun share() {
   @Dog b = Dog("b")
   vec<@Dog> kennel = [a, b, a]
   @Dog last = null
-  bool got = kennel.pop((&)last)
+  bool got = kennel.pop(&last)
   r.Console.log($"pop {got} {last.name}, users a {a.usersCount}, len {kennel.len}")
-  got = kennel.pop((&)last)
+  got = kennel.pop(&last)
   r.Console.log($"pop {got} {last.name}, users a {a.usersCount}, b {b.usersCount}")
   kennel.fill(a)
   r.Console.log($"fill vec, users a {a.usersCount}, b {b.usersCount}")
@@ -48,8 +48,8 @@ fun share() {
   r.Console.log($"fill(2, b), len {pack.len}, users b {b.usersCount}, pack[3] {pack[3].name}")
   pack.fill(null)
   r.Console.log($"fill null, users a {a.usersCount}, b {b.usersCount}, has null {pack.has(null)}")
-  kennel.pop((&)last)
-  kennel.pop((&)last)
+  kennel.pop(&last)
+  kennel.pop(&last)
   r.Console.log($"empty pop, last is null {last == null}, users a {a.usersCount}")
 }
 fun transform() {

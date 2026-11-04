@@ -45,7 +45,7 @@ fun string grow(map<string, i32> m) {
 }
 r.Console.log(grow(ages))                            // locked
 r.Console.log(ages.len)                              // 3: the view ended with the function
-fun string walk(map<string, i32> m) {
+fun ->string walk(map<string, i32> m) {
   var held = m.values
   string text = ""
   for i32 v in held {

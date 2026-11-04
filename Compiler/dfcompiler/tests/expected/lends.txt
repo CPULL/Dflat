@@ -1,0 +1,13 @@
+leader Boss, second b, version 1.2.3
+same Rex
+  end Rex
+  end Boss
+rex Max, boss New boss, pup Pup
+scope end
+  end Pup
+  end Max
+  end New boss
+  end a
+  end b
+end
+---- exit code 0 ----

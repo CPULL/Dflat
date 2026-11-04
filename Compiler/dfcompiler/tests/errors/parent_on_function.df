@@ -6,4 +6,4 @@ public class Library(string name) {
   public fun string title() { name }
 }
 
-fun show(&Library library as parent) { }
+fun show(Library library as parent) { }

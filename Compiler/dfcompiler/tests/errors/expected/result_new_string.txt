@@ -1,0 +1,1 @@
+result_new_string.df(1): error: this result is a new string that the caller owns: write fun ->string greet(...) (spec 13.1.1)

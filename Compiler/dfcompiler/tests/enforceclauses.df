@@ -58,7 +58,7 @@ fun i32 early(i32? value) {
 
 fun weakUsage() {
   @Dog first = Dog("rex")
-  _Dog w = _first
+  %Dog w = %first
   enforce w {
     first is done.                       // the enforce still holds a usage
     r.Console.log("  in block: " + w.name)

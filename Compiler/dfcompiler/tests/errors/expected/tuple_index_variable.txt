@@ -1,0 +1,1 @@
+tuple_index_variable.df(3): error: the index of a tuple is a literal, a const or an enum value (spec 3.2)

@@ -63,7 +63,7 @@ r.Console.log(many.sizeof > 0)                       // true
 // clear, a parameter, a field
 many.clear()
 r.Console.log(many.len)                              // 0
-fun string joined(set<string> s) {
+fun ->string joined(set<string> s) {
   string all = ""
   for string item in s {
     all += item

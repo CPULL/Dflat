@@ -1,0 +1,1 @@
+ref_borrowed_array.df(3): error: 'given' only borrows its array: & needs the variable that owns it, a field, or a & parameter (spec 13.1)

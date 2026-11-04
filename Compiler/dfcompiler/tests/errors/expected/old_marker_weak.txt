@@ -1,0 +1,1 @@
+old_marker_weak.df(3,1): error: a weak reference is written with %: %Dog w (spec 12.7)

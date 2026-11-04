@@ -5,11 +5,11 @@ Root.Console.print("Print adds no newline, ")
 Root.Console.log("Log does")
 
 // overloading by number, order and types of parameters
-fun string describe(i32 value) { "i32 " + value }
-fun string describe(i64 value) { "i64 " + value }
-fun string describe(i32 value, i32 width) { $"i32 {value} width {width}" }
-fun string describe(string text, i32 count) { $"text {text} x{count}" }
-fun string describe(i32 count, string text) { $"count {count} then {text}" }
+fun ->string describe(i32 value) { "i32 " + value }
+fun ->string describe(i64 value) { "i64 " + value }
+fun ->string describe(i32 value, i32 width) { $"i32 {value} width {width}" }
+fun ->string describe(string text, i32 count) { $"text {text} x{count}" }
+fun ->string describe(i32 count, string text) { $"count {count} then {text}" }
 i8 small = 5
 i32 medium = 6
 Root.Console.log(describe(7))              // literal: the native-size i64 wins
@@ -20,7 +20,7 @@ Root.Console.log(describe("a", 3))
 Root.Console.log(describe(4, "b"))
 
 // named arguments in any position, defaults for the rest
-fun string connect(string host = "localhost", u16 port = 80, bool secure = false) {
+fun ->string connect(string host = "localhost", u16 port = 80, bool secure = false) {
   $"{host}:{port} secure={secure}"
 }
 Root.Console.log(connect())
@@ -47,7 +47,7 @@ for i32 stepped = 0..=6 step stepped += 2 {
 Root.Console.log("")
 
 // switch case ranges, multi-line bodies, jump into a range
-fun string httpClass(i32 code) {
+fun ->string httpClass(i32 code) {
   string result = ""
   switch code {
     100, 201:

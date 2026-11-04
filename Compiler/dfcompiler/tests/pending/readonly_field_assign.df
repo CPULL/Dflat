@@ -5,6 +5,6 @@ public class Counter(string name) {
   public fun add(i32 amount) { }
 }
 
-fun look(&Counter counter) {
+fun look(Counter counter) {
   counter.name = "x"
 }

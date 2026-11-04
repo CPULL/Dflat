@@ -16,10 +16,10 @@ public class Dog {
 public notclonable class Guard : Dog { }
 public class Named(string name) {
   public string name
-  public fun Named clone() { Named(name + " (own clone)") }
+  public fun ->Named clone() { Named(name + " (own clone)") }
 }
 
-fun string copyName(Dog d) {
+fun ->string copyName(Dog d) {
   Dog c = d.tryClone()
   return "copy of " + c.name
   catch ObjectNotClonableException { return "not clonable" }

@@ -5,7 +5,7 @@ public class Counter(string name) {
   public fun add(i32 amount) { }
 }
 
-fun grow((&)Counter counter) { }
-fun look(&Counter counter) {
-  grow((&)counter)
+fun grow(&Counter counter) { }
+fun look(Counter counter) {
+  grow(&counter)
 }

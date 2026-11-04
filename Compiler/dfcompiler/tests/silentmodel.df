@@ -16,11 +16,11 @@ fun i64 mul(i64 a, i64 b) {
 fun i64 add3(i64 a, i64 b, i64 c) {                         // no catch: the warning of mul is ignored here
   return mul(a, b) + c
 }
-fun string observe(i64 a, i64 b, i64 c) {
+fun ->string observe(i64 a, i64 b, i64 c) {
   return "result " + add3(a, b, c)
   catch Warning w { return "observed in observe: " + w.message }
 }
-fun string observeMul(i64 a, i64 b) {
+fun ->string observeMul(i64 a, i64 b) {
   return "mul " + mul(a, b)
   catch Warning w { return "observed in observeMul: " + w.message }
 }
@@ -35,7 +35,7 @@ fun i64 checked(i64 a, i64 b) {
   return mul(a, b)
   catch Warning w { throw w }
 }
-fun string seeChecked(i64 a, i64 b) {
+fun ->string seeChecked(i64 a, i64 b) {
   return "checked " + checked(a, b)
   catch Warning w { return "observed up the chain: " + w.message }
 }
@@ -44,19 +44,19 @@ r.Console.log(seeChecked(20, 30))                           // observed up the c
 r.Console.log(checked(20, 30))                              // nobody observes the rethrow: execution goes on after the call: 0
 
 // catch SilentException and catch all observe silent exceptions; catch Exception does not (spec 15.1, 15.4, 15.8.2)
-fun string sink(i64 a) {
+fun ->string sink(i64 a) {
   return "sink " + mul(a, a)
   catch Exception e { return "Exception sees: " + e.message }
 }
-fun string bySilent(i64 a) {
+fun ->string bySilent(i64 a) {
   return "bySilent " + mul(a, a)
   catch SilentException e { return "SilentException sees: " + e.message }
 }
-fun string byAll(i64 a) {
+fun ->string byAll(i64 a) {
   return "byAll " + mul(a, a)
   catch all { return "all sees it" }
 }
-fun string wrongKind(i64 a) {
+fun ->string wrongKind(i64 a) {
   return "wrongKind " + mul(a, a)
   catch Notice n { return "Notice: " + n.message }
 }
@@ -72,11 +72,11 @@ fun i64 cousin(i64 a) {
   if a > 0 then throw Cousin("a cousin")
   return a
 }
-fun string byParent(i64 a) {
+fun ->string byParent(i64 a) {
   return "byParent " + cousin(a)
   catch Family f { return "Family sees: " + f.message }
 }
-fun string byException(i64 a) {
+fun ->string byException(i64 a) {
   return "byException " + cousin(a)
   catch Exception e { return "Exception sees: " + e.message }
 }
@@ -85,7 +85,7 @@ r.Console.log(byParent(0))                                  // byParent 0
 r.Console.log(byException(5))                               // byException 0: catch Exception does not observe it
 
 // a silent exception thrown and caught in the same function
-fun string sameFunction() {
+fun ->string sameFunction() {
   r.Console.log("  before")
   throw Notice("local")
   r.Console.log("  after the throw")
@@ -104,11 +104,11 @@ public class Noisy : Sensor {
     return v
   }
 }
-fun string reading(Sensor s, i64 v) {
+fun ->string reading(Sensor s, i64 v) {
   return "reading " + s.read(v)
   catch Notice n { return "noise: " + n.message }
 }
-fun string ignoring(Sensor s, i64 v) {
+fun ->string ignoring(Sensor s, i64 v) {
   return "ignoring " + s.read(v)
 }
 r.Console.log(reading(Sensor(), 9))                         // reading 9
@@ -125,7 +125,7 @@ public class Deep : Probe {
     return v * 2
   }
 }
-fun string probing(Probe p, i64 v) {
+fun ->string probing(Probe p, i64 v) {
   return "level " + p.level(v)
   catch Warning w { return "probe warning: " + w.message }
 }
@@ -138,7 +138,7 @@ fun i64 hard(i64 a) {
   return a
 }
 fun i64 middleman(i64 a) { hard(a) + 1 }
-fun string hardCatcher(i64 a) {
+fun ->string hardCatcher(i64 a) {
   return "hard " + middleman(a)
   catch Trouble t { return "Trouble: " + t.message }
 }
@@ -159,12 +159,12 @@ fun i64 forwarder(i64 which, i64 a) {
   return forwardWarning(a)
   catch SilentException e { throw e }
 }
-fun string seeForwarded(i64 which, i64 a) {
+fun ->string seeForwarded(i64 which, i64 a) {
   return "forwarded " + forwarder(which, a)
   catch Notice n { return "Notice seen: " + n.message }
   catch Warning w { return "Warning seen: " + w.message }
 }
-fun string ignoreForwarded(i64 which, i64 a) {
+fun ->string ignoreForwarded(i64 which, i64 a) {
   return "ignored " + forwarder(which, a)
 }
 r.Console.log(seeForwarded(0, 5))                           // Notice seen: forwarded notice

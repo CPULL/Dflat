@@ -1,2 +1,2 @@
 const i32 code = 0
-i32.tryParse("7", (&)code)
+i32.tryParse("7", &code)

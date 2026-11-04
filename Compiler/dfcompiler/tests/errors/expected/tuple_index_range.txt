@@ -1,0 +1,1 @@
+tuple_index_range.df(2): error: the tuple (i32,string) has 2 items: the index 2 is out of range

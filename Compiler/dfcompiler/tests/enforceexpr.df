@@ -13,7 +13,7 @@ public class Box(i32 size) {
     }
     return size * 10
   }
-  public fun string label() { $"box {size}" }
+  public fun ->string label() { $"box {size}" }
 }
 
 // statement form with default
@@ -60,7 +60,7 @@ fun i32 lastExpression(Box b) {
   enforce b.count() default { -8 }
 }
 
-fun string text(Box b) {
+fun ->string text(Box b) {
   string s = enforce b.label() default { "no box" }
   return s
 }

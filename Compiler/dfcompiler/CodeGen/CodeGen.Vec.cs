@@ -59,7 +59,7 @@ trait IndexCollection<Item> : Collection<Item> {
 
 // the iterator of a vec (spec 6.7): a child of its vec (12.5). While it exists the vec counts it as open (spec 6.4) and cannot change its size;
 // its atEnd gives the counter back. An iterator whose vec ended raises UsageOfDestroyedObjectException
-public class vecIterator<T>(&vec<T> collection as parent) : IndexIterator<T> {
+public class vecIterator<T>(vec<T> collection as parent) : IndexIterator<T> {
   uns cursor = 0
 
   override fun (T value, bool isValid) next() {
@@ -78,7 +78,7 @@ public class vecIterator<T>(&vec<T> collection as parent) : IndexIterator<T> {
 }
 
 // the iterator of a list: a child of its list that keeps a reference to the current node (spec 6.8.3); one step follows the link, O(1)
-public class listIterator<T>(&list<T> collection as parent) : IndexIterator<T> {
+public class listIterator<T>(list<T> collection as parent) : IndexIterator<T> {
   u64 node              // the current node: a pointer to a node in the C (CodeGen.List.cs)
   bool started = false
 
@@ -99,7 +99,7 @@ public class listIterator<T>(&list<T> collection as parent) : IndexIterator<T> {
 
 // views (spec 6.5): a read-only part of a collection, no copy. The view of a vec or a list is a child of its collection and counts as open while it
 // exists; the view of an arr keeps the array (an arr cannot change its size). c[a..b] makes them (CodeGen.List.cs, ViewExpr)
-public class vecView<T>(&vec<T> collection as parent, uns start, uns count) {
+public class vecView<T>(vec<T> collection as parent, uns start, uns count) {
   public fun uns get_len() { count }
 
   public fun T read_pos(uns index) {
@@ -129,7 +129,7 @@ public class vecView<T>(&vec<T> collection as parent, uns start, uns count) {
   }
 }
 
-public class listView<T>(&list<T> collection as parent, uns start, uns count) {
+public class listView<T>(list<T> collection as parent, uns start, uns count) {
   public fun uns get_len() { count }
 
   public fun T read_pos(uns index) {
@@ -537,7 +537,7 @@ public class map<K, V> : MapCollection<K, V> {
     }
   }
 
-  public fun bool tryGet(K key, (&)V result) {
+  public fun bool tryGet(K key, &V result) {
     if !this.tree_hasKey(key) {
       V none
       result = none
@@ -547,7 +547,7 @@ public class map<K, V> : MapCollection<K, V> {
     return true
   }
 
-  public fun bool tryGet(K key, (&)V result, V otherwise) {
+  public fun bool tryGet(K key, &V result, V otherwise) {
     if !this.tree_hasKey(key) {
       result = otherwise
       return false
@@ -616,7 +616,7 @@ public class map<K, V> : MapCollection<K, V> {
 
 // the keys and the values of a map (spec 6.5, 6.6): read-only views, children of their map, counted as open while they exist (spec 6.4).
 // for x in m.keys, m.keys.len, m.keys.has(x), m.keys! and printing are C over the map itself (CodeGen.Map.cs), with no view object
-public class mapKeys<K, V>(&map<K, V> collection as parent) {
+public class mapKeys<K, V>(map<K, V> collection as parent) {
   public fun uns get_len() {
     return collection.viewLen()
   }
@@ -630,7 +630,7 @@ public class mapKeys<K, V>(&map<K, V> collection as parent) {
   }
 }
 
-public class mapValues<K, V>(&map<K, V> collection as parent) {
+public class mapValues<K, V>(map<K, V> collection as parent) {
   public fun uns get_len() {
     return collection.viewLen()
   }
@@ -1016,7 +1016,7 @@ public class set<T> : SetCollection<T> {
       throw Error("a view is read-only: its items cannot be moved out (spec 6.5)", gift);
     }
     if (ReadOnlyVariable(operand.Children[0], scope) is not null) {
-      throw Error($"'{operand.Children[0].Text}' is a read-only reference (&): its items cannot be moved out", gift);
+      throw Error($"'{operand.Children[0].Text}' is a read-only reference: its items cannot be moved out", gift);
     }
     var obj = ExprOf(operand.Children[0], scope);
     if (IsMap(obj.Type) || IsSet(obj.Type)) {
@@ -1070,10 +1070,10 @@ public class set<T> : SetCollection<T> {
     sb.Append($"  free(self->{items}.p);\n  self->{items}.p = NULL;\n  self->{items}.len = 0;\n  self->{count} = 0;\n");
   }
 
-  // v.pop((&)x): the last item moves into x (the old value of x ends); false and the default value when the vector is empty (spec 6.6)
+  // v.pop(&x): the last item moves into x (the old value of x ends); false and the default value when the vector is empty (spec 6.6)
   Expr VecPop(Expr vec, List<Node> args, Scope scope, Node at) {
     if (args.Count != 1 || args[0].Kind != "WritableAddressOf") {
-      throw Error("pop takes one writable variable: pop((&)x)", at);
+      throw Error("pop takes one writable variable: pop(&x)", at);
     }
     var targetNode = args[0].Children[0];
     if (BoxInner(VecElem(vec.Type)) != null) {
@@ -1095,7 +1095,7 @@ public class set<T> : SetCollection<T> {
     string incoming = NewTemp();
     string old = NewTemp();
     bool owned = IsClass(target.Type) && (target.Variable?.Own ?? target.IsField);
-    bool ownsArray = IsArr(target.Type) && !LibraryCode && (target.Variable is { OwnsArray: true } || target.IsField || target.IsStatic);
+    bool ownsArray = IsArr(target.Type) && !LibraryCode && (target.Variable is { OwnsArray: true } or { RefSlot: true } || target.IsField || target.IsStatic);
     string zero = ZeroValue(elem);
     string store = Convert(new Expr(incoming, elem), target.Type, at);
     string assignCode = target.Type == "string"

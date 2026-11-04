@@ -17,7 +17,7 @@ fun i32 caught(i32 a) {
   return divide(a, 0)
   catch DivisionByZeroException { return -1 }              // left through return
 }
-fun string withVariable(i32 a) {
+fun ->string withVariable(i32 a) {
   return $"{divide(a, 0)}"
   catch DivisionByZeroException ex { return ex.message }   // the message is copied before the record is released
 }
@@ -29,11 +29,11 @@ fun i32 rethrown(i32 a) {
   return divide(a, 0)
   catch DivisionByZeroException ex { throw ex }            // the same record goes up
 }
-fun string outerCatch(i32 a) {
+fun ->string outerCatch(i32 a) {
   return $"{replaced(a)}"
   catch Trouble t { return t.message }
 }
-fun string rethrownCatch(i32 a) {
+fun ->string rethrownCatch(i32 a) {
   return $"{rethrown(a)}"
   catch Exception e { return e.message }
 }

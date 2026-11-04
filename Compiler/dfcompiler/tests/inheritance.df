@@ -5,7 +5,7 @@ public class Shape {
   string label = "shape"
   public static i32 count = 0
   public static fun i32 Total() { count }
-  public fun string Describe() { "I am a " + Kind() + " " + label }
+  public fun ->string Describe() { "I am a " + Kind() + " " + label }
   public fun string Kind() { "shape" }
   public fun r64 Area() { 0.0 }
   public fun Touch() { count += 1 }
@@ -20,7 +20,7 @@ public class Circle : Shape {
 
 public class Ring(r64 hole) : Circle {
   i32 depth = 2
-  override fun string Kind() { "ring/" + parent.Kind() }
+  override fun ->string Kind() { "ring/" + parent.Kind() }
   public fun i32 Depth() { depth }
 }
 
@@ -30,7 +30,7 @@ public class Square : Shape {
 }
 
 // virtual calls through the parent type
-fun string show(Shape s) { s.Describe() + " area " + s.Area() }
+fun ->string show(Shape s) { s.Describe() + " area " + s.Area() }
 
 Circle c = Circle()
 r.Console.log(c.Kind())

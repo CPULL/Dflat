@@ -23,7 +23,7 @@ fun Fail(i32 kind) {
   if kind == 5 then throw NetworkException(code: 7)
 }
 
-fun string Try(i32 kind) {
+fun ->string Try(i32 kind) {
   Fail(kind)
   return "ok"
   catch TimeoutException ex {
@@ -44,7 +44,7 @@ r.Console.log(Try(4))
 r.Console.log(Try(5))
 
 // the base class catches the children; the properties of every exception
-fun string Describe(i32 kind) {
+fun ->string Describe(i32 kind) {
   Fail(kind)
   return "ok"
   catch Exception ex {
@@ -55,7 +55,7 @@ r.Console.log(Describe(2))
 r.Console.log(Describe(3))
 
 // is, and the exception as the base type
-fun string Which(i32 kind) {
+fun ->string Which(i32 kind) {
   Fail(kind)
   return "ok"
   catch Exception ex {
@@ -69,7 +69,7 @@ r.Console.log(Which(2))
 r.Console.log(Which(1))
 
 // standard exceptions are caught by the same mechanism
-fun string Divide(i32 d) {
+fun ->string Divide(i32 d) {
   i32 q = 10 / d
   return "q=" + q
   catch DivisionByZeroException {
@@ -89,7 +89,7 @@ fun Wrap(i32 kind) {
     throw ex
   }
 }
-fun string Outer(i32 kind) {
+fun ->string Outer(i32 kind) {
   Wrap(kind)
   return "wrapped ok"
   catch TimeoutException ex {
@@ -122,14 +122,14 @@ fun string CatchPlain() {
 r.Console.log(NoCatch())
 r.Console.log(CatchPlain())
 
-fun string CatchOwn() {
+fun ->string CatchOwn() {
   throw AlertException("alert", "c")
   return "continued"
   catch AlertException ex {
     return "own type: " + ex.what
   }
 }
-fun string CatchTrait() {
+fun ->string CatchTrait() {
   throw AlertException("alert", "d")
   return "continued"
   catch SilentException ex {

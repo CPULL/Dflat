@@ -17,11 +17,11 @@ r.Console.log(numbers)
 
 // pop moves the last item into the variable and says whether there was one
 i32 last
-bool found = numbers.pop((&)last)
+bool found = numbers.pop(&last)
 r.Console.log($"{found} {last}")
 vec<i32> empty = []
 last = 7
-found = empty.pop((&)last)
+found = empty.pop(&last)
 r.Console.log($"{found} {last}")
 
 // a bare vec takes its type from the literal, the capacity form starts empty

@@ -1,0 +1,2 @@
+i32 value = 1
+&*i32 writer = &*value

@@ -3,7 +3,7 @@ alias Root as r
 
 enum Color { Red, Green, Blue }
 
-fun string classify(i32 value) {
+fun ->string classify(i32 value) {
   string result = "?"
   switch value {
     1: result = "one", 2: result = "two"
@@ -20,7 +20,7 @@ for i32 i = 0..7 {
 }
 
 // jumps between cases, by value and to default
-fun string walk(i32 start) {
+fun ->string walk(i32 start) {
   string path = ""
   switch start {
     1: {

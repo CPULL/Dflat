@@ -1,2 +1,2 @@
-fun increment((&)i32 value) { value += 1 }
-increment((&)3)
+fun increment(&i32 value) { value += 1 }
+increment(&3)

@@ -1,0 +1,28 @@
+// &T results (spec 13.1.1): the caller writes the result in place; a & result lends this, its fields, an item, a & parameter or another & result
+alias Root as r
+public class Dog(string name) {
+  public string name
+  public i32 level = 0
+} atEnd {
+  r.Console.log("  end " + name)
+}
+public class Kennel {
+  public Dog boss = Dog("Boss")
+  public arr<Dog> dogs = [Dog("a"), Dog("b")]
+  public fun &Dog leader() { boss }
+  public fun &Dog at(uns i) { dogs[i] }
+  public fun &Dog first() { at(0) }
+  public fun &arr<Dog> all() { dogs }
+}
+fun &Dog same(&Dog d) { d }
+fun run() {
+  Kennel k = Kennel()
+  k.leader().name = "Chief"
+  k.at(1).level += 5
+  k.first().name = "A"
+  k.all()[1].name = "B"
+  Dog rex = Dog("Rex")
+  same(&rex).level = 9
+  r.Console.log($"{k.boss.name} {k.dogs[0].name} {k.dogs[1].name} {k.dogs[1].level} {rex.level}")
+}
+run()

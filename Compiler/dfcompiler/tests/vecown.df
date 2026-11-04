@@ -30,7 +30,7 @@ r.Console.log(taken.name)
 r.Console.log(kennel[0] == null)
 
 Dog last
-bool had = kennel.pop((&)last)     // fido moves into last
+bool had = kennel.pop(&last)     // fido moves into last
 r.Console.log($"{had} {last.name}")
 
 kennel.removeAt(0)                 // the empty slot goes away

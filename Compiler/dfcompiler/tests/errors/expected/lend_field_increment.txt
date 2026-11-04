@@ -1,0 +1,1 @@
+lend_field_increment.df(13): error: 'k' is lent to 'd' until its last use: until then it and its fields cannot be assigned, ended, moved or passed as & (spec 12)

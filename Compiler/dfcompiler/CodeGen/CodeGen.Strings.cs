@@ -75,10 +75,10 @@ public sealed partial class CodeGen {
     if (target.Variable?.OwnFlag is string flag) {
       return $"df_str_set(&{target.Code}, &{flag}, {converted}, {fresh})";
     }
-    if (target.IsField) {
-      return $"df_str_put(&{target.Code}, {converted}, {fresh})";
+    if (target.IsField || target.Variable is { RefSlot: true }) {
+      return $"df_str_put(&{target.Code}, {converted}, {fresh})";   // a field, or a &string parameter: the old string ends (spec 13.1)
     }
-    // a tuple item, a static field or a reference parameter: it gets a string of its own, the old one is left alone
+    // a tuple item or a static field: it gets a string of its own, the old one is left alone
     return fresh == "true" ? $"{target.Code} = {converted}" : $"{target.Code} = df_str_own({converted}, {fresh})";
   }
 

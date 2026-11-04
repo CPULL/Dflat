@@ -1,0 +1,1 @@
+generic_call_comparison.df(4): error: 'a' is not a generic function or class: a<b>(c) is read as a generic call; for comparisons write (a < ...) > (...)

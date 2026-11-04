@@ -162,6 +162,10 @@ public sealed partial class CodeGen {
       return ViewExpr(n, scope);
     }
     var obj = ExprOf(n.Children[0], scope);
+    if (IsTuple(obj.Type)) {
+      int position = TupleIndex(n.Children[1], obj.Type, scope, n);   // t[1]: the second item (spec 3.2)
+      return new Expr($"({obj.Code}).e{position}", TupleElems(obj.Type)[position].Type);
+    }
     if (IsView(obj.Type)) {
       return ObjectCall(obj, "read_pos", new List<Node> { n.Children[1] }, scope, n) ?? throw Error("no read_pos", n);
     }
@@ -195,7 +199,7 @@ public sealed partial class CodeGen {
   string IndexAssign(Node s, Scope scope) {
     var target = s.Children[0];
     if (ReadOnlyVariable(target.Children[0], scope) is not null) {
-      throw Error($"'{target.Children[0].Text}' is a read-only reference (&): its items cannot be assigned", s);
+      throw Error($"'{target.Children[0].Text}' is a read-only reference: its items cannot be assigned", s);
     }
     var obj = ExprOf(target.Children[0], scope);
     if (obj.Type == "string") {
@@ -427,7 +431,7 @@ public sealed partial class CodeGen {
     string elem = ArrElem(array.Type);
     var first = ExprOf(args[0], scope, "u64");
     bool boxed = BoxInner(elem) != null;
-    var replacement = ArrItemValue(args[1], Adopted(ExprOf(boxed ? BoxCall(args[1], elem) : args[1], scope, elem), args[1]), elem, args[1]);   // vec<@T>: a new box takes a usage
+    var replacement = ArrItemValue(args[1], Adopted(ExprOf(boxed ? BoxCall(CallMarker(args[1], "@", writableBoxes.Contains(elem), "the item", scope), elem) : args[1], scope, elem), args[1]), elem, args[1]);   // vec<@T>: a new box takes a usage
     if (IsClass(elem) && !replacement.Fresh && replacement.Type != "null") {
       throw Error("a collection owns its items: move an existing object in with ->x, or put a new one", args[1]);
     }
@@ -531,7 +535,7 @@ public sealed partial class CodeGen {
     return null;
   }
 
-  // is the variable assigned again, or handed out as (&)name, anywhere in the function (or the program) that declares it?
+  // is the variable assigned again, or handed out as &name, anywhere in the function (or the program) that declares it?
   bool AssignedAgain(string name) {
     bool Walk(Node node) {
       if (node.Kind == "Assign" && node.Children.Count > 0 && node.Children[0] is { Kind: "Name" } target && target.Text == name) {
@@ -551,6 +555,40 @@ public sealed partial class CodeGen {
 
   long? KnownLengthOf(Node? node, Scope scope) {
     return node is { Kind: "Name" } && scope.Find(node.Text!) is { KnownLength: long length } ? length : null;
+  }
+
+  // the index of a tuple item (spec 3.2): a literal, a const or an enum value, known when compiling; out of range is a compile error
+  int TupleIndex(Node index, string tupleType, Scope scope, Node at) {
+    System.Numerics.BigInteger? value = IntLiteralValue(index);
+    if (value == null && index.Kind == "Name") {
+      value = scope.Find(index.Text!) is VarInfo variable
+        ? (variable.IsConst ? variable.ConstValue : null)
+        : globalConstValues.TryGetValue(index.Text!, out var global) ? global : null;
+    }
+    if (value == null && index is { Kind: "Member", Children: [{ Kind: "Name" } enumName] } && enums.TryGetValue(enumName.Text!, out var e)) {
+      value = e.Find(index.Text!);
+    }
+    if (value == null) {
+      throw Error("the index of a tuple is a literal, a const or an enum value (spec 3.2)", at);
+    }
+    int count = TupleElems(tupleType).Count;
+    if (value < 0 || value >= count) {
+      throw Error($"the tuple {tupleType} has {count} items: the index {value} is out of range", at);
+    }
+    return (int)value.Value;
+  }
+
+  // t[1] = v on a tuple: the same as an assignment of the item by its position
+  bool TupleIndexTarget(Node target, Scope scope) {
+    var obj = ExprOf(target.Children[0], scope);
+    if (!IsTuple(obj.Type) || target.Children[1].Kind is "Range" or "Empty") {
+      return false;
+    }
+    int position = TupleIndex(target.Children[1], obj.Type, scope, target);
+    target.Kind = "Member";
+    target.Text = position.ToString();
+    target.Children.RemoveAt(1);
+    return true;
   }
 
   static long? ConstantIndex(Node node) {
@@ -715,7 +753,7 @@ public sealed partial class CodeGen {
         throw Error("a set gives one item at a time: for x in s", s);
       }
       if (varNode.Kind == "WritableVar") {
-        throw Error("the items of a set are read-only: (&) is not allowed (spec 6.4); to change an item, remove it and add the new one", s);
+        throw Error("the items of a set are read-only: & is not allowed (spec 6.4); to change an item, remove it and add the new one", s);
       }
       mapPart = "keys";
     }
@@ -796,10 +834,10 @@ public sealed partial class CodeGen {
         throw Error("a map gives two values per entry: for (k, v) in m", s);
       }
       if (names[0].Kind == "WritableVar") {
-        throw Error("the keys of a map are read-only: (&) on the key is not allowed (spec 6.4); to change a key, remove the entry and add it again", s);
+        throw Error("the keys of a map are read-only: & on the key is not allowed (spec 6.4); to change a key, remove the entry and add it again", s);
       }
       if (names[1].Kind == "WritableVar") {
-        throw Error("for (k, (&)V v) in m is not built yet (writable values come with a later step)", s);
+        throw Error("for (k, &V v) in m is not built yet (writable values come with a later step)", s);
       }
       loopVars.Add((names[0], "", MapKey(collection.Type)));
       loopVars.Add((names[1], "", MapValue(collection.Type)));
@@ -829,7 +867,7 @@ public sealed partial class CodeGen {
     string cname = "v_" + loopVars[0].Node.Text;
     bool writableItem = boxedElem != null && writableBoxes.Contains(boxedElem);
     if (writableItem) {
-      // list<(@)T>: the loop variable is read/write and can be enforced (its lock, spec 12.7); the collection keeps the usage of the item
+      // list<&@T>: the loop variable is read/write and can be enforced (its lock, spec 12.7); the collection keeps the usage of the item
       innerScope.Vars[loopVars[0].Node.Text!] = new VarInfo(type, cname, false) { IsCounted = true, IsWritable = true };
     }
     var body = PrepareFrame(LoopStatements(block.Children), innerScope, FrameKind.LoopBody);

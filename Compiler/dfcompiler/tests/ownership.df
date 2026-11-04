@@ -26,7 +26,7 @@ public class Derived : Base {
   r.Console.log("  end Derived part")
 }
 
-fun Res make(string name) {
+fun ->Res make(string name) {
   Res made = Res()
   made.name = name
   return made
@@ -102,7 +102,7 @@ for i32 i = 0..3 {
 }
 
 r.Console.log("return and break")
-fun Res find(i32 n) {
+fun ->Res find(i32 n) {
   for i32 i = 0..5 {
     Res candidate = make("cand" + i)
     if i == n { return candidate }
@@ -114,7 +114,7 @@ r.Console.log("  found " + found.name)
 
 r.Console.log("weak")
 @Res strong = make("strong")
-_Res weak = _strong
+%Res weak = %strong
 enforce weak {
   r.Console.log("  alive: " + weak.name)
 } else {

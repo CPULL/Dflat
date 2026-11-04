@@ -1,0 +1,6 @@
+Chief A B 5 9
+  end Rex
+  end Chief
+  end A
+  end B
+---- exit code 0 ----

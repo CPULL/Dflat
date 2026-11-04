@@ -26,12 +26,12 @@ sealed class FieldInfo {
   public bool IsConst { get; set; }
   public bool FromParam { get; set; }
   public bool IsParentRef { get; set; }      // &Parent name as parent (spec 12.5): a reference, not owned
-  public bool ReadOnlyRef { get; set; }      // declared with & (not (&)): only unrestricted and asparent functions are called through it
+  public bool ReadOnlyRef { get; set; }      // a plain (read-only) parent: only unrestricted and asparent functions are called through it
   public bool Hidden { get; set; }           // a field of the compiler (the children of a parent, the slot of a child)
   public bool IsReadOnly { get; set; }       // readonly (spec 11.1.4): read with its visibility, written only by the class
   public bool IsWeak { get; set; }           // _T name (spec 12.7): does not own its object, read through enforce, set with = _x
   public bool IsCounted { get; set; }        // @T name (spec 12.7): a user of a counted object, the C field holds the counting block (df_rc*)
-  public bool IsWritable { get; set; }       // (@)T name, (_)T name (spec 12.7): read/write, its object has a lock
+  public bool IsWritable { get; set; }       // &@T name, &%T name (spec 12.7): read/write, its object has a lock
   public bool HasAccessors { get; set; }     // a property with R: / W: blocks (spec 11.1.4): read and written through get_ and set_
   public bool CanRead { get; set; } = true;
   public bool CanWrite { get; set; } = true;
@@ -88,6 +88,7 @@ public sealed partial class CodeGen {
   readonly StringBuilder classCode = new();
   readonly List<FieldInfo> staticOrder = new();              // statics in the order their initializers must run
   readonly Dictionary<string, (string CName, string Type)> globalConsts = new();   // top-level const: seen by every function
+  readonly Dictionary<string, System.Numerics.BigInteger> globalConstValues = new();   // the top-level consts with an integer literal value
   readonly List<string> globalConstOrder = new();
   FunSig? globalConstsInit;
   ClassInfo? currentClass;
@@ -294,7 +295,7 @@ public sealed partial class CodeGen {
           RegisterParentParam(cls, p, type, def);
           continue;
         }
-        if (p.Kind is "RefParam" or "WritableRefParam") {
+        if (p.Kind == "WritableRefParam") {
           throw NotSupported("Reference parameters on constructors", p);
         }
         bool weakParam = p.Children.Any(child => child.Kind == "Weak");
@@ -312,7 +313,7 @@ public sealed partial class CodeGen {
           continue;
         }
         if (IsClass(type) && p.Kind != "GiftParam" && !weakParam) {
-          throw Error($"the object '{p.Text}' goes into a field of {cls.Name}, which owns it: write ->{type} {p.Text} (or _{type} {p.Text} for a weak reference)", p);
+          throw Error($"the object '{p.Text}' goes into a field of {cls.Name}, which owns it: write ->{type} {p.Text} (or %{type} {p.Text} for a weak reference)", p);
         }
         bool writableWeak = weakParam && p.Children.Any(child => child.Kind == "ReadWrite");
         cls.PrimaryParams.Add(new ParamSig(p.Text!, weakParam ? "_" + type : type, def?.Children[0]) { IsGift = p.Kind == "GiftParam" && (IsClass(type) || type == "string" || IsArr(type)), IsWeak = weakParam, IsWritable = writableWeak });
@@ -342,7 +343,7 @@ public sealed partial class CodeGen {
           var init = member.Children.FirstOrDefault(child => child.Kind is "Init" or "WeakInit");
           bool weakField = member.Children.Any(child => child.Kind == "Weak");
           if (init?.Kind == "WeakInit" && !weakField) {
-            throw Error($"a weak field is declared with _ before its type: _Type {member.Text}", init);
+            throw Error($"a weak field is declared with % before its type: %Type {member.Text}", init);
           }
           var typeNode = member.Children.First(child => TypeNodeKinds.Contains(child.Kind));
           if (typeNode is { Kind: "Type", Text: "var" }) {
@@ -476,14 +477,14 @@ public sealed partial class CodeGen {
     }
   }
 
-  // &Parent name as parent: the object that guarantees the existence of this one (spec 12.5). The field is a reference: the child does not own its
+  // Parent name as parent (read-only) or &Parent name as parent (writable): the object that guarantees the existence of this one (spec 12.5). The field is a reference: the child does not own its
   // parent. The parent class gets the list of its adopted children (a hidden field) and the child its slot in that list
   void RegisterParentParam(ClassInfo cls, Node p, string type, Node? def) {
     if (cls.ParentField != null) {
       throw Error($"a class has one parent: '{cls.ParentField.Name}' is already 'as parent'", p);
     }
-    if (p.Kind is not ("RefParam" or "WritableRefParam")) {
-      throw Error($"'as parent' goes on a reference parameter: &{p.Children[0].Text} {p.Text} as parent", p);
+    if (p.Kind is not ("Param" or "WritableRefParam") || p.Children.Any(child => child.Kind is "Counted" or "Weak")) {
+      throw Error($"'as parent' goes on a borrowed parameter: {p.Children[0].Text} {p.Text} as parent, or &{p.Children[0].Text} {p.Text} as parent", p);
     }
     if (def != null) {
       throw Error("the parent cannot have a default value", p);
@@ -492,8 +493,8 @@ public sealed partial class CodeGen {
       throw traits.ContainsKey(type) ? NotSupported("A trait as the type of the parent", p) : Error($"the parent must be an object, not {type}", p);
     }
     CheckFieldName(cls, p.Text!, p);
-    cls.PrimaryParams.Add(new ParamSig(p.Text!, type, null) { Ref = p.Kind == "RefParam" ? 1 : 2 });
-    var field = new FieldInfo(p.Text!, type, cls, p) { FromParam = true, IsParentRef = true, ReadOnlyRef = p.Kind == "RefParam" };
+    cls.PrimaryParams.Add(new ParamSig(p.Text!, type, null) { Ref = p.Kind == "Param" ? 1 : 2, IsParent = true });
+    var field = new FieldInfo(p.Text!, type, cls, p) { FromParam = true, IsParentRef = true, ReadOnlyRef = p.Kind == "Param" };
     cls.Fields.Add(field);
     cls.ParentField = field;
     cls.Fields.Add(new FieldInfo("df_slot", NativeUns, cls, p) { Hidden = true });
@@ -1120,6 +1121,9 @@ public sealed partial class CodeGen {
       var init = decl.Children.FirstOrDefault(child => child.Kind == "Init") ?? throw Error("a const needs a value", decl);
       string type = ResolveDeclType(decl, null);
       globalConsts[name] = ($"g_{name}", type);
+      if (IntLiteralValue(init.Children[0]) is System.Numerics.BigInteger constValue) {
+        globalConstValues[name] = constValue;   // a tuple index can use it (spec 3.2)
+      }
       globalConstOrder.Add(name);
       classGlobals.Append($"static {CType(type)} g_{name};\n");
       block.Add(Synthetic("Assign", decl, "=").Add(Synthetic("Name", decl, name)).Add(init.Children[0]));
@@ -1167,7 +1171,7 @@ public sealed partial class CodeGen {
     return code == $"self->{parent.CName}" || code == $"(self)->{parent.CName}" ? parent : null;
   }
 
-  // the parent reference when it is read-only (&), or null
+  // the parent reference when it is read-only &, or null
   FieldInfo? ReadOnlyParent(string code) => ParentReceiver(code) is { ReadOnlyRef: true } parent ? parent : null;
 
   // the variable a receiver names when it is a read-only reference (&Item o, &arr<T> a), or null
@@ -1177,7 +1181,7 @@ public sealed partial class CodeGen {
   // the members of the collections of the compiler that do not change them: the only ones a read-only reference can call (spec 1.6.2)
   static readonly HashSet<string> ReadOnlyCollectionMembers = new() { "has", "indexOf", "getIterator", "hasKey", "tryGet", "keyOf" };
 
-  // spec 1.6.2: through a read-only reference (&) only the unrestricted functions (and static ones) can be called; for the collections of the compiler
+  // spec 1.6.2: through a read-only reference & only the unrestricted functions (and static ones) can be called; for the collections of the compiler
   // the members that do not change them
   void CheckReadOnlyCall(Node receiverNode, Expr receiver, string name, Scope scope, Node at) {
     if (ReadOnlyVariable(receiverNode, scope) is null) {
@@ -1196,12 +1200,12 @@ public sealed partial class CodeGen {
     }
     if (!allowed) {
       throw Error(library
-        ? $"'{what}' is a read-only reference (&): '{name}' can change it, so it needs an owned or writable reference (take (&){what})"
-        : $"'{what}' is a read-only reference (&): '{name}' needs an owned or writable reference (mark it unrestricted, or take (&){what})", at);
+        ? $"'{what}' is a read-only reference: '{name}' can change it, so it needs an owned or writable reference (take &{what})"
+        : $"'{what}' is a read-only reference: '{name}' needs an owned or writable reference (mark it unrestricted, or take &{what})", at);
     }
   }
 
-  // spec 12.5: an asparent function is called only by a child, through its parent reference; through a read-only reference (&) only the
+  // spec 12.5: an asparent function is called only by a child, through its parent reference; through a read-only reference & only the
   // unrestricted and asparent functions can be called
   void CheckParentAccess(FunSig chosen, string? receiver, string name, Node at) {
     var parent = receiver == null ? null : ParentReceiver(receiver);
@@ -1214,7 +1218,7 @@ public sealed partial class CodeGen {
       return;
     }
     if (parent is { ReadOnlyRef: true } && !chosen.IsUnrestricted && !chosen.IsStatic && !name.StartsWith("get_")) {   // properties can be read
-      throw Error($"'{parent.Name}' is a read-only reference (&): '{name}' needs an owned or writable reference (mark it unrestricted, or declare (&){parent.Name})", at);
+      throw Error($"'{parent.Name}' is a read-only reference: '{name}' needs an owned or writable reference (mark it unrestricted, or declare &{parent.Name})", at);
     }
     CheckAccess(chosen.Visibility, chosen.Class!, name, at);
   }
@@ -1329,15 +1333,15 @@ public sealed partial class CodeGen {
       return null;
     }
     if (ReadOnlyParent(owner.Code) is FieldInfo readOnly) {
-      throw Error($"'{readOnly.Name}' is a read-only reference (&): its fields cannot be assigned", target);
+      throw Error($"'{readOnly.Name}' is a read-only reference: its fields cannot be assigned", target);
     }
     if (ReadOnlyVariable(target.Children[0], scope) is not null) {
-      throw Error($"'{target.Children[0].Text}' is a read-only reference (&): its fields cannot be assigned", target);
+      throw Error($"'{target.Children[0].Text}' is a read-only reference: its fields cannot be assigned", target);
     }
     var instance = ObjectField(owner, target.Text!, target, true);
     var info = FindField(ObjInfo(owner.Type), target.Text!)!;
     if (info.IsCounted && !countedFieldWrite) {
-      throw NotSupported($"This use of the counted field '{info.Name}' (->, (&), swap, out arguments)", target);
+      throw NotSupported($"This use of the counted field '{info.Name}' (->, &, swap, out arguments)", target);
     }
     if (info.IsWeak && !countedFieldWrite) {
       throw Error($"'{info.Name}' is a weak reference: copy it into a weak variable and use that through enforce (spec 12.7)", target);
@@ -1405,17 +1409,17 @@ public sealed partial class CodeGen {
     return codes;
   }
 
-  // &T x gets the address of a variable, or of a temporary holding the value; (&)T x gets the address of a variable, a field or an
-  // array item, written (&)x in the call
+  // &T x gets the address of a variable, or of a temporary holding the value; &T x gets the address of a variable, a field or an
+  // array item, written &x in the call
   string ReferenceArg(ParamSig param, Node arg, Scope scope) {
     if (param.Ref == 2) {
       if (arg.Kind != "WritableAddressOf") {
-        throw Error($"'{param.Name}' is written by the function: pass it as (&)variable", arg);
+        throw Error($"'{param.Name}' is written by the function: pass it as &variable", arg);
       }
       return WritableAddress(arg.Children[0], scope, param.Type, arg);
     }
     if (arg.Kind == "WritableAddressOf") {
-      throw Error($"'{param.Name}' is a read-only reference: remove the (&)", arg);
+      throw Error($"'{param.Name}' is a read-only reference: remove the &", arg);
     }
     var value = ExprOf(arg, scope, param.Type);
     string code = Convert(value, param.Type, arg);
@@ -1429,15 +1433,15 @@ public sealed partial class CodeGen {
     return $"((const {CType(param.Type)}[1]){{ {code} }})";
   }
 
-  // the C address of what (&)x names; the type must be the one of the parameter
+  // the C address of what &x names; the type must be the one of the parameter
   string WritableAddress(Node target, Scope scope, string type, Node at) {
     if (target.Kind is not ("Name" or "Member" or "Index")) {
-      throw Error("(&) needs a variable, a field or an array item", at);
+      throw Error("& needs a variable, a field or an array item", at);
     }
     if (target.Kind == "Index") {
       var obj = ExprOf(target.Children[0], scope);
       if (!IsArr(obj.Type) || target.Children[0].Kind == "GenericRef") {
-        throw Error("(&) needs a variable, a field or an array item", at);
+        throw Error("& needs a variable, a field or an array item", at);
       }
       if (ArrElem(obj.Type) != type) {
         throw Error($"the parameter is a {type}, not a {ArrElem(obj.Type)}", at);
@@ -1448,17 +1452,71 @@ public sealed partial class CodeGen {
       return $"({{ {CType(obj.Type)} {array} = {obj.Code}; df_uns {position} = {IndexValue(index, target)}; "
         + $"if (!df_idx_ok({array}.len, {position}, {fn!.NameConst})) {RaiseJump} &{array}.p[{position}]; }})";
     }
+    if (target is { Kind: "Name", Text: "this" }) {
+      throw Error("&this is not allowed: the function could replace the object while its method runs; pass the fields that change", at);
+    }
     CheckNotWritableBorrowOfCounted(target, scope, at);
     var lvalue = LValue(target, scope);
     if (lvalue.IsConst) {
-      throw Error($"'{target.Text}' is const and cannot be passed as (&)", at);
+      throw Error($"'{target.Text}' is const and cannot be passed as &", at);
+    }
+    if (IsClass(type)) {
+      // the function can replace the object (spec 13.1): what it names must own its object, or be a & parameter that does it for its caller
+      if (ReadOnlyVariable(target, scope) is not null) {
+        throw Error($"'{target.Text}' is a read-only reference: it cannot be passed as &", at);
+      }
+      if (lvalue.Variable is VarInfo holder && !holder.Own && !holder.RefSlot) {
+        throw Error($"'{target.Text}' only borrows its object: & needs the variable that owns it, a field, or a & parameter (spec 13.1)", at);
+      }
     }
     if (lvalue.Type != type) {
       throw Error($"the parameter is a {type}, but '{target.Text}' is a {lvalue.Type}", at);
     }
+    if (IsArr(type) && !LibraryCode && lvalue.Variable is VarInfo arrHolder && !arrHolder.OwnsArray && !arrHolder.RefSlot) {
+      // the function can replace the array and end the old one (spec 13.1, 6.8.1): only its owner hands it out
+      throw Error($"'{target.Text}' only borrows its array: & needs the variable that owns it, a field, or a & parameter (spec 13.1)", at);
+    }
     MarkAssigned(lvalue.Variable);
+    if (type == "string" && lvalue.Variable?.OwnFlag is string flag) {
+      // the function can replace the string and end the old one (spec 13.1): a variable that borrows its string takes a copy of its own first
+      return $"({{ if (!{flag}) {{ {lvalue.Code} = df_str_own({lvalue.Code}, false); {flag} = true; }} &{lvalue.Code}; }})";
+    }
     return "&" + lvalue.Code;
   }
+
+  // the marker of a counted or weak argument repeats the one of its parameter (spec 13.1): @x, &@x, %x, &%x. ->x gives the caller's usage;
+  // a new object, a result and null need no marker. Returns the argument without the &
+  Node CallMarker(Node arg, string marker, bool writable, string what, Scope scope) {
+    string kind = marker == "@" ? "CountedOf" : "WeakOf";
+    string wanted = (writable ? "&" : "") + marker;
+    if (arg.Kind == "WritableAddressOf" && arg.Children[0].Kind is "CountedOf" or "WeakOf") {
+      var inner = arg.Children[0];
+      if (inner.Kind != kind) {
+        throw Error($"{what} takes {wanted}: write {wanted}{Shown(inner.Children[0])} (spec 13.1)", arg);
+      }
+      if (!writable) {
+        throw Error($"{what} is read-only: write {marker}{Shown(inner.Children[0])}, without & (spec 13.1)", arg);
+      }
+      return inner;
+    }
+    if (arg.Kind is "CountedOf" or "WeakOf") {
+      if (arg.Kind != kind || writable) {
+        throw Error($"{what} takes {wanted}: write {wanted}{Shown(arg.Children[0])} (spec 13.1)", arg);
+      }
+      return arg;
+    }
+    if (arg.Kind is "Name" or "Member" or "Index" && arg is not { Kind: "Name", Text: "this" }) {
+      throw Error($"{what} takes {wanted}: write {wanted}{Shown(arg)} (spec 13.1)", arg);
+    }
+    return arg;   // null, ->x, a new object, a result
+  }
+
+  static string Shown(Node node) => node.Kind switch {
+    "Name" => node.Text ?? "x",
+    "Member" when node.Children.Count > 0 => Shown(node.Children[0]) + "." + node.Text,
+    "Index" when node.Children.Count > 0 => Shown(node.Children[0]) + "[...]",
+    _ => "x"
+  };
 
   // one argument: an object given to a parameter written ->T moves (the call writes ->x); the others only borrow
   string ArgCode(ParamSig param, Node arg, Scope scope) {
@@ -1466,17 +1524,26 @@ public sealed partial class CodeGen {
       if (!param.IsGift) {
         return LookupBox(arg, param.Type, scope);   // pack.has(first): compared, not kept
       }
-      arg = BoxCall(arg, param.Type);   // pack.add(first): a new box takes a usage (spec 12.7)
+      arg = CallMarker(arg, "@", writableBoxes.Contains(param.Type), "the item", scope);   // pack.add(@first), team.add(&@p)
+      arg = BoxCall(arg, param.Type);   // a new box takes a usage (spec 12.7)
+    }
+    bool boxed = arg.Kind == "Boxed";
+    if (boxed) {
+      arg = arg.Children[0];
     }
     if (IsCountedType(param.Type)) {
-      return CountedArg(arg, CountedBase(param.Type), scope, param.IsWritable);   // @T name, (@)T name (spec 12.7)
+      if (!boxed) {
+        arg = CallMarker(arg, "@", param.IsWritable, $"'{param.Name}'", scope);
+      }
+      return CountedArg(arg, CountedBase(param.Type), scope, param.IsWritable);   // @T name, &@T name (spec 12.7)
     }
     if (IsWeakType(param.Type)) {
-      return WeakValue(arg, scope, param.Type[1..], arg, param.IsWritable);   // _T name: one more weak reference for the call (spec 12.7)
+      arg = CallMarker(arg, "%", param.IsWritable, $"'{param.Name}'", scope);
+      return WeakValue(arg, scope, param.Type[1..], arg, param.IsWritable);   // %T name: one more weak reference for the call (spec 12.7)
     }
     if (IsClass(param.Type) && CountedRef(arg.Kind == "WritableAddressOf" ? arg.Children[0] : arg, scope) is CountedRefInfo counted) {
       throw arg.Kind == "WritableAddressOf"
-        ? Error($"(&) is not allowed on the counted object '{counted.Name}': writing needs a read/write usage, (@)T (spec 12.7)", arg)
+        ? Error($"& is not allowed on the counted object '{counted.Name}': writing needs a read/write usage, &@T (spec 12.7)", arg)
         : Error($"'{counted.Name}' is counted and cannot be borrowed: the parameter '{param.Name}' takes a counted object only if declared @{counted.Type} {param.Name} (spec 12.7)", arg);
     }
     if (param.IsGift && arg.Kind == "Gift" && CountedRef(arg.Children[0], scope) is CountedRefInfo given) {
@@ -1486,17 +1553,17 @@ public sealed partial class CodeGen {
       return ReferenceArg(param, arg, scope);
     }
     if (param.Ref == 2 && IsClass(param.Type)) {
-      // (&)Item o: the object is already a pointer; the call still writes (&)o
+      // &Parent name as parent: the object pointer; the call still writes &o
       if (arg.Kind != "WritableAddressOf") {
-        throw Error($"'{param.Name}' is a writable borrow: pass it as (&)object", arg);
+        throw Error($"'{param.Name}' is a writable borrow: pass it as &object", arg);
       }
       arg = arg.Children[0];
       CheckNotWritableBorrowOfCounted(arg, scope, arg);
       if (ReadOnlyVariable(arg, scope) is not null) {
-        throw Error($"'{arg.Text}' is a read-only reference (&): it cannot be passed as (&)", arg);
+        throw Error($"'{arg.Text}' is a read-only reference: it cannot be passed as &", arg);
       }
     } else if (arg.Kind == "WritableAddressOf") {
-      throw Error($"'{param.Name}' is not a (&) parameter: remove the (&)", arg);
+      throw Error($"'{param.Name}' is not a & parameter: remove the &", arg);
     }
     if (IsArr(param.Type) && !LibraryCode) {
       // spec 6.8.1: ->arr<T> p takes the array (->a, a new array, a!, or a silent copy of plain items), arr<T> p borrows it

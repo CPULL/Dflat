@@ -42,7 +42,7 @@ r.Console.log(a == b)
 r.Console.log(a == sameA)
 r.Console.log(a != b)
 
-fun Number num(i32 v) {
+fun ->Number num(i32 v) {
   Number made = Number()
   made.value = v
   return made

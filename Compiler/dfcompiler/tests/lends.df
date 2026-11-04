@@ -1,0 +1,38 @@
+// Lent results and borrow locks (spec 12, 13.1.1): a plain result lends from this, a parameter or static data; the lender of a borrow
+// cannot be replaced, released or moved until the last use of the borrow, and can afterwards
+alias Root as r
+
+public class Dog(string name) {
+  public string name
+} atEnd {
+  r.Console.log("  end " + name)
+}
+
+public class Kennel {
+  public Dog boss = Dog("Boss")
+  public arr<Dog> dogs = [Dog("a"), Dog("b")]
+  public fun Dog leader() { boss }                 // lends a field of this
+  public fun Dog at(uns i) { dogs[i] }             // lends an item of this
+  public fun ->Dog adopt() { Dog("Pup") }          // gives a new object
+}
+
+const string VERSION = "1.2.3"
+fun string version() { VERSION }                   // lends static data
+fun Dog pick(Dog d) { d }                          // lends what the caller lent
+
+fun run() {
+  Kennel k = Kennel()
+  Dog d = k.leader()
+  Dog second = k.at(1)
+  r.Console.log($"leader {d.name}, second {second.name}, version {version()}")
+  Dog rex = Dog("Rex")
+  Dog same = pick(rex)
+  r.Console.log($"same {same.name}")
+  rex = Dog("Max")                                 // after the last use of same: rex can be replaced
+  k.boss = Dog("New boss")                         // after the last use of d
+  Dog pup = k.adopt()
+  r.Console.log($"rex {rex.name}, boss {k.boss.name}, pup {pup.name}")
+  r.Console.log("scope end")
+}
+run()
+r.Console.log("end")

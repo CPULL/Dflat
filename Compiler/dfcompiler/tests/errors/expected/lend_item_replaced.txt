@@ -1,0 +1,1 @@
+lend_item_replaced.df(12): error: 'pack' is lent to 'first' until its last use: until then it and its fields cannot be assigned, ended, moved or passed as & (spec 12)

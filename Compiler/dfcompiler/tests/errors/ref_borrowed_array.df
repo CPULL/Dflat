@@ -1,0 +1,5 @@
+fun refill(&arr<i32> a) { a = [1] }
+fun f(arr<i32> given) {
+  refill(&given)
+}
+f([3])

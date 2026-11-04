@@ -1,0 +1,36 @@
+// Tuple items by index (spec 3.2): the index is a literal, a const or an enum value; reads and assignments;
+// indexes apply left to right
+alias Root as r
+
+const i32 SECOND = 1
+enum Slot { First, Second, Third }
+
+fun (i32 sum, i32 count) stats(vec<i32> nums) {
+  i32 s = 0
+  for n in nums {
+    s += n
+  }
+  return (s, (i32)nums.len)
+}
+
+var st = stats([1, 2, 3, 5, 8, 13])
+i32 total = st[0]
+i32 n = st[1]
+r.Console.log($"{total} {n}")
+
+(i32, string, r64) t = (7, "seven", 7.5)
+const i32 LAST = 2
+r.Console.log(t[0])
+r.Console.log(t[SECOND])
+r.Console.log(t[LAST])
+r.Console.log(t[Slot.Second])
+
+t[0] = 70
+t[SECOND] = "seventy"
+t[2] += 0.25
+r.Console.log(t)
+
+arr<(i32, string)> pairs = [(1, "one"), (2, "two"), (3, "three")]
+r.Console.log(pairs[2][1])
+((i32, i32), string) nested = ((4, 5), "n")
+r.Console.log(nested[0][1])

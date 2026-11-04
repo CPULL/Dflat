@@ -1,0 +1,17 @@
+alias Root as r
+public class Dog(string name) {
+  public string name
+}
+public class Kennel {
+  public Dog boss = Dog("Boss")
+  public fun Dog leader() { boss }
+}
+fun Dog pick(Dog d) { d }
+fun give(->Dog d) { }
+fun f() {
+  Dog rex = Dog("Rex")
+  Dog same = pick(rex)
+  give(->rex)
+  r.Console.log(same.name)
+}
+f()

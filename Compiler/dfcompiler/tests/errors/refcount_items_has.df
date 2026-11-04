@@ -4,7 +4,7 @@ fun f() {
   @Dog rex = Dog()
   Dog plain = Dog()
   list<@Dog> pack = []
-  pack.add(rex)
+  pack.add(@rex)
   bool found = pack.has(plain)
 }
 f()

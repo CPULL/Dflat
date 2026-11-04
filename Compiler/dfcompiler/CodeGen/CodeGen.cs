@@ -29,6 +29,8 @@ sealed class FunSig {
   public string CName => IsExtern ? "dfx_" + Name : "f_" + Name.Replace('.', '_').Replace("==", "op_eq") + (OverloadIndex > 0 ? "_" + OverloadIndex : "");
   public bool IsExtern { get; init; }       // extern fun: a C function of a library, no body, never returns an error (spec 15.8, 15.9)
   public string Ret { get; }
+  public HashSet<int> Gives { get; init; } = new();   // the results written ->T: the caller owns them (spec 13.1.1)
+  public HashSet<int> Writes { get; init; } = new();  // the results written &T: lent read/write, the caller changes them in place
   public List<ParamSig> Params { get; }
   public Node Node { get; }
   public string? EnumName { get; }
@@ -46,7 +48,7 @@ sealed class FunSig {
   public Vis Visibility { get; set; } = Vis.Public;
   public int Slot { get; set; } = -1;
   public bool ReturnsOwned { get; set; }      // returns new or moved objects (false: borrowed ones)
-  public bool RetWritable { get; set; }       // fun (@)T make(): the counted result is read/write (spec 12.7)
+  public bool RetWritable { get; set; }       // fun &@T make(): the counted result is read/write (spec 12.7)
   public bool ReturnsOwnedSet { get; set; }
   public bool IsDtor { get; set; }            // the atEnd of a class
   public bool IsAccessor { get; set; }        // get_ / set_ of a property with accessor blocks: no error part, what it lets out is a Panic (spec 11.1.4)
@@ -76,9 +78,10 @@ sealed class ParamSig {
   public Node? Default { get; }
   public bool IsVariadic { get; init; }   // T name...: an arr<T> filled from the extra arguments
   public bool IsGift { get; init; }       // ->T name: the function owns the object it is given
-  public int Ref { get; init; }           // 0 a copy, 1 &T name (read-only reference), 2 (&)T name (writable reference, the call writes (&)x)
+  public int Ref { get; init; }           // 0 a copy, 1 a read-only reference, 2 &T name (writable reference, the call writes &x)
+  public bool IsParent { get; init; }     // T name as parent: the object pointer is kept in a field (spec 12.5)
   public bool IsWeak { get; init; }       // _T name (spec 12): a weak reference, used through enforce
-  public bool IsWritable { get; init; }   // (@)T name, (_)T name (spec 12.7): read/write, the object has a lock
+  public bool IsWritable { get; init; }   // &@T name, &%T name (spec 12.7): read/write, the object has a lock
 }
 
 sealed class VarInfo {
@@ -96,11 +99,17 @@ sealed class VarInfo {
   public string Type { get; }
   public string CName { get; }
   public bool IsConst { get; }
+  public BigInteger? ConstValue { get; set; }   // a const with an integer literal value: usable where a constant is needed (a tuple index)
   public bool Own { get; set; }       // the variable owns its object: it is destroyed when the scope ends
   public bool IsWeak { get; set; }    // a weak reference: used only through enforce
   public bool IsCounted { get; set; } // @T name (spec 12.7): the C variable holds the counting block (df_rc*); reading it gives the object
-  public bool IsWritable { get; set; } // (@)T name, (_)T name (spec 12.7): read/write, its object has a lock taken by enforce
-  public bool ReadOnlyRef { get; set; }   // &Item o: a read-only reference to an object or a collection (spec 1.6.2)
+  public bool IsWritable { get; set; } // &@T name, &%T name (spec 12.7): read/write, its object has a lock taken by enforce
+  public bool ReadOnlyRef { get; set; }   // a read-only reference to an object or a collection (spec 1.6.2)
+  public bool IsLocal { get; set; }       // declared in the body of a function: it ends with the function (spec 13.1.1)
+  public bool IsParam { get; set; }       // a parameter of the function
+  public string? LentFromLocal { get; set; }   // the local of the function it borrows from: it cannot be lent as a result
+  public bool RefSlot { get; set; }       // &T name of an object, a string or an array: the caller's variable, which owns its value; assigning it ends
+                                          // the old value and the caller owns the new one (spec 13.1)
   public long? KnownLength { get; set; }   // an array that starts from a literal or arr<T>[n] and is never assigned again: its length is known
   public string? OwnFlag { get; set; }     // a string variable: the C flag that says whether it owns its string (CodeGen.Strings.cs)
   public bool ReadOnlyString { get; set; } // a string parameter or loop variable: a read-only borrow, never changed in place (spec 4.1)
@@ -418,7 +427,8 @@ public sealed partial class CodeGen {
       var def = p.Children.FirstOrDefault(child => child.Kind == "Default");
       string paramType = ResolveType(p.Children[0]);
       bool variadic = p.Kind == "VariadicParam";
-      int reference = p.Kind == "RefParam" ? 1 : p.Kind == "WritableRefParam" ? 2 : 0;
+      // &T: a writable lend (spec 13.1); a plain parameter keeps the old behaviour until the read-only lend is built (1.6.2)
+      int reference = p.Kind == "WritableRefParam" ? 2 : 0;
       if (reference == 2 && def != null) {
         throw Error($"the writable reference '{p.Text}' cannot have a default value: it needs a variable", p);
       }
@@ -465,13 +475,29 @@ public sealed partial class CodeGen {
     if (ret != "void" && !IsMulti(ret) && !isExtern && !noBody) {
       MarkImplicitReturn(funNode);   // before ClassifyReturns, so a last expression that makes an object moves it
     }
-    var fun = new FunSig(name, ret, ps, funNode, enumName) { OverloadIndex = overloads.Count, IsExtern = isExtern, RetWritable = rets?.Text == "counted-rw" };
+    var marked = rets?.Text is string marks && marks.StartsWith("marks:") ? marks[6..].Split(',') : Array.Empty<string>();
+    var gives = marked.Where(mark => mark[0] == 'g').Select(mark => int.Parse(mark[1..])).ToHashSet();
+    var writes = marked.Where(mark => mark[0] == 'w').Select(mark => int.Parse(mark[1..])).ToHashSet();
+    foreach (int written in writes) {
+      string writtenType = IsMulti(ret) ? TupleElems(ret)[written].Type : ret;
+      if (!(IsClass(writtenType) || IsArr(writtenType))) {
+        throw NotSupported("& results of basic values and strings (spec 13.1.1)", rets!);
+      }
+    }
+    foreach (int given in gives) {
+      string givenType = IsMulti(ret) ? TupleElems(ret)[given].Type : ret;
+      if (IsNumeric(givenType) || givenType is "bool" or "char" || enums.ContainsKey(givenType)) {
+        Warn($"-> on a {DisplayName(givenType)} result is ignored: a basic value is a copy (spec 13.1.1)", rets!, 1);
+      }
+    }
+    var fun = new FunSig(name, ret, ps, funNode, enumName) { OverloadIndex = overloads.Count, IsExtern = isExtern, RetWritable = rets?.Text == "counted-rw", Gives = gives, Writes = writes };
     overloads.Add(fun);
     return fun;
   }
 
-  // references to objects are the object pointer itself; every other type is passed by the address of the variable
-  bool IsByPointer(ParamSig p) => p.Ref != 0 && !IsClass(p.Type);
+  // a & parameter is the address of the caller's variable, so the function can replace its value (spec 13.1); a read-only reference to an
+  // object is the object pointer itself, to any other type the address of the variable; a parent is the object pointer (spec 12.5)
+  bool IsByPointer(ParamSig p) => !p.IsParent && (p.Ref == 2 || p.Ref != 0 && !IsClass(p.Type));
   string ParamCType(ParamSig p) => IsByPointer(p) ? (p.Ref == 1 ? "const " : "") + CType(p.Type) + "*" : CType(p.Type);
   string ParamName(ParamSig p) => (IsByPointer(p) ? "p_" : "v_") + p.Name;
 
@@ -527,8 +553,9 @@ public sealed partial class CodeGen {
       }
       // a reference parameter is a pointer in C; the body reads and writes through it, a read-only one cannot be assigned
       scope.Vars[p.Name] = IsByPointer(p)
-        ? new VarInfo(p.Type, $"(*{ParamName(p)})", p.Ref == 1) { ReadOnlyRef = p.Ref == 1 && IsArr(p.Type) }
+        ? new VarInfo(p.Type, $"(*{ParamName(p)})", p.Ref == 1) { ReadOnlyRef = p.Ref == 1 && IsArr(p.Type), RefSlot = p.Ref == 2 && (IsClass(p.Type) || IsArr(p.Type) || p.Type == "string"), BorrowsArray = p.Ref == 2 && IsArr(p.Type) }
         : StringVar(new VarInfo(p.Type, "v_" + p.Name, false) { Own = p.IsGift, ReadOnlyRef = p.Ref == 1 && IsClass(p.Type), ReadOnlyString = p.Type == "string" && !p.IsGift, IsWeak = p.IsWeak, BorrowsArray = IsArr(p.Type) && !p.IsGift, OwnsArray = OwnsGivenArray(f, p) });
+      scope.Vars[p.Name].IsParam = true;
       if (scope.Vars[p.Name].OwnFlag is string flag) {
         // a parameter borrows its string (one taken with -> owns it); assigned again, it may own the new one
         fn.Decls.Append($"  bool {flag} = {(p.IsGift ? "true" : "false")};\n  (void){flag};\n");
@@ -873,6 +900,9 @@ public sealed partial class CodeGen {
       }
     } else {
       variable = StringVar(new VarInfo(type, "v_" + s.Text, isConst));
+      if (isConst && init != null && IntLiteralValue(init.Children[0]) is BigInteger constValue) {
+        variable.ConstValue = constValue;
+      }
       sb.Append($"{pad}{(isConst && variable.OwnFlag == null ? "const " : "")}{CType(type)} {variable.CName} = {code};\n");
       if (variable.OwnFlag != null) {
         sb.Append($"{pad}bool {variable.OwnFlag} = {ownsString};\n{pad}(void){variable.OwnFlag};\n");
@@ -895,6 +925,8 @@ public sealed partial class CodeGen {
       variable.BorrowsArray = true;   // arr<T> b = a borrows (spec 6.8.1)
     }
     scope.Vars[s.Text!] = variable;
+    variable.IsLocal = currentFun != null && !fn!.IsMain;
+    CheckBorrowLock(s, type, init?.Children[0], variable, scope);   // spec 12
     if (init == null) {
       assign.Unassigned.Add(variable);
     } else {
@@ -1091,6 +1123,52 @@ public sealed partial class CodeGen {
     EmitReturnUnwind(sb, indent);
   }
 
+  // a result that is a new value (a new object, string or array, or a local that owns one) goes to the caller, who owns it: the function says so
+  // with fun ->T (spec 13.1.1). A plain result lends (built later); until then only the new values are checked
+  void CheckGivenResults(Node s, Scope scope) {
+    if (LibraryCode || currentFun == null || currentFun.IsCtor || currentFun.IsInit || IsCountedType(currentRet!)
+        || currentFun.Name.Split('.')[^1].StartsWith("get_")) {   // an R accessor gives what it computes (spec 13.1.1)
+      return;
+    }
+    var types = IsMulti(currentRet!) ? TupleElems(currentRet!).Select(elem => elem.Type).ToList() : new List<string> { currentRet! };
+    if (types.Count != s.Children.Count) {
+      return;   // a forwarded call or a wrong count: reported by the return itself
+    }
+    for (int index = 0; index < types.Count; index++) {
+      string type = types[index];
+      if (currentFun.Gives.Contains(index) || !(IsClass(type) || IsArr(type) || type == "string")) {
+        continue;
+      }
+      if (!IsNewResult(s.Children[index], type, scope)) {
+        CheckLentResult(s.Children[index], type, scope);   // a plain result lends (spec 13.1.1)
+        if (currentFun.Writes.Contains(index)) {
+          CheckWritableLend(s.Children[index], type, scope);
+        }
+        continue;
+      }
+      if (currentFun.Writes.Contains(index)) {
+        throw Error($"this result is a new {DisplayName(type)}: a & result lends something that exists; a new value is given with ->{DisplayName(type)} (spec 13.1.1)", s.Children[index]);
+      }
+      string shown = types.Count == 1 ? $"fun ->{DisplayName(type)} {(currentFun.Node.Text ?? currentFun.Name).Split("__")[0]}(...)" : $"->{DisplayName(type)} for this result";
+      throw Error($"this result is a new {DisplayName(type)} that the caller owns: write {shown} (spec 13.1.1)", s.Children[index]);
+    }
+  }
+
+  // the value is a new one: built here, or held by a local (or a ->T parameter) that owns it
+  bool IsNewResult(Node value, string type, Scope scope) => value.Kind switch {
+    "Paren" => IsNewResult(value.Children[0], type, scope),
+    "Gift" or "Copy" => true,
+    "List" => IsArr(type),
+    "Interp" => type == "string",
+    "Binary" => type == "string" && value.Text == "+",
+    "Call" => value.Children[0] is { Kind: "Name" } callee && classes.ContainsKey(callee.Text!)
+      || CalleesOf(value) is { Count: > 0 } callees && callees.All(f => f.Gives.Contains(0)) || IsArr(type) && IsNewArray(value)
+      || (type == "string" || IsArr(type)) && CalleesOf(value).Count == 0,   // s.trim(), the members of the runtime: a new string or array
+    "Name" => scope.Find(value.Text!) is VarInfo held && !held.IsCounted && !held.IsWeak
+      && (IsClass(type) && held.Own || IsArr(type) && held.OwnsArray || type == "string" && held.OwnFlag != null && !held.ReadOnlyString && !held.RefSlot),
+    _ => false
+  };
+
   // checks the returned value against the function; null when there is none
   string? ReturnValueCode(Node s, Scope scope, StringBuilder sb, string pad) {
     if (fn!.IsMain) {
@@ -1115,6 +1193,7 @@ public sealed partial class CodeGen {
     if (s.Children.Count == 0) {
       throw Error($"this function must return {Article(currentRet!)} {currentRet}", s);
     }
+    CheckGivenResults(s, scope);
     if (IsMulti(currentRet!)) {
       return MultiReturnCode(s, scope, sb, pad);
     }
@@ -1155,7 +1234,7 @@ public sealed partial class CodeGen {
       if (variable == null && currentClass != null && FindField(currentClass, target.Text!, target) is FieldInfo ownField) {
         var bare = BareField(target.Text!, scope, target, true)!.Value;
         if ((ownField.IsCounted || ownField.IsWeak) && !countedFieldWrite) {
-          throw NotSupported($"This use of the counted field '{ownField.Name}' (->, (&), swap, out arguments)", target);
+          throw NotSupported($"This use of the counted field '{ownField.Name}' (->, &, swap, out arguments)", target);
         }
         CheckTraitFieldWrite(ownField, target);
         if (ownField.HasAccessors) {
@@ -1175,7 +1254,7 @@ public sealed partial class CodeGen {
       }
       if (variable.IsCounted) {
         // the C variable is the counting block: only =, is done. and the reads are built (spec 12.7)
-        throw NotSupported($"This use of the counted variable '{target.Text}' (->, (&), ++, swap, out arguments)", target);
+        throw NotSupported($"This use of the counted variable '{target.Text}' (->, &, ++, swap, out arguments)", target);
       }
       if (variable.IsWeak && !countedFieldWrite) {
         throw Error($"'{target.Text}' is a weak reference: use it through enforce {target.Text} {{ }} else {{ }} (spec 12.7)", target);
@@ -1203,7 +1282,7 @@ public sealed partial class CodeGen {
 
   string AssignCodeOf(Node s, Scope scope) {
     var targetNode = s.Children[0];
-    if (targetNode.Kind == "Index") {
+    if (targetNode.Kind == "Index" && !TupleIndexTarget(targetNode, scope)) {
       return IndexAssign(s, scope);
     }
     if (PropertyTarget(targetNode, scope) is var (propertyObj, property)) {
@@ -1235,7 +1314,7 @@ public sealed partial class CodeGen {
     if (op == "=" && target.Variable is { ArrFlag: not null } && !LibraryCode) {
       return MixedArrAssign(target, s.Children[1], scope, s);   // a local that owns or borrows (spec 6.8.1)
     }
-    if (op == "=" && IsArr(target.Type) && (target.IsField || target.IsStatic || target.Variable is { OwnsArray: true } || IsOwnedTupleItem(targetNode, scope)) && !LibraryCode) {
+    if (op == "=" && IsArr(target.Type) && (target.IsField || target.IsStatic || target.Variable is { OwnsArray: true } or { RefSlot: true } || IsOwnedTupleItem(targetNode, scope)) && !LibraryCode) {
       return ArrFieldAssign(target, targetNode, s.Children[1], scope, s);   // spec 6.8.1: fields, statics and owned locals free their old array
     }
     if (op == "=" && IsArr(target.Type) && target.Variable != null && !GivesOwnArray(s.Children[1])) {
@@ -1257,7 +1336,7 @@ public sealed partial class CodeGen {
       return $"{target.Code} = {value}";
     }
     if (op == "_=") {
-      throw Error($"'{targetNode.Text}' is not a weak reference: declare it with _{target.Type} {targetNode.Text}", s);
+      throw Error($"'{targetNode.Text}' is not a weak reference: declare it with %{target.Type} {targetNode.Text}", s);
     }
     ReadCheck(target.Variable, targetNode.Text ?? "", targetNode);
     if (op == "??=") {
@@ -1346,7 +1425,7 @@ public sealed partial class CodeGen {
       case "CountedOf":
         throw NotSupported("@x outside the value of a counted variable (@T x = @e, var x = @e, x = @e)", n);
       case "WeakOf":
-        throw Error("_x makes a weak reference: it is the value of a weak variable, field or parameter (_T w = _x, spec 12.7); the bitwise not is ~x", n);
+        throw Error("%x makes a weak reference: it is the value of a weak variable, field or parameter (%T w = %x, spec 12.7)", n);
       case "Tuple":
         return TupleLiteral(n, scope, expected);
       case "Interp":
@@ -2047,7 +2126,8 @@ public sealed partial class CodeGen {
         // Stack<i32>(args): the constructor of the copy
         return Call(Synthetic("Call", n).Add(Synthetic("Name", n, instanceName)).Add(n.Children[1]), scope);
       }
-      throw Error($"'{genericName.Text}' is not a generic function or class", callee);
+      throw Error($"'{genericName.Text}' is not a generic function or class"
+        + (callee.Text == "ambiguous" ? $": a<b>(c) is read as a generic call; for comparisons write ({genericName.Text} < ...) > (...)" : ""), callee);
     }
     if (callee.Kind == "SafeMember") {
       return SafeAccess(callee, n, scope);

@@ -1,5 +1,5 @@
 namespace weak_old_assign
 class C { }
 @C c = C()
-_C w
+%C w
 w _= c

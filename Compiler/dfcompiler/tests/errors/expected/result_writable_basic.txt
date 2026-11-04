@@ -1,0 +1,1 @@
+result_writable_basic.df(5): error: feature not supported: & results of basic values and strings (spec 13.1.1)

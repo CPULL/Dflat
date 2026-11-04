@@ -3,6 +3,6 @@ class Dog { }
 fun f() {
   vec<@Dog> kennel = [Dog()]
   Dog last = null
-  kennel.pop((&)last)
+  kennel.pop(&last)
 }
 f()

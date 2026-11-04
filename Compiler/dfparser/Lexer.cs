@@ -269,6 +269,10 @@ public sealed class Lexer {
       Advance();
       ReadDigits(char.IsDigit);
     }
+    // "0." is not a real: a real needs a digit on both sides of the dot (spec 1.3); "5.toStr()" and "0..10" go on
+    if (Cur == '.' && At(1) != '.' && !char.IsLetter(At(1)) && At(1) != '_') {
+      throw Error($"a real needs a digit after the dot: {src[start..pos]}.0 (spec 1.3)", l, c);
+    }
     bool exp = Cur == 'e' || Cur == 'E';
     bool expDigits = char.IsDigit(At(1)) || ((At(1) == '+' || At(1) == '-') && char.IsDigit(At(2)));
     if (exp && expDigits) {

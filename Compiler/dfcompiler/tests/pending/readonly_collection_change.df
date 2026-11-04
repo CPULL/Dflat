@@ -1,5 +1,5 @@
 alias Root as r
 
-fun fill(&vec<i32> values) {
+fun fill(vec<i32> values) {
   values.add(3)
 }

@@ -14,7 +14,7 @@ public class Box {
 fun ((arr<Dog>, i32), i32) nested() {
   return (([Dog("n1")], 1), 2)
 }
-fun arr<Dog>, i32 pair(string n) {
+fun ->arr<Dog>, i32 pair(string n) {
   return [Dog(n)], 1
 }
 fun (arr<Dog>, i32) tup(string n) {
@@ -23,7 +23,7 @@ fun (arr<Dog>, i32) tup(string n) {
 fun uns count((arr<Dog>, i32) t) {
   return t.0.len
 }
-fun arr<Dog> fresh() {
+fun ->arr<Dog> fresh() {
   return [Dog("r1")]
 }
 fun nestedTuples() {

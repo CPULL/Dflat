@@ -13,14 +13,14 @@ public class Counter(i32 start, string label) {
     start += increment
     return start
   }
-  public fun string Name() { prefix + label }
+  public fun ->string Name() { prefix + label }
   public fun i32 Twice() { Next() + Next() }
   public fun Reset(i32 value) {
     this.start = value
     created += 1
   }
   public fun u64 Doubled() { doubled }
-  public static fun Counter Make(string label) { Counter(0, label) }
+  public static fun ->Counter Make(string label) { Counter(0, label) }
   fun i32 Hidden() { 42 }
   public fun i32 Reveal() { Hidden() }
 }
@@ -121,7 +121,7 @@ r.Console.log($"p is {p.partner}")
 // arrays, tuples and parameters of objects
 arr<Person> people = [Person("A", 1), Person("B", 2)]
 r.Console.log(people[1].name)
-fun string describe(Person who) { who.name + ":" + who.age }
+fun ->string describe(Person who) { who.name + ":" + who.age }
 r.Console.log(describe(people[0]))
 fun (Person who, i32 count) pair(Person x) { return (x, 2) }
 r.Console.log(pair(p).count)

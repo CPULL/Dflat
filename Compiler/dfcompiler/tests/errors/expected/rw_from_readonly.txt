@@ -1,1 +1,1 @@
-rw_from_readonly.df(8): error: 'reader' is read-only (@Player): only a (@)Player or a (_)Player gives a read/write one (spec 12.7)
+rw_from_readonly.df(8): error: 'reader' is read-only (@Player): only a &@Player or a &%Player gives a read/write one (spec 12.7)

@@ -44,7 +44,7 @@ r.Console.log($"delete sub recursive: {File.delete(File.combinePaths(base, "sub"
 r.Console.log($"delete missing: {File.delete(File.combinePaths(base, "nothing"))}")
 
 // errors
-fun string readMissing() {
+fun ->string readMissing() {
   File missing = File(File.combinePaths(File.getTempDir(), "dflat-no-such-file.txt"))
   string text = missing.readAllText()
   return "no error"
@@ -54,7 +54,7 @@ fun string readMissing() {
 }
 r.Console.log(readMissing())
 
-fun string badPath() {
+fun ->string badPath() {
   File bad = File("/d:/bad|name")
   return "no error"
   catch InvalidPathException ex {
@@ -63,7 +63,7 @@ fun string badPath() {
 }
 r.Console.log(badPath())
 
-fun string createOnly(File target) {
+fun ->string createOnly(File target) {
   target.writeAllText("again", String.StringEncoding.UTF8, fs.FileWriteMode.CreateOnly)
   return "no error"
   catch FileAlreadyExistsException ex {
@@ -72,7 +72,7 @@ fun string createOnly(File target) {
 }
 r.Console.log(createOnly(report))
 
-fun string noParent(string where) {
+fun ->string noParent(string where) {
   File.createDirectory(File.combinePaths(where, "a/b/c"))
   return "no error"
   catch InvalidPathException ex {

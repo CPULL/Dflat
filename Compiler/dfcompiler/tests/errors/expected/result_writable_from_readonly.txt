@@ -1,0 +1,1 @@
+result_writable_from_readonly.df(5): error: 'd' is lent read-only to this function: a & result lends only what the function can write (this, its fields, a & parameter) (spec 13.1.1)

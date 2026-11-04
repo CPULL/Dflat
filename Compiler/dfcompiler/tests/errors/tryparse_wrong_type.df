@@ -1,2 +1,2 @@
 i32 code
-i64.tryParse("7", (&)code)
+i64.tryParse("7", &code)

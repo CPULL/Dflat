@@ -64,7 +64,7 @@ fun i64 userThrow(i64 a) {                                  // FAILING: throws a
   return a
 }
 
-fun string wrapped(i64 a) {                                 // SAFE: handles what userThrow throws
+fun ->string wrapped(i64 a) {                                 // SAFE: handles what userThrow throws
   return "ok " + userThrow(a)
   catch Exception e { return "caught " + e.message }
 }
@@ -84,15 +84,15 @@ nested(0)                                                   // nested 0: 1
 r.Console.log(wrapped(5))                                   // ok 5
 r.Console.log(wrapped(-1))                                  // caught negative
 
-fun string outer(i64 a, i64 b) {
+fun ->string outer(i64 a, i64 b) {
   return "outer " + plainDivide(a, b)
   catch DivisionByZeroException ex { return "outer caught " + ex.message }
 }
-fun string outer2(i64 a, i64 b) {
+fun ->string outer2(i64 a, i64 b) {
   return "outer2 " + rethrows(a, b)
   catch DivisionByZeroException ex { return "outer2 caught " + ex.message }
 }
-fun string outer3(arr<i64> items) {
+fun ->string outer3(arr<i64> items) {
   return "outer3 " + partlyHandled(1, items)
   catch IndexOutOfRangeException ex { return "outer3 caught " + ex.message }
 }

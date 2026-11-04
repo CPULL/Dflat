@@ -12,7 +12,7 @@ fun callNote(i32 x) {                              // no catch: the notice is ig
   note(x)
   r.Console.log("  callNote goes on")
 }
-fun string seeNote(i32 x) {
+fun ->string seeNote(i32 x) {
   note(x)
   return "no notice"
   catch Notice n { return "saw " + n.message }
@@ -24,7 +24,7 @@ r.Console.log(seeNote(1))
 
 // the notice goes one level only: the middle function does not catch it, so the outer one never sees it
 fun middle(i32 x) { note(x) }
-fun string outer(i32 x) {
+fun ->string outer(i32 x) {
   middle(x)
   return "outer saw nothing"
   catch Notice n { return "outer saw " + n.message }
@@ -37,7 +37,7 @@ fun i32 mixed(i32 x) {
   if x > 5 then throw Trouble("big")
   return x
 }
-fun string mixedCaller(i32 x) {
+fun ->string mixedCaller(i32 x) {
   return "mixed " + mixed(x)
   catch Trouble t { return "Trouble: " + t.message }
 }

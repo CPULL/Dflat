@@ -13,7 +13,7 @@ public class Flat : Shape {
   override fun i64 area(i64 k) { 0 }
 }
 
-fun string describe(Shape s, i64 k) {
+fun ->string describe(Shape s, i64 k) {
   return "area " + s.area(k)
   catch DivisionByZeroException { return "division by zero" }
 }
@@ -31,7 +31,7 @@ public class Wide : Measure {
 public class Thin : Measure {
   override fun i64 size(i64 k) { 60 / k }
 }
-fun string measure(Measure m, i64 k) {
+fun ->string measure(Measure m, i64 k) {
   return "size " + m.size(k)
   catch Exception e { return "failed: " + e.message }
 }
@@ -43,7 +43,7 @@ r.Console.log(measure(Thin(), 0))                   // failed: Division By Zero 
 public class Ratio(i64 top, i64 bottom) {
   public i64 value = top / bottom
 }
-fun string ratio(i64 top, i64 bottom) {
+fun ->string ratio(i64 top, i64 bottom) {
   Ratio q = Ratio(top, bottom)
   return "ratio " + q.value
   catch DivisionByZeroException { return "no ratio" }
@@ -61,7 +61,7 @@ fun middle(i64 code) {
   fail(code)
   r.Console.log("middle: no error")
 }
-fun string top(i64 code) {
+fun ->string top(i64 code) {
   middle(code)
   return "top: ok"
   catch AppError e { return "top caught " + e.message }
@@ -78,7 +78,7 @@ fun i64 guarded(i64 k) {
   Guard g = Guard("g")
   return 100 / k
 }
-fun string runGuarded(i64 k) {
+fun ->string runGuarded(i64 k) {
   return "guarded " + guarded(k)
   catch DivisionByZeroException { return "guarded failed" }
 }
@@ -96,7 +96,7 @@ fun i64 total(arr<i64> items) {
   return sum
 }
 r.Console.log(sumTo(10))                            // 55
-fun string safeTotal(arr<i64> items) {
+fun ->string safeTotal(arr<i64> items) {
   return "total " + total(items)
   catch DivisionByZeroException { return "zero in the list" }
 }

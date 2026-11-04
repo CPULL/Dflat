@@ -1,0 +1,1 @@
+lend_result_from_local.df(12): error: this result lends from 'made', which ends with the function: give the caller its own value with fun ->Dog (spec 13.1.1)

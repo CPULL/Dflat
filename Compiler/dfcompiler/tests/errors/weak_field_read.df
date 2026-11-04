@@ -3,7 +3,7 @@ class C {
   public i32 id
 }
 class H {
-  public _C c
+  public %C c
 }
 var h = H()
 Root.Console.log(h.c.id)

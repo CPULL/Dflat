@@ -4,7 +4,7 @@ alias Root as r
 
 class Dog {
   public string name = "?"
-  public fun string bark() { name + " barks" }
+  public fun ->string bark() { name + " barks" }
 }
 
 public class Point {
@@ -30,7 +30,7 @@ public class Point {
     }
     made = 99
   }
-  public fun string show() { $"{tag} ({x}, {y}) {made}" }
+  public fun ->string show() { $"{tag} ({x}, {y}) {made}" }
 }
 
 public class Kennel {
@@ -41,7 +41,7 @@ public class Kennel {
     dog = ->d
     count++
   }
-  public fun string describe() { dog.bark() + " " + count.toStr() }
+  public fun ->string describe() { dog.bark() + " " + count.toStr() }
 }
 
 public class Checked {
@@ -59,7 +59,7 @@ class Part {
 
 public class Total {
   public i32 sum
-  public Total(&i32 a, i32 b) {
+  public Total(i32 a, i32 b) {
     sum = a + b
   }
 }
@@ -86,7 +86,7 @@ r.Console.log(good.v + good.part.id)
 catch Exception {
   r.Console.log("never")
 }
-fun string tryChecked(i32 v) {
+fun ->string tryChecked(i32 v) {
   Checked c = Checked(v)
   return "made " + c.v.toStr()
   catch Exception ex {

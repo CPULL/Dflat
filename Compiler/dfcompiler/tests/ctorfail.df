@@ -32,12 +32,12 @@ public class Quiet(i32 x) {
   public i32 value = noisy(x)           // the silent exception of noisy never leaves a constructor
 }
 
-fun string build(i32 size) {
+fun ->string build(i32 size) {
   Machine m = Machine(size)
   return $"built with ratio {m.ratio}"
   catch DivisionByZeroException { return "construction failed" }
 }
-fun string buildDerived() {
+fun ->string buildDerived() {
   Derived d = Derived()
   return $"derived with ratio {d.ratio}"
   catch DivisionByZeroException { return "derived construction failed" }

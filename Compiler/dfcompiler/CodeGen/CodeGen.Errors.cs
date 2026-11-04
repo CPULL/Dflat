@@ -131,7 +131,7 @@ public sealed partial class CodeGen {
     ["InvalidIteratorReleaseException"] = 47,   // spec 6.4: a release of the counter of open iterators when it is zero
     ["UsageOfDestroyedObjectException"] = 48,  // spec 12.5: an adopted child whose parent ended
     ["ObjectNotClonableException"] = 49,       // spec 12.6: tryClone()
-    ["WritingOnRefCountWithoutLockingException"] = 50   // spec 12.7: a write to a (@)T without its lock
+    ["WritingOnRefCountWithoutLockingException"] = 50   // spec 12.7: a write to a &@T without its lock
   };
 
   readonly Stack<Frame> frames = new();
@@ -221,6 +221,7 @@ public sealed partial class CodeGen {
     tempCounter++;
     var frame = new Frame(tempCounter, kind, frames.Count > 0 ? frames.Peek() : null, parentScope);
     frame.Statements.AddRange(statements);
+    RecordFollowingStatements(statements);   // the lends of the block (spec 12)
     for (int index = 0; index < statements.Count; index++) {
       var statement = statements[index];
       switch (statement.Kind) {

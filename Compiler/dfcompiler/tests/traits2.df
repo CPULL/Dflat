@@ -16,7 +16,7 @@ trait Counted {
 }
 
 public class Both : TraitA, TraitB {
-  override fun string Who() { "both: " + TraitA.Who() + " / " + TraitB.Who() + " / " + TraitA.tag + TraitB.tag }
+  override fun ->string Who() { "both: " + TraitA.Who() + " / " + TraitB.Who() + " / " + TraitA.tag + TraitB.tag }
 }
 
 public class Plain : TraitA, TraitB {

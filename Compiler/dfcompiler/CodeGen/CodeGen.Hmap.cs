@@ -52,7 +52,7 @@ public class hmap<K, V> : MapCollection<K, V> {
     }
   }
 
-  public fun bool tryGet(K key, (&)V result) {
+  public fun bool tryGet(K key, &V result) {
     if !this.tree_hasKey(key) {
       V none
       result = none
@@ -62,7 +62,7 @@ public class hmap<K, V> : MapCollection<K, V> {
     return true
   }
 
-  public fun bool tryGet(K key, (&)V result, V otherwise) {
+  public fun bool tryGet(K key, &V result, V otherwise) {
     if !this.tree_hasKey(key) {
       result = otherwise
       return false
@@ -147,7 +147,7 @@ public class hmap<K, V> : MapCollection<K, V> {
 }
 
 // the keys and the values of an hmap (spec 6.5, 6.6): the same as mapKeys and mapValues (VecPrelude), in the order of the table
-public class hmapKeys<K, V>(&hmap<K, V> collection as parent) {
+public class hmapKeys<K, V>(hmap<K, V> collection as parent) {
   public fun uns get_len() {
     return collection.viewLen()
   }
@@ -161,7 +161,7 @@ public class hmapKeys<K, V>(&hmap<K, V> collection as parent) {
   }
 }
 
-public class hmapValues<K, V>(&hmap<K, V> collection as parent) {
+public class hmapValues<K, V>(hmap<K, V> collection as parent) {
   public fun uns get_len() {
     return collection.viewLen()
   }

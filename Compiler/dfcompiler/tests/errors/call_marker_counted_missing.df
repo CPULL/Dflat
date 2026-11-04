@@ -1,0 +1,4 @@
+class Dog { }
+fun keep(@Dog d) { }
+@Dog rex = Dog()
+keep(rex)

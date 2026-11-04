@@ -1,0 +1,8 @@
+class Dog { }
+fun swap(&Dog d) { d = Dog() }
+fun f() {
+  Dog rex = Dog()
+  Dog view = rex
+  swap(&view)
+}
+f()

@@ -1,0 +1,1 @@
+ref_this.df(2): error: &this is not allowed: the function could replace the object while its method runs; pass the fields that change

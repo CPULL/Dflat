@@ -26,7 +26,7 @@ fun i32 viaIf(bool b) { b ? { 4, 5 } }
 fun bool flag(i32 v) { v > 3 }
 fun r64 real() { 1.5 }
 fun char letter() { 'z' }
-fun string text() {
+fun ->string text() {
   string s = "ab"
   s + "c"
 }
@@ -37,12 +37,12 @@ fun i32? maybe(bool b) {
   }
   return null
 }
-fun Box newBox(string l) { Box(l) }
-fun Box newBoxAfter(string l) {
+fun ->Box newBox(string l) { Box(l) }
+fun ->Box newBoxAfter(string l) {
   string full = "box " + l
   Box(full)
 }
-fun Box moveOut() {
+fun ->Box moveOut() {
   Box b = Box("moved")
   return ->b
 }

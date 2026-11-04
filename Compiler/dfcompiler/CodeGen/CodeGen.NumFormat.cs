@@ -243,8 +243,8 @@ public sealed partial class CodeGen {
     }
   }
 
-  // T.tryParse(text, (&)result[, format]) for integers, reals, date and time (spec 9): the library takes the address of a
-  // variable; (&) is required in the call. True and the value in the variable, or false and the variable unchanged.
+  // T.tryParse(text, &result[, format]) for integers, reals, date and time (spec 9): the library takes the address of a
+  // variable; & is required in the call. True and the value in the variable, or false and the variable unchanged.
   Expr? TryParseCall(string path, List<Node> args, Scope scope, Node at) {
     string type = path[..^".tryParse".Length];
     bool number = IntTypes.Contains(type) || type is "r32" or "r64";
@@ -256,7 +256,7 @@ public sealed partial class CodeGen {
     int next = 0;
     foreach (var arg in args.Where(arg => arg.Kind != "Named")) {
       if (next >= 3) {
-        throw Error($"{type}.tryParse takes the text, (&)result and an optional format", at);
+        throw Error($"{type}.tryParse takes the text, &result and an optional format", at);
       }
       slots[next++] = arg;
     }
@@ -268,10 +268,10 @@ public sealed partial class CodeGen {
       slots[index] = arg.Children[0];
     }
     if (slots[0] == null || slots[1] == null) {
-      throw Error($"{type}.tryParse takes the text, (&)result and an optional format", at);
+      throw Error($"{type}.tryParse takes the text, &result and an optional format", at);
     }
     if (slots[1]!.Kind != "WritableAddressOf") {
-      throw Error($"the result of {type}.tryParse is passed as (&)variable", slots[1]!);
+      throw Error($"the result of {type}.tryParse is passed as &variable", slots[1]!);
     }
     var target = LValue(slots[1]!.Children[0], scope);
     if (target.IsConst) {

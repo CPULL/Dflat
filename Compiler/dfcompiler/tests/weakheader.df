@@ -6,8 +6,8 @@ class C {
   public i32 id = 9
 }
 
-class H(_C c) {
-  public readonly _C c
+class H(%C c) {
+  public readonly %C c
   public fun i32 read() {
     enforce c { return c.id }
     return -1
@@ -15,7 +15,7 @@ class H(_C c) {
 }
 
 @C ctx = C()
-var h = H(_ctx)
+var h = H(%ctx)
 r.Console.log(h.read())
 addr a = null
 r.Console.log(a)

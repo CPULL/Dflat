@@ -1,0 +1,1 @@
+ref_borrowed_object.df(6): error: 'view' only borrows its object: & needs the variable that owns it, a field, or a & parameter (spec 13.1)

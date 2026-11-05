@@ -224,6 +224,9 @@ public sealed partial class CodeGen {
   }
 
   Expr? TryReceiverCall(Expr receiver, string name, List<Node> args, Scope scope, Node at) {
+    if (FunctionalMembers.Contains(name) && IndexCollectionElem(receiver.Type) != null && at.Line < LibraryLine) {
+      return FunctionalCall(receiver, name, args, null, scope, at);   // filter, map, reduce (spec 6.6)
+    }
     if (IsBitfield(receiver.Type)) {
       return BitfieldMethod(receiver, name, args, scope, at);
     }

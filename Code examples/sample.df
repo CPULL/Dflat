@@ -120,7 +120,7 @@ Item sameObject = first
 Item owner = ->first
 @Item counted = Item(2)
 @Item shared = counted
-_Item weakRef = _counted
+%Item weakRef = %counted
 Item copied = owner!
 Item cloned = owner.clone()
 if counted.usersCount > 1 then r.Console.log("counted")
@@ -133,10 +133,10 @@ items.add(->owner)
 
 // ------------------------------------------------ lambdas
 i32 top = 5
-fun bool isBig = (i32 x; top!) { x > top }
-nums.Sort((l, m) { l < m })
+bool(i32) isBig = (i32 x; top!) { x > top }
+nums.sort((i32 l, i32 m) { l - m })
 u64 total = nums
-  .Filter((n; top, ->pool, _cache) { n > top })
+  .filter((i32 n) { n > top })
   .len
 
 // ------------------------------------------------ control flow

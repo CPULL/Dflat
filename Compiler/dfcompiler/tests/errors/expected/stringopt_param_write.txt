@@ -1,0 +1,1 @@
+stringopt_param_write.df(3): error: 's' is a read-only string? (a parameter or a loop variable, spec 7.1)

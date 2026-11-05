@@ -100,22 +100,22 @@ fun i32 outside(list<i32> source, u64 index) {
 }
 r.Console.log(outside(numbers, 1))
 r.Console.log(outside(numbers, 40))
-fun bool badRemove(list<i32> source) {
+fun bool badRemove(&list<i32> source) {
   source.removeAt(10)
   return true
   catch IndexOutOfRangeException { return false }
 }
-r.Console.log(badRemove(numbers))
+r.Console.log(badRemove(&numbers))
 
 // a list that changes while it is iterated
-fun string addWhileLooping(list<i32> source) {
+fun string addWhileLooping(&list<i32> source) {
   for i32 n in source {
     source.add(n)
   }
   return "no exception"
   catch ModifyingIteratedCollectionException { return "changed while iterated" }
 }
-r.Console.log(addWhileLooping(numbers))
+r.Console.log(addWhileLooping(&numbers))
 
 // a generic function over a list, and a list of lists
 fun T total<T : Numeric>(list<T> items) {

@@ -1,0 +1,26 @@
+42
+10
+15
+hello rex
+42
+2
+6
+8
+true true
+txt
+1
+2
+0
+unassigned 51
+a NullPointerException
+rex!
+rex!
+x:0
+x:1
+x:2
+inner outer
+max!
+end max
+end rex
+done
+---- exit code 0 ----

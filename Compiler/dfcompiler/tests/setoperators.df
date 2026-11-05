@@ -60,30 +60,30 @@ bag.items += 4
 bag.items += [2, 6]
 bag.items -= 6
 r.Console.log(bag.items)                             // [2, 4]
-fun fill(hset<i32> s, vec<i32> from) {
+fun fill(&hset<i32> s, vec<i32> from) {
   s += from
 }
 hset<i32> filled = []
-fill(filled, v)
+fill(&filled, v)
 r.Console.log(filled.len)                            // 2
 
 // not while it is walked; the exception leaves a function that does not catch it (spec 6.4)
-fun shrink(set<i32> s) {
+fun shrink(&set<i32> s) {
   for i32 n in s {
     s -= n
   }
 }
-fun string tryShrink(set<i32> s) {
-  shrink(s)
+fun string tryShrink(&set<i32> s) {
+  shrink(&s)
   return "shrank"
   catch ModifyingIteratedCollectionException { return "locked" }
 }
-r.Console.log(tryShrink(sorted))                     // locked
-fun string grow(hset<i32> s, arr<i32> from) {
+r.Console.log(tryShrink(&sorted))                     // locked
+fun string grow(&hset<i32> s, arr<i32> from) {
   for i32 n in s {
     s += from
   }
   return "grew"
   catch ModifyingIteratedCollectionException { return "locked" }
 }
-r.Console.log(grow(hashed, [100]))                   // locked
+r.Console.log(grow(&hashed, [100]))                   // locked

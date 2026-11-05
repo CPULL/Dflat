@@ -1,0 +1,1 @@
+lambda_wrong_params.df(2): error: this lambda takes (string), but fun(i32) is expected

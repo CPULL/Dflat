@@ -109,7 +109,7 @@ r.Console.log($"{table.len} {table.sizeof}")
 
 // a new key while the map is walked
 hmap<i32, i32> locked = [1: 1, 2: 2]
-fun tryAdd(hmap<i32, i32> m) {
+fun tryAdd(&hmap<i32, i32> m) {
   for (i32 k, i32 v) in m {
     m[k + 100] = v
   }
@@ -117,5 +117,5 @@ fun tryAdd(hmap<i32, i32> m) {
     r.Console.log("cannot add while walking")
   }
 }
-tryAdd(locked)
+tryAdd(&locked)
 r.Console.log(locked.len)

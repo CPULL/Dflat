@@ -1,0 +1,1 @@
+lambda_borrow_assign.df(4): error: this function value borrows variables, so it cannot be kept in 'f', which may outlive them: declare a new variable for it, or capture with x! or ->x (spec 13.3.4)

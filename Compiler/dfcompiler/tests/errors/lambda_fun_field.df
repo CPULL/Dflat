@@ -1,0 +1,4 @@
+namespace lambda_fun_field
+class Box {
+  fun() f
+}

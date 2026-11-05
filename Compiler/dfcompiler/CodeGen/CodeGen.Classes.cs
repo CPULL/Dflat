@@ -11,6 +11,9 @@ enum Vis {
 
 sealed class FieldInfo {
   public FieldInfo(string name, string type, ClassInfo owner, Node at) {
+    if (type.StartsWith("fun(")) {
+      throw new CompileException("feature not supported: a function value in a field (spec 13.3.2)", at.Line);
+    }
     Name = name;
     Type = type;
     Owner = owner;
@@ -1179,7 +1182,15 @@ public sealed partial class CodeGen {
     receiverNode.Kind == "Name" && scope.Find(receiverNode.Text!) is { ReadOnlyRef: true } variable ? variable : null;
 
   // the members of the collections of the compiler that do not change them: the only ones a read-only reference can call (spec 1.6.2)
-  static readonly HashSet<string> ReadOnlyCollectionMembers = new() { "has", "indexOf", "getIterator", "hasKey", "tryGet", "keyOf" };
+  static readonly HashSet<string> ReadOnlyCollectionMembers = new() {
+    "has", "indexOf", "indexOfFrom", "getIterator", "hasKey", "tryGet", "keyOf", "clone", "read_pos", "viewHasKey", "viewHasValue", "viewLen",
+    "union", "intersection", "difference", "symmetricDifference", "isSubsetOf", "isSupersetOf", "isDisjointFrom", "filter", "map", "reduce"
+  };
+
+  // the members of File that do not change the File object (it only holds a path): they can be called through a read-only reference
+  static readonly HashSet<string> ReadOnlyFileMembers = new() {
+    "exists", "copyTo", "getAllFiles", "readAll", "readAllText", "writeAll", "writeAllText", "delete", "open", "createDirectory"
+  };
 
   // spec 1.6.2: through a read-only reference & only the unrestricted functions (and static ones) can be called; for the collections of the compiler
   // the members that do not change them
@@ -1192,11 +1203,13 @@ public sealed partial class CodeGen {
       || (classes.TryGetValue(receiver.Type, out var libraryClass) && libraryClass.Node.Line >= LibraryLine)
       || (traits.TryGetValue(receiver.Type, out var libraryTrait) && libraryTrait.Node.Line >= LibraryLine);
     bool allowed;
-    if (library) {
+    if (receiver.Type == "File" && ReadOnlyFileMembers.Contains(name)) {
+      allowed = true;
+    } else if (library) {
       allowed = ReadOnlyCollectionMembers.Contains(name);
     } else {
       var methods = IsClass(receiver.Type) ? LookupMethods(ObjInfo(receiver.Type), name) : new List<FunSig>();
-      allowed = methods.Count == 0 || methods.All(f => f.IsUnrestricted || f.IsStatic);
+      allowed = methods.Count == 0 || methods.All(f => f.IsUnrestricted || f.IsStatic) || name == "getIterator";   // iterating reads (6.7)
     }
     if (!allowed) {
       throw Error(library
@@ -1548,6 +1561,18 @@ public sealed partial class CodeGen {
     }
     if (param.IsGift && arg.Kind == "Gift" && CountedRef(arg.Children[0], scope) is CountedRefInfo given) {
       throw Error($"a ->T parameter receives a plain owned object: ->{given.Name} passes a usage only to a @T parameter (spec 12.7)", arg);
+    }
+    if (IsFunType(param.Type)) {
+      return FnArg(param, arg, scope);   // spec 13.3
+    }
+    if (param.Type == "string?") {
+      if (IsByPointer(param) || param.IsGift) {
+        throw NotSupported("&string? and ->string? parameters (a string? parameter borrows, spec 7.1)", arg);
+      }
+      if (arg.Kind is "Gift" or "WritableAddressOf") {
+        throw Error($"'{param.Name}' borrows the string?: remove the {(arg.Kind == "Gift" ? "->" : "&")}", arg);
+      }
+      return OptStrBorrowed(ExprOf(arg, scope, param.Type), arg);
     }
     if (IsByPointer(param)) {
       return ReferenceArg(param, arg, scope);

@@ -1,0 +1,4 @@
+namespace stringopt_param_write
+fun f(string? s) {
+  s = "x"
+}

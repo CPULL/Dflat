@@ -1,1 +1,1 @@
-sort_with_lambda.df(2): error: feature not supported: Lambdas
+sort_with_lambda.df(2): error: the type of the lambda parameter 'a' is written: (i32 a) (spec 13.3)

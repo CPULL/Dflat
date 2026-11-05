@@ -52,11 +52,11 @@ public sealed partial class CodeGen {
   // ->a for an array: the block moves out and a is left empty; only an owner can give it (not a borrowed parameter or local, not a const)
   Expr ArrGift(Node gift, Node operand, string type, Scope scope) {
     var source = LValue(operand, scope);
+    if (!source.IsConst && source.Variable is { BorrowsArray: true }) {
+      throw Error($"'{operand.Text}' only borrows its array: ->{operand.Text} cannot take it; copy it with {operand.Text}! (spec 6.8.1)", gift);
+    }
     if (source.IsConst || source.Variable is { ReadOnlyRef: true }) {
       throw Error($"'{operand.Text}' is read-only: ->{operand.Text} cannot take its array", gift);
-    }
-    if (source.Variable is { BorrowsArray: true }) {
-      throw Error($"'{operand.Text}' only borrows its array: ->{operand.Text} cannot take it; copy it with {operand.Text}! (spec 6.8.1)", gift);
     }
     string taken = NewTemp();
     return new Expr($"({{ {CType(type)} {taken} = {source.Code}; {source.Code}.p = NULL; {source.Code}.len = 0; {taken}; }})", type, true);

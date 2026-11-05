@@ -1,0 +1,1 @@
+lambda_untyped_param.df(2): error: the type of the lambda parameter 'x' is written: (i32 x) (spec 13.3)

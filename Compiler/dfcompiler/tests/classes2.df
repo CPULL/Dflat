@@ -56,7 +56,7 @@ public class Divider(i32 by) {
   public i32 quotient = 100 / by
 }
 public class Base {
-  public fun i32 Run(i32 n) { 10 / n }
+  unrestricted fun i32 Run(i32 n) { 10 / n }
 }
 public class Derived : Base {
   override fun i32 Run(i32 n) { 20 / n }

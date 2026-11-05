@@ -1,0 +1,33 @@
+// var x = f() owns the object a function gives (->T), also a trait object: it ends with the scope, and it can be passed as &x
+namespace varresult
+alias Root as r
+
+public class Dog(string name) {
+  public string name
+} atEnd {
+  r.Console.log("end " + name)
+}
+
+fun ->Dog make() { Dog("rex") }
+
+fun ->IndexIterator<i32> orphan() {
+  vec<i32> local = [7, 8]
+  var iterator = local.getIterator()
+  return ->iterator
+}
+
+fun ->string tryNext(&IndexIterator<i32> iterator) {
+  var got = iterator.next()
+  return $"{got.value}"
+  catch UsageOfDestroyedObjectException { return "the vec is gone" }
+}
+
+fun f() {
+  var d = make()
+  r.Console.log(d.name)
+}
+
+f()
+r.Console.log("after f")
+var lost = orphan()
+r.Console.log(tryNext(&lost))

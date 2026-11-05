@@ -1,0 +1,7 @@
+namespace lambda_field_return
+class Box {
+  i32 n = 0
+  public fun ->fun i32() get() {
+    return () { n }
+  }
+}

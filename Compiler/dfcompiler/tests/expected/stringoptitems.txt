@@ -1,0 +1,12 @@
+ann - none
+true ann - none
+[] false
+ann X  / ann copy 
+Person { name: ann, nick: X, note:  }
+[Y, OWN, null, ...] (5 items) true true
+Y;OWN;_;OWN;_;
+Y z
+[null, null, null, ...] (5 items) [null, q, null, ...] (5 items) true 1
+T [x, now, OWN, ...] (4 items) 5 [x, now, OWN]
+[f, f, f] [IN, null, OWN, ...] (5 items) [IN, null] [IN, -, OWN, ...] (5 items)
+---- exit code 0 ----

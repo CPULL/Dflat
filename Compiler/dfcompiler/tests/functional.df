@@ -1,0 +1,36 @@
+// sort with a lambda and the functional members filter, map<U>, reduce (spec 6.6, 13.3)
+namespace functional
+alias Root as r
+
+public class Dog(string name, i32 age) {
+  public string name
+  public i32 age
+} atEnd {
+  r.Console.log("end " + name)
+}
+
+arr<i32> numbers = [5, 3, 9, 1, 7]
+numbers.sort((i32 a, i32 b) { b - a })
+r.Console.log(numbers)
+vec<string> names = ["pear", "fig", "banana", "kiwi"]
+names.sort((string x, string y) { (int)x.len - (int)y.len })
+r.Console.log(names)
+list<i32> chain = [4, 2, 8]
+chain.sort((i32 a, i32 b) { a - b })
+r.Console.log(chain)
+vec<Dog> dogs = [Dog("rex", 5), Dog("max", 2), Dog("ace", 9)]
+dogs.sort((Dog a, Dog b) { a.age - b.age })
+r.Console.log(dogs.map<string>((Dog d) { d.name }))
+i32 limit = 4
+r.Console.log(numbers.filter((i32 x) { x > limit }))
+r.Console.log(names.filter((string s) { s.len > 3 }))
+r.Console.log(chain.map<string>((i32 x) { "#" + x.toStr() }))
+r.Console.log(numbers.reduce(0, (i32 total, i32 x) { total + x }))
+r.Console.log(names.reduce("", (string text, string s) { text + s[0].toStr() }))
+arr<i32> four = [1, 2, 3, 4]
+r.Console.log(four.filter((i32 x) { x % 2 == 0 }))
+vec<Dog> olds = dogs.map<Dog>((Dog d) { Dog(d.name + "2", d.age + 10) })
+r.Console.log(olds.len)
+int(i32, i32) desc = (i32 a, i32 b) { b - a }
+chain.sort(desc)
+r.Console.log(chain)

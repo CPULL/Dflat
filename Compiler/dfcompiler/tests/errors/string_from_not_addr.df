@@ -1,0 +1,2 @@
+namespace string_from_not_addr
+string s = string(5)

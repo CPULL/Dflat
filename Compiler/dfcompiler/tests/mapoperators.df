@@ -58,26 +58,26 @@ r.Console.log($"{total} {text}")                      // 12 ab
 
 // changing the size while the map is iterated: ModifyingIteratedCollectionException (spec 6.4)
 map<i32, i32> counts = [1: 1, 2: 2]
-fun string grow(map<i32, i32> m) {
+fun string grow(&map<i32, i32> m) {
   for (i32 k, i32 v) in m {
     m += (k + 10, v)
   }
   return "grew"
   catch ModifyingIteratedCollectionException { return "locked" }
 }
-r.Console.log(grow(counts))                          // locked
+r.Console.log(grow(&counts))                          // locked
 // the exception leaves a function that does not catch it
-fun shrink(hmap<i32, string> m) {
+fun shrink(&hmap<i32, string> m) {
   for (i32 k, string v) in m {
     m -= k
   }
 }
-fun string tryShrink(hmap<i32, string> m) {
-  shrink(m)
+fun string tryShrink(&hmap<i32, string> m) {
+  shrink(&m)
   return "shrank"
   catch ModifyingIteratedCollectionException { return "locked too" }
 }
-r.Console.log(tryShrink(names))                      // locked too
+r.Console.log(tryShrink(&names))                      // locked too
 for (i32 k, i32 v) in counts {
   counts += (k, v * 10)                              // replacing a value does not change the size
 }

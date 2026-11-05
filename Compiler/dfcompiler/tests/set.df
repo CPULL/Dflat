@@ -81,18 +81,18 @@ v.ids.add(5)
 r.Console.log(v.ids)                                 // [1, 5]
 
 // not while it is walked (spec 6.4)
-fun string grow(set<i32> s) {
+fun string grow(&set<i32> s) {
   for i32 n in s {
     s.add(n + 100)
   }
   return "grew"
   catch ModifyingIteratedCollectionException { return "locked" }
 }
-r.Console.log(grow(numbers))                         // locked
-fun string again(set<i32> s) {
+r.Console.log(grow(&numbers))                         // locked
+fun string again(&set<i32> s) {
   for i32 n in s {
     s.add(n)                                         // already there: the size does not change
   }
   return "same size"
 }
-r.Console.log(again(numbers))                        // same size
+r.Console.log(again(&numbers))                        // same size

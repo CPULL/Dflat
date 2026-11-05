@@ -1,0 +1,2 @@
+namespace lambda_untyped_param
+fun(i32) f = (x) { }

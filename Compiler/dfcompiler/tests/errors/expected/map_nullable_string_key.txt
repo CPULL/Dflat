@@ -1,1 +1,1 @@
-map_nullable_string_key.df(1): error: string is already nullable; 'string?' is not allowed
+map_nullable_string_key.df(1): error: map keys of type string? are not built yet (this version: integers, bool, char, enums, reals, date, time and string)

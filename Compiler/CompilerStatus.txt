@@ -1,4 +1,4 @@
-Compiler version 0.0.52 alpha for version 0.0.23 of the specs 2026/11/04
+Compiler version 0.0.53 alpha for version 0.0.24 of the specs 2026/11/05
 
 Changes from the previous version -----------------------
 - tuple items by index (spec 3.2): t[1], t[SECOND] (a const), t[Slot.Second] (an enum value), read and assigned (t[0] = v, t[2] += x); nested (pairs[2][1]); a variable index or one out of range is a compile error (was "feature not supported: Collections")
@@ -11,7 +11,17 @@ Changes from the previous version -----------------------
 - while a borrow is alive the fields of its lender cannot be written either (Rust style): k.boss = x, k.visits++, k.dogs[0] = x
 - &T results (spec 13.1.1): fun &Dog at(uns i) { dogs[i] } lends read/write, k.at(0).name = "Max" writes in place; only from this, its fields, a & parameter, a global or another &T result; objects, collections and arrays (basic values and strings: not supported yet)
 - a real ending in a dot (0., 2. + x) is a compile error that shows 0.0 (spec 1.3); it was read as a member access, also across a line end
-- not built yet: plain object parameters read-only (5 tests parked in tests/pending)
+- C strings (spec 4.4.6): string(addr) borrows a C text, string(->addr) takes it and frees it; read-only, copied into a regular string at the first change
+- string? (spec 7.1): null is not ""; variables, parameters and results (fields, collections and tuples: not supported yet); string(addr) now gives a string?
+- lambdas and function types (spec 13.3.6), in part: fun(i32) f = (i32 x) { ... }, i32(i32) parameters, fun ->fun i32(i32) results; captures unlisted (read-only), &a, a!, ->a; a call of a null one raises UnassignedFunctionCallException (51); a borrowing lambda cannot be assigned to an existing variable or returned
+- string? fields and string? items of arr, vec and list (spec 7.1); maps and sets of string?: not built yet
+- leaks fixed: a new collection or array printed directly (log(v.clone()), log(a.filter(...))); ex.message and ex.function read in a catch; an array given to copyFrom, has or indexOf inside a function no longer stops its caller from owning it (f(&a, a) gave a wrong "only borrows its array")
+- var x = f() owns the object (or trait object) that f gives; it was not ended before
+- exceptions leaving a lambda go back to the caller as for functions (they were a panic); in sort, filter, map and reduce they stop the work and are raised after it; a silent one is ignored by the caller unless a catch handles it (spec 13.3.6)
+- lambdas in methods: the fields are captured by their bare names (read-only, &field, field!, ->field); a! of objects (a clone) and arrays, ->a of arrays (spec 13.3.6)
+- sort(lambda) on arr, vec and list (spec 6.6), any item type; filter(bool(T)), map<U>(U(T)), reduce(start, A(A, T)) on arr, vec and list
+- a return whose value uses temporaries (fun ->string f(i32 x) { "#" + x.toStr() }) leaked them: they now end before the function returns
+- plain parameters of objects, collections and arrays are read-only (spec 1.6.2, 13.1): public methods need unrestricted or a & parameter; collection members that do not change them, getIterator and the File members still work; the 5 parked tests are in tests/errors
 
 Done -----------------------
 
@@ -81,7 +91,7 @@ Generics: definition-time checking of bodies
 dfoot (7c); vec, list, map, hmap, set and hset are built in part (see below)
 Ownership, move, copy, refcount
 Move parameters on non-objects, volatile references, reference parameters on constructors, (&) borrows that replace an object
-Lambdas and captures
+Lambdas and captures: the rest of spec 13.3.6 (counted and weak captures, &a of strings and arrays, modes in function types, function types in fields and collections, f1!, the &a lock)
 Pointers, alignment, volatile (the pointer types *T and (*)T); addr is built only as the opaque handle of spec 15.9 (no arithmetic, no printing)
 Custom exception classes, catch by trait
 Class atEnd

@@ -366,7 +366,7 @@ public sealed class Parser {
     if (IsOp("_") && PeekAt(2).Kind == TokenKind.Ident && PeekAt(2).Line == Peek.Line) {
       CheckUnderscoreName();   // _Texture2D t: the old weak marker
     }
-    if (IsKw("fun")) {
+    if (IsKw("fun") && !IsFunTypeDecl()) {
       return WithMods(ParseFun(), mods);
     }
     if (IsKw("class")) {
@@ -1000,6 +1000,9 @@ public sealed class Parser {
     bool startsType = weak || counted || Peek.Kind == TokenKind.Ident || IsOp("(") || IsOp("*") || IsOp("&") && PeekAt(1).Is("*") || IsKw("fun");
     if (!startsType) {
       return null;
+    }
+    if (IsOp("(") && FindMatchingParen(pos) is int close && close >= 0 && NextNonNewline(close + 1).Is("{")) {
+      return null;   // (i32 a) { ... }(42): a lambda called where it is written (spec 13.3)
     }
     int save = pos;
     try {
@@ -2175,6 +2178,28 @@ public sealed class Parser {
     return -1;
   }
 
+  // fun(i32) f = ...: a variable of a function type (spec 13.3.2). A function with a tuple result, fun (i32, string) pair(), has its name and
+  // its parameters after the closing parenthesis
+  bool IsFunTypeDecl() {
+    if (!PeekAt(1).Is("(")) {
+      return false;
+    }
+    int close = FindMatchingParen(pos + 1);
+    if (close < 0) {
+      return false;
+    }
+    var name = toks[close + 1];
+    var after = toks[close + 2];
+    return !(name.Kind == TokenKind.Ident && (after.Is("(") || after.Is("<")));
+  }
+
+  Token NextNonNewline(int index) {
+    while (toks[index].Kind == TokenKind.Newline) {
+      index++;
+    }
+    return toks[index];
+  }
+
   // (expr)  |  (a, b, ...) tuple  |  (params; captures) { body } lambda
   Node ParseParen() {
     if (!noBrace) {
@@ -2255,8 +2280,23 @@ public sealed class Parser {
     return new Node("Param", name, name.Text).Add(type);
   }
 
-  // limit (borrow) | limit! (copy) | ->limit (move) | %limit (weak)
+  // &limit (writable borrow) | limit! (copy) | ->limit (move) | @limit, &@limit (counted) | %limit, &%limit (weak) (spec 13.3.1); a plain
+  // name is read as Capture, which the compiler rejects (an unlisted variable is the read-only borrow)
   Node ParseCapture() {
+    if (IsOp("&") && (PeekAt(1).Is("@") || PeekAt(1).Is("%"))) {
+      Next();
+      bool weak = Next().Is("%");
+      var n = ExpectIdent();
+      return new Node(weak ? "WeakCapture" : "CountedCapture", n, n.Text).Add(new Node("ReadWrite", n));
+    }
+    if (AcceptOp("&")) {
+      var n = ExpectIdent();
+      return new Node("WritableCapture", n, n.Text);
+    }
+    if (AcceptOp("@")) {
+      var n = ExpectIdent();
+      return new Node("CountedCapture", n, n.Text);
+    }
     if (AcceptOp("->")) {
       var n = ExpectIdent();
       return new Node("MoveCapture", n, n.Text);

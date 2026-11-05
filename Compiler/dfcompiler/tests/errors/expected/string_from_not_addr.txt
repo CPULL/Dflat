@@ -1,0 +1,1 @@
+string_from_not_addr.df(2): error: string(...) takes an addr, not i64: string(addr) borrows a C text, string(->addr) takes it (spec 4.4.6)

@@ -1,0 +1,484 @@
+using System.Text;
+using dfparser;
+
+namespace dfcompiler;
+
+// Lambdas and function types (spec 13.3).
+//
+// A function type is written fun(i32), string(char, char); in the compiler it is the type "fun(R)(P1,P2)". Its C value is a df_fn
+// { code, ctx } of the runtime. Every lambda is compiled as a function of its own, f_lambda_N(void* df_ctx, params...), emitted after the
+// other functions (pendingInstances). A lambda with captures has a context, a counted struct df_lctx_N that starts with df_lhead: each
+// holder has a usage and the last one runs df_lend_N (it ends what the lambda owns) and frees it. A lambda without captures has no context.
+//
+// Captures (13.3.1): an unlisted outer variable is a read-only borrow, &a a writable one (the context keeps the address of the variable);
+// a! a copy and ->a a move (the context owns the value). A lambda that borrows cannot outlive its variables: it can be called, passed to a
+// call or kept in a new local, not assigned to an existing variable or returned (a strict form of 13.3.4 until borrow lifetimes are
+// checked). A function-type parameter may borrow too.
+//
+// Inside a method the fields are captured by their bare names, like locals; a borrowed field borrows the object (13.3.1).
+//
+// Not built yet: counted and weak captures (@a, &@a, %a, &%a), &a of strings and arrays, parameter modes in function types, function
+// types in fields and collections, f1! copies, and the lock of the outer variable while a &a capture lives.
+//
+// Exceptions: every lambda returns its exception, as a function that can fail does (a call through a function value cannot know which
+// lambda it reaches), and each call checks it; a silent one is ignored by the caller unless a catch there handles it (spec 15.4).
+public sealed partial class CodeGen {
+  static bool IsFunType(string type) => type.StartsWith("fun(");
+
+  static string MakeFunType(string ret, IEnumerable<string> ps) => $"fun({ret})({string.Join(",", ps)})";
+
+  // fun(R)(P1,P2) → (R, [P1, P2])
+  static (string Ret, List<string> Params) FunParts(string type) {
+    int close = MatchingClose(type, 3);
+    string ret = type[4..close];
+    string inner = type[(close + 2)..^1];
+    return (ret, SplitTopLevel(inner));
+  }
+
+  static int MatchingClose(string text, int open) {
+    int depth = 0;
+    for (int index = open; index < text.Length; index++) {
+      if (text[index] is '(' or '<') {
+        depth++;
+      } else if (text[index] is ')' or '>') {
+        depth--;
+        if (depth == 0) {
+          return index;
+        }
+      }
+    }
+    return text.Length - 1;
+  }
+
+  static List<string> SplitTopLevel(string text) {
+    var parts = new List<string>();
+    if (text.Length == 0) {
+      return parts;
+    }
+    int depth = 0;
+    int start = 0;
+    for (int index = 0; index < text.Length; index++) {
+      if (text[index] is '(' or '<') {
+        depth++;
+      } else if (text[index] is ')' or '>') {
+        depth--;
+      } else if (text[index] == ',' && depth == 0) {
+        parts.Add(text[start..index]);
+        start = index + 1;
+      }
+    }
+    parts.Add(text[start..]);
+    return parts;
+  }
+
+  // the way the program writes it: fun(i32), string(char, char)
+  static string FunDisplay(string type) {
+    var (ret, ps) = FunParts(type);
+    string list = string.Join(", ", ps.Select(p => IsFunType(p) ? FunDisplay(p) : p));
+    return ret == "void" ? $"fun({list})" : $"{(IsFunType(ret) ? FunDisplay(ret) : ret)}({list})";
+  }
+
+  // fun(i32), fun i32(string), i32(string) (spec 13.3.2)
+  string ResolveFunType(Node n) {
+    if (nestedTypeDepth > 0) {
+      throw NotSupported("a function type in a collection, an array or a tuple (spec 13.3.2)", n);
+    }
+    var returns = n.Children.FirstOrDefault(child => child.Kind == "Returns");
+    string ret = returns == null ? "void" : ResolveType(returns.Children[0]);
+    var list = n.Children.First(child => child.Kind == "ParamTypes");
+    var ps = list.Children.Select(ResolveType).ToList();
+    return MakeFunType(ret, ps);
+  }
+
+  // ---------------------------------------------------------------- lambda expressions
+
+  int lambdaCounter;
+  readonly HashSet<Node> borrowingLambdas = new();
+
+  static readonly HashSet<string> LambdaNotBuilt = new() { "CountedCapture", "WeakCapture" };
+
+  // a capture kept by address (a borrow) can have any type; a copy or a move only the types handled below
+  bool IsPlainValueType(string type) =>
+    IsNumeric(type) || type is "bool" or "char" or "date" or "time" or "clock" or "lapse" or "addr" || IsEnum(type);
+
+  Expr LambdaExpr(Node n, Scope scope, string? expected) {
+    var paramsNode = n.Children.First(child => child.Kind == "Params");
+    var capturesNode = n.Children.FirstOrDefault(child => child.Kind == "Captures");
+    var block = n.Children.First(child => child.Kind == "Block");
+
+    // parameters: their types are always written (13.3)
+    var ps = new List<ParamSig>();
+    foreach (var p in paramsNode.Children) {
+      if (p.Children.Count == 0) {
+        throw Error($"the type of the lambda parameter '{p.Text}' is written: (i32 {p.Text}) (spec 13.3)", p);
+      }
+      if (ps.Any(other => other.Name == p.Text)) {
+        throw Error($"duplicate parameter '{p.Text}'", p);
+      }
+      string type = ResolveType(p.Children[0]);
+      ps.Add(new ParamSig(p.Text!, type, null));
+    }
+    string ret = "void";
+    if (expected != null && IsFunType(expected)) {
+      var (expectedRet, expectedParams) = FunParts(expected);
+      if (expectedParams.Count != ps.Count || expectedParams.Zip(ps).Any(pair => pair.First != pair.Second.Type)) {
+        throw Error($"this lambda takes ({string.Join(", ", ps.Select(p => p.Type))}), but {FunDisplay(expected)} is expected", n);
+      }
+      ret = expectedRet;
+    }
+
+    // captures: the listed ones, then every other outer variable the body uses (a read-only borrow)
+    var listed = new Dictionary<string, Node>();
+    foreach (var capture in capturesNode?.Children ?? new List<Node>()) {
+      string name = capture.Text!;
+      if (capture.Kind == "Capture") {
+        throw Error($"'{name}' is captured read-only without listing it: remove it from the list, or write &{name} to change it (spec 13.3.1)", capture);
+      }
+      if (LambdaNotBuilt.Contains(capture.Kind)) {
+        throw NotSupported("counted and weak captures (@a, &@a, %a, &%a, spec 13.3.1)", capture);
+      }
+      if (listed.ContainsKey(name)) {
+        throw Error($"'{name}' is listed twice", capture);
+      }
+      if (ps.Any(p => p.Name == name)) {
+        throw Error($"'{name}' is a parameter of the lambda, not a capture", capture);
+      }
+      if (OuterOf(name, scope, capture) == null) {
+        throw Error($"unknown variable '{name}'", capture);
+      }
+      listed[name] = capture;
+    }
+    var used = new List<string>();
+    CollectNames(block, used);
+    var captures = new List<(string Name, VarInfo Outer, string Kind, Node At)>();
+    foreach (var (name, at) in listed) {
+      captures.Add((name, OuterOf(name, scope, at)!, at.Kind, at));
+    }
+    foreach (string name in used.Distinct()) {
+      if (listed.ContainsKey(name) || ps.Any(p => p.Name == name)) {
+        continue;
+      }
+      if (name == "this" && scope.Find(name) != null) {
+        throw Error("there is no this in a lambda: the fields are captured by their bare names (spec 13.3.1)", n);
+      }
+      if (OuterOf(name, scope, n) is VarInfo outer) {
+        captures.Add((name, outer, "Implicit", n));
+      }
+    }
+
+    int id = ++lambdaCounter;
+    string ctxName = $"df_lctx_{id}";
+    var funNode = Synthetic("Fun", n, $"lambda_{id}").Add(block);
+    var lambda = new FunSig($"lambda_{id}", ret, ps, funNode, null) { LambdaCtx = captures.Count > 0 ? ctxName : "df_lhead" };
+    if (ret == "string" || IsClass(ret) || IsArr(ret)) {
+      lambda.Gives.Add(0);   // the caller of a function value owns the new value it gets
+      lambda.ReturnsOwned = true;
+      lambda.ReturnsOwnedSet = true;
+    }
+    bool borrows = false;
+    var fields = new StringBuilder();
+    var inits = new StringBuilder();
+    var ends = new StringBuilder();
+    foreach (var (name, outer, kind, at) in captures) {
+      if (outer.IsCounted || outer.IsWeak) {
+        throw NotSupported($"the counted or weak '{name}' in a lambda (@{name}, %{name}, spec 13.3.1)", at);
+      }
+      string type = outer.Type;
+      string cType = CType(type);
+      switch (kind) {
+        case "Implicit":
+        case "WritableCapture": {
+          bool readOnly = kind == "Implicit";
+          if (!readOnly) {
+            if (outer.IsConst) {
+              throw Error($"'{name}' is const: it cannot be captured with &", at);
+            }
+            if (!IsPlainValueType(type) && !IsClass(type)) {
+              throw NotSupported($"&{name} of a {type} in a lambda (numbers, bool, char, dates and objects are built)", at);
+            }
+          }
+          borrows = true;
+          fields.Append($"  void* p_{name};\n");
+          inits.Append($"c_->p_{name} = (void*)&({outer.CName}); ");
+          var inner = new VarInfo(type, $"(*({cType}*)c->p_{name})", readOnly || IsClass(type)) {
+            CapturedReadOnly = readOnly,
+            ReadOnlyRef = readOnly && (IsClass(type) || IsArr(type)),
+            ReadOnlyString = type == "string",
+            BorrowsArray = IsArr(type),
+            FnBorrows = IsFunType(type)
+          };
+          lambda.LambdaVars.Add((name, inner));
+          break;
+        }
+        case "CopyCapture": {
+          string field = $"c->v_{name}";
+          if (IsPlainValueType(type)) {
+            fields.Append($"  {cType} v_{name};\n");
+            inits.Append($"c_->v_{name} = {outer.CName}; ");
+            lambda.LambdaVars.Add((name, new VarInfo(type, field, false)));
+          } else if (type == "string") {
+            fields.Append($"  df_string v_{name};\n");
+            inits.Append($"c_->v_{name} = df_str_dup({outer.CName}); ");
+            ends.Append($"  df_str_free({field});\n");
+            lambda.LambdaVars.Add((name, new VarInfo(type, field, false) { RefSlot = true }));
+          } else if (type == "string?") {
+            fields.Append($"  df_opt_string v_{name};\n");
+            inits.Append($"c_->v_{name} = df_opt_str_dup({outer.CName}); ");
+            ends.Append($"  df_str_free({field}.val);\n");
+            lambda.LambdaVars.Add((name, new VarInfo(type, field, false)));
+          } else if (IsFunType(type)) {
+            fields.Append($"  df_fn v_{name};\n");
+            inits.Append($"c_->v_{name} = df_fn_retain({outer.CName}); ");
+            ends.Append($"  df_fn_release({field});\n");
+            borrows |= outer.FnBorrows;
+            lambda.LambdaVars.Add((name, new VarInfo(type, field, false) { FnBorrows = outer.FnBorrows }));
+          } else if (IsArr(type) || IsClass(type) && !IsTraitType(type)) {
+            // a clone (12.6): the lambda owns it
+            var copy = ExprOf(Synthetic("Copy", at).Add(Synthetic("Name", at, name)), scope);
+            OwnedCapture(name, type, copy.Code, fields, inits, ends, lambda);
+          } else {
+            throw NotSupported($"{name}! of a {type} in a lambda (spec 13.3.1)", at);
+          }
+          break;
+        }
+        case "MoveCapture": {
+          string field = $"c->v_{name}";
+          var moved = Synthetic("Gift", at).Add(Synthetic("Name", at, name));
+          if (type == "string") {
+            fields.Append($"  df_string v_{name};\n");
+            inits.Append($"c_->v_{name} = {GiftExpr(moved, scope).Code}; ");
+            ends.Append($"  df_str_free({field});\n");
+            lambda.LambdaVars.Add((name, new VarInfo(type, field, false) { RefSlot = true }));
+          } else if (IsArr(type) || IsClass(type) && !IsTraitType(type)) {
+            OwnedCapture(name, type, GiftExpr(moved, scope).Code, fields, inits, ends, lambda);
+          } else if (IsFunType(type)) {
+            if (outer.IsParam) {
+              throw Error($"'{name}' is a parameter: it only borrows its function, ->{name} cannot take it", at);
+            }
+            fields.Append($"  df_fn v_{name};\n");
+            inits.Append($"c_->v_{name} = {outer.CName}; {outer.CName} = (df_fn){{0}}; ");
+            ends.Append($"  df_fn_release({field});\n");
+            borrows |= outer.FnBorrows;
+            lambda.LambdaVars.Add((name, new VarInfo(type, field, false) { FnBorrows = outer.FnBorrows }));
+          } else {
+            throw NotSupported($"->{name} of a {type} in a lambda (spec 13.3.1)", at);
+          }
+          break;
+        }
+      }
+    }
+    failingFuns.Add(lambda);   // it returns its exception (CodeGen.ExcFlow.cs)
+    pendingInstances.Add(lambda);
+    if (borrows) {
+      borrowingLambdas.Add(n);
+    }
+    string fnType = MakeFunType(ret, ps.Select(p => p.Type));
+    if (captures.Count == 0) {
+      return new Expr($"((df_fn){{ (void*){lambda.CName}, NULL }})", fnType);
+    }
+    lambdaHelpers.Append($"typedef struct {{\n  df_lhead h;\n{fields}}} {ctxName};\n\n");
+    lambdaHelpers.Append($"static void df_lend_{id}(void* p) {{\n  {ctxName}* c = ({ctxName}*)p;\n  (void)c;\n{ends}}}\n\n");
+    string code = $"({{ {ctxName}* c_ = ({ctxName}*)df_alloc(sizeof({ctxName})); c_->h.rc = 1; c_->h.end = df_lend_{id}; {inits}"
+      + $"(df_fn){{ (void*){lambda.CName}, &c_->h }}; }})";
+    return new Expr(code, fnType, true);
+  }
+
+  // what a captured name is outside the lambda: a variable, or a field of the class of the method (borrowing it borrows the object, 13.3.1).
+  // A field is seen through a VarInfo whose C is the field itself. Null when the name is neither.
+  VarInfo? OuterOf(string name, Scope scope, Node at) {
+    if (scope.Find(name) is VarInfo variable) {
+      return variable;
+    }
+    if (currentClass == null || FindField(currentClass, name, at) is not FieldInfo field) {
+      return null;
+    }
+    if (field.IsCounted || field.IsWeak || field.HasAccessors || field.IsParentRef) {
+      throw NotSupported($"the field '{name}' in a lambda (counted, weak, parent and property fields, spec 13.3.1)", at);
+    }
+    var bare = BareField(name, scope, at, true)!.Value;
+    return new VarInfo(field.Type, bare.Code, field.IsConst || field.IsReadOnly && !initializing);
+  }
+
+  // a capture the lambda owns (a clone or a move): an object (dropped) or an array (its items end with it) when the lambda ends
+  void OwnedCapture(string name, string type, string value, StringBuilder fields, StringBuilder inits, StringBuilder ends, FunSig lambda) {
+    string cType = CType(type);
+    if (IsArr(type)) {
+      fields.Append($"  {cType} v_{name};\n");
+      inits.Append($"c_->v_{name} = {value}; ");
+      ends.Append($"  {ArrDropHelper(type)}(c->v_{name});\n");
+      lambda.LambdaVars.Add((name, new VarInfo(type, $"c->v_{name}", false) { OwnsArray = true }));
+      return;
+    }
+    fields.Append($"  void* v_{name};\n");
+    inits.Append($"c_->v_{name} = (void*)({value}); ");
+    ends.Append($"  df_drop(c->v_{name});\n");
+    lambda.LambdaVars.Add((name, new VarInfo(type, $"(*({cType}*)&c->v_{name})", false) { Own = true }));
+  }
+
+  // the names of variables a body uses (a nested lambda counts: it captures them through this one)
+  static void CollectNames(Node node, List<string> names) {
+    if (node.Kind == "Name" && node.Text != null) {
+      names.Add(node.Text);
+    }
+    foreach (var child in node.Children) {
+      CollectNames(child, names);
+    }
+  }
+
+  // a write to a const, or to a variable a lambda captured without listing it
+  static CompileException ConstWrite(LValueInfo target, Node targetNode, Node at) =>
+    target.Variable is { CapturedReadOnly: true }
+      ? Error($"'{targetNode.Text}' is captured read-only by the lambda: list it as &{targetNode.Text} to change it (spec 13.3.1)", at)
+      : target.Variable is { IsConst: true } && target.Variable.CName.StartsWith("(*(c_")
+        ? Error($"'{targetNode.Text}' is captured with & by the lambda: its fields can be changed, the variable cannot be replaced (spec 13.3.1)", at)
+        : Error($"'{targetNode.Text}' is const", at);
+
+  // ---------------------------------------------------------------- function values
+
+  // the value may borrow (a lambda with a borrowed capture, a variable or parameter holding one): it cannot be stored past its variables
+  bool FnMayBorrow(Node value, Scope scope) => value.Kind switch {
+    "Lambda" => borrowingLambdas.Contains(value),
+    "Name" => scope.Find(value.Text!)?.FnBorrows ?? false,
+    "Paren" => FnMayBorrow(value.Children[0], scope),
+    "Call" or "Null" => false,
+    _ => true
+  };
+
+  // a usage of the function value for a variable or a result: a new lambda is taken as it is, an existing value gets one more usage
+  static string FnOwned(Expr value) =>
+    value.Type == "null" ? "((df_fn){0})" : value.Fresh ? value.Code : $"df_fn_retain({value.Code})";
+
+  // a function-type local declared with its type: its usage ends with the scope
+  static bool IsFunDecl(Node decl) =>
+    decl.Children.FirstOrDefault(child => TypeNodeKinds.Contains(child.Kind)) is { Kind: "FunType" };
+
+  string FnDeclCode(Node decl, Expr? initValue, string code) {
+    if (!IsFunDecl(decl)) {
+      throw Error($"write the function type of '{decl.Text}': a lambda is kept in a variable declared with it, as fun(i32) {decl.Text} = ... (spec 13.3.2)", decl);
+    }
+    return initValue is Expr value ? FnOwned(value) : code;
+  }
+
+  string FnAssign(LValueInfo target, Node targetNode, string op, Node valueNode, Scope scope, Node at) {
+    if (op != "=") {
+      throw Error($"'{op}' is not defined on a function value", at);
+    }
+    if (target.Variable == null || target.IsField) {
+      throw NotSupported("a function value in a field (spec 13.3.2)", at);
+    }
+    if (target.Variable.IsParam) {
+      throw Error($"'{targetNode.Text}' is a parameter: it is read-only", at);
+    }
+    var value = ExprOf(valueNode, scope, target.Type);
+    string converted = Convert(value, target.Type, valueNode);
+    if (FnMayBorrow(valueNode, scope)) {
+      throw Error($"this function value borrows variables, so it cannot be kept in '{targetNode.Text}', which may outlive them: declare a new variable for it, or capture with x! or ->x (spec 13.3.4)", at);
+    }
+    MarkAssigned(target.Variable);
+    return $"df_fn_set(&{target.Code}, {FnOwned(value with { Code = converted })})";
+  }
+
+  string FnReturned(Expr value, Node expression, Scope scope, Node at) {
+    if (FnMayBorrow(expression, scope)) {
+      throw Error("this function value borrows variables of the function, so it cannot be returned: capture them with x! or ->x (spec 13.3.4)", at);
+    }
+    return FnOwned(value with { Code = Convert(value, currentRet!, at) });
+  }
+
+  // the argument of a function-type parameter: a borrow; a new lambda ends with the statement
+  string FnArg(ParamSig param, Node arg, Scope scope) {
+    if (param.IsGift || IsByPointer(param) || arg.Kind is "Gift" or "WritableAddressOf") {
+      throw NotSupported("&, -> and the other markers on a function-type parameter (spec 13.3.2)", arg);
+    }
+    var value = ExprOf(arg, scope, param.Type);
+    string converted = Convert(value, param.Type, arg);
+    if (!value.Fresh) {
+      return converted;
+    }
+    fn!.UsesTmp = true;
+    return $"df_fn_tmp({converted})";
+  }
+
+  // f(args) where f is a function value: a null one raises UnassignedFunctionCallException (spec 13.3.2)
+  Expr FnValueCall(Expr callee, List<Node> args, Scope scope, Node at) {
+    var (ret, types) = FunParts(callee.Type);
+    if (args.Any(arg => arg.Kind == "Named")) {
+      throw Error("a function value takes its arguments by position", at);
+    }
+    if (args.Count != types.Count) {
+      throw Error($"this function takes {types.Count} argument{(types.Count == 1 ? "" : "s")}, not {args.Count} ({FunDisplay(callee.Type)})", at);
+    }
+    var codes = new List<string>();
+    for (int index = 0; index < args.Count; index++) {
+      codes.Add(ArgCode(new ParamSig($"argument {index + 1}", types[index], null), args[index], scope));
+    }
+    string fnCode = callee.Code;
+    if (callee.Fresh) {
+      fn!.UsesTmp = true;
+      fnCode = $"df_fn_tmp({fnCode})";
+    }
+    string temp = NewTemp();
+    string call = PairCheck(LambdaCall(temp, ret, types.Select(CType), codes), ret);
+    string code = $"({{ df_fn {temp} = {fnCode}; if (!{temp}.code) {{ df_raise(&df_desc_UnassignedFunctionCallException, {fn!.NameConst}); {RaiseJump} }} {call}; }})";
+    bool fresh = ret == "string" || IsClass(ret) || IsArr(ret) || ret == "string?" || IsFunType(ret);
+    return new Expr(code, ret, fresh);
+  }
+
+  // the C call of the lambda held in the df_fn 'held': it returns its result with its exception (a df_res pair, or the exception alone)
+  string LambdaCall(string held, string ret, IEnumerable<string> cTypes, IEnumerable<string> args) {
+    string retC = ret == "void" ? "df_exception*" : ResultPair(CType(ret));
+    return $"(({retC} (*)({string.Join(", ", new[] { "void*" }.Concat(cTypes))})){held}.code)({string.Join(", ", new[] { $"(void*){held}.ctx" }.Concat(args))})";
+  }
+
+  // a call of a lambda whose exception, when it is not ignored (a silent one, spec 15.4), first runs 'cleanup' (what was built so far ends)
+  string CheckedLambdaCall(string held, string ret, IEnumerable<string> cTypes, IEnumerable<string> args, string cleanup) {
+    string temp = NewTemp();
+    string call = LambdaCall(held, ret, cTypes, args);
+    if (ret == "void") {
+      return $"({{ df_exception* {temp} = {call}; if ({temp}) {{ if ({SilentIgnored(temp)}) {{ df_exc_release({temp}); }} "
+        + $"else {{ {cleanup}df_err = {temp}; df_err_thrown = false; goto {Handler}; }} }} }})";
+    }
+    string err = temp + ".err";
+    return $"({{ {ResultPair(CType(ret))} {temp} = {call}; if ({err}) {{ if ({SilentIgnored(err)}) {{ df_exc_release({err}); {err} = NULL; }} "
+      + $"else {{ {cleanup}df_err = {err}; df_err_thrown = false; goto {Handler}; }} }} {temp}.value; }})";
+  }
+
+  // a call whose callee is a function value: a variable or parameter of a function type, a lambda, a call that returns one. Null otherwise.
+  Expr? TryFnValueCall(Node callee, List<Node> args, Scope scope, Node at) {
+    if (callee.Kind == "Name" && scope.Find(callee.Text!) is VarInfo variable && IsFunType(variable.Type)) {
+      return FnValueCall(new Expr(variable.CName, variable.Type), args, scope, at);
+    }
+    if (callee.Kind is "Lambda" or "Paren" or "Call") {
+      var value = ExprOf(callee, scope);
+      if (!IsFunType(value.Type)) {
+        throw Error($"this {value.Type} is not a function: it cannot be called", at);
+      }
+      return FnValueCall(value, args, scope, at);
+    }
+    return null;
+  }
+
+  // sort(f), filter(f), map<U>(f), reduce(x, f): the member calls the function it is given
+  static bool FlowCallsGivenFunction(Node call) {
+    var callee = call.Children[0].Kind == "GenericRef" ? call.Children[0].Children[0] : call.Children[0];
+    return callee is { Kind: "Member", Text: "sort" or "sortUnstable" or "filter" or "map" or "reduce" }
+      && call.Children[1].Children.Any(arg => arg.Kind is "Lambda" or "Name");
+  }
+
+  // the analysis of exceptions: a call through a function value may raise UnassignedFunctionCallException. The analysis has no types,
+  // so any call of a name that is not a function, a class or a library function counts.
+  bool FlowMayCallFunValue(Node callee) {
+    if (callee.Kind is "Lambda" or "Paren" or "Call") {
+      return true;
+    }
+    if (callee.Kind != "Name") {
+      return false;
+    }
+    string name = callee.Text!;
+    if (funs.ContainsKey(name) || genericFuns.ContainsKey(name) || classes.ContainsKey(name) || traits.ContainsKey(name) || Stdlib.ContainsKey(name)
+        || name is "string" or "Panic" or "date" or "time" || IsEnum(name) || ExceptionId(name) != null || nameAliases.ContainsKey(name) || typeAliases.ContainsKey(name)) {
+      return false;
+    }
+    return currentFlowFun?.Class is not ClassInfo cls || LookupMethods(cls, name).Count == 0;
+  }
+}

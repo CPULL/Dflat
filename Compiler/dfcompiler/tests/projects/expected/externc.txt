@@ -7,4 +7,14 @@ true
 true
 true
 true
+héllo 5
+5000 true
+5001
+xxxyz
+false
+abc
+XXXX
+[xx, héllo]
+true false héllo
+[]
 ---- exit code 0 ----

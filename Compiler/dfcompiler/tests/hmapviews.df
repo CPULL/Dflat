@@ -37,13 +37,13 @@ ages.removeAt("alice")
 r.Console.log(names.len)                             // 5: the copy does not change
 
 // a view held in a variable counts as open: the map cannot change its size while it exists
-fun string grow(hmap<string, i32> m) {
+fun string grow(&hmap<string, i32> m) {
   var held = m.keys
   m["zed"] = 1
   return "grew"
   catch ModifyingIteratedCollectionException { return "locked" }
 }
-r.Console.log(grow(ages))                            // locked
+r.Console.log(grow(&ages))                            // locked
 r.Console.log(ages.len)                              // 3: the view ended with the function
 fun ->string walk(hmap<string, i32> m) {
   var held = m.values
@@ -58,14 +58,14 @@ ages["zed"] = 1
 r.Console.log(ages.keys)                             // [bob, carol, dave, zed]
 
 // the loop over a view holds the counter like the loop over the map
-fun string addInLoop(hmap<string, i32> m) {
+fun string addInLoop(&hmap<string, i32> m) {
   for string k in m.keys {
     m["new"] = 0
   }
   return "added"
   catch ModifyingIteratedCollectionException { return "locked" }
 }
-r.Console.log(addInLoop(ages))                       // locked
+r.Console.log(addInLoop(&ages))                       // locked
 for i32 v in ages.values {
   r.Console.log(v)                                   // 30, 40, 50, 1
 }

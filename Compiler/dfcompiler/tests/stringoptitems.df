@@ -1,0 +1,88 @@
+// string? (spec 7.1) in fields and in the items of arr, vec and list: each owns its string; the end of the object or collection frees it
+namespace stringoptitems
+alias Root as r
+
+public class Person(string name) {
+  public string name
+  public string? nick
+  public string? note = "none"
+  unrestricted fun ->string show() { $"{name} {nick ?? "-"} {note}" }
+  public fun rename(string? n) { nick = n }
+}
+
+fun keep(&Person p, string text) {
+  p.nick = text.toUpper()
+}
+
+fun fields() {
+  Person a = Person("ann")
+  r.Console.log(a.show())
+  a.nick = "annie"
+  a.rename(null)
+  r.Console.log($"{a.nick == null} {a.show()}")
+  a.note = ""
+  r.Console.log($"[{a.note}] {a.note == null}")
+  keep(&a, "x")
+  Person b = a!
+  b.nick = "copy"
+  r.Console.log($"{a.show()} / {b.show()}")
+  r.Console.log(a)
+}
+
+fun arrays() {
+  string own = "own".toUpper()
+  string? maybe = null
+  arr<string?> a = ["x", null, "", own, maybe]
+  a[0] = "y".toUpper()
+  a[1] = own
+  a[2] = null
+  r.Console.log($"{a} {a[0] == "Y"} {a[2] == null}")
+  for string? s in a {
+    r.Console.print($"{s ?? "_"};")
+  }
+  r.Console.log("")
+  arr<string?> b = a!
+  b[0] = "z"
+  r.Console.log($"{a[0]} {b[0]}")
+  a.fill("f")
+  a.clear()
+  arr<string?> c = [null, "q"]
+  b.copyFrom(0, c, 0, 2)
+  r.Console.log($"{a} {b} {b.has(null)} {b.indexOf("q")}")
+}
+
+fun vecs() {
+  string own = "own".toUpper()
+  vec<string?> v = ["x", null]
+  v.add(own)
+  v.add(null)
+  v.add("t".toUpper())
+  v[1] = "now"
+  v.insert(0, null)
+  string? last
+  v.pop(&last)
+  v.removeAt(0)
+  vec<string?> w = v.clone()
+  w.add(null)
+  r.Console.log($"{last} {v} {w.len} {w.filter((string? s) { s != null })}")
+}
+
+fun lists() {
+  list<string?> l = ["x", null]
+  l.add("own".toUpper())
+  l.insert(1, "in".toUpper())
+  l[0] = null
+  l.removeAt(0)
+  list<string?> m = l.clone()
+  vec<string?> v = [null, "v"]
+  m.add(v)
+  l.fill("f")
+  arr<string?> dest = [null, null]
+  dest.copyFrom(0, m, 0, 2)
+  r.Console.log($"{l} {m} {dest} {m.map<string>((string? s) { s ?? "-" })}")
+}
+
+fields()
+arrays()
+vecs()
+lists()

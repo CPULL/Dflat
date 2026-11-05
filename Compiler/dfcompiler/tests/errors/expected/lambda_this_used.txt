@@ -1,0 +1,1 @@
+lambda_this_used.df(5): error: there is no this in a lambda: the fields are captured by their bare names (spec 13.3.1)

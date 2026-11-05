@@ -68,7 +68,7 @@ fun returned() {
   r.Console.log("  got " + mine[1].name + " " + other[0].name)
 }
 
-fun kept(Keeper k) {
+fun kept(&Keeper k) {
   arr<Dog> held = [Dog("held")]
   k.keep(held)                        // the function clones it: held is still freed here
 }
@@ -88,5 +88,8 @@ given()
 r.Console.log("returned")
 returned()
 r.Console.log("kept")
-kept(Keeper())
+{
+  Keeper keeper = Keeper()
+  kept(&keeper)
+}
 r.Console.log("done")

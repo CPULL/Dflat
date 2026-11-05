@@ -20,21 +20,21 @@ r.Console.log(numbers)             // clear keeps the size (spec 6.6)
 
 // changing the size or the order of a vec while it is iterated raises ModifyingIteratedCollectionException (a Panic in a release build);
 // replacing an item is allowed (spec 6.4)
-fun string addWhileLooping(vec<i32> source) {
+fun string addWhileLooping(&vec<i32> source) {
   for i32 n in source {
     source.add(n)
   }
   return "no exception"
   catch ModifyingIteratedCollectionException { return "changed while iterated" }
 }
-fun string replaceWhileLooping(vec<i32> source) {
+fun string replaceWhileLooping(&vec<i32> source) {
   for i32 n in source {
     source[0] = 9
   }
   return "an item can be replaced while iterated"
   catch ModifyingIteratedCollectionException { return "never" }
 }
-fun ->string sortWhileLooping(vec<i32> source) {
+fun ->string sortWhileLooping(&vec<i32> source) {
   for i32 n in source {
     source.reverse()
   }
@@ -51,9 +51,9 @@ fun ->string readOnly(vec<i32> source) {
 }
 vec<i32> values = [1, 2, 3]
 r.Console.log(readOnly(values))
-r.Console.log(addWhileLooping(values))
-r.Console.log(replaceWhileLooping(values))
-r.Console.log(sortWhileLooping(values))
+r.Console.log(addWhileLooping(&values))
+r.Console.log(replaceWhileLooping(&values))
+r.Console.log(sortWhileLooping(&values))
 r.Console.log(readOnly(values))
 
 // swap exchanges two positions; replace puts a new item and gives back the old one

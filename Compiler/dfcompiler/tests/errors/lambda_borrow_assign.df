@@ -1,0 +1,4 @@
+namespace lambda_borrow_assign
+i32 n = 0
+fun() f = () { }
+f = () { Root.Console.log(n) }

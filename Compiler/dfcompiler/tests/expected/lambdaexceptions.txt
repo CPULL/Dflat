@@ -1,0 +1,9 @@
+division by zero from the lambda
+Bad: too big
+sort: no twos
+filter: C
+map: three
+reduce: three
+silent gives 0
+passed up to the caller of the caller
+---- exit code 0 ----

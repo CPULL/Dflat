@@ -1022,12 +1022,12 @@ public class set<T> : SetCollection<T> {
     if (IsMap(obj.Type) || IsSet(obj.Type)) {
       // the value leaves the map with its entry, the key ends; the item leaves a set (spec 6.6)
       var mapValue = ObjectCall(obj, "takeAt", new List<Node> { operand.Children[1] }, scope, gift) ?? throw Error("no takeAt", gift);
-      return new Expr(mapValue.Code, mapValue.Type, mapValue.Fresh || mapValue.Type == "string");
+      return new Expr(mapValue.Code, mapValue.Type, mapValue.Fresh || IsStrItem(mapValue.Type));
     }
     if (IsList(obj.Type)) {
       // the item leaves the list and the node goes away (spec 6.6)
       var removed = ObjectCall(obj, "takeAt", new List<Node> { operand.Children[1] }, scope, gift) ?? throw Error("no takeAt", gift);
-      return new Expr(removed.Code, removed.Type, IsClass(removed.Type) || removed.Type == "string");
+      return new Expr(removed.Code, removed.Type, IsClass(removed.Type) || IsStrItem(removed.Type));
     }
     bool isVec = IsVec(obj.Type);
     if (!isVec && !IsArr(obj.Type)) {
@@ -1037,7 +1037,7 @@ public class set<T> : SetCollection<T> {
     if (IsArr(elem)) {
       return ArrGiftIndex(obj, isVec, operand, scope, gift);   // the array leaves the slot, the slot is empty (spec 6.8.1)
     }
-    if (!IsClass(elem) && elem != "string") {
+    if (!IsClass(elem) && !IsStrItem(elem)) {
       Warn("-> on a basic value is ignored: it is a copy", gift, 1);
       return IndexExpr(operand, scope);
     }
@@ -1049,7 +1049,7 @@ public class set<T> : SetCollection<T> {
     string length = isVec ? $"{holder}->{VecField(obj.Type, "count")}" : $"{holder}.len";
     string source = isVec ? NullChecked(obj.Code, obj.Type) : obj.Code;
     string code = CheckRaise($"({{ {CType(obj.Type)} {holder} = {source}; df_uns {position} = {IndexValue(index, gift)}; "
-      + $"{CType(elem)} {taken} = NULL; if (df_idx_ok({length}, {position}, {fn!.NameConst})) {{ {taken} = {items}.p[{position}]; {items}.p[{position}] = NULL; }} {taken}; }})", elem);
+      + $"{CType(elem)} {taken} = {ZeroValue(elem)}; if (df_idx_ok({length}, {position}, {fn!.NameConst})) {{ {taken} = {items}.p[{position}]; {items}.p[{position}] = {ZeroValue(elem)}; }} {taken}; }})", elem);
     return new Expr(code, elem, true);
   }
 
@@ -1062,6 +1062,9 @@ public class set<T> : SetCollection<T> {
     }
     if (VecElem(cls.Name) == "string") {
       sb.Append($"  for (df_uns i = 0; i < self->{items}.len; i++) {{ df_str_free(self->{items}.p[i]); self->{items}.p[i] = NULL; }}\n");
+    }
+    if (VecElem(cls.Name) == "string?") {
+      sb.Append($"  for (df_uns i = 0; i < self->{items}.len; i++) {{ df_opt_str_drop(&self->{items}.p[i]); }}\n");   // spec 7.1
     }
     if (IsArr(VecElem(cls.Name))) {
       // spec 6.8.1
@@ -1098,8 +1101,10 @@ public class set<T> : SetCollection<T> {
     bool ownsArray = IsArr(target.Type) && !LibraryCode && (target.Variable is { OwnsArray: true } or { RefSlot: true } || target.IsField || target.IsStatic);
     string zero = ZeroValue(elem);
     string store = Convert(new Expr(incoming, elem), target.Type, at);
-    string assignCode = target.Type == "string"
-      ? StrAssign(target, "true", incoming) + "; "   // the item moves into the variable or the field, the old string ends
+    string assignCode = target.Type == "string?" && elem == "string?"
+      ? $"df_opt_str_set(&{target.Code}, {incoming}); "   // the item moves into the variable or the field, the old string ends
+      : target.Type == "string"
+      ? StrAssign(target, "true", elem == "string?" ? incoming + ".val" : incoming) + "; "   // the item moves into the variable or the field, the old string ends
       : $"{CType(target.Type)} {old} = {target.Code}; {target.Code} = {store}; " + (owned ? $"if ({old} != {target.Code}) {{ df_drop((void*){old}); }} " : "")
         + (ownsArray ? $"if ({old}.p != {target.Code}.p) {{ {ArrDropHelper(target.Type)}({old}); }} " : "");   // the old array of an owner ends (spec 6.8.1)
     string code = $"({{ {CType(vec.Type)} {held} = {NullChecked(vec.Code, vec.Type)}; bool {ok} = false; {CType(elem)} {incoming} = {zero}; {LockCheck(held, vec.Type)}"
@@ -1169,7 +1174,7 @@ public class set<T> : SetCollection<T> {
     sb.Append(LockCheck(held, vec.Type));
     sb.Append($"df_uns {amount} = {SourceLength(sourceType, s)}; {VecReserve(held, vec.Type, $"{count} + {amount}")}");
     sb.Append(ForEachSourceItem(sourceType, s, "0", amount, item =>
-      $"{items}.p[{count}] = {(cloning ? CloneValue(item, elem, at) : elem == "string" && !moving ? $"df_str_dup({item})" : item)}; {count} += 1; " + (moving && (IsClass(elem) || elem == "string") ? $"{item} = NULL; " : moving && IsArr(elem) ? $"{item} = {ZeroValue(elem)}; " : "")));
+      $"{items}.p[{count}] = {(cloning ? CloneValue(item, elem, at) : IsStrItem(elem) && !moving ? StrItemDup(elem, item) : item)}; {count} += 1; " + (moving && (IsClass(elem) || elem == "string") ? $"{item} = NULL; " : moving && (IsArr(elem) || elem == "string?") ? $"{item} = {ZeroValue(elem)}; " : "")));
     if (moving && sourceIsObject) {
       sb.Append($"df_drop((void*){s}); ");   // the collection was moved in: its items are gone and it ends
     }

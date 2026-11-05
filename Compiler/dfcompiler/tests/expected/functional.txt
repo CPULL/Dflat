@@ -1,0 +1,19 @@
+[9, 7, 5, ...] (5 items)
+[fig, pear, kiwi, ...] (4 items)
+[2, 4, 8]
+[max, rex, ace]
+[9, 7, 5]
+[pear, kiwi, banana]
+[#2, #4, #8]
+25
+fpkb
+[2, 4]
+3
+[8, 4, 2]
+end max2
+end rex2
+end ace2
+end max
+end rex
+end ace
+---- exit code 0 ----

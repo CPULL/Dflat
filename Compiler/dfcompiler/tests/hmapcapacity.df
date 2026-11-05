@@ -54,7 +54,7 @@ names[7] = "seven"
 r.Console.log(names)
 
 // not while the map is walked
-fun tryReserve(hmap<i32, i32> m) {
+fun tryReserve(&hmap<i32, i32> m) {
   for (i32 k, i32 v) in m {
     m.reserve(10)
   }
@@ -62,4 +62,4 @@ fun tryReserve(hmap<i32, i32> m) {
     r.Console.log("cannot reserve while walking")
   }
 }
-tryReserve(sized)
+tryReserve(&sized)

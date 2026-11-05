@@ -82,7 +82,7 @@ Decided (Specs12.7): `@T` read-only, `(@)T` read/write with a lock in the object
 - 64. Subclassing the default collections: the compiler's direct code for `c[i]`, `for` and the hot paths does not call methods; if a class overrides `add`, which one runs? PROPOSAL: a subclass loses the direct paths and goes through the virtual calls. `arr` cannot be subclassed.
 - 67. Structs in collections (Specs11.1.5): a `vec<Point>` of structs holds values inline, which changes the ownership and the drop code.
 - 68. Lists of pointers and references, after the pointers work (Specs12.1).
-- 69. Functional members (`filter`, `map`, `reduce`) and queue / stack; they need lambdas (Specs13.3, decided, not built).
+- 69. Functional members built on 2026-11-05 (Specs6.6: `filter`, `map<U>`, `reduce`); queue / stack are left.
 - 71. Embedded Dflat classes against hand-written C: `vec` and `list` (and the maps) are Dflat classes in a prelude with C hot paths; you asked for hand-written C versions too, to compare. PROPOSAL: finish the surface of the language first, then write the C versions of `vec`, `list`, `hmap`, `hset` and compare on a fixed set of programs.
 - 72. Code size: a copy per type or shared helpers working on byte sizes and a comparer (Specs11.3.12). PROPOSAL: copies per type for numbers and small value types; shared helpers for objects when the output size becomes a problem.
 - 74. Small architectures (Specs15.7.5, 6.1): collections need a heap; does a small target get only `arr`, or `vec` with a fixed capacity? There `null.hash` is 0 and multi-type keys are not available.
@@ -109,7 +109,7 @@ What the specification decides and the compiler does not build. The point number
 - 18. A failed allocation ends the program (a panic) instead of raising `OutOfMemoryException` in Debug (Specs6.1, 15.3); a size that does not fit (`n * size` overflowing) ends it the same way since 2026-11-01.
 - 34. `c[a..b]!` (clone is built, the copy of a view is not) and `get_view` for custom collections (Specs6.5).
 - 35. Cloning (Specs12.6) is built for objects, `vec`, `list` (also of counted items), and since 2026-10-31 `map`, `hmap`, `set`, `hset` (a new collection, then `add(this)`), the plain `add(other)` and `copyFrom` (object items cloned, the items written over end); `tryClone()` since 2026-10-31; not yet: tuple fields with strings or objects, the object items of the set operations (sets hold no objects yet). `fill` of an object stays a compile error (Specs6.6).
-- 36. Lambdas and function types (Specs13.3, decided in Specs0.0.22), so `sort(lambda)` and the functional members; sorting objects and tuples with the default comparer.
+- 36. Lambdas and function types (Specs13.3): built in part on 2026-11-05 (Specs13.3.6 lists what is left: counted and weak captures, &a of strings and arrays, modes in function types, function types in fields and collections, `f1!`, the `&a` lock); `sort(lambda)` and `filter` / `map<U>` / `reduce` built on 2026-11-05; still to do: sorting objects and tuples with the default comparer, `filter` of objects and arrays.
 - 37. Conversion of collections of related types (Specs11.3.10, 11.3.7), for any generic class.
 - 40. Destructuring tuples other than `(k, v)` of a map in the header of a `for`.
 

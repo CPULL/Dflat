@@ -1,0 +1,3 @@
+namespace lambda_capture_write
+i32 n = 0
+fun() f = () { n++ }

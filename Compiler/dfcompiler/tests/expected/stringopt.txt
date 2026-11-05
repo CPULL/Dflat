@@ -1,0 +1,19 @@
+null  abc
+true false true true
+[] abc
+default [] none
+false
+item 2
+null [] [X] [item 3]
+othermine
+item 4
+null
+set
+set
+null
+
+item 2
+3 null ABC
+enforced abc 3
+a is null
+---- exit code 0 ----

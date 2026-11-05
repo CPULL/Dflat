@@ -21,7 +21,7 @@ public class Board {
   public arr<bool> mines = arr<bool>[4]   // a field type no local uses: its helper comes before the drop of the class
 }
 
-fun fill(Scores s) {
+fun fill(&Scores s) {
   arr<i32> local = [7, 8, 9]
   s.start = local                     // plain items: the field gets a copy, local still ends with this scope
   local[0] = 70
@@ -45,7 +45,7 @@ fun fields() {
   Scores s = Scores(first)
   first[0] = 100
   r.Console.log($"  header copy {s.start[0]}, caller {first[0]}, names {s.names.len}")
-  fill(s)
+  fill(&s)
   r.Console.log("  " + s.dogs[0].name)
 }
 fields()

@@ -1,5 +1,5 @@
 namespace enforce_default_type
-class Box { public fun i32 size() { 1 } }
+class Box { unrestricted fun i32 size() { 1 } }
 fun f(Box b) {
   i32 res = enforce b.size() default { "not good" }
 }

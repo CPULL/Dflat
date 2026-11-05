@@ -184,6 +184,11 @@ public sealed partial class CodeGen {
           var names = new HashSet<string>();
           CollectCallNames(node, names);
           ctx.Flow.Calls.Add((names, ctx.Cover));
+          if (FlowMayCallFunValue(node.Children[0]) || FlowCallsGivenFunction(node)) {
+            // a lambda can let any exception out, and a null function value raises UnassignedFunctionCallException (spec 13.3.2)
+            ctx.Flow.Raises.Add((StandardExceptions["UnassignedFunctionCallException"], ctx.Cover));
+            ctx.Flow.Raises.Add((AnyException, ctx.Cover));
+          }
           if (node.Children[0] is { Kind: "Member", Text: "tryClone" }) {
             ctx.Flow.Raises.Add((StandardExceptions["ObjectNotClonableException"], ctx.Cover));   // spec 12.6
           }

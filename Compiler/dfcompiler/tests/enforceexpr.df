@@ -6,14 +6,14 @@ public class Trouble(string text) : Exception { }
 
 public class Box(i32 size) {
   public i32 size
-  public fun i32 count() { size }
-  public fun i32 test(bool fail) {
+  unrestricted fun i32 count() { size }
+  unrestricted fun i32 test(bool fail) {
     if fail {
       throw Trouble("box trouble")
     }
     return size * 10
   }
-  public fun ->string label() { $"box {size}" }
+  unrestricted fun ->string label() { $"box {size}" }
 }
 
 // statement form with default

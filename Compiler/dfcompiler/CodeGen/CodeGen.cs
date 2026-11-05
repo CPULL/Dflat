@@ -64,6 +64,8 @@ sealed class FunSig {
   public int GroupSize { get; set; }   // on a root: how many functions override it
   public int InstanceDepth { get; set; }      // a copy of a generic function: how deep the chain of copies is
   public string InstanceChain { get; set; } = "";
+  public string? LambdaCtx { get; set; }      // a lambda (spec 13.3.5): the C struct of its context, the hidden first parameter df_ctx
+  public List<(string Name, VarInfo Var)> LambdaVars { get; } = new();   // its captures, as the body sees them
 }
 
 sealed class ParamSig {
@@ -114,6 +116,9 @@ sealed class VarInfo {
   public string? OwnFlag { get; set; }     // a string variable: the C flag that says whether it owns its string (CodeGen.Strings.cs)
   public bool ReadOnlyString { get; set; } // a string parameter or loop variable: a read-only borrow, never changed in place (spec 4.1)
   public VarInfo? AliasOf { get; set; }    // string b = a: b is known to be the same string as a (spec 4.1, in place through an alias)
+  public bool FnBorrows { get; set; }      // a function value that may borrow (a lambda with a borrowed capture, or a parameter): it is not
+                                           // stored past its variables or returned (spec 13.3.4)
+  public bool CapturedReadOnly { get; set; } // inside a lambda: an unlisted capture, a read-only borrow (spec 13.3.1)
 }
 
 sealed class Scope {
@@ -324,6 +329,7 @@ public sealed partial class CodeGen {
     output.Append(classGlobals).Append('\n');
     output.Append(protos).Append('\n');
     output.Append(classCode);
+    output.Append(lambdaHelpers);   // the comparers of sort(lambda) (CodeGen.Functional.cs)
     output.Append(bodies);
     output.Append(main);
     return output.ToString();
@@ -503,6 +509,9 @@ public sealed partial class CodeGen {
 
   string Signature(FunSig f) {
     var list = f.Params.Select(p => $"{ParamCType(p)} {ParamName(p)}").ToList();
+    if (f.LambdaCtx != null) {
+      list.Insert(0, "void* df_ctx");   // a lambda receives its context (spec 13.3.5)
+    }
     if (f.Class != null && !f.IsStatic && !f.IsCtor) {
       list.Insert(0, $"{CType(f.Class.Name)} self");
     }
@@ -542,6 +551,12 @@ public sealed partial class CodeGen {
     if (f.Class != null && !f.IsStatic) {
       scope.Vars["this"] = new VarInfo(f.Class.Name, "self", true);
     }
+    if (f.LambdaCtx != null) {
+      fn.Decls.Append($"  {f.LambdaCtx}* c = ({f.LambdaCtx}*)df_ctx;\n  (void)c;\n");
+      foreach (var (name, variable) in f.LambdaVars) {
+        scope.Vars[name] = variable;   // the captures (spec 13.3.1)
+      }
+    }
     foreach (var p in f.Params) {
       if (IsCountedType(p.Type)) {
         scope.Vars[p.Name] = new VarInfo(CountedBase(p.Type), "v_" + p.Name, false) { IsCounted = true, IsWritable = p.IsWritable };   // spec 12.7
@@ -554,8 +569,9 @@ public sealed partial class CodeGen {
       // a reference parameter is a pointer in C; the body reads and writes through it, a read-only one cannot be assigned
       scope.Vars[p.Name] = IsByPointer(p)
         ? new VarInfo(p.Type, $"(*{ParamName(p)})", p.Ref == 1) { ReadOnlyRef = p.Ref == 1 && IsArr(p.Type), RefSlot = p.Ref == 2 && (IsClass(p.Type) || IsArr(p.Type) || p.Type == "string"), BorrowsArray = p.Ref == 2 && IsArr(p.Type) }
-        : StringVar(new VarInfo(p.Type, "v_" + p.Name, false) { Own = p.IsGift, ReadOnlyRef = p.Ref == 1 && IsClass(p.Type), ReadOnlyString = p.Type == "string" && !p.IsGift, IsWeak = p.IsWeak, BorrowsArray = IsArr(p.Type) && !p.IsGift, OwnsArray = OwnsGivenArray(f, p) });
+        : StringVar(new VarInfo(p.Type, "v_" + p.Name, false) { Own = p.IsGift, ReadOnlyRef = PlainLend(p), ReadOnlyString = p.Type == "string" && !p.IsGift, IsWeak = p.IsWeak, BorrowsArray = IsArr(p.Type) && !p.IsGift, OwnsArray = OwnsGivenArray(f, p) });
       scope.Vars[p.Name].IsParam = true;
+      scope.Vars[p.Name].FnBorrows = IsFunType(p.Type);   // a function parameter may borrow (spec 13.3.4)
       if (scope.Vars[p.Name].OwnFlag is string flag) {
         // a parameter borrows its string (one taken with -> owns it); assigned again, it may own the new one
         fn.Decls.Append($"  bool {flag} = {(p.IsGift ? "true" : "false")};\n  (void){flag};\n");
@@ -876,6 +892,17 @@ public sealed partial class CodeGen {
       initValue = value;
       code = tupleArrDecls.Contains(s) ? TupleOwnedCode(init.Children[0], value, type, init) : Convert(value, type, init);
     }
+    if (IsFunType(type)) {
+      code = FnDeclCode(s, initValue, code);   // the variable holds a usage of the function value (spec 13.3.5)
+    }
+    if (type == "string?") {
+      if (!IsOptStringDecl(s) && !LibraryCode) {
+        throw NotSupported("a string? declared with var: write string? " + s.Text + " (spec 7.1)", s);
+      }
+      if (initValue != null) {
+        code = OptStrOwned(initValue.Value, init!);   // the variable owns its string
+      }
+    }
     // an owner must receive an object nobody else owns (the same decision was made when the scope was prepared)
     bool owns = declOwner.TryGetValue(s, out bool guessed) && guessed;
     if (owns && IsClass(type) && initValue is Expr given && !(given.Fresh || given.Type == "null")) {
@@ -909,6 +936,7 @@ public sealed partial class CodeGen {
       }
     }
     variable.IsWeak = weak;
+    variable.FnBorrows = IsFunType(type) && init != null && FnMayBorrow(init.Children[0], scope);
     if (type == "string" && init?.Children[0] is { Kind: "Name" } source && scope.Find(source.Text!) is VarInfo { Type: "string" } original) {
       variable.AliasOf = original.AliasOf ?? original;
     }
@@ -1101,6 +1129,12 @@ public sealed partial class CodeGen {
   void EmitReturn(Node s, StringBuilder sb, Scope scope, int indent) {
     string pad = Pad(indent);
     string? value = ReturnValueCode(s, scope, sb, pad);
+    if (value != null && !fn!.IsMain && currentRet != null && currentRet != "void" && UsesTemporaries(value)) {
+      // the temporaries of the value end before the function returns (they would stay on the stack of temporaries otherwise)
+      string kept = NewTemp();
+      sb.Append($"{pad}{CType(currentRet)} {kept} = {value};\n{pad}df_tmp_drop(df_tm);\n");
+      value = kept;
+    }
     if (!ReturnPassesAtEnd()) {
       if (fn!.IsMain) {
         sb.Append($"{pad}return {value ?? "0"};\n");
@@ -1122,6 +1156,8 @@ public sealed partial class CodeGen {
     }
     EmitReturnUnwind(sb, indent);
   }
+
+  static bool UsesTemporaries(string code) => code.Contains("df_tmp(") || code.Contains("df_tmpo(") || code.Contains("df_tmpf(") || code.Contains("df_fn_tmp(") || code.Contains("df_opt_str_tmp(");
 
   // a result that is a new value (a new object, string or array, or a local that owns one) goes to the caller, who owns it: the function says so
   // with fun ->T (spec 13.1.1). A plain result lends (built later); until then only the new values are checked
@@ -1219,6 +1255,12 @@ public sealed partial class CodeGen {
     if (currentRet == "string") {
       returned = StrReturned(returned, s.Children[0], scope);
     }
+    if (currentRet == "string?") {
+      return OptStrReturned(returned, s.Children[0], scope, s);   // the caller owns it (spec 7.1)
+    }
+    if (IsFunType(currentRet!)) {
+      return FnReturned(returned, s.Children[0], scope, s);   // the caller gets a usage (spec 13.3)
+    }
     return Convert(returned, currentRet!, s);
   }
 
@@ -1299,9 +1341,15 @@ public sealed partial class CodeGen {
     }
     var target = LValue(targetNode, scope);
     if (target.IsConst) {
-      throw Error($"'{targetNode.Text}' is const", s);
+      throw ConstWrite(target, targetNode, s);
     }
     string op = s.Text!;
+    if (target.Type == "string?") {
+      return OptStrAssign(target, targetNode, op, s.Children[1], scope, s);   // spec 7.1
+    }
+    if (IsFunType(target.Type)) {
+      return FnAssign(target, targetNode, op, s.Children[1], scope, s);   // spec 13.3
+    }
     if (op == "=" && target.Type == "string" && InPlaceAssign(targetNode, s.Children[1], scope, s) is string inPlace) {
       return inPlace;   // x = x.trim() changes x (spec 4.1)
     }
@@ -1360,6 +1408,12 @@ public sealed partial class CodeGen {
   Expr ExprOf(Node n, Scope scope, string? expected = null) {
     var e = ExprOfNode(n, scope, expected);
     e = EnforceSourceCall(n, e);
+    if (IsFunType(e.Type) && n.Kind == "Call") {
+      return e with { Fresh = true };   // a call gives a usage of the function value it returns (spec 13.3)
+    }
+    if (e.Type == "string?") {
+      return e with { Fresh = n.Kind == "Call" || (n.Kind is not ("Name" or "Member" or "Index" or "SafeMember") && e.Fresh) };   // a call gives a new string? (spec 7.1)
+    }
     return e.Type == "string" ? e with { Fresh = StrNodeFresh(n, e) } : e;
   }
 
@@ -1422,6 +1476,8 @@ public sealed partial class CodeGen {
       }
       case "Gift":
         return GiftExpr(n, scope);
+      case "Lambda":
+        return LambdaExpr(n, scope, expected);   // spec 13.3
       case "CountedOf":
         throw NotSupported("@x outside the value of a counted variable (@T x = @e, var x = @e, x = @e)", n);
       case "WeakOf":
@@ -1594,7 +1650,7 @@ public sealed partial class CodeGen {
       throw Error($"++ and -- need a number, not {target.Type}", n);
     }
     if (target.IsConst) {
-      throw Error($"'{targetNode.Text}' is const", n);
+      throw ConstWrite(target, targetNode, n);
     }
     if (IsInt(target.Type) && SilentCaught(StandardExceptions["OverflowException"])) {
       // the step overflows: raise it; the variable wraps, as it does when nobody catches
@@ -2110,6 +2166,14 @@ public sealed partial class CodeGen {
     var callee = n.Children[0];
     var args = n.Children[1].Children;
     if (callee.Kind == "GenericRef") {
+      if (callee.Children[0] is { Kind: "Member", Text: "map" } mapping && callee.Children.Count == 2) {
+        // c.map<U>(f) (spec 6.6)
+        var mapped = ExprOf(mapping.Children[0], scope);
+        if (IndexCollectionElem(mapped.Type) != null) {
+          CheckReadOnlyCall(mapping.Children[0], mapped, "map", scope, n);
+          return FunctionalCall(mapped, "map", args, callee.Children[1], scope, n);
+        }
+      }
       if (callee.Children[0] is { Kind: "Member", Text: "transformTo" } transform) {
         if (ExprOf(transform.Children[0], scope) is var source && (IsVec(source.Type) || IsList(source.Type))) {
           CheckCountedItemsMember(ObjInfo(source.Type), "transformTo", n);   // spec 12.7
@@ -2131,6 +2195,9 @@ public sealed partial class CodeGen {
     }
     if (callee.Kind == "SafeMember") {
       return SafeAccess(callee, n, scope);
+    }
+    if (TryFnValueCall(callee, args, scope, n) is Expr fnCall) {
+      return fnCall;   // f(3), (i32 a) { ... }(42) (spec 13.3)
     }
 
     // parent.name(): the parent's version of an overridden function
@@ -2181,6 +2248,9 @@ public sealed partial class CodeGen {
 
     string? path = Path(callee);
     if (path != null && scope.Find(path.Split('.')[0]) == null) {
+      if (path == "string" && callee.Kind == "Name") {
+        return StringFromAddr(args, scope, n);   // string(addr), string(->addr) (spec 4.4.6)
+      }
       if (path == "Root.Random.shuffle") {
         return ShuffleCall(args, scope, n);
       }
@@ -2215,6 +2285,11 @@ public sealed partial class CodeGen {
   }
 
   // positional arguments in order, named ones anywhere, defaults for the rest
+  // a plain parameter of an object, a collection or an array lends it read-only (spec 13.1, 1.6.2); not the parent reference of a
+  // constructor, which keeps its own rule (12.5)
+  bool PlainLend(ParamSig p) => p.Ref == 1 && IsClass(p.Type)
+    || p.Ref == 0 && !p.IsGift && !p.IsWeak && !p.IsParent && (IsClass(p.Type) || IsArr(p.Type));
+
   Expr UserCall(FunSig f, List<Node> args, Scope scope, Node at) {
     if (f.IsCtor && f.Visibility == Vis.Private && currentClass != f.Class && !LibraryCode) {
       // a private constructor (spec 11.1.1): only the code of its class calls it, its static functions included

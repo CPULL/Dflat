@@ -6,7 +6,7 @@ public class Dog(string name) {
   public string name
 }
 
-fun fill(vec<Dog> kennel, u64 count) {
+fun fill(&vec<Dog> kennel, u64 count) {
   u64 i = 0
   while i < count {
     kennel.add(Dog("dog"))
@@ -39,7 +39,7 @@ kennel.clear()                     // the items become null: the size is kept
 r.Console.log(kennel.len)
 kennel.truncate(0)
 
-fill(kennel, 1000)
+fill(&kennel, 1000)
 r.Console.log(kennel.len)
 kennel.truncate(10)
 r.Console.log(kennel.len)

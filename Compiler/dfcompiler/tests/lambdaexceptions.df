@@ -1,0 +1,101 @@
+// exceptions leaving a lambda (spec 13.3.6): through a direct call, a parameter, sort, filter, map, reduce; a silent one is ignored by the caller
+namespace lambdaexceptions
+alias Root as r
+
+public class Bad(string what) : Exception { }
+public class Quiet(string what) : Exception, SilentException { }
+
+fun i32 apply(i32(i32) f, i32 v) {
+  f(v)
+}
+
+fun ->string direct() {
+  i32(i32) f = (i32 x) { 100 / x }
+  return "got " + f(0).toStr()
+  catch DivisionByZeroException { return "division by zero from the lambda" }
+}
+
+fun ->string throughParam() {
+  return "got " + apply((i32 x) {
+    if x > 2 {
+      throw Bad("too big")
+    }
+    x
+  }, 5).toStr()
+  catch Bad ex { return "Bad: " + ex.message }
+}
+
+fun ->string inSort() {
+  vec<i32> v = [3, 1, 2]
+  v.sort((i32 a, i32 b) {
+    if a == 2 || b == 2 {
+      throw Bad("no twos")
+    }
+    a - b
+  })
+  return "sorted"
+  catch Bad ex { return "sort: " + ex.message }
+}
+
+fun ->string inFilter() {
+  vec<string> words = ["a".toUpper(), "b".toUpper(), "c".toUpper()]
+  vec<string> kept = words.filter((string s) {
+    if s == "C" {
+      throw Bad("C")
+    }
+    true
+  })
+  return "kept " + kept.len.toStr()
+  catch Bad ex { return "filter: " + ex.message }
+}
+
+fun ->string inMap() {
+  list<i32> n = [1, 2, 3]
+  list<string> m = n.map<string>((i32 x) {
+    if x == 3 {
+      throw Bad("three")
+    }
+    "#" + x.toStr()
+  })
+  return "mapped"
+  catch Bad ex { return "map: " + ex.message }
+}
+
+fun ->string inReduce() {
+  arr<i32> n = [1, 2, 3]
+  string s = n.reduce("", (string t, i32 x) {
+    if x == 3 {
+      throw Bad("three")
+    }
+    t + x.toStr()
+  })
+  return s
+  catch Bad ex { return "reduce: " + ex.message }
+}
+
+fun ->string silentOne() {
+  i32(i32) f = (i32 x) {
+    throw Quiet("ignored")
+    x
+  }
+  return "silent gives " + f(5).toStr()
+}
+
+fun ->string uncaught() {
+  i32(i32) f = (i32 x) { 10 / x }
+  return "got " + apply(f, 0).toStr()
+}
+
+fun ->string outer() {
+  return uncaught()
+  catch DivisionByZeroException { return "passed up to the caller of the caller" }
+}
+
+r.Console.log(direct())
+r.Console.log(throughParam())
+r.Console.log(inSort())
+r.Console.log(inFilter())
+r.Console.log(inMap())
+r.Console.log(inReduce())
+r.Console.log(silentOne())
+r.Console.log(outer())

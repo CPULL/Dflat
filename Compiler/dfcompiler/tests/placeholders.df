@@ -28,7 +28,7 @@ public class Evens : Sequence with (Item is i64) {
   }
 }
 
-fun r64 sum<Source : Sequence>(Source items) where Source.Item : Numeric {
+fun r64 sum<Source : Sequence>(->Source items) where Source.Item : Numeric {
   r64 total = 0.0
   var current = items.Next()
   while current != null {
@@ -38,7 +38,7 @@ fun r64 sum<Source : Sequence>(Source items) where Source.Item : Numeric {
   return total
 }
 
-fun i32 count<Source : Sequence>(Source items) {
+fun i32 count<Source : Sequence>(->Source items) {
   i32 n = 0
   while items.Next() != null {
     n += 1

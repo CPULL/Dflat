@@ -32,6 +32,35 @@ public sealed partial class CodeGen {
     }
   }
 
+  // string(addr) borrows a C text (UTF-8 ended by a 0) and never frees it; string(->addr) takes it and frees it with free() when the string
+  // ends or changes (spec 4.4.6, 15.9). The result is a string?: a null addr gives null, and string s = string(p) takes "" for it. ->x empties the variable or field x (it no longer owns the text); ->f() takes the result
+  Expr StringFromAddr(List<Node> args, Scope scope, Node at) {
+    if (args.Count != 1 || args[0].Kind == "Named") {
+      throw Error("string(...) takes one addr: string(addr) borrows a C text, string(->addr) takes it (spec 4.4.6)", at);
+    }
+    var arg = args[0];
+    bool owned = arg.Kind == "Gift";
+    var operand = owned ? arg.Children[0] : arg;
+    var value = ExprOf(operand, scope);
+    if (value.Type is not ("addr" or "null")) {
+      throw Error($"string(...) takes an addr, not {value.Type}: string(addr) borrows a C text, string(->addr) takes it (spec 4.4.6)", at);
+    }
+    if (value.Type == "null") {
+      return new Expr("((df_opt_string){0})", "string?", true);
+    }
+    string code = value.Code;
+    if (owned && operand.Kind is "Name" or "Member" or "Index") {
+      var target = LValue(operand, scope);
+      if (target.IsConst) {
+        throw Error("a const cannot be moved", operand);
+      }
+      string slot = NewTemp();
+      string taken = NewTemp();
+      code = $"({{ void** {slot} = &({target.Code}); void* {taken} = *{slot}; *{slot} = NULL; {taken}; }})";
+    }
+    return new Expr($"df_str_from_c_opt({code}, {(owned ? "true" : "false")})", "string?", true);   // a null addr is null (spec 7.1)
+  }
+
   // the prototype of the C function and the wrapper the program calls
   string ExternDeclarations(FunSig f) {
     string ret = f.Ret == "void" ? "void" : CType(f.Ret);

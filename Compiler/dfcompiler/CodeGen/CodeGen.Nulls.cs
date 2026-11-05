@@ -95,6 +95,9 @@ public sealed partial class CodeGen {
       string fallback = StrOwnedAs(other, "string", Convert(other, "string", n));
       return new Expr(WithTemp(left, temp => $"(df_str_len({temp}) != 0 ? {StrOwnedAs(left, "string", temp)} : {fallback})"), "string", true);
     }
+    if (left.Type == "string?") {
+      return OptStrCoalesce(left, n, scope);   // spec 7.1
+    }
     if (!IsNullable(left.Type)) {
       throw Error($"the left side of '??' is {left.Type}, which is never null", n);
     }

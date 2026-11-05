@@ -33,6 +33,12 @@ typedef uint64_t df_uns;
 typedef struct df_strh df_strh;
 typedef df_strh* df_string;
 
+/* string? (spec 7.1): null is has == false; "" is has == true with the empty string. A string? variable always owns its string */
+typedef struct {
+  bool has;
+  df_string val;
+} df_opt_string;
+
 /* the text of a string, for the code that reads it */
 typedef struct {
   const char* p;   /* UTF-8 bytes, followed by a 0 */
@@ -129,6 +135,7 @@ static const df_descriptor df_desc_InvalidIteratorReleaseException = { 47, "Inva
 static const df_descriptor df_desc_UsageOfDestroyedObjectException = { 48, "UsageOfDestroyedObjectException", &df_desc_Exception, false };
 static const df_descriptor df_desc_ObjectNotClonableException = { 49, "ObjectNotClonableException", &df_desc_Exception, false };
 static const df_descriptor df_desc_WritingOnRefCountWithoutLockingException = { 50, "WritingOnRefCountWithoutLockingException", &df_desc_Exception, false };
+static const df_descriptor df_desc_UnassignedFunctionCallException = { 51, "UnassignedFunctionCallException", &df_desc_NullPointerException, false };
 
 /* The exception of a function is a local of that function (df_err in the generated code) and travels back to the caller as the second
    value it returns. The runtime functions written in C cannot return it that way: they leave it here, and the code generated around
@@ -221,12 +228,17 @@ static void df_panic_unhandled(const df_exception* error) {
    The class is in the low 4 bits of the first byte.
    0-7  single block of 32 << class bytes: byte length in the high 4 bits of byte 0 and in byte 1, char length in bytes 2-3, text at byte 4
    11   literal: char length and byte length, each as two 32-bit words (low first), at bytes 4 and 12; text at byte 20
+   12   C string (string(addr), string(->addr)): char length and byte length as for 11, the pointer to the C text at byte 20; the high bit
+        of its first byte (DF_STR_COWNED) says that the string owns the C text and frees it. Read-only: the first change makes it a
+        regular string (the first allocation becomes class 13), and an owned C text is freed then
    13   moved: pointer to the new location at byte 4
    15   block string: a root (df_sroot) and a chain of 4 KB blocks (df_sblock), for the strings above 4091 bytes
-   The text of classes 0-11 ends with a 0. A class 11 with the high bit of its first byte (DF_STR_HEAP) is on the heap; a literal of the
+   The text of classes 0-12 ends with a 0. A class 11 with the high bit of its first byte (DF_STR_HEAP) is on the heap; a literal of the
    program has it clear and is never freed. */
 
 #define DF_STR_LITERAL 11
+#define DF_STR_CSTR 12
+#define DF_STR_COWNED 0x80
 #define DF_STR_MOVED 13
 #define DF_STR_BLOCK 15
 #define DF_STR_SINGLE_MAX 4091
@@ -310,6 +322,13 @@ static uint64_t df_str_w64(const uint8_t* at) {
   return (uint64_t)w[0] | ((uint64_t)w[1] << 32);
 }
 
+/* the C text of a class 12 string */
+static char* df_cstr_text(const uint8_t* h) {
+  char* text;
+  memcpy(&text, h + 20, sizeof text);
+  return text;
+}
+
 static df_sv df_view(df_string s) {
   df_sv v = { "", 0 };
   const uint8_t* h = df_str_res(s);
@@ -318,6 +337,9 @@ static df_sv df_view(df_string s) {
   }
   if ((h[0] & 0x0F) == DF_STR_LITERAL) {
     v.p = (const char*)h + 20;
+    v.len = df_str_w64(h + 12);
+  } else if ((h[0] & 0x0F) == DF_STR_CSTR) {
+    v.p = df_cstr_text(h);
     v.len = df_str_w64(h + 12);
   } else if (df_is_block(h)) {
     v.len = ((const df_sroot*)h)->bytes;
@@ -361,7 +383,7 @@ static uint64_t df_str_chars(df_string s) {
   if (!h) {
     return 0;
   }
-  if ((h[0] & 0x0F) == DF_STR_LITERAL) {
+  if ((h[0] & 0x0F) == DF_STR_LITERAL || (h[0] & 0x0F) == DF_STR_CSTR) {
     return df_str_w64(h + 4);
   }
   if (df_is_block(h)) {
@@ -428,6 +450,40 @@ static df_string df_str_alloc(uint64_t bytes, uint64_t chars, char** text) {
   }
   (*text)[bytes] = 0;
   return (df_string)h;
+}
+
+/* string(addr) and string(->addr) (spec 4.4.6): a class 12 string on the C text p, a UTF-8 text ended by a 0. owned: the string frees p
+   with free() when it ends or changes. A null p, or an empty text, is "" (an owned empty text is freed at once) */
+static df_string df_str_from_c(void* p, bool owned) {
+  const char* text = (const char*)p;
+  if (!text || !text[0]) {
+    if (text && owned) {
+      free(p);
+    }
+    return NULL;
+  }
+  uint64_t bytes = strlen(text);
+  uint64_t chars = df_utf8_count(text, bytes);
+  DF_STR_TRACE_ALLOC();
+  uint8_t* h = (uint8_t*)df_alloc(32);
+  uint32_t w[4] = { (uint32_t)chars, (uint32_t)(chars >> 32), (uint32_t)bytes, (uint32_t)(bytes >> 32) };
+  h[0] = (uint8_t)(DF_STR_CSTR | (owned ? DF_STR_COWNED : 0));
+  h[1] = h[2] = h[3] = 0;
+  memcpy(h + 4, w, sizeof w);
+  memcpy(h + 20, &p, sizeof p);
+  return (df_string)h;
+}
+
+/* a class 12 string gives up its C text (freed when it owns it); the first allocation is then reused as a moved string (class 13) */
+static void df_cstr_release(uint8_t* h) {
+  if (h[0] & DF_STR_COWNED) {
+    free(df_cstr_text(h));
+  }
+  h[0] = DF_STR_CSTR;
+}
+
+static bool df_is_cstr(const uint8_t* t) {
+  return t && (t[0] & 0x0F) == DF_STR_CSTR;
 }
 
 /* ---- block strings (spec 4.4.4): the counts are per block, a code point never straddles two blocks ---- */
@@ -774,6 +830,9 @@ static void df_str_free(df_string s) {
   if ((h[0] & 0x0F) == DF_STR_LITERAL && !(h[0] & DF_STR_HEAP)) {
     return;
   }
+  if (df_is_cstr(h)) {
+    df_cstr_release(h);
+  }
   if (df_is_block(h)) {
     df_bs_free_blocks((df_sroot*)h);
   }
@@ -869,6 +928,9 @@ static uint64_t df_str_cap(const uint8_t* t) {
 }
 
 static char* df_str_text(uint8_t* t) {
+  if (df_is_cstr(t)) {
+    return df_cstr_text(t);
+  }
   return (char*)t + ((t[0] & 0x0F) <= 7 ? 4 : 20);
 }
 
@@ -929,6 +991,9 @@ static void df_str_become(df_string* slot, bool* owned, df_string value) {
   if (f != t) {
     df_str_free((df_string)t);
   } else {
+    if (df_is_cstr(f)) {
+      df_cstr_release(f);   /* a C string becomes a regular one */
+    }
     unsigned old = (f[0] & 0x0F) <= 7 ? (f[0] & 0x0F) : 0x0F;
     f[0] = (uint8_t)(DF_STR_MOVED | (old << 4));
   }
@@ -948,7 +1013,7 @@ static uint8_t* df_str_room(df_string* slot, bool* owned, uint64_t bytes, uint64
   if (t && keep) {
     memcpy(text, df_str_text(t), keep);
   }
-  if (!t || df_str_cap(t) == 0) {
+  if (!t || (df_str_cap(t) == 0 && !df_is_cstr(t))) {
     *slot = (df_string)n;   /* the empty string or a literal: the variable gets a string of its own */
     *owned = true;
     return n;
@@ -956,6 +1021,9 @@ static uint8_t* df_str_room(df_string* slot, bool* owned, uint64_t bytes, uint64
   if (f != t) {
     df_str_free((df_string)t);   /* moved already: the previous target was reached only through the first allocation */
   } else {
+    if (df_is_cstr(f)) {
+      df_cstr_release(f);   /* a C string becomes a regular one: its text was copied above */
+    }
     unsigned old = (f[0] & 0x0F) <= 7 ? (f[0] & 0x0F) : 0x0F;
     f[0] = (uint8_t)(DF_STR_MOVED | (old << 4));
   }
@@ -970,6 +1038,12 @@ static void df_str_clear(df_string* slot, bool* owned) {
   }
   if (df_is_block(t)) {
     df_bs_free_blocks((df_sroot*)t);   /* it stays a block string, empty */
+    return;
+  }
+  if (df_is_cstr(t)) {
+    df_cstr_release(t);   /* a C string becomes a regular one, empty: its 32-byte first allocation is a class 0 */
+    t[0] = 0;
+    df_str_set_lens(t, 0, 0);
     return;
   }
   if (df_str_cap(t) == 0) {
@@ -1028,7 +1102,7 @@ static void df_str_take(df_string* slot, bool* owned, df_string value) {
     return;
   }
   df_sv v = df_view(value);
-  if (!t || df_str_cap(t) == 0) {
+  if (!t || (df_str_cap(t) == 0 && !df_is_cstr(t))) {
     *slot = value;   /* the empty string or a literal: the new string becomes the variable's own */
     *owned = value != NULL;
     return;
@@ -1204,6 +1278,42 @@ static df_string df_tmp(df_string s) {
   return s;
 }
 
+/* ---- string? (spec 7.1): the variable owns its string ---- */
+
+/* a new string? that is only read: its string ends with the statement */
+static df_opt_string df_opt_str_tmp(df_opt_string o) {
+  o.val = df_tmp(o.val);
+  return o;
+}
+
+/* a copy that its receiver owns */
+static df_opt_string df_opt_str_dup(df_opt_string o) {
+  o.val = o.has ? df_str_dup(o.val) : NULL;
+  return o;
+}
+
+/* the variable takes value, which it owns; its old string ends */
+static void df_opt_str_set(df_opt_string* slot, df_opt_string value) {
+  df_string old = slot->val;
+  *slot = value;
+  if (old != value.val) {
+    df_str_free(old);
+  }
+}
+
+/* the end of a string? variable */
+static void df_opt_str_drop(df_opt_string* slot) {
+  df_str_free(slot->val);
+  slot->has = false;
+  slot->val = NULL;
+}
+
+/* string(addr) (spec 4.4.6): a null addr is null */
+static df_opt_string df_str_from_c_opt(void* p, bool owned) {
+  df_opt_string o = { p != NULL, df_str_from_c(p, owned) };
+  return o;
+}
+
 /* a new object only used in a statement (an argument to a borrowing parameter, a receiver): it ends when the statement ends */
 static void* df_tmpo(void* o) {
   if (o) {
@@ -1213,6 +1323,65 @@ static void* df_tmpo(void* o) {
 }
 
 /* a value only used in a statement that has its own way to end (a tuple that holds arrays): a copy of it in a block, ended by fn */
+/* ---- function values (spec 13.3.5): { code, context }. A lambda without captures has no context; a context is counted: every holder
+   has a usage, and the last one runs the end code of the lambda (it ends what the lambda owns) and frees the context ---- */
+typedef struct df_lhead {
+  int64_t rc;
+  void (*end)(void*);
+} df_lhead;
+
+typedef struct {
+  void* code;
+  df_lhead* ctx;
+} df_fn;
+
+static df_fn df_fn_retain(df_fn f) {
+  if (f.ctx) {
+    f.ctx->rc++;
+  }
+  return f;
+}
+
+static void df_fn_release(df_fn f) {
+  if (f.ctx && --f.ctx->rc == 0) {
+    f.ctx->end(f.ctx);
+    free(f.ctx);
+  }
+}
+
+/* a variable takes a function value it owns a usage of; the old one is released */
+static void df_fn_set(df_fn* slot, df_fn value) {
+  df_fn old = *slot;
+  *slot = value;
+  df_fn_release(old);
+}
+
+/* sort(lambda) (spec 6.6): the lambda the comparer of the sort calls; saved and restored around each sort, so a sort inside a comparer works */
+static df_fn df_sort_fn;
+/* the exception the lambda of a sort let out: the comparer keeps the first one and the sort finishes; it is raised after the sort */
+static df_exception* df_sort_err;
+
+static void df_fn_drop(df_fn* slot) {
+  df_fn_release(*slot);
+  slot->code = NULL;
+  slot->ctx = NULL;
+}
+
+static void* df_tmpf(void* p, void (*fn)(void*));
+
+static void df_fn_ctx_release(void* ctx) {
+  df_fn f = { NULL, (df_lhead*)ctx };
+  df_fn_release(f);
+}
+
+/* a new function value only used in this statement (called, or passed to a call): its usage ends with the statement */
+static df_fn df_fn_tmp(df_fn f) {
+  if (f.ctx) {
+    df_tmpf(f.ctx, df_fn_ctx_release);
+  }
+  return f;
+}
+
 static void* df_tmpf(void* p, void (*fn)(void*)) {
   df_tmp_push(p, false);
   df_tmp_fns[df_tmp_top - 1] = fn;

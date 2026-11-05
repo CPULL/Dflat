@@ -1,0 +1,11 @@
+k/x/2 [3, 2]
+boss!
+end rex
+rex!3
+end rex
+10
+4
+done
+end boss
+end boss
+---- exit code 0 ----

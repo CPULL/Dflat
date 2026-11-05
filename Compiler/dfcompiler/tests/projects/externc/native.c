@@ -16,3 +16,5 @@ void bytes_fill(uint8_t* data, size_t len, uint8_t value) { for (size_t i = 0; i
 double halve(double x) { return x / 2; }
 bool is_even(int32_t n) { return n % 2 == 0; }
 void* nothing(void) { return NULL; }
+const char* greeting(void) { return "h\xc3\xa9llo"; }
+char* make_text(int32_t n) { char* t = (char*)malloc(n + 1); memset(t, 'x', n); t[n] = 0; return t; }

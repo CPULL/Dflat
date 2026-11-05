@@ -1,0 +1,2 @@
+namespace lambda_var
+var f = (i32 x) { }

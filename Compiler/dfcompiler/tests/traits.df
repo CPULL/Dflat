@@ -4,14 +4,14 @@ alias Root as r
 trait Named {
   public string name = "unnamed"
   public fun string Label()                          // must be implemented
-  public fun ->string Hello() { "Hi " + Label() + " (" + name + ")" }
+  unrestricted fun ->string Hello() { "Hi " + Label() + " (" + name + ")" }
 }
 
 trait Shape : Named {
   public i32 sides
   Shape() { sides = 3 }
   public fun r64 Area()
-  public fun ->string Info() { Hello() + " area " + Area() + " sides " + sides }
+  unrestricted fun ->string Info() { Hello() + " area " + Area() + " sides " + sides }
 }
 
 public class Square : Shape {

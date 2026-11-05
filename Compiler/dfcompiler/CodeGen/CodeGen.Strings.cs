@@ -22,6 +22,7 @@ public sealed partial class CodeGen {
       ? e.Fresh : true,
     "Binary" => n.Text == "+" || (n.Text == "??" && e.Fresh),
     "Paren" or "Gift" => e.Fresh,
+    "Member" => e.Fresh && e.Code.StartsWith("df_str_dup_cstr("),   // ex.message, ex.function: a new string made from the C text of the exception
     _ => false
   };
 
@@ -63,7 +64,7 @@ public sealed partial class CodeGen {
 
   // C for "the value is new": a value of another type converted to a string is new too
   static string FreshCode(Expr value, string converted) =>
-    value.Type != "string" || value.Fresh || IsStaticStr(converted) ? "true" : "false";
+    value.Type is not ("string" or "string?") || value.Fresh || IsStaticStr(converted) ? "true" : "false";
 
   // v = value for a string variable, field, tuple item or reference parameter; fresh is C code ("true", "false" or a flag)
   string StrAssign(LValueInfo target, string fresh, string converted) {
@@ -83,8 +84,16 @@ public sealed partial class CodeGen {
   }
 
   // the value of an item of a collection (spec 4): its own copy of the string, in its smallest form
-  static string StrItemAs(Expr value, string elemType, string converted) =>
-    elemType != "string" || IsStaticStr(converted) ? converted : $"df_str_item({converted}, {FreshCode(value, converted)})";
+  string StrItemAs(Expr value, string elemType, string converted) =>
+    elemType == "string?" ? OptStrItem(value, converted)
+    : elemType != "string" || IsStaticStr(converted) ? converted : $"df_str_item({converted}, {FreshCode(value, converted)})";
+
+  // the value of a string? item, a field or a tuple item: a string? of its own (converted: the value converted to string?)
+  string OptStrItem(Expr value, string converted) => value.Type switch {
+    "string?" => value.Fresh ? converted : $"df_opt_str_dup({converted})",
+    "string" => $"((df_opt_string){{ true, {StrOwned(value, value.Code)} }})",
+    _ => converted
+  };
 
   // ->x on a string: the string leaves the variable or the field with its ownership (a borrowed one is copied). Null when the operand
   // is not a string.
@@ -108,8 +117,24 @@ public sealed partial class CodeGen {
   }
 
   // the value of an item or a tuple item of type string: a string of its own
-  static string StrOwnedAs(Expr value, string targetType, string converted) =>
-    targetType != "string" || FreshCode(value, converted) == "true" ? converted : $"df_str_dup({converted})";
+  string StrOwnedAs(Expr value, string targetType, string converted) =>
+    targetType == "string?" ? OptStrItem(value, converted)
+    : targetType != "string" || FreshCode(value, converted) == "true" ? converted : $"df_str_dup({converted})";
+
+  // items that own a string: string and string? (spec 4, 7.1)
+  static bool IsStrItem(string elem) => elem is "string" or "string?";
+
+  // the copy of an item that a new owner keeps
+  static string StrItemDup(string elem, string item) =>
+    elem == "string" ? $"df_str_dup({item})" : elem == "string?" ? $"df_opt_str_dup({item})" : item;
+
+  // the end of the string an item holds
+  static string StrItemFree(string elem, string item) =>
+    elem == "string" ? $"df_str_free({item}); " : elem == "string?" ? $"df_str_free(({item}).val); " : "";
+
+  // the item takes a value it owns; the string it held ends
+  static string StrItemPut(string elem, string slot, string value) =>
+    elem == "string" ? $"df_str_put(&{slot}, {value}, true);" : elem == "string?" ? $"df_opt_str_set(&{slot}, {value});" : $"{slot} = {value};";
 
   // the end of a string variable (its implicit atEnd)
   static Node StrDropNode(string name, Node at) {
@@ -118,6 +143,14 @@ public sealed partial class CodeGen {
   }
 
   void EmitStrDrop(Node s, StringBuilder sb, Scope scope, string pad) {
+    if (scope.Find(s.Text!) is VarInfo { IsParam: false } held && IsFunType(held.Type)) {
+      sb.Append($"{pad}df_fn_drop(&{held.CName});\n");   // spec 13.3.5
+      return;
+    }
+    if (scope.Find(s.Text!) is VarInfo { Type: "string?", IsParam: false } optional) {
+      sb.Append($"{pad}df_opt_str_drop(&{optional.CName});\n");   // spec 7.1
+      return;
+    }
     if (scope.Find(s.Text!) is VarInfo { OwnFlag: string flag } variable) {
       sb.Append($"{pad}df_str_drop(&{variable.CName}, &{flag});\n");
     }

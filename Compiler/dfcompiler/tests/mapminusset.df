@@ -30,7 +30,7 @@ Registry reg = Registry()
 set<i32> gone = [2, 3]
 reg.seen -= gone
 r.Console.log(reg.seen)                              // [1: true]
-fun string prune(map<i32, i32> m, set<i32> keys) {
+fun string prune(&map<i32, i32> m, set<i32> keys) {
   for (i32 k, i32 v) in m {
     m -= keys
   }
@@ -39,4 +39,4 @@ fun string prune(map<i32, i32> m, set<i32> keys) {
 }
 map<i32, i32> counts = [1: 1, 2: 2]
 set<i32> ones = [1]
-r.Console.log(prune(counts, ones))                   // locked
+r.Console.log(prune(&counts, ones))                   // locked

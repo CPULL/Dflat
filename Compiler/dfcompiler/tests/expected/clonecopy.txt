@@ -13,6 +13,8 @@ y y1 x1
 end of run
   end y1
   end x1
+  end x1
+  end x2
   end a2
   end a1
   end a2

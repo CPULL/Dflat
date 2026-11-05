@@ -266,7 +266,7 @@ public sealed partial class CodeGen {
         + $"if (!df_idx_ok({length}, {position}, {fn!.NameConst})) {RaiseJump} {ReplaceArrItem(elem, slot, incoming)}}})";
     }
     // a string item that is replaced ends
-    string store = elem == "string" ? $"df_str_put(&{slot}, {value}, true);" : $"{slot} = {value};";
+    string store = StrItemPut(elem, slot, value);
     return $"({{ {CType(obj.Type)} {array} = {holder}; df_uns {position} = {IndexValue(index, target)}; "
       + $"if (!df_idx_ok({length}, {position}, {fn!.NameConst})) {RaiseJump} {store} }})";
   }
@@ -313,6 +313,13 @@ public sealed partial class CodeGen {
         if (IsArr(elem) && at.Line < LibraryLine) {
           throw Error("fill would put one array in every item: set the items one by one (spec 6.8.1)", at);
         }
+        if (elem == "string?") {
+          // every item gets its own copy; the strings the items held end (spec 7.1)
+          var given = ExprOf(args[0], scope, elem);
+          string at3 = NewTemp();
+          string source = given.Type == "string?" ? OptStrRead(given).Code : OptStrBorrowed(given, args[0]);
+          return new Expr(WithTemp(array, a => $"({{ df_opt_string {at3} = {source}; for (df_uns k_{at3} = 0; k_{at3} < {a}.len; k_{at3}++) {{ df_opt_str_set(&{Elem(a, $"k_{at3}")}, df_opt_str_dup({at3})); }} }})"), "void");
+        }
         if (elem == "string") {
           // every item gets its own copy; the strings the items held end
           var text = ExprOf(args[0], scope, elem);
@@ -337,6 +344,7 @@ public sealed partial class CodeGen {
         string reset = IsClass(elem)
           ? $"if ({{0}} != NULL) {{{{ void* {gone} = (void*){{0}}; {{0}} = NULL; df_drop({gone}); }}}}"
           : elem == "string" ? "df_str_free({0}); {0} = NULL;"
+          : elem == "string?" ? "df_opt_str_drop(&{0});"
           : IsArr(elem) ? $"{ArrDropHelper(elem)}({{0}}); {{0}} = {ZeroValue(elem)};" : $"{{0}} = {ZeroValue(elem)};";
         string code = WithTemp(array, a =>
           $"({{ for (df_uns {i} = 0; {i} < {a}.len; {i}++) {{ {string.Format(reset, Elem(a, i))} }} }})");
@@ -355,9 +363,15 @@ public sealed partial class CodeGen {
         if (args.Count > 1) {
           throw Error($"{name} takes no argument or a SortDirection", at);
         }
+        if (SortByFunction(elem, args, scope) is var (byFunction, before, after)) {
+          NeedChunk("sort");   // sort(lambda) (spec 6.6)
+          string sorted = WithTemp(array, a =>
+            $"({{ {before}df_sort({a}.p, {a}.len, sizeof(*{a}.p), {byFunction}, {(name == "sort" ? "true" : "false")}, false); {after}}})");
+          return new Expr(sorted, "void");
+        }
         string? compare = CompareFunction(elem);
         if (compare == null) {
-          throw Error($"{name} cannot order {elem} yet (objects and tuples need a comparer)", at);
+          throw Error($"{name} cannot order {elem} yet (objects and tuples need a comparer, or give a lambda)", at);
         }
         string descending = SortDescending(name, args, scope, at);
         NeedChunk("sort");
@@ -441,7 +455,7 @@ public sealed partial class CodeGen {
     string old = NewTemp();
     string code = $"({{ {CType(array.Type)} {a} = {array.Code}; df_uns {i} = {IndexValue(first, args[0])}; {CType(elem)} {incoming} = {StrItemAs(replacement, elem, Convert(replacement, elem, args[1]))}; "
       + $"if (!df_idx_ok({a}.len, {i}, {fn!.NameConst})) {RaiseJump} {CType(elem)} {old} = {a}.p[{i}]; {a}.p[{i}] = {incoming}; {old}; }})";
-    var result = new Expr(code, elem, IsClass(elem) || elem == "string");
+    var result = new Expr(code, elem, IsClass(elem) || IsStrItem(elem));
     return boxed ? UnboxTaken(result) : result;
   }
 
@@ -686,8 +700,8 @@ public sealed partial class CodeGen {
       + $"df_uns {di} = {dstIndex}; df_uns {si} = {srcIndex}; df_uns {n} = {count}; "
       + $"if ({d}.p != NULL && {d}.p == {source0}.p) {{ df_raise(&df_desc_ModifyingProtectedSourceException, {fn!.NameConst}); {RaiseJump} }} "
       + $"if ({di} > {d}.len || {n} > {d}.len - {di} || {si} > {source0}.len || {n} > {source0}.len - {si}) {{ df_raise(&df_desc_IndexOutOfRangeException, {fn!.NameConst}); {RaiseJump} }} "
-      + (elem == "string"
-        ? $"for (df_uns k_{n} = 0; k_{n} < {n}; k_{n}++) {{ df_str_put(&{d}.p[{di} + k_{n}], df_str_dup({source0}.p[{si} + k_{n}]), true); }} }})"
+      + (IsStrItem(elem)
+        ? $"for (df_uns k_{n} = 0; k_{n} < {n}; k_{n}++) {{ {StrItemPut(elem, $"{d}.p[{di} + k_{n}]", StrItemDup(elem, $"{source0}.p[{si} + k_{n}]"))} }} }})"
         : $"if ({n} > 0) {{ memcpy({d}.p + {di}, {source0}.p + {si}, {n} * sizeof(*{d}.p)); }} }})");
     return new Expr(code, "void");
   }
@@ -860,7 +874,7 @@ public sealed partial class CodeGen {
       if (overMap && index == 1 && node.Text == loopVars[0].Node.Text) {
         throw Error($"the key and the value cannot both be called '{node.Text}'", s);
       }
-      innerScope.Vars[node.Text!] = new VarInfo(declared, "v_" + node.Text, false) { ReadOnlyString = declared == "string" };
+      innerScope.Vars[node.Text!] = new VarInfo(declared, "v_" + node.Text, false) { ReadOnlyString = IsStrItem(declared) };
       loopVars[index] = (node, declared, itemType);
     }
     string type = loopVars[0].Type;

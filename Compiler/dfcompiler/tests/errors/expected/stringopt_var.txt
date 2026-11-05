@@ -1,0 +1,1 @@
+stringopt_var.df(2): error: feature not supported: a string? declared with var: write string? x (spec 7.1)

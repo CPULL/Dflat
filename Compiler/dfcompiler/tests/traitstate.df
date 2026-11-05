@@ -85,15 +85,15 @@ public class Lazy : Worker {
   override fun i32 work(i32 n) { parent.work(n) + 1 }
 }
 
-fun ->string attempt(Logged job, i32 n) {
+fun ->string attempt(&Worker job, i32 n) {
   return $"result {job.work(n)}"
   catch NegativeWork { return "failed: no executeAfter" }
 }
 
 Worker worker = Worker()
 r.Console.log(worker.work(3))
-r.Console.log(attempt(worker, 4))
-r.Console.log(attempt(worker, -1))
+r.Console.log(attempt(&worker, 4))
+r.Console.log(attempt(&worker, -1))
 Lazy lazy = Lazy()
 r.Console.log(lazy.work(5))
 

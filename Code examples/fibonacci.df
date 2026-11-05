@@ -1,10 +1,10 @@
 fun int main(arr<string> args) {
-  File output = File("fibonacci.txt") atEnd { output.close() }
+  File output = File("fibonacci.txt")
   u64 limit = 0
   i64 limitInput = 0
   bool isNumber = false
   if args.len > 1 {
-    isNumber = i64.tryParse(args[1], (&)limitInput)
+    isNumber = i64.tryParse(args[1], &limitInput)
 		if isNumber then limit = (u64)limitInput
   }
   if !isNumber || limitInput < 0 {

@@ -1,0 +1,1 @@
+stringopt_append.df(3): error: '+=' is not defined on string?: unwrap it with '??' or 'enforce' first (spec 7.1)

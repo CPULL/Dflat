@@ -131,7 +131,8 @@ public sealed partial class CodeGen {
     ["InvalidIteratorReleaseException"] = 47,   // spec 6.4: a release of the counter of open iterators when it is zero
     ["UsageOfDestroyedObjectException"] = 48,  // spec 12.5: an adopted child whose parent ended
     ["ObjectNotClonableException"] = 49,       // spec 12.6: tryClone()
-    ["WritingOnRefCountWithoutLockingException"] = 50   // spec 12.7: a write to a &@T without its lock
+    ["WritingOnRefCountWithoutLockingException"] = 50,  // spec 12.7: a write to a &@T without its lock
+    ["UnassignedFunctionCallException"] = 51   // spec 13.3.2: a call of a null function value (a child of NullPointerException)
   };
 
   readonly Stack<Frame> frames = new();
@@ -804,8 +805,8 @@ public sealed partial class CodeGen {
   Expr ExceptionMember(Expr exception, string member, Node at) {
     return member switch {
       "id" => new Expr($"(({exception.Code})->id)", "u64"),
-      "message" => new Expr($"df_str_dup_cstr(({exception.Code})->message)", "string"),
-      "function" => new Expr($"df_str_dup_cstr(({exception.Code})->function)", "string"),
+      "message" => new Expr($"df_str_dup_cstr(({exception.Code})->message)", "string", true),   // a new string: read only, it ends with the statement
+      "function" => new Expr($"df_str_dup_cstr(({exception.Code})->function)", "string", true),
       "line" => new Expr($"(({exception.Code})->line)", "u64"),
       _ when ExceptionMembers.FirstOrDefault(known => known.Equals(member, StringComparison.OrdinalIgnoreCase)) is string known
         => throw Error($"Exception has no member '{member}': write {known} (spec 15.2)", at),

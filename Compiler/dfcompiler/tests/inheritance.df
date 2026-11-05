@@ -5,9 +5,9 @@ public class Shape {
   string label = "shape"
   public static i32 count = 0
   public static fun i32 Total() { count }
-  public fun ->string Describe() { "I am a " + Kind() + " " + label }
+  unrestricted fun ->string Describe() { "I am a " + Kind() + " " + label }
   public fun string Kind() { "shape" }
-  public fun r64 Area() { 0.0 }
+  unrestricted fun r64 Area() { 0.0 }
   public fun Touch() { count += 1 }
 }
 

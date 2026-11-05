@@ -1,0 +1,1 @@
+lambda_var.df(2): error: write the function type of 'f': a lambda is kept in a variable declared with it, as fun(i32) f = ... (spec 13.3.2)

@@ -157,6 +157,9 @@ public sealed partial class CodeGen {
     if (type == "string") {
       return $"df_str_dup({source})";
     }
+    if (type == "string?") {
+      return $"df_opt_str_dup({source})";   // spec 7.1
+    }
     if (IsClass(type)) {
       return $"(({CType(type)})df_clone_obj((const void*)({source})))";
     }

@@ -1,0 +1,1 @@
+string_from_two.df(3): error: string(...) takes one addr: string(addr) borrows a C text, string(->addr) takes it (spec 4.4.6)

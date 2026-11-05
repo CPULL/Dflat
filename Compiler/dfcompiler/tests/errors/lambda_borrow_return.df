@@ -1,0 +1,5 @@
+namespace lambda_borrow_return
+fun ->fun() make() {
+  i32 n = 1
+  return () { Root.Console.log(n) }
+}

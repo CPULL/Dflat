@@ -1,0 +1,7 @@
+namespace lambda_this_used
+class Box {
+  i32 n = 0
+  public fun go() {
+    fun() f = () { Root.Console.log(this.n) }
+  }
+}

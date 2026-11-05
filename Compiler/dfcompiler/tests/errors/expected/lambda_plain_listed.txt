@@ -1,0 +1,1 @@
+lambda_plain_listed.df(3): error: 'n' is captured read-only without listing it: remove it from the list, or write &n to change it (spec 13.3.1)

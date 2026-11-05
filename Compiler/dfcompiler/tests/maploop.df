@@ -29,22 +29,22 @@ for (string name, i32 age) in ages {
 r.Console.log(ages)                              // [alice: 26, bob: 31, carol: 41]
 
 // a new key or a removal while iterating raises the exception; the counter is given back after the loop
-fun bool addInLoop(map<string, i32> m) {
+fun bool addInLoop(&map<string, i32> m) {
   for (string key, i32 value) in m {
     m["zed"] = 1
   }
   return true
   catch ModifyingIteratedCollectionException { return false }
 }
-r.Console.log(addInLoop(ages))                   // false
-fun bool removeInLoop(map<string, i32> m) {
+r.Console.log(addInLoop(&ages))                   // false
+fun bool removeInLoop(&map<string, i32> m) {
   for (string key, i32 value) in m {
     m.removeAt(key)
   }
   return true
   catch ModifyingIteratedCollectionException { return false }
 }
-r.Console.log(removeInLoop(ages))                // false
+r.Console.log(removeInLoop(&ages))                // false
 ages["dave"] = 50                                // the loops ended: the map can change again
 r.Console.log(ages.len)                          // 4
 

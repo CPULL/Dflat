@@ -103,9 +103,9 @@ fun i32 outside(vec<i32> source, u64 index) {
 }
 r.Console.log(outside(numbers, 1))
 r.Console.log(outside(numbers, 40))
-fun bool badRemove(vec<i32> source) {
+fun bool badRemove(&vec<i32> source) {
   source.removeAt(10)
   return true
   catch IndexOutOfRangeException { return false }
 }
-r.Console.log(badRemove(numbers))
+r.Console.log(badRemove(&numbers))

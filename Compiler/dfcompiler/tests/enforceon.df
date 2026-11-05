@@ -6,14 +6,14 @@ public class Trouble(string text) : Exception { }
 
 public class Part(string name) {
   public string name
-  public fun work(bool fail) {
+  unrestricted fun work(bool fail) {
     if fail {
       throw Trouble(name + " failed")
     }
     r.Console.log("    " + name + " works")
   }
-  public fun Part self() { this }
-  public fun i32 value(i32 v) { v }
+  unrestricted fun Part self() { this }
+  unrestricted fun i32 value(i32 v) { v }
 }
 
 fun run(Part a, Part b, bool failA, bool failB) {

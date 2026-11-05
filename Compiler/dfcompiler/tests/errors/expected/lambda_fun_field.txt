@@ -1,0 +1,1 @@
+lambda_fun_field.df(3): error: feature not supported: a function value in a field (spec 13.3.2)

@@ -1,0 +1,5 @@
+namespace stringopt_loopvar_write
+arr<string?> a = ["x"]
+for string? s in a {
+  s = "y"
+}

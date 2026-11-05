@@ -29,12 +29,12 @@ work.removeAt(..1)
 r.Console.log(work)
 work.add(100)
 r.Console.log(work)
-fun bool badRange(list<i32> source) {
+fun bool badRange(&list<i32> source) {
   source.removeAt(2..40)
   return true
   catch IndexOutOfRangeException { return false }
 }
-r.Console.log(badRange(work))
+r.Console.log(badRange(&work))
 
 // add(collection): the items of an arr, a vec or a list are added at the end
 list<i32> all = [1]
@@ -45,12 +45,12 @@ all.add(fromArr)
 all.add(fromVec)
 all.add(fromList)
 r.Console.log($"{all} {fromList}")
-fun string addSelf(list<i32> source) {
+fun string addSelf(&list<i32> source) {
   source.add(source)
   return "added"
   catch ModifyingProtectedSourceException { return "the same list" }
 }
-r.Console.log(addSelf(all))
+r.Console.log(addSelf(&all))
 
 // objects move: add(->other) takes the nodes, and the other list ends
 list<Dog> kennel = [Dog("rex")]
@@ -71,13 +71,13 @@ r.Console.log(target)
 list<i32> other = [5, 6]
 target.copyFrom(0, other, 0..)
 r.Console.log(target)
-fun bool badCopy(list<i32> into) {
+fun bool badCopy(&list<i32> into) {
   arr<i32> one = [1]
   into.copyFrom(9, one, 0, 1)
   return true
   catch IndexOutOfRangeException { return false }
 }
-r.Console.log(badCopy(target))
+r.Console.log(badCopy(&target))
 
 // transformTo: the items move to another kind of collection and the original ends
 arr<i32> letters = [3, 1, 2]
@@ -130,7 +130,7 @@ for i32 n in big {
 r.Console.log($"{ordered} {big.len}")
 
 // the counter of open iterators: it goes back to zero on every way out of the loop
-fun string tryAdd(list<i32> source) {
+fun string tryAdd(&list<i32> source) {
   source.add(0)
   return "added"
   catch ModifyingIteratedCollectionException { return "locked" }
@@ -156,17 +156,17 @@ for i32 n in counted {
     break
   }
 }
-r.Console.log(tryAdd(counted))
+r.Console.log(tryAdd(&counted))
 r.Console.log(firstOver(counted, 4))
-r.Console.log(tryAdd(counted))
+r.Console.log(tryAdd(&counted))
 r.Console.log(throwInside(counted))
-r.Console.log(tryAdd(counted))
+r.Console.log(tryAdd(&counted))
 // nested loops on the same list, and the allowed changes while it is iterated
 for i32 outer in counted {
   for i32 inner in counted {
     counted[0] = inner
   }
-  r.Console.print(tryAdd(counted) + ";")
+  r.Console.print(tryAdd(&counted) + ";")
 }
 r.Console.log("")
 for i32 n in counted {
@@ -174,16 +174,16 @@ for i32 n in counted {
   counted.swap(0, 1)
   i32 was = counted.replace(1, 4)
 }
-r.Console.log($"{counted} {tryAdd(counted)}")
-fun string sortWhileLooping(list<i32> source) {
+r.Console.log($"{counted} {tryAdd(&counted)}")
+fun string sortWhileLooping(&list<i32> source) {
   for i32 n in source {
     source.sort()
   }
   return "no exception"
   catch ModifyingIteratedCollectionException { return "sort is locked" }
 }
-r.Console.log(sortWhileLooping(counted))
-fun string copyWhileLooping(list<i32> source) {
+r.Console.log(sortWhileLooping(&counted))
+fun string copyWhileLooping(&list<i32> source) {
   arr<i32> one = [1]
   for i32 n in source {
     source.copyFrom(0, one, 0, 1)
@@ -191,7 +191,7 @@ fun string copyWhileLooping(list<i32> source) {
   return "no exception"
   catch ModifyingIteratedCollectionException { return "copyFrom is locked" }
 }
-r.Console.log(copyWhileLooping(counted))
+r.Console.log(copyWhileLooping(&counted))
 vec<i32> values = [1, 2]
 for i32 n in values {
   if n == 1 {

@@ -1,7 +1,7 @@
 # Dflat Language
 A new language D♭ that is the same as C# but easier to write and faster to execute
 
-**Version** 0.0.23  2026/11/04 by CPU
+**Version** 0.0.24  2026/11/05 by CPU
 
 ## D♭ — Dflat Language Specification (draft)
 
@@ -129,6 +129,9 @@ It is important to note that 2 special cases are used to decide who is allowed t
   - an `unrestricted` method can be called;
   - an `asparent` method can be called by the object itself and by its children (12.5).
 - `unrestricted` is meant for methods that do not change the object or where the developer takes responsibility. The compiler does not perform checks.
+- `getIterator()` can always be called through a read-only reference: iterating reads the collection (6.7).
+- The collections of the compiler, through a read-only reference, give only the members that do not change them: `has`, `indexOf`, `indexOfFrom`, `hasKey`, `tryGet`, `keyOf`, `clone`, the set operations that make a new set (`union`, `intersection`, `difference`, `symmetricDifference`) and the set tests (`isSubsetOf`, `isSupersetOf`, `isDisjointFrom`); reading items and properties is allowed, assigning items is a compile error.
+- A `File` (17.6.3) only holds a path, so the members that do not change the path can be called through a read-only reference: `exists`, `copyTo`, `getAllFiles`, `readAll`, `readAllText`, `writeAll`, `writeAllText`, `delete`, `open`, `createDirectory`. A stream changes when it is read, written or moved, so it needs `&`.
 
 
 # 2. Built-in types
@@ -396,7 +399,7 @@ Signed 64-bit; raw value = `value × 8 + code`.
 - **To `time`**: a value out of range converts to null and raises `OutOfRangeCastException` if a specific catch exists (silent).
 - **Transmute `[type]`**: same bits; truncates low bits or zero-extends. `[bool]`: 0, null, `""`, NaN and `'\0'` are false, anything else is true. `[char]`: invalid → U+0000, or `InvalidCharacterCodePointException` if a specific catch exists.
 - **Implicit**: only widening that keeps the value: same family (`i8 → i64`, `r32 → r64`) and unsigned to a wider signed (`u16 → i32`); any scalar type → bool; any type → `string` when the target is a `string` (calls `toStr()`). An implicit conversion is equivalent to a cast.
-- **To string**: a null `string` converts to `""`; a null of any other type converts to `"null"`.
+- **To string**: a null `string` converts to `""`; a null of any other type converts to `"null"`, `string?` included (`$"{s}"`). Assigned to a `string`, a null `string?` is `""` (7.1).
 - **Pointers**: created from numbers or other pointers by transmute only (`[*u64]address`); pointer → `addr` also with `=`.
 - **To bool**: numbers 0 / NaN = false; `char` `\0`; `date` / `time` / `clock` null; `lapse` zero or null; `string` null/empty; collections and tuples cannot be cast or transmuted to bool.
 
@@ -502,7 +505,7 @@ This layout is for 32- and 64-bit targets; small targets (8 and 16 bits) have th
 | 0–7 | single-block string of 32, 64, 128, 256, 512, 1024, 2048 or 4096 bytes |
 | 8–10 | free |
 | 11 | literal: read-only sequence of bytes |
-| 12 | free |
+| 12 | C string: a text of C code, borrowed or owned (4.4.6) |
 | 13 | moved: the string lives elsewhere |
 | 14 | free |
 | 15 | block string |
@@ -591,6 +594,34 @@ Meant for long text that is modified at any point (editor-like) without copying 
 
 - A string never moves to a smaller form on its own.
 - `shrink()` stores the string in the smallest form that holds it: a smaller class, the blocks of a block string packed full, or a single-block string when the text fits in 4091 bytes.
+
+### 4.4.6 C strings
+
+A text that C code gives (15.9), used as a `string` without copying it: UTF-8 ended by a 0, of any length.
+
+```
+addr p = get_name()               // a C function that returns a char*
+string name = string(p)           // borrows the C text: Dflat never frees it
+string text = string(->p)         // takes the C text: Dflat frees it, p becomes null
+string line = string(->read_line())
+```
+
+- `string(addr)` borrows the C text: the C library keeps it until its own free function is called, and Dflat never frees it.
+- `string(->addr)` takes the C text: the string frees it with the C `free()` when it ends or changes. `->x` sets the variable or field `x` to null; a result (`->f()`) needs nothing more.
+- `string(...)` gives a `string?` (7.1): a null `addr` gives null, an empty text gives `""` (an owned empty text is freed at once). Kept in a `string`, null is `""` (`string s = string(p)`).
+- The lengths are counted once, when the string is made.
+- A C string is read-only. The first change (`+=`, `insert`, `clear()`, ...) copies the text into a regular string (single-block or block string) and the first allocation becomes a moved string (class 13), so a borrow sees the change; an owned C text is freed then. Dflat never writes into the C text; whether C code may change it (read-only or writable) is decided by each interop function.
+- Kept in a collection or a field, a C string is copied into a regular string like a borrowed string; an owned C text is freed then.
+
+| Start | Size | Field | Description |
+|---|---|---|---|
+| 0 | 1 | class | 12 (4 bits); the high bit is set when the string owns the C text |
+| 1 | 3 | padding | |
+| 4 | 8 | length in chars | |
+| 12 | 8 | length in bytes | |
+| 20 | 8 (4 on 32-bit) | text | pointer to the C text |
+
+- The first allocation is 32 bytes, so `clear()` turns it into an empty class 0 in place.
 
 
 # 5. `dfoot`
@@ -798,6 +829,7 @@ arr<i32> middle = scores[2..5]!       // copy
 | `sort`, `sortUnstable`, `reverse` | ✓ | ✓ | ✓ | – | – | – | – |
 | `copyFrom` | ✓ | ✓ | ✓ | – | – | – | – |
 | `transformTo<Kind>()` | ✓ | ✓ | ✓ | – | – | – | – |
+| `filter`, `map<U>`, `reduce` | ✓ | ✓ | ✓ | – | – | – | – |
 | `+=` | – | – | – | `add` | `add` | `add` | `add` |
 | `-=` | – | – | – | `removeAt`, a set of keys | `removeAt`, a set of keys | `remove`, a collection | `remove`, a collection |
 | set operations and tests | – | – | – | – | – | ✓ | ✓ |
@@ -847,6 +879,11 @@ A member marked `–` is a compile error on that collection (for example `hasKey
   - It is a moving method: the original ends and the items go to the new collection without being cloned. Using `myArr` after the call is a compile error, as after `->myArr`.
   - The item type is taken from the original (`arr<i32>` gives `vec<i32>`). `transformTo<vec<i32>>()` is accepted too; a different item type is a compile error.
   - Between `arr`, `vec` and `list`. `vec` to `arr` can reuse the block with no copy, after shrinking it to the length.
+- Functional members (`arr`, `vec`, `list`): they give a new value and leave the collection as it is, so they can be called through a read-only reference.
+  - `filter(bool(T))`: a new collection of the same kind with the items for which the function returns `true`, copied (numbers, `bool`, `char`, dates, enums and strings for now; objects and arrays are not built).
+  - `map<U>(U(T))`: a new collection of the same kind with what the function returns for each item; the new items are owned by the new collection. `U` is written, unless the function is a variable of a function type.
+  - `reduce(A start, A(A, T))`: the total, starting from `start`; `A` is the type of the first parameter of the function (numbers, `bool`, `char`, dates and strings for now).
+  - The function is called in the order of the items.
 
 ```
 arr source = [1, 2, 3]
@@ -854,7 +891,10 @@ arr destination = [1, 2, 3, 4]
 destination.copyFrom(3, source, 0..3)    // compile error: 3 items do not fit from index 3 of 4 items
 
 names.sort(SortDirection.DESC)
-names.sort((first, second) { first.len < second.len })
+names.sort((string first, string second) { (int)first.len - (int)second.len })   // shortest first
+vec<i32> evens = numbers.filter((i32 x) { x % 2 == 0 })
+list<string> labels = numbers.map<string>((i32 x) { "#" + x.toStr() })
+i32 total = numbers.reduce(0, (i32 sum, i32 x) { sum + x })
 ```
 
 ## 6.7 Collection traits
@@ -1298,7 +1338,23 @@ trait MapIterator<Key, Value> : Iterator {
 
 - Basic native types (integers, reals, `dec`, `bool`, `char`, enums) are not nullable by default: nullable only as `type?`.
 - Other native types (`string`, `date`, `time`, `clock`, `lapse`, `addr`), pointers and all objects (classes, collections) are nullable by default; `type?` on them is a compile error.
-- Strings: `""` and null are the same; `string` is already nullable, so `string?` is a compile error.
+- Strings: for a `string`, `""` and null are the same.
+- `string?` is a string where null is not `""` (null `!=` `""`), mostly for C interop (`string? name = string(p)`, 4.4.6):
+
+```
+string? a = null
+string? b = ""
+a == null            // true
+b == null            // false
+string s = a         // "": a null string? is "" in a string
+a ?? "none"          // "none"; b ?? "none" is ""
+$"{a}"               // "null"
+```
+
+  - It converts to `string` implicitly (null becomes `""`); a `string` converts to `string?` implicitly and is never null.
+  - `==`, `!=`, `??`, `??=`, `?.` and `enforce` work as for the other nullable types. `+=` and the changes in place are not defined on a `string?`.
+  - A `string?` variable, field or item owns its string: a borrowed string assigned to it is copied, and the string ends with the variable, the object or the collection. A `string?` parameter or loop variable borrows it and is read-only; a function returns a `string?` its caller owns (`fun ->string? find()`). A clone (12.6) copies it.
+  - Built: local variables (declared with their type, not with `var`), parameters, results, fields, and the items of `arr`, `vec` and `list` (with their members, `filter` and `map<string?>`). Tuple items hold a `string?` as they hold a `string`. Not yet: the keys and values of maps and the items of sets, `&string?` and `->string?` parameters.
 - Null propagates in arithmetic; equals only null; sorts first.
 - Null object access raises `NullPointerException`; no `x!` force-unwrap.
 - `?.` `??` `??=`; `i8 b = maybe ?? 0` unwraps into a non-nullable target.
@@ -2841,7 +2897,17 @@ fun(i32) f3 = f1!                                      // a copy
 - For each lambda expression the compiler writes two pieces of code: the creation code, where the lambda is written (once: it takes the borrows, makes the copies, does the moves, adds the usages), and the end code, when the last holder of the context lets it go (once: it ends the owned values and gives back the usages and the weak references). A call only passes the context.
 - A lambda that does not escape (given to a call, not stored and not returned) has its context on the stack, with no allocation and no count. A lambda that is stored or returned has its context on the heap, with a count. The code written by the user is the same.
 
-### 13.3.6 Examples
+### 13.3.6 What is built (compiler 0.0.53)
+
+- Function types for local variables, parameters and results, null by default; a call of a null one raises `UnassignedFunctionCallException`. A result of a function type is written with the keyword form: `fun ->fun i32(i32) adder(i32 n)` (the form `i32(i32)` reads as the name of the function there).
+- Lambdas with typed parameters, called where they are written, kept in a variable declared with the function type (`var` is a compile error), passed to a parameter and returned. The result type comes from the function type expected there; without one the lambda returns nothing.
+- Captures: unlisted (read-only borrow), `&a` of numbers, `bool`, `char`, dates and objects, `a!` of those values, strings, `string?`, function values, objects (a clone, 12.6) and arrays, `->a` of strings, objects, arrays and function values. Inside a method the fields are captured by their bare names, with the same forms; a borrowed field borrows the object.
+- Borrows (13.3.4), until the lifetime of borrows is checked: a lambda with a borrowed capture (unlisted or `&`), and a function-type parameter, can be called, passed to a call or kept in a new local; assigning it to an existing variable or returning it is a compile error.
+- Every context is on the heap with a count (the stack form of 13.3.5 is not built).
+- Exceptions: a lambda lets its exceptions out as a function does (15), to the code that called it; a silent one is ignored there unless a catch handles it. Every lambda returns its exception (a call through a function value cannot know which lambda it reaches). In `sort` the first exception stops the comparisons (the sort finishes in an unspecified order) and is raised after the sort; in `filter`, `map` and `reduce` it stops the loop, what was built so far ends, and it is raised.
+- Not built yet: counted and weak captures (`@a`, `&@a`, `%a`, `&%a`), `&a` of strings and arrays, counted, weak, parent and property fields in a lambda, the parameter modes in function types (`string(&MyObj)`), function types in fields, collections and tuples, `f1!`, and the lock of the outer variable while a `&a` capture lives. `sort` with a lambda and the functional members (6.6) are built.
+
+### 13.3.7 Examples
 
 ```
 char z = 'z'
@@ -3227,10 +3293,11 @@ extern fun gfx_texture_set_data(addr tex, arr<byte> data)
 | `bool` | `bool` |
 | `addr` | `void*`: an opaque address (2.3), stored, passed, returned and compared with another `addr` or with `null` |
 | `string` (parameter) | `const char*`: UTF-8 ended by a 0, valid only during the call |
+| `addr` (result) that is a `char*` | made a `string` with `string(addr)` (borrowed) or `string(->addr)` (owned), 4.4.6 |
 | `arr<T>` of numbers or `bool` (parameter) | two C parameters, `const T*` and `size_t` (the length); the C function only reads the items |
 | `&arr<T>` of numbers or `bool` (parameter) | two C parameters, `T*` and `size_t` (the length); the C function can change the items (13.1) |
 
-- A return is a number, `bool`, `addr` or nothing. Not yet: structs, callbacks, returned strings or arrays, varargs, objects.
+- A return is a number, `bool`, `addr` or nothing; a returned C string is an `addr` given to `string(...)` (4.4.6). Not yet: structs, callbacks, returned arrays, varargs, objects.
 - Where the C code comes from: Compiler_Options.md (`csource=`, temporary until the libraries bring their own C files).
 
 ---
@@ -3419,7 +3486,6 @@ Level 1 = most important, level 3 = least.
 - Generics: minimal intermediate form exported by compiled libraries for public generics (11.3.14), after 0.1.0
 - Stdlib: strings, files, time, collections extras (queue/stack)
 - Bitfields: whether `set`, `clear`, `setAs` and `toggle` modify the value in place or return a new value; nullability of bitfields (3.1.1, 7.1)
-- Functional collection members (`filter`, `map`, `reduce`)
 - Collections: the members of `MapIterator` (the three sub-traits of `Iterator` are decided, 6.7; the index and set iterators are defined, 6.7.1, 6.7.3)
 - Collections: how a custom class receives literals (`[...]`, `[k: v]`) (`c[k]` is decided, 6.7; `+=` and `-=` call the members, 6.6)
 - Structs: the definition (11.1.5)
@@ -3441,7 +3507,7 @@ Level 1 = most important, level 3 = least.
 - `addr` in `dfoot` (fixed memory maps ok, runtime addresses problematic)
 - Safe / unsafe logic
 - Function pointers (objects); C function tables (COM vtables, Vulkan dispatch tables)
-- C interop: struct layout, calling conventions, callbacks, returned strings and arrays, UTF-16 strings, ownership across the boundary, unions, bit flags, varargs (the minimal extern fun is in 15.9)
+- C interop: struct layout, calling conventions, callbacks, returned arrays, UTF-16 strings, `string?` as map keys and values and set items (7.1), ownership across the boundary, unions, bit flags, varargs (the minimal extern fun is in 15.9)
 - Deferred: async/await, locks/atomics, tasks, SIMD, EF syntax, Vulkan, shaders
 - `&T` results of basic values and strings (`fun &i32 counter()`): not built (they need a pointer to the place)
 - Borrow locks: borrows across functions, loops and method calls (a method that replaces a field of its object while the caller holds a lend from it) are not checked yet
@@ -4018,3 +4084,18 @@ Level 1 = most important, level 3 = least.
 - 1.1 A `_` before a type is no longer the weak marker (names still cannot start with `_`); 7.2.6 example uses `b`
 - 12.3 A volatile parameter is written `volatile T` and is never copied
 - Examples updated to the new markers: 1.6, 2.5, 3.2, 6.4, 6.6, 6.7, 6.8, 6.9, 9, 10.3, 11.1.2, 11.1.4.1, 11.2, 11.3.2, 11.3.10, 12, 12.4–12.6, 14.2, 15.9 (`&arr<T>` for a C function that writes the items), 99
+
+## Changes in 0.0.24
+
+- 4.4, 4.4.6 C strings (new): class 12; `string(addr)` borrows a C text and never frees it, `string(->addr)` takes it and frees it with `free()`; read-only, the first change copies it into a regular string; an empty text is `""`
+- 7.1 `string?` (new): null is not `""`; converts to and from `string` (null becomes `""`); `==`, `??`, `??=`, `?.`, `enforce`; prints null as `null`; the variable owns its string, a parameter borrows it read-only, a result is owned by the caller; built for variables, parameters and results only
+- 4.4.6 `string(addr)` and `string(->addr)` give a `string?`: a null `addr` is null
+- 1.6.2, 13.1 Plain parameters of objects, collections and arrays are read-only lends (built): only `unrestricted` methods, `getIterator()`, the members of the collections that do not change them and the `File` members that do not change its path; fields and items cannot be assigned, `&x` of a plain parameter is a compile error
+- 15.9 A returned C string is an `addr` given to `string(...)`; removed from 99 (returned strings)
+- 13.3.6 Lambdas and function types built in part (new section, the examples are now 13.3.7): what is built and what is not; a function-type result is written `fun ->fun R(P) name()`; a borrowing lambda cannot be assigned to an existing variable or returned until borrow lifetimes are checked
+- 15.3 `UnassignedFunctionCallException` (ID 51) built
+- 6.6 `sort(lambda)` built on `arr`, `vec` and `list` (any item type, objects included); the example uses typed parameters and an int result (13.3)
+- 6.6 Functional members (new): `filter(bool(T))`, `map<U>(U(T))`, `reduce(A start, A(A, T))` on `arr`, `vec` and `list`, giving a new collection of the same kind (filter, map) or a total; removed from 99
+- 13.3.6 Built: the fields of the object inside a method (bare names; `this` in a lambda is a compile error), `a!` of objects and arrays, `->a` of arrays
+- 13.3.6 Exceptions leaving a lambda built: they go back to the code that called it, as for functions; in `sort`, `filter`, `map` and `reduce` they stop the work and are raised after it
+- 7.1 `string?` in fields and in the items of `arr`, `vec` and `list` (built): owned like `string`, freed with the object or the collection, copied by a clone; a loop variable over `string?` items is read-only

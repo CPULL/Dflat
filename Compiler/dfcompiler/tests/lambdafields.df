@@ -1,0 +1,55 @@
+// lambdas in methods (fields by their bare names) and captures that own objects and arrays: a!, ->a (spec 13.3.1)
+namespace lambdafields
+alias Root as r
+
+public class Dog(string name, i32 age) {
+  public string name
+  public i32 age
+  unrestricted fun ->string bark() { name + "!" }
+} atEnd {
+  r.Console.log("end " + name)
+}
+
+public class Kennel {
+  public i32 visits = 0
+  public string label = "k"
+  public vec<i32> scores = [3, 1, 2]
+  public Dog boss = Dog("boss", 7)
+
+  public fun ->string describe() {
+    fun() count = (; &visits) { visits++ }
+    count()
+    count()
+    string(string) tag = (string s) { label + "/" + s + "/" + visits.toStr() }
+    return tag("x") + " " + scores.filter((i32 v) { v > visits - 1 }).toStr()
+  }
+
+  public fun ->fun string() keeper() {
+    return (; boss!) { boss.bark() }
+  }
+}
+
+fun ->fun string() withDog() {
+  Dog d = Dog("rex", 3)
+  string() f = (; d!) { d.bark() + d.age.toStr() }
+  return f
+}
+
+fun ->fun i32() withArray() {
+  arr<i32> a = [4, 5, 6]
+  return (; ->a) { a[0] + a[2] }
+}
+
+fun ->fun u64() withArrayCopy() {
+  arr<string> a = ["x", "yy"]
+  return (; a!) { a.len + a[1].len }
+}
+
+Kennel k = Kennel()
+r.Console.log(k.describe())
+string() kept = k.keeper()
+r.Console.log(kept())
+r.Console.log(withDog()())
+r.Console.log(withArray()())
+r.Console.log(withArrayCopy()())
+r.Console.log("done")

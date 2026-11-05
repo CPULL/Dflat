@@ -64,17 +64,21 @@ r.Console.log(target)                                      // [2, 3, 4, 5, 1, 2]
 target.copyFrom(6, source, 0, 0)                           // nothing to copy at the end: allowed
 r.Console.log(target.len)                                  // 6
 
-fun ->string tryCopy(arr<i32> to, arr<i32> from, i32 dst, i32 src, i32 count) {
+fun ->string tryCopy(&arr<i32> to, arr<i32> from, i32 dst, i32 src, i32 count) {
   to.copyFrom(dst, from, src, count)
   return "copied"
   catch IndexOutOfRangeException ex { return "IndexOutOfRangeException " + ex.id }
   catch ModifyingProtectedSourceException ex { return "ModifyingProtectedSourceException " + ex.id }
 }
-r.Console.log(tryCopy(target, source, 4, 0, 3))            // IndexOutOfRangeException 19 (does not fit in the destination)
-r.Console.log(tryCopy(target, source, 0, 3, 3))            // IndexOutOfRangeException 19 (does not fit in the source)
-r.Console.log(tryCopy(target, source, 0, -1, 1))           // IndexOutOfRangeException 19
-r.Console.log(tryCopy(target, target, 0, 1, 2))            // ModifyingProtectedSourceException 20
-r.Console.log(tryCopy(target, source, 6, 0, 0))            // copied
+fun copies(arr<i32> source) {
+  arr<i32> dest = [2, 3, 4, 5, 1, 2]
+  r.Console.log(tryCopy(&dest, source, 4, 0, 3))          // IndexOutOfRangeException 19 (does not fit in the destination)
+  r.Console.log(tryCopy(&dest, source, 0, 3, 3))          // IndexOutOfRangeException 19 (does not fit in the source)
+  r.Console.log(tryCopy(&dest, source, 0, -1, 1))         // IndexOutOfRangeException 19
+  r.Console.log(tryCopy(&dest, dest, 0, 1, 2))            // ModifyingProtectedSourceException 20
+  r.Console.log(tryCopy(&dest, source, 6, 0, 0))          // copied
+}
+copies(source)
 
 // errors it should give (one at a time):
 // target.copyFrom(0, target, 1, 2)              copyFrom cannot use the same array as source and destination

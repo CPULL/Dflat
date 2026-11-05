@@ -1,0 +1,8 @@
+namespace lambda_field_write
+class Box {
+  i32 n = 0
+  public fun go() {
+    fun() f = () { n++ }
+    f()
+  }
+}

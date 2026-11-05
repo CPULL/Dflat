@@ -1,0 +1,5 @@
+rex
+end rex
+after f
+the vec is gone
+---- exit code 0 ----

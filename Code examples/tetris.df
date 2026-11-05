@@ -231,7 +231,7 @@ class Tetris {
     return y
   }
 
-  fun string nextRow(i32 row) {
+  fun ->string nextRow(i32 row) {
     string text = ""
     for i32 x = -1..3 {
       char c = ' '

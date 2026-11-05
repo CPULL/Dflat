@@ -1,0 +1,6 @@
+namespace lambda_readonly_object
+class Dog {
+  public fun rename() { }
+}
+Dog d = Dog()
+fun() f = () { d.rename() }

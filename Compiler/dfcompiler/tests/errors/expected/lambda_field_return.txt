@@ -1,0 +1,1 @@
+lambda_field_return.df(5): error: this function value borrows variables of the function, so it cannot be returned: capture them with x! or ->x (spec 13.3.4)

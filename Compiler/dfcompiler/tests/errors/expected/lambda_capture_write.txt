@@ -1,0 +1,1 @@
+lambda_capture_write.df(3): error: 'n' is captured read-only by the lambda: list it as &n to change it (spec 13.3.1)

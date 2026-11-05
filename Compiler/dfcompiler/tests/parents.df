@@ -18,7 +18,7 @@ public class Library(string name) {
 // a read-only parent &: only asparent and unrestricted functions are called through it
 public class Reader(Library library as parent, string who) {
   public string who
-  public fun ->string read() { return who + " reads in the " + library.label() }
+  unrestricted fun ->string read() { return who + " reads in the " + library.label() }
   public fun start() { library.open() }
   public fun stop() { library.close() }
 } atEnd {

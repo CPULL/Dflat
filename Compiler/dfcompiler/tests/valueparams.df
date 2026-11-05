@@ -4,7 +4,7 @@ alias Root as r
 public class Grid<u64 Width, u64 Height, Cell>() {
   public arr<Cell> cells = arr<Cell>[Width * Height]
 
-  public fun u64 Count() { Width * Height }
+  unrestricted fun u64 Count() { Width * Height }
   public fun Set(u64 x, u64 y, Cell value) { cells[y * Width + x] = value }
   public fun Cell Get(u64 x, u64 y) { cells[y * Width + x] }
 }

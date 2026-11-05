@@ -183,6 +183,9 @@ public sealed partial class CodeGen {
   }
 
   string CType(string type) {
+    if (IsFunType(type)) {
+      return "df_fn";   // a function value { code, ctx } (spec 13.3.5)
+    }
     if (IsCountedType(type) || IsWeakType(type)) {
       return "df_rc*";   // @Dog, _Dog: a counted or weak parameter or result, the counting block (spec 12.7)
     }
@@ -225,6 +228,9 @@ public sealed partial class CodeGen {
   }
 
   string OptCType(string baseType) {
+    if (baseType == "string") {
+      return "df_opt_string";   // defined by the runtime (string?, spec 7.1)
+    }
     string baseC = CType(baseType);
     string name = "df_opt_" + Mangle(baseType);
     if (definedTypes.Add(name)) {
@@ -260,6 +266,9 @@ public sealed partial class CodeGen {
 
   // value of a declared variable without initializer
   string ZeroValue(string type) {
+    if (IsFunType(type)) {
+      return "((df_fn){0})";   // a function value starts as null (spec 13.3.2)
+    }
     if (IsCountedType(type) || IsWeakType(type)) {
       return "NULL";
     }
@@ -290,12 +299,29 @@ public sealed partial class CodeGen {
 
   // ---------------------------------------------------------------- type nodes
 
+  // inside the type arguments of a generic type, an array or a tuple: string? is not supported there yet
+  int nestedTypeDepth = 0;
+
   string ResolveType(Node n) {
+    bool nests = n.Kind == "TupleType" || n.Kind == "Type" && n.Children.Count > 0;
+    if (nests) {
+      nestedTypeDepth++;
+    }
+    try {
+      return ResolveTypeCore(n);
+    } finally {
+      if (nests) {
+        nestedTypeDepth--;
+      }
+    }
+  }
+
+  string ResolveTypeCore(Node n) {
     switch (n.Kind) {
       case "Nullable": {
         string inner = ResolveType(n.Children[0]);
         if (inner == "string") {
-          throw Error("string is already nullable; 'string?' is not allowed", n);
+          return "string?";   // null is not "" (spec 7.1)
         }
         if (IsTimeType(inner)) {
           throw Error($"{inner} is already nullable; '{inner}?' is not allowed", n);
@@ -326,6 +352,8 @@ public sealed partial class CodeGen {
       }
       case "ResolvedType":
         return n.Text!;   // a type parameter replaced by its type argument (generics)
+      case "FunType":
+        return ResolveFunType(n);   // fun(i32), string(char, char) (spec 13.3.2)
       case "Type": {
         string t = StripLibraryQualifier(n.Text!);
         if (t == "View" && vecPrelude) {
@@ -425,7 +453,7 @@ public sealed partial class CodeGen {
       return false;
     }
     if (from == "null") {
-      return IsNullable(to) || to == "string" || IsTimeType(to) || IsArr(to) || IsClass(to) || to == "Exception";
+      return IsNullable(to) || to == "string" || IsTimeType(to) || IsArr(to) || IsClass(to) || to == "Exception" || IsFunType(to);
     }
     if (to == "Exception" && IsExceptionClass(from)) {
       return true;
@@ -436,6 +464,9 @@ public sealed partial class CodeGen {
     if (IsNullable(to)) {
       string toBase = BaseOf(to);
       return Assignable(toBase, IsNullable(from) ? BaseOf(from) : from);
+    }
+    if (to == "string" && from == "string?") {
+      return true;   // a null string? is "" (spec 7.1)
     }
     if (IsNullable(from)) {
       return false;
@@ -496,6 +527,9 @@ public sealed partial class CodeGen {
       if (to == "Exception") {
         return "NULL";
       }
+      if (IsFunType(to)) {
+        return ZeroValue(to);
+      }
       throw Error($"{to} is not nullable; declare it as {to}?", at);
     }
     if (IsNullable(to)) {
@@ -512,6 +546,9 @@ public sealed partial class CodeGen {
       }
       return WithTemp(e, temp =>
         $"(({CType(to)}){{ {temp}.has, {Convert(new Expr(temp + ".val", fromBase), toBase, at)} }})");
+    }
+    if (e.Type == "string?" && to == "string") {
+      return $"({e.Code}).val";   // a null string? is "" (spec 7.1)
     }
     if (IsNullable(e.Type)) {
       throw Error($"this {e.Type} value may be null; unwrap it with '??' or 'enforce'", at);
@@ -544,6 +581,7 @@ public sealed partial class CodeGen {
   // Reads the value once: simple code is used as it is, anything else goes into a temporary
   // (GNU statement expression, supported by clang).
   string WithTemp(Expr e, Func<string, string> build) {
+    e = OptStrRead(e);   // a new string? that is only read ends with the statement
     if (SimpleCode.IsMatch(e.Code)) {
       return build(e.Code);
     }
@@ -626,6 +664,14 @@ public sealed partial class CodeGen {
     if (e.Type == "string") {
       return e.Code;
     }
+    if (e.Fresh && IsClass(e.Type)) {
+      e = TempObject(e);   // log(v.clone()): the new collection or object ends with the statement
+    } else if (e.Fresh && IsArr(e.Type) && !LibraryCode) {
+      // log(a.filter(...)): the new array ends once its text is made
+      string held = NewTemp();
+      string text = NewTemp();
+      return $"({{ {CType(e.Type)} {held} = {e.Code}; df_string {text} = {StrOf(new Expr(held, e.Type), at)}; {ArrDropHelper(e.Type)}({held}); {text}; }})";
+    }
     if (e.Type == "null") {
       return "df_str_lit(\"\", 0)"; // a null string is empty
     }
@@ -634,6 +680,13 @@ public sealed partial class CodeGen {
     }
     if (IsMulti(e.Type)) {
       throw Error($"this call returns {TupleElems(e.Type).Count} values; assign them to as many targets", at);
+    }
+    if (IsFunType(e.Type)) {
+      throw Error("a function value has no text", at);
+    }
+    if (e.Type == "string?") {
+      // always a new string, as for the other types: the text is copied (a null prints as null)
+      return WithTemp(e, temp => $"({temp}.has ? df_str_dup({temp}.val) : df_str_lit(\"null\", 4))");
     }
     if (IsNullable(e.Type)) {
       return WithTemp(e, temp =>
@@ -724,6 +777,14 @@ public sealed partial class CodeGen {
     }
     if (IsClass(l.Type)) {
       return ObjectEquals(l, r, at);   // equals, the operator ==, or identity (11.1.3)
+    }
+    if (IsFunType(l.Type) || IsFunType(r.Type)) {
+      // a function value is compared with null only (spec 13.3.2)
+      var value = IsFunType(l.Type) ? l : r;
+      if ((IsFunType(l.Type) ? r : l).Type != "null") {
+        throw Error("a function value is compared only with null", at);
+      }
+      return $"(({value.Code}).code == NULL)";
     }
     if (l.Type == "addr" || r.Type == "addr") {
       // addr (spec 2.3): compared with another addr or with null (address 0)

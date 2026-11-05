@@ -143,8 +143,11 @@ public sealed partial class CodeGen {
   bool CallMoves(Node call, Dictionary<FunSig, int>? state = null) {
     state ??= new Dictionary<FunSig, int>();
     var callee = call.Children[0];
-    if (callee.Kind == "GenericRef" && callee.Children[0] is { Kind: "Member", Text: "transformTo" }) {
-      return true;   // c.transformTo<vec>(): a new collection (CodeGen.List.cs)
+    if (callee.Kind == "GenericRef" && callee.Children[0] is { Kind: "Member", Text: "transformTo" or "map" }) {
+      return true;   // c.transformTo<vec>(), c.map<U>(f): a new collection (CodeGen.List.cs, CodeGen.Functional.cs)
+    }
+    if (callee.Kind is "Lambda" or "Call" or "Paren") {
+      return true;   // a call of a function value: its result is new (spec 13.3)
     }
     if (callee.Kind == "GenericRef" && callee.Children[0] is { Kind: "Name" } genericName) {
       return genericClasses.ContainsKey(genericName.Text!)
@@ -154,8 +157,8 @@ public sealed partial class CodeGen {
     if (simple == null) {
       return false;
     }
-    if (callee.Kind == "Member" && simple is "clone" or "tryClone" && !funs.Values.SelectMany(list => list).Any(f => f.Name.EndsWith("." + simple))) {
-      return true;   // the default clone: a new object (spec 12.6)
+    if (callee.Kind == "Member" && simple is "clone" or "tryClone" or "filter" && !funs.Values.SelectMany(list => list).Any(f => f.Name.EndsWith("." + simple))) {
+      return true;   // the default clone: a new object (spec 12.6); filter: a new collection (spec 6.6)
     }
     if (callee.Kind == "Member" && simple == "removeRefCounting" && !funs.Values.SelectMany(list => list).Any(f => f.Name.EndsWith(".removeRefCounting"))) {
       return true;   // the object leaves the counting: its receiver owns it (spec 12.7)
@@ -174,6 +177,9 @@ public sealed partial class CodeGen {
       .ToList();
     if (callee.Kind == "Member" && Path(callee) is string path && funs.TryGetValue(path, out var exact)) {
       candidates = exact;
+    }
+    if (candidates.Count == 0 && callee.Kind == "Name" && !Stdlib.ContainsKey(simple)) {
+      return true;   // f() where f is a function value: what it returns is new (spec 13.3)
     }
     if (candidates.Count == 0 || candidates.Any(f => !IsClass(f.Ret))) {
       return false;
@@ -241,6 +247,11 @@ public sealed partial class CodeGen {
       if (typeNode.Text == "var" && init?.Children[0] is { Kind: "Member" } viewMember && IsMapViewMember(viewMember)) {
         return "var";   // var held = m.keys: a view of the map (spec 6.6)
       }
+      if (typeNode.Text == "var" && decl.Line < LibraryLine && init?.Children[0] is { Kind: "Call" } funCall && funCall.Children[0].Kind == "Name"
+          && CalleesOf(funCall) is { Count: > 0 } callees && callees.All(f => IsClass(f.Ret)) && CallMoves(funCall)) {
+        // var lost = orphan(): a function that gives a new or moved object (its class or trait is known when the call is compiled)
+        return "var";
+      }
       if (typeNode.Text == "var" && init?.Children[0] is { Kind: "Call" } memberCall && memberCall.Children[0].Kind == "Member" && CallMoves(memberCall)) {
         // var it = numbers.getIterator(): a function that gives a new or moved object (the exact class is known when the call is compiled)
         return "var";
@@ -265,7 +276,7 @@ public sealed partial class CodeGen {
   HashSet<Node> AddImplicitDrops(Frame frame, List<Node> statements) {
     var drops = new List<Node>();
     var owners = new HashSet<Node>();
-    foreach (var statement in statements.Where(statement => statement.Kind == "Decl" && IsStringDecl(statement))) {
+    foreach (var statement in statements.Where(statement => statement.Kind == "Decl" && (IsStringDecl(statement) || IsOptStringDecl(statement) || IsFunDecl(statement)))) {
       owners.Add(statement);
       drops.Add(StrDropNode(statement.Text!, statement));
     }
@@ -447,6 +458,9 @@ public sealed partial class CodeGen {
       return true;   // r.Console.log(a) and the other functions of Root read their arguments (a borrowed read)
     }
     var callees = CalleesOf(call);
+    if (callees.Count == 0 && call.Children[0] is { Kind: "Member", Text: "copyFrom" or "has" or "indexOf" }) {
+      return true;   // members of the collections of the compiler that only read the array they are given (spec 6.6)
+    }
     return callees.Count > 0 && callees.All(f => IsGiftParamNode(f, position) ? plain : ParamStaysLocal(f, position));
   }
 
@@ -503,6 +517,7 @@ public sealed partial class CodeGen {
     if (arrDropHelpers.Add(name)) {
       string item = IsClass(elem) ? "if (a.p[i] != NULL) { df_drop((void*)a.p[i]); }"
         : elem == "string" ? "df_str_free(a.p[i]);"
+        : elem == "string?" ? "df_str_free(a.p[i].val);"
         : IsArr(elem) ? $"{ArrDropHelper(elem)}(a.p[i]);" : "";
       string arrType = ArrCType(elem);
       classCode.Append($"static void {name}({arrType} a) {{\n");
@@ -521,7 +536,7 @@ public sealed partial class CodeGen {
     if (statements.Count == 0 || statements.Any(s => s.Kind is "AtEnd" or "AtEndOf" or "Catch" or "Label")) {
       return statements;
     }
-    if (!statements.Any(s => (s.Kind == "Decl" && (IsCountedDecl(s) || ObjectTypeOf(s) != null || IsStringDecl(s)
+    if (!statements.Any(s => (s.Kind == "Decl" && (IsCountedDecl(s) || ObjectTypeOf(s) != null || IsStringDecl(s) || IsOptStringDecl(s) || IsFunDecl(s)
           || IsArrTypeNode(s.Children.FirstOrDefault(child => TypeNodeKinds.Contains(child.Kind)))))
         || (s.Kind == "MultiAssign" && s.Children[0].Children.Any(target => target.Kind == "Decl" && IsStringDecl(target))))) {
       return statements;
@@ -1390,6 +1405,9 @@ public sealed partial class CodeGen {
     }
     foreach (var field in OwnedStringFields(cls)) {
       sb.Append($"  df_str_free(self->{field.CName});\n  self->{field.CName} = NULL;\n");
+    }
+    foreach (var field in IntroducedTraits(cls).SelectMany(trait => trait.Fields).Concat(cls.Fields).Where(field => !field.IsStatic && field.Type == "string?")) {
+      sb.Append($"  df_opt_str_drop(&self->{field.CName});\n");   // spec 7.1
     }
     EmitArrayFieldDrops(cls, sb);   // spec 6.8.1 (CodeGen.ArrOwnership.cs)
     foreach (var field in cls.Fields.Where(field => field.IsCounted && !field.IsStatic)) {

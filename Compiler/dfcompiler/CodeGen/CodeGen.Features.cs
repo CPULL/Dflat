@@ -35,8 +35,6 @@ public sealed partial class CodeGen {
     ["Any"] = "Classes",
     ["Import"] = "Imports",
     ["FunVar"] = "Lambdas",
-    ["Lambda"] = "Lambdas",
-    ["FunType"] = "Lambdas",
     ["List"] = "Collections",
     ["Map"] = "Collections",
     ["GenericRef"] = "Generics",

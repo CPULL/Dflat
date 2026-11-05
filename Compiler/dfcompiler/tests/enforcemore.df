@@ -8,7 +8,7 @@ public class Trouble(string text) : Exception { }
 public class Res(string name) {
   public string name
   public fun release() { r.Console.log("  release " + name) }
-  public fun i32 size() { (i32)name.len }
+  unrestricted fun i32 size() { (i32)name.len }
 }
 
 fun declared() {

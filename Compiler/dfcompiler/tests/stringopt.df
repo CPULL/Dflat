@@ -1,0 +1,60 @@
+// string? (spec 7.1): null is not ""; variables, parameters and results
+namespace stringopt
+alias Root as r
+
+fun ->string? find(u32 k) {
+  if k == 0 {
+    return null
+  }
+  if k == 1 {
+    return ""
+  }
+  string? found = "item " + k.toStr()
+  return found
+}
+
+fun ->string describe(string? s) {
+  if s == null {
+    return "null"
+  }
+  return $"[{s}]"
+}
+
+string? a = null
+string? b = ""
+string? c = "abc"
+r.Console.log($"{a} {b} {c}")
+r.Console.log($"{a == null} {b == null} {b == ""} {c == "abc"}")
+string s = a
+string t = c
+r.Console.log($"[{s}] {t}")
+r.Console.log($"{a ?? "default"} [{b ?? "default"}] {find(0) ?? "none"}")
+r.Console.log(find(1) == null)
+r.Console.log(find(2))
+r.Console.log($"{describe(a)} {describe(b)} {describe("x".toUpper())} {describe(find(3))}")
+string base = "mine"
+string? d = base
+d = "other" + base
+r.Console.log(d)
+d = find(4)
+r.Console.log(d)
+d = null
+r.Console.log(d)
+d ??= "set"
+d ??= "not set"
+r.Console.log(d)
+string? e = d ?? null
+r.Console.log(e)
+for u32 i in 0..3 {
+  string? x = find(i)
+  r.Console.log(x)
+}
+r.Console.log($"{c?.len} {a?.len} {c?.toUpper()}")
+enforce c {
+  r.Console.log($"enforced {c} {c.len}")
+}
+enforce a {
+  r.Console.log("no")
+} else {
+  r.Console.log("a is null")
+}

@@ -1,0 +1,67 @@
+namespace structobjects
+alias Root as r
+
+public class Dog(string name) {
+  public string name
+} atEnd {
+  r.Console.log("  end " + name)
+}
+
+struct Pet {
+  string label = "pet",
+  Dog dog,
+  i32 age
+
+  public fun rename(string n) { label = n }
+  public unrestricted fun ->string describe() { $"{label} {age}" }
+  public static fun ->string kind() { "a pet" }
+}
+
+struct Owner { string who, Pet pet }
+
+class Home {
+  public Pet pet
+}
+
+fun Pet make(string n) { Pet(label: n, dog: Dog(n)) }
+
+fun show(Pet p) { r.Console.log("show " + p.label) }
+
+fun keep(->Pet p) { r.Console.log("keep " + p.label) }
+
+fun Pet back(Pet p) { p }
+
+r.Console.log("1 creation")
+Pet a = Pet(label: "a", dog: Dog("rex"))
+r.Console.log(a)
+r.Console.log("2 copy clones")
+Pet b = a
+b.label = "b"
+b.dog.name = "rex2"
+r.Console.log($"{a.label} {a.dog.name} {b.label} {b.dog.name}")
+r.Console.log("3 assign drops the old")
+b = make("max")
+r.Console.log(b.describe())
+r.Console.log("4 field replaced")
+b.dog = Dog("bo")
+r.Console.log("5 lend and temporaries")
+show(a)
+show(make("tmp"))
+r.Console.log(make("tmp2").label)
+r.Console.log(make("tmp3").describe())
+make("dropped")
+r.Console.log("6 move")
+keep(->b)
+r.Console.log($"b after move: {b.label} {b.dog == null}")
+keep(a!)
+r.Console.log("7 nested and class field")
+Owner o = Owner(who: "ann", pet: make("nest"))
+o.pet.rename("nest2")
+r.Console.log(o)
+var h = Home()
+h.pet = make("home")
+Pet c = back(a)
+r.Console.log(c.label)
+r.Console.log("8 static")
+r.Console.log(Pet.kind())
+r.Console.log("9 end of program")

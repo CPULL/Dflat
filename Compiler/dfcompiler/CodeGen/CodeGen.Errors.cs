@@ -280,6 +280,12 @@ public sealed partial class CodeGen {
       if (IsCountedType(type)) {
         type = CountedBase(type);   // var x = make() with a counted result: a counted variable of the plain type (spec 12.7)
       }
+      if (bigStructDecls.Contains(decl)) {
+        // a struct above 64 KB: the variable is the block on the heap (spec 11.1.5.5)
+        frame.Hoisted[name] = new VarInfo(type, $"(*v_{name}_{frame.Id})", isConst) { HeapName = $"v_{name}_{frame.Id}" };
+        typingScope.Vars[name] = frame.Hoisted[name];
+        return;
+      }
       frame.Hoisted[name] = StringVar(new VarInfo(type, $"v_{name}_{frame.Id}", isConst) {
         Own = declOwner.TryGetValue(decl, out bool owns) && owns,
         IsWeak = decl.Children.Any(child => child.Kind == "WeakInit"),
@@ -319,6 +325,14 @@ public sealed partial class CodeGen {
 
   void EmitHoists(Frame frame, StringBuilder sb, string pad) {
     foreach (var variable in frame.Hoisted.Values) {
+      if (variable.HeapName is string heap) {
+        sb.Append($"{pad}{CType(variable.Type)}* {heap} = ({CType(variable.Type)}*)df_calloc(1, sizeof({CType(variable.Type)}));\n");   // spec 11.1.5.5
+        continue;
+      }
+      if (StructHoldsObjects(variable.Type)) {
+        sb.Append($"{pad}{CType(variable.Type)} {variable.CName} = {{0}};\n");   // its declaration makes its strings and objects (spec 11.1.5.3)
+        continue;
+      }
       sb.Append(variable.IsCounted || variable.IsWeak ? $"{pad}df_rc* {variable.CName} = NULL;\n" : $"{pad}{CType(variable.Type)} {variable.CName} = {ZeroValue(variable.Type)};\n");
       if (variable.OwnFlag != null) {
         sb.Append($"{pad}bool {variable.OwnFlag} = false;\n");

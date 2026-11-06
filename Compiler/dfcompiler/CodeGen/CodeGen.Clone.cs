@@ -166,6 +166,9 @@ public sealed partial class CodeGen {
     if (IsArr(type)) {
       return $"{ArrCloneHelper(type, at)}({source})";
     }
+    if (StructHoldsObjects(type)) {
+      return $"{StructCloneHelper(type)}({source})";   // a struct with its own strings and objects (spec 11.1.5.3)
+    }
     if (IsTuple(type) && TupleElems(type).Any(elem => elem.Type == "string" || IsClass(elem.Type) || IsArr(elem.Type) || IsTuple(elem.Type))) {
       throw NotSupported("Cloning a tuple field that holds strings, objects or arrays", at);
     }

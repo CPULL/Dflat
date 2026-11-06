@@ -1,0 +1,1 @@
+struct_buffer_start_size.df(2): error: the start value of the buffer 'm' is an array literal of 3 items

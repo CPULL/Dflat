@@ -1,0 +1,1 @@
+struct_layout_untagged.df(3): error: a struct<fixed> holds only structs with the same tag: B is a struct without a tag (spec 11.1.5.6)

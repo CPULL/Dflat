@@ -1,0 +1,1 @@
+struct_buffer_compound.df(4): error: the buffer 'm' is changed item by item (m[i] = v) or assigned as a whole from an array literal of 3 items (spec 11.1.5.4)

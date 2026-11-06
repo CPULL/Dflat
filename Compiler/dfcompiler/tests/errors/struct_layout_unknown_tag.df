@@ -1,0 +1,2 @@
+namespace struct_layout_unknown_tag
+struct<packed> A { i32 n }

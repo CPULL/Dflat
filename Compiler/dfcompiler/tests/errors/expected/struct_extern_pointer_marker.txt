@@ -1,0 +1,1 @@
+struct_extern_pointer_marker.df(5): error: 'a' takes the address of the struct: write *a (spec 11.1.5.6)

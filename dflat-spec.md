@@ -1,7 +1,7 @@
 # Dflat Language
 A new language D♭ that is the same as C# but easier to write and faster to execute
 
-**Version** 0.0.24  2026/11/05 by CPU
+**Version** 0.0.25  2026/11/06 by CPU
 
 ## D♭ — Dflat Language Specification (draft)
 
@@ -36,7 +36,7 @@ Status: design in progress. Decisions below reflect the latest choices; earlier 
   - Variables, parameters, fields, properties, enum entries: no imposed case (camelCase suggested for variables and parameters).
   - `Root` is a global static class giving access to the stdlib; always written `Root`, can be aliased.
 - **`...`**: variadic parameter suffix; no other use.
-- **Reserved words**: `as` (used in `alias` [Ref: Namespaces]; other uses to be defined), `this` [Ref: Classes], `atEnd` [Ref: atEnd].
+- **Reserved words**: `as` (used in `alias` [Namespaces](#16-namespaces-imports-aliases); other uses to be defined), `this` [Classes](#111-classes), `atEnd` ([atEnd for classes](#114-class-atend-destructor-code), [atEnd for methods](#142-atend)).
 
 ## 1.2 Labels
 Labels are used as target for jumping around (including controlled jumps like break and continue)
@@ -63,18 +63,18 @@ Labels are used as target for jumping around (including controlled jumps like br
 
 - Suffixes are case-insensitive.
 - A real needs a digit on both sides of the dot: `0.` and `2. + x` are compile errors (write `0.0`). `5.toStr()` is a member of `5`, and `0..10` is a range.
-- Unsuffixed literals take the native size of the target (or the size forced by the native-size compiler option [Ref: Compiler]). A value that doesn't fit takes the smallest wider type that does (`300` on an 8-bit target → `i16`).
+- Unsuffixed literals take the native size of the target (or the size forced by the native-size compiler option [Compiler](#19-compiler)). A value that doesn't fit takes the smallest wider type that does (`300` on an 8-bit target → `i16`).
 - Reals fit by range only (precision loss accepted). The target architecture decides the best native real format (for example `r64` on 64-bit, `r32` on 32-bit, `r16` on 8- and 16-bit, or software emulation where faster).
 - Literals adapt to the declared type; a value that doesn't fit is a compile error.
 - `0x00000000DEADBEEF` is a 64-bit value; hex and binary always describe raw bits.
-- A literal transmuted [Ref: Conversions] to a pointer is zero-extended to the pointer size: `[*i32]0xA0000`.
+- A literal transmuted [Conversions](#35-conversions) to a pointer is zero-extended to the pointer size: `[*i32]0xA0000`.
 
 ## 1.4 Characters and strings
 
 - Chars: `'a'`. Strings: `"text"`.
 - Escapes: `\n \r \t \\ \' \" \0`, code points `\u{1F600}` (hex) and `\#{123}` (decimal).
 - An invalid code point in a literal (surrogate, above `0x10FFFF`) is a compile error.
-- Interpolated strings: `$"Hello {name}, total {x:D,02}"`; `\{` and `\}` for literal braces [Ref: Formatting]).
+- Interpolated strings: `$"Hello {name}, total {x:D,02}"`; `\{` and `\}` for literal braces [Formatting](#8-formatting)).
 
 ## 1.5 Declarations and namespaces
 
@@ -152,7 +152,7 @@ For classes, if not overridden, the default is: class name and the values of the
 | `byte` | alias of `u8` |
 | `int` `uns` `real` | target-dependent aliases, to force a specific size for global data or registers; not allowed in `dfoot` |
 
-- **Native size**: one compiler option sets the native size used by `int` / `uns` / `real` and by unsuffixed literals. It can force a size below or above the CPU's own. [Ref: Compiler]
+- **Native size**: one compiler option sets the native size used by `int` / `uns` / `real` and by unsuffixed literals. It can force a size below or above the CPU's own. [Compiler](#19-compiler)
 - `uns` has the size of `int`: the cpu size by default, or the size forced by `--native-int` (19.1). The lengths and indexes of the collections use it, and so does `.hash` (6.2). A `uns` smaller than the cpu size limits the length of the collections and the size of `.hash`: the compiler gives a warning (19.3).
 - Numbers are **not nullable** unless declared `type?`.
 
@@ -172,7 +172,7 @@ For classes, if not overridden, the default is: class name and the values of the
 Used to define a memory address.
 It is a native type holding an address as a number; It's size comes from the target definition (64-bit by default, 16 on C64), stored in the most efficient way.
 
-It supports only comparison and transmute, arithmetic is done through pointer methods [Ref: Pointers]; cannot be dereferenced.
+It supports only comparison and transmute, arithmetic is done through pointer methods [Pointers](#121-pointers); cannot be dereferenced.
 
 It prints as hex in groups of 4 digits separated by spaces; null is 0 (unmapped address)
 
@@ -182,11 +182,11 @@ Converting an `addr` to a pointer results in an `unsafe` pointer.
 
 | Type | Description |
 |---|---|
-| tuple | an ordered set of different types accessed by order and/or by name [Ref: Tuples] |
-| `string` | UTF-8 text [Ref: Strings] |
-| `dfoot` | Dflat Fast Open Objects Tree, used as serializable tree of objects (similar to JSON) [Ref: Dfoot] |
+| tuple | an ordered set of different types accessed by order and/or by name [Tuples](#32-tuples) |
+| `string` | UTF-8 text [Strings](#4-strings) |
+| `dfoot` | Dflat Fast Open Objects Tree, used as serializable tree of objects (similar to JSON) [Dfoot](#5-dfoot) |
 
-- The collections `arr`, `vec`, `list`, `map`, `hmap`, `set` and `hset` are described in section [Ref: Collections]
+- The collections `arr`, `vec`, `list`, `map`, `hmap`, `set` and `hset` are described in section [Collections](#6-collections)
 - GUID is defined by the EF layer, platform-specific.
 - Lengths and default indexes are `uns` everywhere (2.1, 6.1).
 
@@ -220,7 +220,7 @@ Converting an `addr` to a pointer results in an `unsafe` pointer.
 | Precedence | Level | Operators Associativity |
 |---|---|---
 | 1 Highest | () . ?. | Left to Right |
-| 2 | () `casting` [] `transmute` . | Left to Right |
+| 2 | () `casting` [] `transmute` | Left to Right |
 | 3	| ++ -- (postfix) `x!` (copy) | Left to Right |
 | 4	| ++ -- + - (prefix) ! ~ @ % -> & * (prefix) | Right to Left |
 | 5	| \* / %  | Left to Right |
@@ -344,7 +344,7 @@ A `date` is nullable by default (`date?` is a compile error).
 | `timeOfDay` | property (read-only) | The time part as a `time` |
 | `unixMilliseconds` | property (read-only) | Milliseconds since 1970-01-01 UTC (`i64`) |
 | `DayOfWeek` | enum | `{ Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday }` |
-| `date(string)` | constructor | Uses the [Ref: Parsing] default formats, with or without time. Input with a zone is converted to UTC; input with no zone is UTC. |
+| `date(string)` | constructor | Uses the [Parsing](#9-parsing) default formats, with or without time. Input with a zone is converted to UTC; input with no zone is UTC. |
 | `date(i64)` | constructor | Milliseconds since 1970-01-01 UTC |
 | Invalid string | rule | Gives null plus a silent `InvalidDateTimeFormatException` (ID 24) |
 | `date.fromUnixTime(i64)` | static method | Date from `unixMilliseconds` (milliseconds since 1970-01-01 UTC) |
@@ -353,7 +353,7 @@ A `date` is nullable by default (`date?` is a compile error).
 | `addYears`, `addMonths`, `addDays` | method | Return a new `date` |
 | `addHours`, `addMinutes`, `addSeconds`, `addMilliseconds` | method | Return a new `date` |
 | `startOfDay()` | method | Same day at 00:00:00.000 |
-| `toStr()`, `toStr(format)` | method | Formats the date [Ref: Formatting] |
+| `toStr()`, `toStr(format)` | method | Formats the date [Formatting](#8-formatting) |
 | `date - date` | operator | Gives a `lapse` (already exists) |
 
 
@@ -363,14 +363,14 @@ A `date` is nullable by default (`date?` is a compile error).
 |---|---|---|
 | `hour`, `minute`, `second`, `millisecond` | property (read-only) | Time parts, 24-hour clock |
 | `totalMilliseconds` | property (read-only) | Milliseconds since midnight (`i32`, 0 to 86,399,999) |
-| `time(string)` | constructor | Uses the [Ref: Parsing] default formats: `HH[:mm[:ss[.fff]]]` or `h[:mm[:ss[.fff]]] am/pm` |
+| `time(string)` | constructor | Uses the [Parsing](#9-parsing) default formats: `HH[:mm[:ss[.fff]]]` or `h[:mm[:ss[.fff]]] am/pm` |
 | `time(i32)` | constructor | Milliseconds since midnight |
 | Invalid string | rule | Gives null plus a silent `InvalidDateTimeFormatException` (ID 24) |
 | Out-of-range `i32` | rule | Gives null plus a silent `OutOfRangeCastException` (existing rule) |
 | `time.parse(string)` | static method | Forwards to the time formatting rules (default formats) |
 | `time.parse(string, format)` | static method | Forwards to the time formatting rules (explicit format) |
 | `addHours`, `addMinutes`, `addSeconds`, `addMilliseconds` | method | Return a new `time`. They wrap around midnight and raise no exception. |
-| `toStr()`, `toStr(format)` | method | Formats the time [Ref: Formatting] |
+| `toStr()`, `toStr(format)` | method | Formats the time [Formatting](#8-formatting) |
 | `time - time` | operator | Gives a `lapse` |
 | `date + time` | operator | Produces an updated date |
 | `date - time` | operator | Produces an updated date |
@@ -626,7 +626,7 @@ string line = string(->read_line())
 
 # 5. `dfoot`
 `Dfoot` is a specific Dflat structure used to serialize and deserialize a tree of items. It is inspired by JSON.
-- Recursive ordered tree, JSON-like, not JSON-compatible. Meant for human-readable maps, so the key rules of [Ref Collections] are looser here (details later).
+- Recursive ordered tree, JSON-like, not JSON-compatible. Meant for human-readable maps, so the key rules of [Collections](#6-collections) are looser here (details later).
 - Keys: macrotype + value (signed number, unsigned number, string, bool, date); `r`, `dec`, `int`/`uns`/`real` not allowed.
 - Values: any Dflat type, classes included (details later).
 TODO
@@ -671,7 +671,7 @@ A collection holds several items in one object. Dflat has seven: `arr`, `vec`, `
 
 Applies to the keys of `map` / `hmap` and to the items of `set` / `hset`.
 
-- Types that can be keys: all the native types (the numeric types, `bool`, `char`, `string`, `date`, `time`, `clock`, `lapse`, enums, bitfields), composite types (tuples, and structs when they are defined, 11.1.5) whose components are all valid key types, classes that implement the trait `Keyable` (11.2.1), and generic sets whose members are all valid key types (11.3.6.1).
+- Types that can be keys: all the native types (the numeric types, `bool`, `char`, `string`, `date`, `time`, `clock`, `lapse`, enums, bitfields), composite types (tuples and structs, 11.1.5) whose components are all valid key types, classes that implement the trait `Keyable` (11.2.1), and generic sets whose members are all valid key types (11.3.6.1).
 - Types that cannot be keys (compile error): `arr` and all the other collections (also as a component of a tuple), iterators and views, counted objects (`@T`, `&@T`) and weak references (`%T`, `&%T`), which are not stable by definition (12.7), and classes that do not implement `Keyable` (the error names the trait).
 - Nullable types can be keys (`i16?`), and null is a valid key; it sorts first (6.2.2). The empty string `""` is a valid key: for a `string`, `""` and null are the same value (7.1), so there is no separate null string key.
 - Keys are always read-only through the collection.
@@ -1824,7 +1824,7 @@ for var (key, value) in map { }
 - A range whose start is greater than its end counts down.
 - The `for` variable always has a type; `var` is accepted when the type can be inferred (also in tuple forms); an untyped `for x in ...` is a compile error.
 - The loop variable is read-only by default; `&Type variable` makes it a read/write borrow of the item. Rules for the items, keys and basic values: 6.4.
-- Iterating collections (default iterators, maps, ranges as virtual collections): [Ref: Collections]
+- Iterating collections (default iterators, maps, ranges as virtual collections): [Collections](#6-collections)
 
 ## 10.4 jumping
 ```
@@ -2007,10 +2007,125 @@ var p = s.pos                  // a tuple copy: (r32 x, r32 y)
 - Each field of a group is a field of the class (`s.pos.x`), with the rules of 11.1.4: start values and accessor blocks. The visibility of the group applies to all its fields.
 - The group alone cannot be passed, returned, stored or referenced (`f(s.pos)`, `&s.pos` and `*s.pos` are compile errors).
 - Assigning a tuple to the group (`s.pos = (10.0, 20.0)`) sets its fields in order; the tuple must have the same number of items, each convertible to its field. Reading the group as an expression gives a tuple copy with the names and types of its fields.
+- A struct with the same structure can be assigned to the group (`s.pos = Vec2(10.0, 20.0)`, 11.1.5.8): the same number of fields, each convertible to its field.
 
-## 11.1.5 Structs (to be defined)
+## 11.1.5 Structs
 
-Dflat will have structs: generic value types that do not live on the heap, like the Rust structs. They are not defined yet and need a section of their own. They are different from `dfoot` (5). Two points to settle: a struct may not be allowed to hold objects or, if it can, the objects it holds are owned by the struct.
+```
+struct Vec3 {
+  r32 x,
+  r32 y,
+  r32 z = -1.0
+}
+
+var s = Vec3(x: 2.0)                           // {2.0, 0.0, -1.0}
+```
+
+- A struct is a bundle of plain data with methods, like a C struct. It is a value: assigning it copies it, and a struct inside another struct is stored inline.
+- A struct has no constructors, properties, traits, inheritance or generics. It is never nullable (`Vec3?` is a compile error).
+- The compiler never reorders the fields.
+
+### 11.1.5.1 Fields and creation
+
+- Fields are always public. A visibility keyword on a field is a compile error. Methods follow the usual visibility rules (1.6).
+- Fields are declared only in the body, separated by `,`.
+- A field can have a start value (`z = -1.0`). A field with no start value that is not given one is zeroed. This also applies to the items of arrays of structs.
+- `Vec3(...)` creates a struct. By name, any subset of the fields can be given (`Vec3(x: 2.0)`, `Vec3()`); the others take their start value or zero. By position, all the fields must be given, in the order they are declared (`Vec3(2.0, 0.0, 1.0)`); `Vec3(2.0)` is a compile error.
+
+### 11.1.5.2 Methods and access
+
+- Inside a method, `this` is the struct itself, so changes happen in place.
+- Whether a struct can be changed depends on how its variable or parameter is declared, as for an `i32`. Through a read-only reference (a plain lend, 13.1), the rules of 1.6.2 apply:
+  - fields can be read; assigning to them is a compile error;
+  - only `unrestricted` methods can be called.
+- In an `unrestricted` struct method, assigning a field of `this` is a compile error.
+- A struct can have static functions (`public static fun r64 dot(Vec2 a, Vec2 b)`). They are called with the name of the struct (`Vec2.dot(a, b)`); calling one through a value (`a.dot(a, b)`) is a compile error. A static function and a method can have the same name when their parameters differ.
+
+### 11.1.5.3 Copying
+
+```
+Vec3 first = second                            // copy
+Vec3 third = second!                           // same as =
+```
+
+- Copying a struct clones every object it holds (strings, lists, class instances): `=` and `!` give the same result.
+- A struct that holds an object that cannot be cloned is a compile error.
+- Passing a struct as a plain parameter lends it, and `->` moves it. Neither one clones.
+
+### 11.1.5.4 Buffers
+
+```
+struct Matrix { arr<r32>[16] m }
+struct DeviceInfo { u32 id, arr<byte>[256] name }
+```
+
+- An `arr<T>[N]` field whose size `N` is known at compile time is stored inline: its bytes are part of the struct. `T` can be any plain type. The items start zeroed.
+- A struct cannot have an array of undefined size: an `arr` field must have a size known at compile time. An `arr` of runtime size is a compile error in every struct.
+
+### 11.1.5.5 Where a struct lives
+
+- A struct normally lives wherever it is declared:
+  - in a field, an array or a collection, it lives inside its owner on the heap;
+  - in a global, it lives in static memory;
+  - in a local variable, it lives on the stack.
+- A local struct larger than 64 KB is allocated on the heap by the compiler and freed at the end of its scope. This is invisible to the code.
+
+### 11.1.5.6 Memory layout and C interop
+
+```
+struct<fixed> Vec2 { r32 x, r32 y }
+struct<compact> Header { u8 kind, u32 size }
+```
+
+- With no tag, the compiler chooses the layout for speed. The layout is always the same for the same definition.
+- `<fixed>`: exactly a C struct with normal alignment. A `bool` takes 4 bytes.
+- `<compact>`: no alignment. Every type is stored at its own size, and a `bool` takes 1 byte. Some C APIs require this.
+- `<fixed>` and `<compact>` are layout tags, not types. They cannot be combined. They allow only plain values. Objects are not allowed.
+- Plain values: `i<size>`, `u<size>`, `r<size>`, `byte`, `bool`, `char`, `dec`, `addr`, pointers, bitfields, enums (unsigned numbers), `date`, `time`, `clock`, inline buffers and other structs with the same tag. Not plain: `string`, `string?`, `lapse`, collections and class instances.
+- There is no layout metadata: whoever passes or receives a struct must know its definition.
+- `.sizeof` includes the padding.
+- `.offset(field)` gives the byte offset of a field, padding included.
+- When calling a C function, `fun blah(*Vec2 value)` passes the address. Without `*`, it passes a copy.
+
+### 11.1.5.7 Transmute
+
+```
+struct Pair { i16 low, i16 high }
+struct Whole { u32 value }
+
+Pair pair = Pair(1, 2)
+([Whole]pair).value = 5                        // changes pair
+```
+
+- `[T]x` (3.5) on a struct reads the same bytes with the layout of `T`. The result is live and writable: writing through it changes `x`. Assigning it with `=` makes a copy.
+- `.` binds tighter than transmute (2.5.1), so writing to a field of the view needs parentheses.
+- The compiler checks that every access stays inside the bytes of the original.
+- The view is never larger than the original (`[T]x` with more bytes than `x` is a compile error), so every access stays inside.
+- `T` or `x` can also be a number (`[u32]pair`, `[Rgba]bits`). Structs that hold strings or objects are not transmuted.
+- Writing through a view needs a place (a variable, a field or an item); a view of a value that is not a place (`[Whole]make()`) only reads a copy.
+
+### 11.1.5.8 Field groups and tuples
+
+```
+class Sprite { public pos { r32 x, r32 y } }
+
+sprite.pos = Vec2(12.5, 5.0)                   // a struct assigned to a field group
+```
+
+- A struct can be assigned to a field group (11.1.4.1) that has the same structure: the same number of fields, each convertible to its field.
+- A struct with two or more fields converts to a tuple automatically, including as multiple return values.
+
+### 11.1.5.9 Comparing and printing
+
+- `==` compares field by field. Object fields use their default equality.
+- `.hash` works as for tuples.
+- `toStr()` prints the type name and the first 3 fields, followed by `...`, as for classes.
+
+### 11.1.5.10 Not included
+
+- Nullable structs: never.
+- Generic structs: never.
+- GPU layouts and EF mapping: parked.
 
 ## 11.2 Traits
 They are similar to C# interfaces and Rust traits
@@ -2550,7 +2665,7 @@ public notclonable class File { }
 
 | Field | In the clone |
 |---|---|
-| native (numbers, `bool`, `char`, enums, bitfields, structs) | duplicated, it is a value |
+| native (numbers, `bool`, `char`, enums, bitfields, structs) | duplicated, it is a value (the objects inside a struct are cloned, 11.1.5.3) |
 | owned `string` | copied: a new string with the same text |
 | owned object | deep cloned with the same rules; null when it cannot be cloned |
 | owned child (an object that has a parent, 12.5) | null: a child is never duplicated, a new one comes from the functions of its parent |
@@ -2956,7 +3071,7 @@ fun main(arr<string> args) { }
 fun int main(string args...) { return 0 }
 ```
 
-- A program starts either from top-level code or from a `main` function in the root file (`program.df` / `main.df`); having both is a compile error. [Ref: Namespaces, Imports, Aliases]
+- A program starts either from top-level code or from a `main` function in the root file (`program.df` / `main.df`); having both is a compile error. [Namespaces, imports, aliases](#16-namespaces-imports-aliases)
 - `main` is a top-level function, outside any class.
 - Return type: `int` (exit code) or void (exit code 0).
 - Parameters: none, `arr<string> args`, or `string args...` (an `arr<string>`).
@@ -3296,8 +3411,10 @@ extern fun gfx_texture_set_data(addr tex, arr<byte> data)
 | `addr` (result) that is a `char*` | made a `string` with `string(addr)` (borrowed) or `string(->addr)` (owned), 4.4.6 |
 | `arr<T>` of numbers or `bool` (parameter) | two C parameters, `const T*` and `size_t` (the length); the C function only reads the items |
 | `&arr<T>` of numbers or `bool` (parameter) | two C parameters, `T*` and `size_t` (the length); the C function can change the items (13.1) |
+| `struct<fixed>` / `struct<compact>` S (parameter or result) | the C struct S, a copy (11.1.5.6) |
+| `*S` / `&*S` of such a struct (parameter) | `const S*` / `S*`: the address of the struct, the call writes `*s` / `&*s`; through `&*S` the C function can change it (11.1.5.6) |
 
-- A return is a number, `bool`, `addr` or nothing; a returned C string is an `addr` given to `string(...)` (4.4.6). Not yet: structs, callbacks, returned arrays, varargs, objects.
+- A return is a number, `bool`, `addr`, a `struct<fixed>` / `struct<compact>` or nothing; a returned C string is an `addr` given to `string(...)` (4.4.6). A struct without a layout tag is not given to C. Not yet: callbacks, returned arrays, varargs, objects.
 - Where the C code comes from: Compiler_Options.md (`csource=`, temporary until the libraries bring their own C files).
 
 ---
@@ -3430,7 +3547,7 @@ The cpus (the names are Dflat names, not the names of clang):
 
 - **dfcompiler**: the only compiler, written in .NET 10. It runs the preprocessor (19.1), parses, type checks, emits C and calls clang. Its options are listed in `Compiler/Compiler_Options.md`. A minimal or zero libc, calling the OS directly, is planned (`--libc none`).
 - **dfparser** `[--tokens] file.df`: the parser alone (hand-written lexer and recursive-descent parser, shared with dfcompiler); it prints the syntax tree. It has no version of its own yet.
-- **Native-size option**: forces the native size of integers and reals [Ref: Number literals].
+- **Native-size option**: forces the native size of integers and reals [Number literals](#13-number-literals).
 
 ### 19.3 Compiler Warnings
 
@@ -3488,7 +3605,6 @@ Level 1 = most important, level 3 = least.
 - Bitfields: whether `set`, `clear`, `setAs` and `toggle` modify the value in place or return a new value; nullability of bitfields (3.1.1, 7.1)
 - Collections: the members of `MapIterator` (the three sub-traits of `Iterator` are decided, 6.7; the index and set iterators are defined, 6.7.1, 6.7.3)
 - Collections: how a custom class receives literals (`[...]`, `[k: v]`) (`c[k]` is decided, 6.7; `+=` and `-=` call the members, 6.6)
-- Structs: the definition (11.1.5)
 - Collections: views are read-only; revisit with tasks (6.5), the full Rust borrow model stays an option
 - Collections: shared C helpers against one copy per type (code size, 11.3.12); the B-tree (6.8.4.1) and the hash table (6.8.5.1) are decided
 - Collections: widening of the stuck buckets of `hmap` / `hset` (6.8.5.1)
@@ -3507,7 +3623,7 @@ Level 1 = most important, level 3 = least.
 - `addr` in `dfoot` (fixed memory maps ok, runtime addresses problematic)
 - Safe / unsafe logic
 - Function pointers (objects); C function tables (COM vtables, Vulkan dispatch tables)
-- C interop: struct layout, calling conventions, callbacks, returned arrays, UTF-16 strings, `string?` as map keys and values and set items (7.1), ownership across the boundary, unions, bit flags, varargs (the minimal extern fun is in 15.9)
+- C interop: calling conventions, callbacks, returned arrays, UTF-16 strings, `string?` as map keys and values and set items (7.1), ownership across the boundary, unions, bit flags, varargs (the minimal extern fun is in 15.9)
 - Deferred: async/await, locks/atomics, tasks, SIMD, EF syntax, Vulkan, shaders
 - `&T` results of basic values and strings (`fun &i32 counter()`): not built (they need a pointer to the place)
 - Borrow locks: borrows across functions, loops and method calls (a method that replaces a field of its object while the caller holds a lend from it) are not checked yet
@@ -4099,3 +4215,14 @@ Level 1 = most important, level 3 = least.
 - 13.3.6 Built: the fields of the object inside a method (bare names; `this` in a lambda is a compile error), `a!` of objects and arrays, `->a` of arrays
 - 13.3.6 Exceptions leaving a lambda built: they go back to the code that called it, as for functions; in `sort`, `filter`, `map` and `reduce` they stop the work and are raised after it
 - 7.1 `string?` in fields and in the items of `arr`, `vec` and `list` (built): owned like `string`, freed with the object or the collection, copied by a clone; a loop variable over `string?` items is read-only
+
+## Changes in 0.0.25
+
+- 11.1.5 Structs defined (new section, was "to be defined"): values with methods and no constructors, properties, traits, inheritance or generics, never nullable; fields always public, declared only in the body; creation by name (any subset, the others take their start value or zero) or by position (all the fields); read-only access as in 1.6.2, an `unrestricted` struct method cannot assign a field of `this`; copying clones the objects inside (`=` and `!` are the same); inline buffers `arr<T>[N]`, no `arr` of runtime size; a local struct over 64 KB goes to the heap; layout tags `<fixed>` (C alignment, 4-byte `bool`) and `<compact>` (no alignment, 1-byte `bool`) with plain values only; `.sizeof`, `.offset(field)`; transmute `[T]x` on a struct is live and writable; assigned to a field group, converted to a tuple; `==` field by field, `.hash` as tuples, `toStr()`; removed from 99 (definition, C struct layout)
+- 2.5.1 `.` removed from level 2 of the precedence table: it binds tighter than casting and transmute
+- 11.1.4.1 A struct with the same structure can be assigned to a field group
+- 6.2, 12.6 Structs as keys and in the default `clone()` refer to 11.1.5
+- `[Ref: ...]` tags replaced by Markdown links to the headings
+- 11.1.5.2 Static functions of a struct: called with the name of the struct, never through a value
+- 15.9 Structs with a layout tag passed to C functions by value or by address (`*S`, `&*S`) and returned; removed from "Not yet"
+- 11.1.5.7 Transmute: the view is never larger than the original; numbers on either side; no structs with strings or objects; writing needs a place

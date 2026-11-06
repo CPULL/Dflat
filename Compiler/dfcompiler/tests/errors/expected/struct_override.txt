@@ -1,0 +1,1 @@
+struct_override.df(4): error: a struct has no inheritance: 'override' does not apply (spec 11.1.5)

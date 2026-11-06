@@ -1,0 +1,1 @@
+struct_unrestricted_calls_writer.df(5): error: an unrestricted method only reads its struct: only the unrestricted methods of A can be called, not 'grow' (spec 1.6.2, 11.1.5.2)

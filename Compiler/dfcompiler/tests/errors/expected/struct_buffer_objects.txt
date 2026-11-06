@@ -1,0 +1,1 @@
+struct_buffer_objects.df(2): error: the items of a buffer are plain values (numbers, bool, char, enums, bitfields, date, time, clock, structs of plain values), not string (spec 11.1.5.4)

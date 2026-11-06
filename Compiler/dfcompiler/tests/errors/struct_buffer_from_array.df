@@ -1,0 +1,5 @@
+namespace struct_buffer_from_array
+struct A { arr<r32>[3] m }
+var a = A()
+var xs = [1.0, 2.0, 3.0]
+a.m = xs

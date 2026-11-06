@@ -1,0 +1,2 @@
+namespace struct_layout_string
+struct<fixed> A { i32 n, string s }

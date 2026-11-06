@@ -1,0 +1,1 @@
+struct_layout_mixed_tags.df(3): error: a struct<fixed> holds only structs with the same tag: B is struct<compact> (spec 11.1.5.6)

@@ -65,7 +65,7 @@ public sealed partial class CodeGen {
 
   bool IsKnownType(string t) {
     return SignedTypes.Contains(t) || UnsignedTypes.Contains(t) || RealTypes.Contains(t)
-      || t is "bool" or "char" or "string" or "byte" or "uns" or "int" or "date" or "time" or "clock" or "lapse" or "Exception" or "addr" || IsEnum(t) || IsClass(t);
+      || t is "bool" or "char" or "string" or "byte" or "uns" or "int" or "date" or "time" or "clock" or "lapse" or "Exception" or "addr" || IsEnum(t) || IsClass(t) || IsStruct(t);
   }
 
   // the native integer types (spec 2.1): int and uns, and the unsuffixed integer literals; the size of the cpu or of --native-int, set
@@ -204,6 +204,9 @@ public sealed partial class CodeGen {
     if (IsArr(type)) {
       return ArrCType(ArrElem(type));
     }
+    if (structs.TryGetValue(type, out var structInfo)) {
+      return structInfo.CName;   // a struct of the program (spec 11.1.5)
+    }
     if (IsTraitType(type)) {
       return "void*";
     }
@@ -281,6 +284,9 @@ public sealed partial class CodeGen {
     if (IsArr(type)) {
       return $"(({CType(type)}){{0}})";
     }
+    if (structs.TryGetValue(type, out var structInfo)) {
+      return StructZero(structInfo);   // its start values, or zero (spec 11.1.5.1)
+    }
     if (IsClass(type) || type == "addr") {
       return "NULL";
     }
@@ -308,7 +314,11 @@ public sealed partial class CodeGen {
       nestedTypeDepth++;
     }
     try {
-      return ResolveTypeCore(n);
+      string resolved = ResolveTypeCore(n);
+      if (nests && structs.Count > 0 && !LibraryCode && n.Line < LibraryLine) {
+        CheckStructItems(resolved, n);   // spec 11.1.5.3, not built yet
+      }
+      return resolved;
     } finally {
       if (nests) {
         nestedTypeDepth--;
@@ -331,6 +341,9 @@ public sealed partial class CodeGen {
         }
         if (IsClass(inner)) {
           throw Error($"objects are already nullable; '{inner}?' is not allowed", n);
+        }
+        if (IsStruct(inner)) {
+          throw Error($"a struct is never nullable; '{inner}?' is not allowed (spec 11.1.5)", n);
         }
         if (IsNullable(inner)) {
           throw Error($"'{inner}' is already nullable", n);
@@ -449,6 +462,9 @@ public sealed partial class CodeGen {
     if (to == from) {
       return true;
     }
+    if ((IsTuple(to) || IsMulti(to)) && IsStruct(from)) {
+      return StructToTupleAssignable(from, to);   // a struct converts to a tuple (spec 11.1.5.8)
+    }
     if (IsMulti(to) || IsMulti(from)) {
       return false;
     }
@@ -493,6 +509,9 @@ public sealed partial class CodeGen {
   string Convert(Expr e, string to, Node at) {
     if (e.Type == to) {
       return e.Code;
+    }
+    if (IsStruct(e.Type) && (IsTuple(to) || IsMulti(to))) {
+      return StructToTupleCode(e, to, at);   // a struct converts to a tuple (spec 11.1.5.8)
     }
     if (IsWeakType(e.Type) || IsWeakType(to)) {
       throw Error("a weak reference is used through enforce w { } else { } (spec 12.7)", at);
@@ -661,6 +680,9 @@ public sealed partial class CodeGen {
   }
 
   string StrOf(Expr e, Node at) {
+    if (IsStruct(e.Type)) {
+      return $"{StructPrinter(structs[e.Type])}({TempStruct(e).Code})";   // Vec3 { x: 1, y: 2, z: 3 } (spec 11.1.5.9)
+    }
     if (e.Type == "string") {
       return e.Code;
     }
@@ -760,6 +782,9 @@ public sealed partial class CodeGen {
 
   // C bool expression for l == r. Null equals only null.
   string EqualsCode(Expr l, Expr r, Node at) {
+    if (IsStruct(l.Type) || IsStruct(r.Type)) {
+      return StructEquals(l, r, at);   // field by field (spec 11.1.5.9)
+    }
     if (l.Type == "null" && r.Type == "null") {
       return "true";
     }

@@ -1,0 +1,5 @@
+namespace struct_no_comma
+struct A {
+  i32 x
+  i32 y
+}

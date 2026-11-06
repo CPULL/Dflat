@@ -331,7 +331,9 @@ public sealed partial class CodeGen {
       ? Error($"'{targetNode.Text}' is captured read-only by the lambda: list it as &{targetNode.Text} to change it (spec 13.3.1)", at)
       : target.Variable is { IsConst: true } && target.Variable.CName.StartsWith("(*(c_")
         ? Error($"'{targetNode.Text}' is captured with & by the lambda: its fields can be changed, the variable cannot be replaced (spec 13.3.1)", at)
-        : Error($"'{targetNode.Text}' is const", at);
+        : target.Variable is { ReadOnlyStruct: true } && targetNode.Text == "this"
+          ? Error("an unrestricted method only reads its struct: it cannot assign this (spec 11.1.5.2)", at)
+          : Error($"'{targetNode.Text}' is const", at);
 
   // ---------------------------------------------------------------- function values
 

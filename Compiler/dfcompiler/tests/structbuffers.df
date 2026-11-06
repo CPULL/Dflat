@@ -1,0 +1,74 @@
+namespace structbuffers
+alias Root as r
+
+const i32 NAME_SIZE = 8
+
+struct Matrix {
+  arr<r32>[4] m = [1.0, 0.0, 0.0, 1.0]
+
+  public fun scale(r32 k) {
+    for i32 i in 0..4 {
+      m[i] = m[i] * k
+    }
+  }
+  public unrestricted fun r32 trace() { m[0] + m[3] }
+}
+
+struct Device { u32 id, arr<byte>[NAME_SIZE] name }
+
+struct Point { i32 x, i32 y }
+
+struct Path { arr<Point>[3] points, i32 count }
+
+struct Huge { arr<u64>[20000] data, i32 tag = 7 }
+
+fun r32 total(Matrix x) {
+  r32 sum = 0.0
+  for r32 v in x.m {
+    sum += v
+  }
+  return sum
+}
+
+fun i64 hugeSum(Huge h) {
+  i64 sum = 0
+  for u64 v in h.data {
+    sum += (i64)v
+  }
+  return sum
+}
+
+var a = Matrix()
+r.Console.log(a)
+r.Console.log(a.m.len)
+a.m[1] = 5.0
+a.scale(2.0)
+r.Console.log(a.m)
+r.Console.log(a.trace())
+r.Console.log(total(a))
+Matrix b = a
+b.m[0] = 100.0
+r.Console.log($"{a.m[0]} {b.m[0]} {a == b}")
+b = a
+r.Console.log(a == b)
+b.m = [9.0, 8.0, 7.0, 6.0]
+r.Console.log(b.m)
+a.m = b.m
+r.Console.log(a.m)
+var d = Device(id: 3, name: [68b, 102b, 108b, 97b, 116b, 0b, 0b, 0b])
+r.Console.log(d.name[1])
+var p = Path(count: 2)
+p.points[1].x = 4
+p.points[2] = Point(7, 8)
+r.Console.log(p.points)
+Huge h
+h.data[19999] = 42
+h.data[0] = 1
+r.Console.log($"{h.tag} {h.data.len} {hugeSum(h)}")
+var h2 = Huge(tag: 9)
+r.Console.log(h2.tag)
+for i32 i in 0..3 {
+  Huge each
+  each.data[0] = (u64)i
+  r.Console.log(each.data[0])
+}

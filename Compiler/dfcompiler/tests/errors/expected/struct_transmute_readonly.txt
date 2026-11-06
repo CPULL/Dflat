@@ -1,0 +1,1 @@
+struct_transmute_readonly.df(5): error: 'p' is a read-only parameter: its fields cannot be written; declare it &Pair p to change it (spec 13.1, 11.1.5.2)

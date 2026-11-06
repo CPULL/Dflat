@@ -1,0 +1,1 @@
+struct_method_as_static.df(6): error: 'grow' is a method of A: call it on a struct, s.grow(...)

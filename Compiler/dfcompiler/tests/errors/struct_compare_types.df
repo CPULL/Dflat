@@ -1,0 +1,4 @@
+namespace struct_compare_types
+struct A { i32 x }
+struct B { i32 x }
+Root.Console.log(A() == B())

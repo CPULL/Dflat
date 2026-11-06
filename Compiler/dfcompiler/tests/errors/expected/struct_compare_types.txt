@@ -1,0 +1,1 @@
+struct_compare_types.df(4): error: cannot compare A and B

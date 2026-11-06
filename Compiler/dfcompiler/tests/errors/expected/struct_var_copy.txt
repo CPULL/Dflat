@@ -1,0 +1,1 @@
+struct_var_copy.df(4): error: feature not supported: this declaration of a struct that holds strings or objects (write its type: A b = ...)

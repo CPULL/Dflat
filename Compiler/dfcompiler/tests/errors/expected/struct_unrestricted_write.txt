@@ -1,0 +1,1 @@
+struct_unrestricted_write.df(4): error: an unrestricted method only reads its struct: it cannot write the field 'x' of this (spec 11.1.5.2)

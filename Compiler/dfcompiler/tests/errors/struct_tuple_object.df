@@ -1,0 +1,5 @@
+namespace struct_tuple_object
+class Dog { }
+struct Pet { Dog d, i32 age }
+Pet p = Pet(d: Dog())
+i32 n, i32 m = p

@@ -1,0 +1,1 @@
+struct_visibility.df(2,12): error: the fields of a struct are always public: they take no visibility keyword (spec 11.1.5.1)

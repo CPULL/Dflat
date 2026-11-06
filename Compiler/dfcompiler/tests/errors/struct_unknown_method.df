@@ -1,0 +1,4 @@
+namespace struct_unknown_method
+struct A { i32 x }
+var a = A()
+a.nothing()

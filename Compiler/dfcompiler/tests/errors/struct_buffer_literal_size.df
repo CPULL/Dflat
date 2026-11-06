@@ -1,0 +1,4 @@
+namespace struct_buffer_literal_size
+struct A { arr<r32>[3] m }
+var a = A()
+a.m = [1.0, 2.0]

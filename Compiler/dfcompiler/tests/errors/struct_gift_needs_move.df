@@ -1,0 +1,5 @@
+namespace struct_gift_needs_move
+struct A { string s }
+fun keep(->A a) { }
+A a = A(s: "x")
+keep(a)

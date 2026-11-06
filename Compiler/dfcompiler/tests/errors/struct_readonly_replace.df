@@ -1,0 +1,5 @@
+namespace struct_readonly_replace
+struct A { string s }
+fun f(A a) {
+  a = A(s: "y")
+}

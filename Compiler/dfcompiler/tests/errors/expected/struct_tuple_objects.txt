@@ -1,0 +1,1 @@
+struct_tuple_objects.df(3): error: feature not supported: Tuples of structs that hold strings or objects

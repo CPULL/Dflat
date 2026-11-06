@@ -1,0 +1,1 @@
+struct_unknown_field.df(3): error: the struct 'A' has no field 'w'

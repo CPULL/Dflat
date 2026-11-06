@@ -7,7 +7,7 @@ namespace dfcompiler;
 // which takes the Dflat values and calls the C function: a string becomes a const char* (UTF-8, ended by a 0, valid during the call), an
 // arr<T> becomes a T* and a size_t length. The other types go as they are; addr is a void*.
 public sealed partial class CodeGen {
-  bool IsExternValueType(string type) => IsNumeric(type) || type is "bool" or "addr";
+  bool IsExternValueType(string type) => IsNumeric(type) || type is "bool" or "addr" || IsStruct(type) && structs[type].Layout != null;
 
   void CheckExtern(Node funNode, ClassInfo? cls, string? enumName, string ret, List<ParamSig> ps, bool noBody) {
     if (cls != null || enumName != null) {
@@ -17,7 +17,9 @@ public sealed partial class CodeGen {
       throw Error("an extern function has no body: the C library gives it", funNode);
     }
     if (ret != "void" && !IsExternValueType(ret)) {
-      throw Error($"an extern function returns a number, bool or addr, not {ret} (spec 15.9)", funNode);
+      throw Error(IsStruct(ret)
+        ? $"a struct given to C needs a layout: struct<fixed> {ret} or struct<compact> {ret} (spec 11.1.5.6)"
+        : $"an extern function returns a number, bool, addr or a struct<fixed> / <compact>, not {ret} (spec 15.9)", funNode);
     }
     var paramsNode = funNode.Children.First(child => child.Kind == "Params");
     foreach (var (param, node) in ps.Zip(paramsNode.Children)) {
@@ -26,6 +28,9 @@ public sealed partial class CodeGen {
       }
       bool ok = IsExternValueType(param.Type) || param.Type == "string"
         || IsArr(param.Type) && (IsNumeric(ArrElem(param.Type)) || ArrElem(param.Type) == "bool");
+      if (IsStruct(param.Type) && structs[param.Type].Layout == null) {
+        throw Error($"a struct given to C needs a layout: struct<fixed> {param.Type} or struct<compact> {param.Type} (spec 11.1.5.6)", node);
+      }
       if (!ok) {
         throw Error($"'{param.Name}' is {param.Type}: an extern function takes numbers, bool, addr, string and arr of numbers (spec 15.9)", node);
       }
@@ -66,7 +71,9 @@ public sealed partial class CodeGen {
     string ret = f.Ret == "void" ? "void" : CType(f.Ret);
     var cParams = new List<string>();
     foreach (var p in f.Params) {
-      if (p.Type == "string") {
+      if (p.Pointer != 0) {
+        cParams.Add((p.Pointer == 1 ? "const " : "") + CType(p.Type) + "*");
+      } else if (p.Type == "string") {
         cParams.Add("const char*");
       } else if (IsArr(p.Type)) {
         cParams.Add(CType(ArrElem(p.Type)) + "*");
@@ -77,7 +84,8 @@ public sealed partial class CodeGen {
     }
     var sb = new StringBuilder();
     sb.Append($"extern {ret} {f.Name}({(cParams.Count == 0 ? "void" : string.Join(", ", cParams))});\n");
-    string wrapperParams = f.Params.Count == 0 ? "void" : string.Join(", ", f.Params.Select(p => $"{CType(p.Type)} v_{p.Name}"));
+    string wrapperParams = f.Params.Count == 0 ? "void" : string.Join(", ", f.Params.Select(p =>
+      p.Pointer != 0 ? $"{(p.Pointer == 1 ? "const " : "")}{CType(p.Type)}* v_{p.Name}" : $"{CType(p.Type)} v_{p.Name}"));
     sb.Append($"static {ret} {f.CName}({wrapperParams}) {{\n");
     var args = new List<string>();
     var frees = new List<string>();

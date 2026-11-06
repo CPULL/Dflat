@@ -1,0 +1,1 @@
+struct_offset_unknown.df(3): error: the struct 'A' has no field 'm'

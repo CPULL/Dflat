@@ -1,0 +1,3 @@
+namespace struct_extern_untagged
+struct A { i32 n }
+extern fun f(A a)

@@ -1,0 +1,6 @@
+namespace struct_unrestricted_calls_writer
+struct A {
+  i32 x
+  public fun grow() { x++ }
+  public unrestricted fun bad() { grow() }
+}

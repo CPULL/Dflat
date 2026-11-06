@@ -1,0 +1,4 @@
+namespace struct_var_copy
+struct A { string s }
+A a = A(s: "x")
+var b = a

@@ -1,0 +1,1 @@
+struct_buffer_zero.df(2): error: the size of a buffer goes from 1 to 2147483647

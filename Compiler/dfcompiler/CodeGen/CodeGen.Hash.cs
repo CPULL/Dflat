@@ -110,6 +110,9 @@ public sealed partial class CodeGen {
     if (type == "r64") {
       return $"df_hash_r64({e.Code})";
     }
+    if (IsStruct(type)) {
+      return StructHashCode(e, at);   // as a tuple of its fields (spec 11.1.5.9)
+    }
     if (IsTuple(type)) {
       var elems = TupleElems(type);
       return WithTemp(e, temp => {
@@ -140,6 +143,9 @@ public sealed partial class CodeGen {
   bool IsStableType(string type, HashSet<ClassInfo> visiting) {
     if (IsNullable(type)) {
       return IsStableType(BaseOf(type), visiting);
+    }
+    if (IsStruct(type)) {
+      return structs[type].Fields.All(field => IsStableType(field.Buffer != null ? ArrElem(field.Type) : field.Type, visiting));
     }
     if (IsTuple(type)) {
       return TupleElems(type).All(elem => IsStableType(elem.Type, visiting));

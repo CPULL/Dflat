@@ -1,0 +1,1 @@
+struct_generic.df(2,9): error: a struct has no generics (spec 11.1.5), found '<'

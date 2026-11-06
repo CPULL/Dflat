@@ -1,0 +1,5 @@
+namespace struct_object_borrowed
+class Dog { }
+struct A { Dog d }
+var rex = Dog()
+A a = A(d: rex)

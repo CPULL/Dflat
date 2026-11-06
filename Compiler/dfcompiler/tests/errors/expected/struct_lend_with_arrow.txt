@@ -1,0 +1,1 @@
+struct_lend_with_arrow.df(5): error: 'a' only borrows the struct: remove the ->

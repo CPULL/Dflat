@@ -1,0 +1,2 @@
+namespace struct_buffer_size_var
+struct A { i32 n, arr<i32>[n] items }

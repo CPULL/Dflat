@@ -37,6 +37,7 @@ sealed class FunSig {
 
   // classes
   public ClassInfo? Class { get; set; }
+  public StructInfo? Struct { get; set; }    // a method of a struct: its first C parameter is the struct itself, self (spec 11.1.5.2)
   public bool IsStatic { get; set; }
   public bool IsOverride { get; set; }
   public bool IsCtor { get; set; }
@@ -84,6 +85,7 @@ sealed class ParamSig {
   public bool IsParent { get; init; }     // T name as parent: the object pointer is kept in a field (spec 12.5)
   public bool IsWeak { get; init; }       // _T name (spec 12): a weak reference, used through enforce
   public bool IsWritable { get; init; }   // &@T name, &%T name (spec 12.7): read/write, the object has a lock
+  public int Pointer { get; init; }       // an extern function: 1 for *S name (the address, read-only), 2 for &*S name (writable) (spec 11.1.5.6)
 }
 
 sealed class VarInfo {
@@ -119,6 +121,9 @@ sealed class VarInfo {
   public bool FnBorrows { get; set; }      // a function value that may borrow (a lambda with a borrowed capture, or a parameter): it is not
                                            // stored past its variables or returned (spec 13.3.4)
   public bool CapturedReadOnly { get; set; } // inside a lambda: an unlisted capture, a read-only borrow (spec 13.3.1)
+  public string? HeapName { get; set; }      // a local struct above 64 KB: the C pointer to its block on the heap (spec 11.1.5.5)
+  public bool OwnsStruct { get; set; }       // a struct variable that owns its strings and objects: they end with it (spec 11.1.5.3)
+  public bool ReadOnlyStruct { get; set; }   // a plain struct parameter: a read-only lend, its fields are not written (spec 11.1.5.2)
 }
 
 sealed class Scope {
@@ -219,6 +224,7 @@ public sealed partial class CodeGen {
       }
     }
     RewriteSizedArrays(program);
+    DeclareStructs(program);
     RegisterGenerics(program);
     DeclareClasses(program);
     foreach (var statement in program.Children) {
@@ -231,7 +237,9 @@ public sealed partial class CodeGen {
         RegisterEnum(statement);
       }
     }
+    RegisterStructs();
     RegisterClasses();
+    RegisterStructMethods();
     CheckClassInstances();
     DeclareGlobalConsts(program);
     foreach (var statement in program.Children) {
@@ -263,7 +271,7 @@ public sealed partial class CodeGen {
 
     // a main function is the entry point (spec 14.1); otherwise the top-level statements are
     var topLevel = program.Children.Where(statement =>
-      statement.Kind is not ("Fun" or "Alias" or "Enum" or "Class" or "Trait" or "GenericSet" or "Namespace" or "NamespaceLocal")).ToList();
+      statement.Kind is not ("Fun" or "Alias" or "Enum" or "Class" or "Trait" or "GenericSet" or "Namespace" or "NamespaceLocal" or "Struct")).ToList();
     if (funs.TryGetValue("main", out var mains)) {
       if (topLevel.Count > 0) {
         throw Error("a program starts either from top-level code or from a main function, not both", topLevel[0]);
@@ -275,7 +283,7 @@ public sealed partial class CodeGen {
     fn = NewFunctionContext("main()", "i32", true);
     assign = new AssignState();
     currentRet = null;
-    var statements = program.Children.Where(statement => statement.Kind is not ("Fun" or "Alias" or "Enum" or "Class" or "Trait" or "GenericSet")).ToList();
+    var statements = program.Children.Where(statement => statement.Kind is not ("Fun" or "Alias" or "Enum" or "Class" or "Trait" or "GenericSet" or "Struct")).ToList();
     var root = PrepareFrame(statements, new Scope(null), FrameKind.Function);
     root.OuterHandler = fn.PanicLabel;
     var mainBody = new StringBuilder();
@@ -325,7 +333,9 @@ public sealed partial class CodeGen {
     output.Append(ObservedBitTable());
     output.Append(functionNames).Append('\n');
     output.Append(enumCode);
+    output.Append(structProtos);   // the prototypes of the struct helpers: the array helpers call them, they call the array helpers
     output.Append(arrayCode);
+    output.Append(structCode);   // the printers, clones and drops of the structs (CodeGen.Structs.cs)
     output.Append(classGlobals).Append('\n');
     output.Append(protos).Append('\n');
     output.Append(classCode);
@@ -388,9 +398,9 @@ public sealed partial class CodeGen {
   }
 
   // enumName: set for static methods declared inside an enum
-  FunSig? RegisterFun(Node funNode, string? enumName, ClassInfo? cls = null) {
-    string name = cls != null ? cls.Name + "." + funNode.Text : enumName == null ? funNode.Text! : enumName + "." + funNode.Text;
-    if (cls == null && enumName == null && classes.ContainsKey(name)) {
+  FunSig? RegisterFun(Node funNode, string? enumName, ClassInfo? cls = null, StructInfo? owner = null) {
+    string name = owner != null ? owner.Name + "." + funNode.Text : cls != null ? cls.Name + "." + funNode.Text : enumName == null ? funNode.Text! : enumName + "." + funNode.Text;
+    if (cls == null && enumName == null && owner == null && classes.ContainsKey(name)) {
       throw Error($"a function cannot be named like the class '{name}'", funNode);
     }
     foreach (var child in funNode.Children) {
@@ -431,10 +441,19 @@ public sealed partial class CodeGen {
         throw Error($"duplicate parameter '{p.Text}'", p);
       }
       var def = p.Children.FirstOrDefault(child => child.Kind == "Default");
+      int pointer = 0;
+      if (p.Children[0].Kind is "Pointer" or "WritablePointer" && funNode.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ').Contains("extern") == true
+          && TryResolveType(p.Children[0].Children[0]) is string pointed && IsStruct(pointed)) {
+        pointer = p.Children[0].Kind == "Pointer" ? 1 : 2;   // extern fun f(*Vec2 v): the address of the struct (spec 11.1.5.6)
+        p.Children[0] = p.Children[0].Children[0];
+      }
       string paramType = ResolveType(p.Children[0]);
       bool variadic = p.Kind == "VariadicParam";
       // &T: a writable lend (spec 13.1); a plain parameter keeps the old behaviour until the read-only lend is built (1.6.2)
       int reference = p.Kind == "WritableRefParam" ? 2 : 0;
+      if (reference == 0 && p.Kind == "Param" && IsBigStruct(paramType)) {
+        reference = 1;   // a struct above 64 KB is lent by its address (spec 11.1.5.5)
+      }
       if (reference == 2 && def != null) {
         throw Error($"the writable reference '{p.Text}' cannot have a default value: it needs a variable", p);
       }
@@ -451,9 +470,10 @@ public sealed partial class CodeGen {
       ps.Add(new ParamSig(p.Text!, variadic ? "arr<" + paramType + ">" : paramType, def?.Children[0]) {
         IsWritable = p.Children.Any(child => child.Kind == "ReadWrite"),
         IsVariadic = variadic,
-        IsGift = p.Kind == "GiftParam" && (IsClass(paramType) || paramType == "string" || IsArr(paramType)),
+        IsGift = p.Kind == "GiftParam" && (IsClass(paramType) || paramType == "string" || IsArr(paramType) || StructHoldsObjects(paramType)),
         Ref = reference,
-        IsWeak = weakParam
+        IsWeak = weakParam,
+        Pointer = pointer
       });
     }
     bool isExtern = funNode.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ').Contains("extern") == true;
@@ -515,6 +535,9 @@ public sealed partial class CodeGen {
     if (f.Class != null && !f.IsStatic && !f.IsCtor) {
       list.Insert(0, $"{CType(f.Class.Name)} self");
     }
+    if (f.Struct != null && !f.IsStatic) {
+      list.Insert(0, $"{(f.IsUnrestricted ? "const " : "")}{f.Struct.CName}* self");   // the struct itself, changed in place (spec 11.1.5.2)
+    }
     string ps = list.Count == 0 ? "void" : string.Join(", ", list);
     return $"static {RetCType(f)} {f.CName}({ps})";
   }
@@ -551,6 +574,11 @@ public sealed partial class CodeGen {
     if (f.Class != null && !f.IsStatic) {
       scope.Vars["this"] = new VarInfo(f.Class.Name, "self", true);
     }
+    currentStruct = f.Struct;
+    if (f.Struct != null && !f.IsStatic) {
+      // this is the struct itself; an unrestricted method only reads it (spec 11.1.5.2)
+      scope.Vars["this"] = new VarInfo(f.Struct.Name, "(*self)", f.IsUnrestricted) { ReadOnlyStruct = f.IsUnrestricted, IsParam = true };
+    }
     if (f.LambdaCtx != null) {
       fn.Decls.Append($"  {f.LambdaCtx}* c = ({f.LambdaCtx}*)df_ctx;\n  (void)c;\n");
       foreach (var (name, variable) in f.LambdaVars) {
@@ -568,8 +596,8 @@ public sealed partial class CodeGen {
       }
       // a reference parameter is a pointer in C; the body reads and writes through it, a read-only one cannot be assigned
       scope.Vars[p.Name] = IsByPointer(p)
-        ? new VarInfo(p.Type, $"(*{ParamName(p)})", p.Ref == 1) { ReadOnlyRef = p.Ref == 1 && IsArr(p.Type), RefSlot = p.Ref == 2 && (IsClass(p.Type) || IsArr(p.Type) || p.Type == "string"), BorrowsArray = p.Ref == 2 && IsArr(p.Type) }
-        : StringVar(new VarInfo(p.Type, "v_" + p.Name, false) { Own = p.IsGift, ReadOnlyRef = PlainLend(p), ReadOnlyString = p.Type == "string" && !p.IsGift, IsWeak = p.IsWeak, BorrowsArray = IsArr(p.Type) && !p.IsGift, OwnsArray = OwnsGivenArray(f, p) });
+        ? new VarInfo(p.Type, $"(*{ParamName(p)})", p.Ref == 1) { ReadOnlyStruct = p.Ref == 1 && IsStruct(p.Type), ReadOnlyRef = p.Ref == 1 && IsArr(p.Type), RefSlot = p.Ref == 2 && (IsClass(p.Type) || IsArr(p.Type) || p.Type == "string"), BorrowsArray = p.Ref == 2 && IsArr(p.Type) }
+        : StringVar(new VarInfo(p.Type, "v_" + p.Name, false) { Own = p.IsGift, ReadOnlyRef = PlainLend(p), ReadOnlyString = p.Type == "string" && !p.IsGift, IsWeak = p.IsWeak, BorrowsArray = IsArr(p.Type) && !p.IsGift, OwnsArray = OwnsGivenArray(f, p), ReadOnlyStruct = IsStruct(p.Type) && !p.IsGift, OwnsStruct = p.IsGift && IsStruct(p.Type) });
       scope.Vars[p.Name].IsParam = true;
       scope.Vars[p.Name].FnBorrows = IsFunType(p.Type);   // a function parameter may borrow (spec 13.3.4)
       if (scope.Vars[p.Name].OwnFlag is string flag) {
@@ -584,8 +612,11 @@ public sealed partial class CodeGen {
     if (trailing != null) {
       statements.Insert(0, Synthetic("AtEnd", trailing).Add(trailing.Children[0]));
     }
-    foreach (var p in f.Params.Where(p => p.IsGift && !IsArr(p.Type) && !(p.Type == "string" && !IsByPointer(p)))) {
+    foreach (var p in f.Params.Where(p => p.IsGift && !IsArr(p.Type) && !(p.Type == "string" && !IsByPointer(p)) && !IsStruct(p.Type))) {
       statements.Insert(0, DropNode(p.Name, f.Node));
+    }
+    foreach (var p in f.Params.Where(p => p.IsGift && StructHoldsObjects(p.Type))) {
+      statements.Insert(0, StructDropNode(p.Name, f.Node));   // ->S p: its strings and objects end with the function (spec 11.1.5.3)
     }
     foreach (var p in f.Params.Where(p => OwnsGivenArray(f, p))) {
       // ->arr<T> p: the array ends with the function, unless it was moved on (spec 6.8.1)
@@ -637,6 +668,7 @@ public sealed partial class CodeGen {
     currentRet = null;
     currentEnum = null;
     currentClass = null;
+    currentStruct = null;
     currentFun = null;
     currentGenericT = null;
     initializing = false;
@@ -680,6 +712,15 @@ public sealed partial class CodeGen {
         }
         return;
 
+      case "StructDrop":
+        if (scope.Find(s.Text!) is VarInfo held && StructHoldsObjects(held.Type)) {
+          sb.Append(pad).Append(StructDropCode(held.Type, held.CName)).Append('\n');   // spec 11.1.5.3
+        }
+        if (scope.Find(s.Text!) is { HeapName: string heap }) {
+          sb.Append(pad).Append($"free({heap}); {heap} = NULL;\n");   // a struct above 64 KB (spec 11.1.5.5)
+        }
+        return;
+
       case "RawC":
         sb.Append(pad).Append(s.Text).Append('\n');   // C made by the compiler (the release of a loop's counter, EmitForEach)
         return;
@@ -718,7 +759,9 @@ public sealed partial class CodeGen {
           return;
         }
         string k = s.Children[0].Kind;
-        if (DroppedResultCode(s.Children[0], e) is string dropped) {
+        if (DroppedStructCode(e) is string droppedStruct) {
+          sb.Append(pad).Append(droppedStruct).Append(";\n");   // a struct nobody keeps: its strings and objects end here (spec 11.1.5.3)
+        } else if (DroppedResultCode(s.Children[0], e) is string dropped) {
           sb.Append(pad).Append(dropped).Append(";\n");   // the new arrays of a result nobody keeps end here (spec 6.8.1)
         } else if (k == "Call" && e.Fresh && IsClass(e.Type)) {
           // a new object nobody keeps ends here
@@ -857,6 +900,7 @@ public sealed partial class CodeGen {
     string type = ResolveDeclType(s, scope);
     if (!LibraryCode) {
       CheckTupleItems(type, s);
+      CheckStructItems(type, s);
     }
     if (scope.Vars.ContainsKey(s.Text!)) {
       throw Error($"'{s.Text}' is already declared in this scope", s);
@@ -891,6 +935,12 @@ public sealed partial class CodeGen {
       var value = ExprOf(init.Children[0], scope, type);
       initValue = value;
       code = tupleArrDecls.Contains(s) ? TupleOwnedCode(init.Children[0], value, type, init) : Convert(value, type, init);
+      if (structObjDecls.Contains(s)) {
+        code = StructOwnedCode(value, type, init);   // its own strings and objects (spec 11.1.5.3)
+      }
+    }
+    if (StructHoldsObjects(type) && !structObjDecls.Contains(s) && !LibraryCode) {
+      throw NotSupported($"this declaration of a struct that holds strings or objects (write its type: {type} {s.Text} = ...)", s);
     }
     if (IsFunType(type)) {
       code = FnDeclCode(s, initValue, code);   // the variable holds a usage of the function value (spec 13.3.5)
@@ -918,7 +968,12 @@ public sealed partial class CodeGen {
     if (frames.Peek().Hoisted.TryGetValue(s.Text!, out var hoisted)) {
       // already created at the start of the scope (the scope has atEnd blocks)
       variable = hoisted;
-      sb.Append($"{pad}{hoisted.CName} = {code};\n");
+      if (hoisted.HeapName != null && (init == null || init.Children[0] is { Kind: "Call" } created && created.Children[0] is { Kind: "Name" } createdName
+          && createdName.Text == type && scope.Find(type) == null)) {
+        sb.Append(BigStructFill(hoisted.CName, structs[type], init?.Children[0], scope, pad));   // spec 11.1.5.5
+      } else {
+        sb.Append($"{pad}{hoisted.CName} = {code};\n");
+      }
       if (hoisted.OwnFlag != null) {
         sb.Append($"{pad}{hoisted.OwnFlag} = {ownsString};\n");
       }
@@ -948,6 +1003,9 @@ public sealed partial class CodeGen {
     }
     if (tupleArrDecls.Contains(s)) {
       variable.OwnsTuple = true;   // spec 6.8.1
+    }
+    if (structObjDecls.Contains(s)) {
+      variable.OwnsStruct = true;   // spec 11.1.5.3
     }
     if (IsArr(type) && init != null && !GivesOwnArray(init.Children[0])) {
       variable.BorrowsArray = true;   // arr<T> b = a borrows (spec 6.8.1)
@@ -1248,6 +1306,9 @@ public sealed partial class CodeGen {
     if (TupleHoldsArrays(currentRet!) && !LibraryCode) {
       returned = new Expr(TupleOwnedCode(s.Children[0], returned, currentRet!, s), currentRet!);   // the caller gets its own arrays (spec 6.8.1)
     }
+    if (StructHoldsObjects(currentRet!) && !LibraryCode) {
+      returned = new Expr(StructOwnedCode(returned, currentRet!, s), currentRet!, true);   // the caller gets its own strings and objects (spec 11.1.5.3)
+    }
     if (returned.Type == "void" && s.Text == "implicit") {
       throw Error($"this function must return {Article(currentRet!)} {currentRet}: its last expression gives nothing", s);
     }
@@ -1273,6 +1334,9 @@ public sealed partial class CodeGen {
     }
     if (target.Kind == "Name") {
       var variable = scope.Find(target.Text!);
+      if (variable == null && StructBareField(target, scope) is Node viaThis) {
+        return LValue(viaThis, scope);   // x = 1 inside a method of a struct: this.x (spec 11.1.5.2)
+      }
       if (variable == null && currentClass != null && FindField(currentClass, target.Text!, target) is FieldInfo ownField) {
         var bare = BareField(target.Text!, scope, target, true)!.Value;
         if ((ownField.IsCounted || ownField.IsWeak) && !countedFieldWrite) {
@@ -1303,11 +1367,23 @@ public sealed partial class CodeGen {
       }
       return new LValueInfo(variable.CName, variable.Type, variable.IsConst, variable);
     }
+    if (target.Kind == "Paren") {
+      return LValue(target.Children[0], scope);   // (x).f = v
+    }
+    if (target.Kind == "Transmute" && StructTransmuteLValue(target, scope) is LValueInfo view) {
+      return view;   // ([Whole]pair).value = 5: written through the view (spec 11.1.5.7)
+    }
     if (target.Kind == "Member") {
       if (ClassLValue(target, scope) is LValueInfo classTarget) {
         return classTarget;
       }
+      if (target.Children[0].Kind == "Index" && StructItemLValue(target.Children[0], scope) is LValueInfo item) {
+        return StructLValue(item, target, scope);   // ps[2].b = 4 (spec 11.1.5)
+      }
       var owner = LValue(target.Children[0], scope);
+      if (IsStruct(owner.Type)) {
+        return StructLValue(owner, target, scope);   // s.x = v (spec 11.1.5)
+      }
       if (!IsTuple(owner.Type)) {
         throw Error("only variables and tuple fields can be assigned for now", target);
       }
@@ -1324,6 +1400,9 @@ public sealed partial class CodeGen {
 
   string AssignCodeOf(Node s, Scope scope) {
     var targetNode = s.Children[0];
+    if (targetNode.Kind == "Member" && structs.Count > 0 && BufferAssign(s, scope) is string buffer) {
+      return buffer;   // s.m = [ ... ] (spec 11.1.5.4)
+    }
     if (targetNode.Kind == "Index" && !TupleIndexTarget(targetNode, scope)) {
       return IndexAssign(s, scope);
     }
@@ -1355,6 +1434,14 @@ public sealed partial class CodeGen {
     }
     if (op == "+=" && target.Type == "string" && StrAppendAssign(targetNode, s.Children[1], scope, s) is string appended) {
       return appended;   // always in place
+    }
+    if (op == "=" && IsStructOwner(target)) {
+      return StructAssign(target, s.Children[1], scope, s);   // the struct owns its strings and objects (spec 11.1.5.3)
+    }
+    if (op == "=" && StructHoldsObjects(target.Type) && !LibraryCode) {
+      throw Error(target.Variable is { ReadOnlyStruct: true }
+        ? $"'{targetNode.Text}' is a read-only parameter: it cannot be replaced; declare it &{target.Type} {targetNode.Text} to change it (spec 13.1, 11.1.5.3)"
+        : $"'{targetNode.Text}' does not own its struct: it cannot be replaced", s);
     }
     if (op == "=" && IsTupleOwner(target)) {
       return TupleAssign(target, s.Children[1], scope, s);   // the tuple owns its arrays (spec 6.8.1)
@@ -1451,6 +1538,9 @@ public sealed partial class CodeGen {
             return new Expr($"DF_RC_OBJ({CType(v.Type)}, {v.CName})", v.Type);   // the object of the counting block (spec 12.7)
           }
           return new Expr(v.CName, v.Type);
+        }
+        if (StructBareField(n, scope) is Node viaThis) {
+          return ExprOf(viaThis, scope);   // x inside a method of a struct: this.x (spec 11.1.5.2)
         }
         if (BareField(n.Text!, scope, n) is Expr field) {
           CheckWeakFieldRead(FindField(currentClass!, n.Text!), n);
@@ -1587,6 +1677,10 @@ public sealed partial class CodeGen {
         }
         if (copied.Type == "string") {
           return new Expr(copied.Fresh ? copied.Code : $"df_str_dup({copied.Code})", "string", true);
+        }
+        if (IsStruct(copied.Type)) {
+          // s!: a copy with its own strings and objects (spec 11.1.5.3)
+          return new Expr(StructHoldsObjects(copied.Type) && !copied.Fresh ? $"{StructCloneHelper(copied.Type)}({copied.Code})" : copied.Code, copied.Type, true);
         }
         if (IsArr(copied.Type)) {
           cloneUsed = true;   // the items that are objects are cloned through their classes
@@ -2112,6 +2206,9 @@ public sealed partial class CodeGen {
   Expr Transmute(Node n, Scope scope) {
     string to = ResolveType(n.Children[0]);
     var e = ExprOf(n.Children[1], scope);
+    if (IsStructTransmute(to, e.Type)) {
+      return StructTransmuteExpr(n, to, e, scope);   // [Whole]pair: the same bytes, another layout (spec 11.1.5.7)
+    }
     if (to == "bool") {
       // 0, null, "", NaN and '\0' are false, anything else is true
       return new Expr(BoolOf(e, n), "bool");
@@ -2196,6 +2293,10 @@ public sealed partial class CodeGen {
     if (callee.Kind == "SafeMember") {
       return SafeAccess(callee, n, scope);
     }
+    // Vec3(x: 2.0), Vec3(1.0, 2.0, 3.0): a new struct (spec 11.1.5.1)
+    if (callee.Kind == "Name" && structs.TryGetValue(callee.Text!, out var created) && scope.Find(callee.Text!) == null) {
+      return StructCreate(created, args, scope, n);
+    }
     if (TryFnValueCall(callee, args, scope, n) is Expr fnCall) {
       return fnCall;   // f(3), (i32 a) { ... }(42) (spec 13.3)
     }
@@ -2235,6 +2336,15 @@ public sealed partial class CodeGen {
       return ObjectCall(viewMap, viewKeys ? "hasKey" : "has", args, scope, n) ?? throw Error("no has", n);
     }
 
+    // Vec2.dot(a, b): a static function of a struct (spec 11.1.5.2)
+    if (callee is { Kind: "Member" } && callee.Children[0] is { Kind: "Name" } structName && structs.TryGetValue(structName.Text!, out var staticOwner)
+        && scope.Find(structName.Text!) == null) {
+      return StructStaticCall(staticOwner, callee.Text!, args, scope, n);
+    }
+    // s.len(): a method of a struct (spec 11.1.5.2)
+    if (callee.Kind == "Member" && StructMethodCall(callee, args, scope, n) is Expr structCall) {
+      return structCall;
+    }
     // a function of a value: "text".Trim(), c.IsDigit(), d.addDays(1), numbers.has(3)
     if (callee.Kind == "Member" && IsValueReceiver(callee.Children[0], scope)) {
       var receiver = ExprOf(callee.Children[0], scope);
@@ -2290,7 +2400,7 @@ public sealed partial class CodeGen {
   bool PlainLend(ParamSig p) => p.Ref == 1 && IsClass(p.Type)
     || p.Ref == 0 && !p.IsGift && !p.IsWeak && !p.IsParent && (IsClass(p.Type) || IsArr(p.Type));
 
-  Expr UserCall(FunSig f, List<Node> args, Scope scope, Node at) {
+  Expr UserCall(FunSig f, List<Node> args, Scope scope, Node at, string? self = null) {
     if (f.IsCtor && f.Visibility == Vis.Private && currentClass != f.Class && !LibraryCode) {
       // a private constructor (spec 11.1.1): only the code of its class calls it, its static functions included
       throw Error($"this constructor of {DisplayName(f.Class!.Name)} is private: only the code of {DisplayName(f.Class.Name)} can call it", at);
@@ -2310,8 +2420,11 @@ public sealed partial class CodeGen {
       }
       codes.Add(ArgCode(param, arg, scope));
     }
+    if (self != null) {
+      codes.Insert(0, self);   // a method of a struct: the address of the struct (spec 11.1.5.2)
+    }
     string call = $"{f.CName}({string.Join(", ", codes)})";
-    return new Expr(UserCallCode(f, call), f.Ret, IsClass(f.Ret) && (f.IsCtor || f.ReturnsOwned));
+    return new Expr(UserCallCode(f, call), f.Ret, IsClass(f.Ret) && (f.IsCtor || f.ReturnsOwned) || StructHoldsObjects(f.Ret));
   }
 
   Expr MemberValue(Node n, Scope scope) {
@@ -2328,6 +2441,9 @@ public sealed partial class CodeGen {
       if (parts.Length == 2 && classes.TryGetValue(parts[0], out var staticOwner)) {
         return StaticField(staticOwner, parts[1], n);
       }
+      if (parts.Length == 2 && parts[1] == "sizeof" && structs.ContainsKey(parts[0])) {
+        return StructSizeof(parts[0]);   // Vec2.sizeof (spec 11.1.5.6)
+      }
       if (parts.Length == 2 && IsEnum(parts[0])) {
         return EnumEntryExpr(parts[0], parts[1]) ?? throw Error($"'{parts[0]}' has no entry '{parts[1]}'", n);
       }
@@ -2335,7 +2451,10 @@ public sealed partial class CodeGen {
     if (n.Text == "len" && MapViewOf(n.Children[0], scope) is (Expr viewMap, _)) {
       return MapLen(viewMap);   // m.keys.len: the map itself, no view object (CodeGen.Map.cs)
     }
-    var obj = TempTuple(TempObject(ExprOf(n.Children[0], scope)), n.Children[0]);   // Dog("a").name, f().0: the new value ends with the statement
+    var obj = TempStruct(TempTuple(TempObject(ExprOf(n.Children[0], scope)), n.Children[0]));   // Dog("a").name, f().0: the new value ends with the statement
+    if (IsStruct(obj.Type)) {
+      return StructMember(obj, n);   // s.x (spec 11.1.5)
+    }
     if (n.Text == "hash") {
       return HashOf(obj, n);   // every type has it, the nullable ones too (CodeGen.Hash.cs)
     }

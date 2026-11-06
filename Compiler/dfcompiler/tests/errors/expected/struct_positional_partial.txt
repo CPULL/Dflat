@@ -1,0 +1,1 @@
+struct_positional_partial.df(3): error: a struct created by position needs all its 2 fields, in order (x, y); give only some of them by name: A(x: value) (spec 11.1.5.1)

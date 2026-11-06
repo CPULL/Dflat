@@ -80,6 +80,9 @@ public sealed partial class CodeGen {
     var size = ExprOf(sizeNode, scope, "u64");
     string count = NewTemp();
     string code = $"({{ df_uns {count} = {IndexValue(size, sizeNode)}; ({CType(type)}){{ ({CType(elem)}*)df_calloc({count}, sizeof({CType(elem)})), {count} }}; }})";
+    if (IsStruct(elem) && StructHasStartValues(elem)) {
+      code = StructArrayFill(code, type, elem);   // the items of an array of structs take the start values (spec 11.1.5.1)
+    }
     return new Expr(code, type);
   }
 
@@ -198,6 +201,7 @@ public sealed partial class CodeGen {
   // a[i] = v, a[i] += v ...
   string IndexAssign(Node s, Scope scope) {
     var target = s.Children[0];
+    CheckBufferWrite(target.Children[0], scope, s);   // s.m[i] = v: an item of a buffer (spec 11.1.5.4)
     if (ReadOnlyVariable(target.Children[0], scope) is not null) {
       throw Error($"'{target.Children[0].Text}' is a read-only reference: its items cannot be assigned", s);
     }

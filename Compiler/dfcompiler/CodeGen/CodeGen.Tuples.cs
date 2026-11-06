@@ -49,6 +49,9 @@ public sealed partial class CodeGen {
     if (s.Children.Count == 1) {
       // forwarding another call with the same return values
       var single = ExprOf(s.Children[0], scope);
+      if (IsStruct(single.Type) && Assignable(currentRet!, single.Type)) {
+        return Convert(single, currentRet!, s);   // return s: the fields of the struct are the values (spec 11.1.5.8)
+      }
       if (single.Type != currentRet) {
         throw Error($"this function returns {elems.Count} values", s);
       }
@@ -88,7 +91,31 @@ public sealed partial class CodeGen {
     var values = s.Children[1].Children;
     var resolved = new List<Expr?>();
 
-    if (values.Count == 1) {
+    if (values.Count == 1 && values[0].Kind == "GroupValue") {
+      var source = values[0].Children[0];
+      var sourceValue = ExprOf(source, scope);
+      if (!IsStruct(sourceValue.Type)) {
+        // a tuple variable: by the names of the fields of the group
+        if (!IsSimpleReceiver(source)) {
+          throw NotSupported("Assigning to a field group the result of an expression (use a tuple literal or a variable)", s);
+        }
+        values = values[0].Text!.Split(',').Select(field => Synthetic("Member", source, field).Add(CopyTree(source))).ToList();
+      } else {
+        values = new List<Node> { source };   // a struct: its fields in order (spec 11.1.5.8)
+      }
+    }
+    if (values.Count == 1 && ExprOf(values[0], scope) is { } single && IsStruct(single.Type)) {
+      // a, b = s: the fields of the struct in order (spec 11.1.5.8)
+      var fields = StructTupleFields(single.Type, s);
+      if (fields.Count != targets.Count) {
+        throw Error($"the struct '{single.Type}' has {fields.Count} fields, not {targets.Count}", s);
+      }
+      string held = NewTemp();
+      sb.Append($"{pad}{CType(single.Type)} {held} = {single.Code};\n");
+      foreach (var field in fields) {
+        resolved.Add(new Expr(StructFieldRead(held, field), field.Type, single.Fresh || field.Type != "string"));
+      }
+    } else if (values.Count == 1) {
       var value = ExprOf(values[0], scope);
       if (!IsMulti(value.Type)) {
         if (IsTuple(value.Type)) {

@@ -1,0 +1,1 @@
+struct_unrestricted_this.df(4): error: an unrestricted method only reads its struct: it cannot assign this (spec 11.1.5.2)

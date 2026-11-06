@@ -1,0 +1,1 @@
+struct_transmute_objects.df(5): error: Named holds strings or objects: only structs of plain values are transmuted (spec 11.1.5.7)

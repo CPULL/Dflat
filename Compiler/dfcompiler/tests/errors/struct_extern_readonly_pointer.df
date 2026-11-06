@@ -1,0 +1,6 @@
+namespace struct_extern_readonly_pointer
+struct<fixed> A { i32 n }
+extern fun f(&*A a)
+fun g(A a) {
+  f(&*a)
+}

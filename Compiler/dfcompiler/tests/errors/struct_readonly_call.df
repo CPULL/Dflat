@@ -1,0 +1,8 @@
+namespace struct_readonly_call
+struct A {
+  i32 x
+  public fun grow() { x++ }
+}
+fun f(A a) {
+  a.grow()
+}

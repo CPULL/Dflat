@@ -1,0 +1,1 @@
+struct_map_key.df(3): error: map keys of type Pair are not built yet (this version: integers, bool, char, enums, reals, date, time and string)

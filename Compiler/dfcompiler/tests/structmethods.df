@@ -1,0 +1,58 @@
+namespace structmethods
+alias Root as r
+
+struct Vec2 {
+  r32 x,
+  r32 y
+
+  public unrestricted fun r32 lenSq() { x * x + y * y }
+  public fun scale(r32 k) {
+    x *= k
+    this.y = this.y * k
+  }
+  public fun double() { scale(2.0) }
+  public unrestricted fun Vec2 plus(Vec2 o) { Vec2(x + o.x, y + o.y) }
+  public fun reset() { this = Vec2() }
+  fun r32 secret() { 42.0 }
+  public unrestricted fun r32 peek() { secret2() }
+  unrestricted fun r32 secret2() { 7.0 }
+}
+
+struct Seg { Vec2 a, Vec2 b
+  public fun stretch() { b.scale(3.0) }
+}
+
+class Ship {
+  public Vec2 pos
+}
+
+fun r32 measure(Vec2 v) { v.lenSq() }
+
+fun push(&Vec2 v) { v.double() }
+
+var p = Vec2(3.0, 4.0)
+r.Console.log(p.lenSq())
+p.scale(2.0)
+r.Console.log(p)
+p.double()
+r.Console.log(p)
+r.Console.log(Vec2(1.0, 1.0).plus(p))
+r.Console.log(measure(p))
+push(&p)
+r.Console.log(p)
+p.reset()
+r.Console.log(p)
+var s = Seg(b: Vec2(1.0, 2.0))
+s.stretch()
+s.a.scale(5.0)
+r.Console.log(s)
+arr<Vec2>[2] items
+items[1] = Vec2(1.0, 1.0)
+items[1].scale(4.0)
+r.Console.log(items)
+var ship = Ship()
+ship.pos = Vec2(2.0, 0.0)
+ship.pos.double()
+r.Console.log(ship.pos)
+r.Console.log(p.peek())
+r.Console.log(Vec2(2.0, 2.0).lenSq())

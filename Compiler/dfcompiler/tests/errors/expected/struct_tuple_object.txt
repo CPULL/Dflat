@@ -1,0 +1,1 @@
+struct_tuple_object.df(5): error: feature not supported: converting to a tuple a struct with an object ('d' of Pet)

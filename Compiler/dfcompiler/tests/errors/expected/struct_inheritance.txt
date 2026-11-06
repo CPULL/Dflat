@@ -1,0 +1,1 @@
+struct_inheritance.df(2,10): error: a struct has no inheritance and no traits (spec 11.1.5), found ':'

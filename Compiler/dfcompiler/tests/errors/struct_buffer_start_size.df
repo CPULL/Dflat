@@ -1,0 +1,2 @@
+namespace struct_buffer_start_size
+struct A { arr<i32>[3] m = [1, 2] }

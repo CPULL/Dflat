@@ -1,0 +1,5 @@
+namespace struct_transmute_precedence
+struct Pair { i16 low, i16 high }
+struct Whole { u32 value }
+var pair = Pair()
+Root.Console.log([Whole]pair.value)

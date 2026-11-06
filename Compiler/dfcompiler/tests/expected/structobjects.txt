@@ -1,0 +1,35 @@
+1 creation
+Pet { label: a, dog: Dog{}, age: 0 }
+2 copy clones
+a rex b rex2
+3 assign drops the old
+  end rex2
+max 0
+4 field replaced
+  end max
+5 lend and temporaries
+show a
+show tmp
+  end tmp
+tmp2
+  end tmp2
+  end tmp3
+tmp3 0
+  end dropped
+6 move
+keep max
+  end bo
+b after move:  true
+keep a
+  end rex
+7 nested and class field
+Owner { who: ann, pet: Pet { label: nest2, dog: Dog{}, age: 0 } }
+a
+8 static
+a pet
+9 end of program
+  end home
+  end rex
+  end nest
+  end rex
+---- exit code 0 ----

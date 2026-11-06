@@ -1,0 +1,1 @@
+struct_transmute_larger.df(5): error: [Whole] reads 4 bytes, but a Small has 1: the view must stay inside the bytes of the original (spec 11.1.5.7)

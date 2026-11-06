@@ -1,0 +1,5 @@
+namespace struct_lend_with_arrow
+struct A { string s }
+fun show(A a) { }
+A a = A(s: "x")
+show(->a)

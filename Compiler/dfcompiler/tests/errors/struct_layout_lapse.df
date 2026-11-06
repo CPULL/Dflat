@@ -1,0 +1,2 @@
+namespace struct_layout_lapse
+struct<compact> A { lapse l }

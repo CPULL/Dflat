@@ -1,0 +1,1 @@
+struct_gift_needs_move.df(5): error: 'a' takes ownership of the struct: write ->a to move it, or a! to give a copy

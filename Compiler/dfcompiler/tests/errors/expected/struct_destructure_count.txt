@@ -1,0 +1,1 @@
+struct_destructure_count.df(3): error: the struct 'Size' has 2 fields, not 3

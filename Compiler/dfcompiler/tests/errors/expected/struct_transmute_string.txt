@@ -1,0 +1,1 @@
+struct_transmute_string.df(3): error: a struct is transmuted to or from another struct or a number, not string (spec 11.1.5.7)

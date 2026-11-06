@@ -1,0 +1,17 @@
+Matrix { m: [1, 0, 0, ...] (4 items) }
+4
+[2, 10, 0, ...] (4 items)
+4
+14
+2 100 false
+true
+[9, 8, 7, ...] (4 items)
+[9, 8, 7, ...] (4 items)
+102
+[Point { x: 0, y: 0 }, Point { x: 4, y: 0 }, Point { x: 7, y: 8 }]
+7 20000 43
+9
+0
+1
+2
+---- exit code 0 ----

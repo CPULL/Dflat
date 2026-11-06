@@ -280,6 +280,17 @@ public sealed partial class CodeGen {
       owners.Add(statement);
       drops.Add(StrDropNode(statement.Text!, statement));
     }
+    foreach (var statement in statements.Where(statement => statement.Kind == "Decl" && IsStructObjDecl(statement))) {
+      owners.Add(statement);   // a struct that holds strings or objects: they end with the scope (spec 11.1.5.3)
+      structObjDecls.Add(statement);
+      drops.Add(StructDropNode(statement.Text!, statement));
+    }
+    foreach (var statement in statements.Where(statement => statement.Kind == "Decl" && IsBigStructDecl(statement))) {
+      bigStructDecls.Add(statement);   // a struct above 64 KB: on the heap, freed with the scope (spec 11.1.5.5)
+      if (owners.Add(statement)) {
+        drops.Add(StructDropNode(statement.Text!, statement));
+      }
+    }
     foreach (var statement in statements.Where(statement => statement.Kind == "Decl" && IsTupleArrDecl(statement))) {
       owners.Add(statement);   // a tuple that holds arrays: they end with the scope (spec 6.8.1)
       tupleArrDecls.Add(statement);
@@ -536,7 +547,7 @@ public sealed partial class CodeGen {
     if (statements.Count == 0 || statements.Any(s => s.Kind is "AtEnd" or "AtEndOf" or "Catch" or "Label")) {
       return statements;
     }
-    if (!statements.Any(s => (s.Kind == "Decl" && (IsCountedDecl(s) || ObjectTypeOf(s) != null || IsStringDecl(s) || IsOptStringDecl(s) || IsFunDecl(s)
+    if (!statements.Any(s => (s.Kind == "Decl" && (IsCountedDecl(s) || ObjectTypeOf(s) != null || IsStringDecl(s) || IsOptStringDecl(s) || IsFunDecl(s) || IsStructObjDecl(s) || IsBigStructDecl(s)
           || IsArrTypeNode(s.Children.FirstOrDefault(child => TypeNodeKinds.Contains(child.Kind)))))
         || (s.Kind == "MultiAssign" && s.Children[0].Children.Any(target => target.Kind == "Decl" && IsStringDecl(target))))) {
       return statements;
@@ -594,6 +605,9 @@ public sealed partial class CodeGen {
     var value = ExprOf(operand, scope);
     if (IsArr(value.Type) && !LibraryCode) {
       return ArrGift(n, operand, value.Type, scope);   // spec 6.8.1
+    }
+    if (StructHoldsObjects(value.Type) && !LibraryCode) {
+      return StructGift(operand, value, scope, n);   // spec 11.1.5.3
     }
     if (!IsClass(value.Type)) {
       Warn("-> on a basic value is ignored: it is a copy", n, 1);
@@ -1384,6 +1398,9 @@ public sealed partial class CodeGen {
       }
       foreach (var field in cls.Fields.Where(field => TupleHoldsArrays(field.Type) && !field.IsStatic)) {
         TupleDropCode(field.Type, "self");   // the same for the arrays of a tuple field
+      }
+      foreach (var field in cls.Fields.Where(field => StructHoldsObjects(field.Type) && !field.IsStatic)) {
+        StructDropHelper(field.Type);   // and for a struct field that holds strings or objects (spec 11.1.5.3)
       }
     }
     var sb = classCode;

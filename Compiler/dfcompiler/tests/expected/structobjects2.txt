@@ -1,0 +1,31 @@
+1 self assign
+  end a
+a
+2 & parameter
+  end a
+in
+3 this replaced
+  end in
+reset
+4 nested replaced
+  end p1
+  end p2
+5 string fields
+named
+note
+6 class clone
+h1 h2
+7 loop
+loop0
+  end loop0
+loop1
+  end loop1
+8 copy
+fresh copy
+9 end
+  end h2
+  end h1
+  end copy
+  end p3
+  end fresh
+---- exit code 0 ----

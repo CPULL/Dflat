@@ -1,0 +1,5 @@
+namespace struct_transmute_objects
+struct Named { string name }
+struct Whole { u64 value }
+Named n = Named(name: "x")
+Root.Console.log(([Whole]n).value)

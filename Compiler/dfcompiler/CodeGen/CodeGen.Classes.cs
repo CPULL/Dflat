@@ -1196,6 +1196,9 @@ public sealed partial class CodeGen {
   // the members that do not change them
   void CheckReadOnlyCall(Node receiverNode, Expr receiver, string name, Scope scope, Node at) {
     if (ReadOnlyVariable(receiverNode, scope) is null) {
+      if (IsArr(receiver.Type) && !ReadOnlyCollectionMembers.Contains(name) && structs.Count > 0) {
+        CheckBufferWrite(receiverNode, scope, at);   // s.m.fill(0) through a read-only struct (spec 11.1.5.4)
+      }
       return;
     }
     string what = receiverNode.Text!;
@@ -1533,6 +1536,9 @@ public sealed partial class CodeGen {
 
   // one argument: an object given to a parameter written ->T moves (the call writes ->x); the others only borrow
   string ArgCode(ParamSig param, Node arg, Scope scope) {
+    if (param.Pointer != 0) {
+      return StructPointerArg(param, arg, scope);   // f(*v), f(&*v) (spec 11.1.5.6)
+    }
     if (BoxInner(param.Type) != null) {
       if (!param.IsGift) {
         return LookupBox(arg, param.Type, scope);   // pack.has(first): compared, not kept
@@ -1602,6 +1608,9 @@ public sealed partial class CodeGen {
       if (!param.IsGift && arg.Kind == "Gift") {
         throw Error($"'{param.Name}' only borrows the array: remove the ->", arg);
       }
+    }
+    if (StructHoldsObjects(param.Type) && !LibraryCode) {
+      return StructArg(param, arg, scope);   // spec 11.1.5.3
     }
     // a weak parameter takes any existing object, also another weak reference (spec 12)
     var value = ExprOf(arg, scope, param.Type);
@@ -1686,6 +1695,17 @@ public sealed partial class CodeGen {
 
   // name(args) written inside a class: a function of this class (or a parent), before free functions
   Expr? BareMethodCall(string name, List<Node> args, Scope scope, Node at) {
+    if (currentStruct != null && funs.TryGetValue(currentStruct.Name + "." + name, out var structFuns)) {
+      // len() inside a method of a struct: this.len(), or a static function of the struct (spec 11.1.5.2)
+      var chosen = ResolveOverload(structFuns, args, scope, at);
+      if (chosen.IsStatic) {
+        return StructStaticCall(currentStruct, name, args, scope, at);
+      }
+      if (scope.Find("this") == null) {
+        throw Error($"'{name}' is a method: a static function has no struct to call it on", at);
+      }
+      return StructMethodCall(Synthetic("Member", at, name).Add(Synthetic("Name", at, "this")), args, scope, at);
+    }
     if (currentClass == null) {
       return null;
     }

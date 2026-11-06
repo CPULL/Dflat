@@ -1,0 +1,1 @@
+struct_buffer_from_array.df(5): error: the buffer 'm' takes an array literal of 3 items or another buffer arr<r32>[3]

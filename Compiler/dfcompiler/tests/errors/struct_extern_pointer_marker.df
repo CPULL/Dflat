@@ -1,0 +1,5 @@
+namespace struct_extern_pointer_marker
+struct<fixed> A { i32 n }
+extern fun f(*A a)
+var a = A()
+f(a)

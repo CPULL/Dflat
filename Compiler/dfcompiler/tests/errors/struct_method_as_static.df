@@ -1,0 +1,6 @@
+namespace struct_method_as_static
+struct A {
+  i32 x
+  public fun grow() { x++ }
+}
+A.grow()

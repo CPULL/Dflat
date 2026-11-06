@@ -1,0 +1,5 @@
+namespace struct_method_field_name
+struct A {
+  i32 x
+  public fun x() { }
+}

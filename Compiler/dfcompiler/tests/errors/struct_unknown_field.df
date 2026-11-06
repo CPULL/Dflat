@@ -1,0 +1,3 @@
+namespace struct_unknown_field
+struct A { i32 x }
+var a = A(w: 1)

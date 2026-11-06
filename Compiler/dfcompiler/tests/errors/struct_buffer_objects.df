@@ -1,0 +1,2 @@
+namespace struct_buffer_objects
+struct A { arr<string>[3] names }

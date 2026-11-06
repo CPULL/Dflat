@@ -1,0 +1,5 @@
+namespace struct_readonly_param
+struct A { i32 x }
+fun f(A a) {
+  a.x = 3
+}

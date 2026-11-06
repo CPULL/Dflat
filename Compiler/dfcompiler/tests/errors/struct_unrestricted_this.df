@@ -1,0 +1,5 @@
+namespace struct_unrestricted_this
+struct A {
+  i32 x
+  public unrestricted fun bad() { this = A() }
+}

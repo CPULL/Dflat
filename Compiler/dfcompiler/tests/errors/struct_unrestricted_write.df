@@ -1,0 +1,5 @@
+namespace struct_unrestricted_write
+struct A {
+  i32 x
+  public unrestricted fun bad() { x = 1 }
+}

@@ -1,0 +1,1 @@
+struct_notclonable.df(3): error: a struct holds only objects that can be cloned: Key cannot be cloned, Key is notclonable (spec 11.1.5.3)

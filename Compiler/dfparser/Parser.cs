@@ -383,6 +383,10 @@ public sealed class Parser {
         && PeekAt(1).Kind == TokenKind.Ident) {
       return WithMods(ParseEnum(), mods);
     }
+    // struct Name { fields, methods }, struct<fixed> Name { ... } (spec 11.1.5); struct is a keyword only here
+    if (Peek.Kind == TokenKind.Ident && Peek.Text == "struct" && (PeekAt(1).Kind == TokenKind.Ident || PeekAt(1).Is("<"))) {
+      return WithMods(ParseStruct(), mods);
+    }
     // Generic Name { type, type, Set }: a named set of types (spec 11.3.6)
     if (Peek.Kind == TokenKind.Ident && Peek.Text == "Generic" && PeekAt(1).Kind == TokenKind.Ident && PeekAt(2).Is("{")) {
       return WithMods(ParseGenericSet(), mods);
@@ -1568,6 +1572,90 @@ public sealed class Parser {
       throw ErrorAt("a field group needs at least one field", name);
     }
     return group;
+  }
+
+  // struct [<fixed|compact>] Name { type field [= value], ..., methods } (spec 11.1.5): a Struct node with an optional Layout child,
+  // one Field per field (its type, an optional Size for arr<T>[N], an optional Init) and the Fun nodes of the methods
+  Node ParseStruct() {
+    Next();
+    Node? layout = null;
+    if (IsOp("<")) {
+      Next();
+      var tag = ExpectIdent();
+      if (tag.Text is not ("fixed" or "compact")) {
+        throw ErrorAt("the layout of a struct is <fixed> or <compact> (spec 11.1.5.6)", tag);
+      }
+      ExpectOp(">");
+      layout = new Node("Layout", tag, tag.Text);
+    }
+    var name = ExpectIdent();
+    var node = new Node("Struct", name, name.Text);
+    if (layout != null) {
+      node.Add(layout);
+    }
+    if (IsOp("<")) {
+      throw Error("a struct has no generics (spec 11.1.5)");
+    }
+    if (IsOp("(")) {
+      throw Error($"a struct has no constructors: it is created with {name.Text}(field: value) (spec 11.1.5.1)");
+    }
+    if (IsOp(":")) {
+      throw Error("a struct has no inheritance and no traits (spec 11.1.5)");
+    }
+    bool saved = noBrace;
+    noBrace = false;
+    var open = ExpectOp("{");
+    bool needComma = false;   // a field was just read without its ','
+    while (true) {
+      SkipTerminators();
+      if (IsOp("}")) {
+        break;
+      }
+      if (AtEnd) {
+        throw ErrorAt("unclosed '{'", open);
+      }
+      var mods = ParseModifiers();
+      if (IsKw("fun")) {
+        node.Add(WithMods(ParseFun(), mods));
+        needComma = false;
+        continue;
+      }
+      if (mods.Count > 0) {
+        throw ErrorAt(mods[0].Text is "public" or "private" or "internal" or "unrestricted" or "asparent"
+          ? "the fields of a struct are always public: they take no visibility keyword (spec 11.1.5.1)"
+          : $"'{mods[0].Text}' does not apply to the field of a struct (spec 11.1.5.1)", mods[0]);
+      }
+      if (needComma) {
+        throw Error("the fields of a struct are separated by ',' (spec 11.1.5.1)");
+      }
+      var type = ParseType();
+      Node? size = null;
+      if (IsOp("[") && type.Kind == "Type" && type.Text == "arr" && type.Children.Count > 0) {
+        var bracket = Next();
+        size = new Node("Size", bracket).Add(ParseExpr());
+        ExpectOp("]");
+      }
+      var fieldName = ExpectIdent();
+      var field = new Node("Field", fieldName, fieldName.Text).Add(type);
+      if (size != null) {
+        field.Add(size);
+      }
+      if (IsOp("=")) {
+        field.Add(new Node("Init", Next()).Add(ParseExpr()));
+      }
+      node.Add(field);
+      if (AcceptOp(",")) {
+        needComma = false;
+        continue;
+      }
+      if (!IsNewline && !IsOp(";") && !IsOp("}")) {
+        throw Error("the fields of a struct are separated by ',' (spec 11.1.5.1)");
+      }
+      needComma = true;
+    }
+    Next();
+    noBrace = saved;
+    return node;
   }
 
   // trait Name : SuperTrait { properties, methods, constructor }

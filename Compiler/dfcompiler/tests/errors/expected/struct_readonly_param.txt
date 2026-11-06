@@ -1,0 +1,1 @@
+struct_readonly_param.df(4): error: 'a' is a read-only parameter: its fields cannot be written; declare it &A a to change it (spec 13.1, 11.1.5.2)

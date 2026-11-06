@@ -1,0 +1,19 @@
+2 0 -1
+Vec3 { x: 0, y: 0, z: -1 }
+Vec3 { x: 1, y: 2, z: 3 }
+Vec3 { x: 3, y: 2, z: 2 }
+7
+3 100
+200 3
+7 false -1 0
+Box { min: Vec3 { x: 0, y: 0, z: 9 }, max: Vec3 { x: 0, y: 5, z: -1 }, id: 7, ... }
+-1
+Holder { p: Vec3 { x: 4, y: 0, z: -1 } }
+[Vec3 { x: 0, y: 0, z: -1 }, Vec3 { x: 0, y: 6, z: -1 }, Vec3 { x: 7, y: 8, z: 9 }]
+[Vec3 { x: 1, y: 0, z: 9 }]
+2
+Big { a: 1, b: 2, c: 3, ... }
+Stamp { when: null, count: 3, mark: k }
+true false true
+2 1
+---- exit code 0 ----

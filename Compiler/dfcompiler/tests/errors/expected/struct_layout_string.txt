@@ -1,0 +1,1 @@
+struct_layout_string.df(2): error: a struct<fixed> holds only plain values (numbers, bool, char, addr, enums, bitfields, date, time, clock, buffers and structs with the same tag), not string (spec 11.1.5.6)

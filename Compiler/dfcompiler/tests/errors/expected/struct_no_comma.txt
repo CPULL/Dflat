@@ -1,0 +1,1 @@
+struct_no_comma.df(4,3): error: the fields of a struct are separated by ',' (spec 11.1.5.1), found 'i32'

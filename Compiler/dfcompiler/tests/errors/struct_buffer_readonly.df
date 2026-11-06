@@ -1,0 +1,5 @@
+namespace struct_buffer_readonly
+struct A { arr<r32>[3] m }
+fun f(A a) {
+  a.m[0] = 1.0
+}

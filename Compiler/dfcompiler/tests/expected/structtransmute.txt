@@ -1,0 +1,12 @@
+131073
+Pair { low: 5, high: 0 }
+5 7
+5
+Pair { low: 0, high: 0 }
+Rgba { r: 4, g: 3, b: 2, ... }
+4278321924
+1
+Holder { p: Pair { low: 1, high: 1 }, tag: 3 }
+65537
+[Pair { low: 0, high: 0 }, Pair { low: 2, high: 2 }]
+---- exit code 0 ----

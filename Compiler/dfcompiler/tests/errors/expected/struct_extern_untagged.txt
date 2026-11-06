@@ -1,0 +1,1 @@
+struct_extern_untagged.df(3): error: a struct given to C needs a layout: struct<fixed> A or struct<compact> A (spec 11.1.5.6)

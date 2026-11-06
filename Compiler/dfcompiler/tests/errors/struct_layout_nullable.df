@@ -1,0 +1,2 @@
+namespace struct_layout_nullable
+struct<fixed> A { i32? n }

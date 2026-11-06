@@ -1,0 +1,5 @@
+namespace struct_transmute_larger
+struct Small { u8 a }
+struct Whole { u32 value }
+var s = Small()
+Root.Console.log(([Whole]s).value)

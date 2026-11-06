@@ -1,0 +1,1 @@
+struct_method_field_name.df(4): error: the struct 'A' has a field 'x': a method cannot have the same name

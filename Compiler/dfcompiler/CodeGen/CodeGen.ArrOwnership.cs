@@ -114,15 +114,19 @@ public sealed partial class CodeGen {
     foreach (var field in cls.Fields.Where(field => TupleHoldsArrays(field.Type) && !field.IsStatic)) {
       sb.Append($"  {TupleDropCode(field.Type, "self->" + field.CName)}\n");
     }
+    foreach (var field in cls.Fields.Where(field => StructHoldsObjects(field.Type) && !field.IsStatic)) {
+      sb.Append($"  {StructDropCode(field.Type, "self->" + field.CName)}\n");   // spec 11.1.5.3
+    }
   }
 
   // the static array fields of the classes of the program end with the program, in the reverse order of their start
   string StaticEndCode() {
     var sb = new System.Text.StringBuilder();
-    var statics = staticOrder.Where(field => (IsArr(field.Type) || TupleHoldsArrays(field.Type)) && field.Owner.Node.Line < LibraryLine).ToList();
+    var statics = staticOrder.Where(field => (IsArr(field.Type) || TupleHoldsArrays(field.Type) || StructHoldsObjects(field.Type)) && field.Owner.Node.Line < LibraryLine).ToList();
     for (int index = statics.Count - 1; index >= 0; index--) {
       var field = statics[index];
       sb.Append(IsArr(field.Type) ? $"  {ArrDropHelper(field.Type)}({field.CName});\n  {field.CName}.p = NULL;\n  {field.CName}.len = 0;\n"
+        : StructHoldsObjects(field.Type) ? $"  {StructDropCode(field.Type, field.CName)}\n"
         : $"  {TupleDropCode(field.Type, field.CName)}\n");
     }
     return sb.ToString();

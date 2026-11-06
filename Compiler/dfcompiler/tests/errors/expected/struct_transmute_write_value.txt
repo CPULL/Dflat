@@ -1,0 +1,1 @@
+struct_transmute_write_value.df(5): error: a view that is written needs a variable, a field or an item: the value would be a copy (spec 11.1.5.7)

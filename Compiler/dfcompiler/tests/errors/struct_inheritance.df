@@ -1,0 +1,2 @@
+namespace struct_inheritance
+struct A : B { i32 x }

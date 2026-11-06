@@ -1,0 +1,1 @@
+struct_object_borrowed.df(5): error: the field 'd' owns its object: give it a new object or move one in with ->x

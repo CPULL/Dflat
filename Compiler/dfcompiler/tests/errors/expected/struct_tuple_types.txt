@@ -1,0 +1,1 @@
+struct_tuple_types.df(3): error: cannot convert r32 to string implicitly; use a cast

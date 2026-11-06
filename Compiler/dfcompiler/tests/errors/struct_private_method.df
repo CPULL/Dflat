@@ -1,0 +1,7 @@
+namespace struct_private_method
+struct A {
+  i32 x
+  fun hidden() { x++ }
+}
+var a = A()
+a.hidden()

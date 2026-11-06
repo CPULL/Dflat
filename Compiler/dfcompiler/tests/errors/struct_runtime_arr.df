@@ -1,0 +1,2 @@
+namespace struct_runtime_arr
+struct A { i32 n, arr<i32> items }

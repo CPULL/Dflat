@@ -1,0 +1,7 @@
+namespace struct_static_on_value
+struct A {
+  i32 x
+  public static fun i32 one() { 1 }
+}
+var a = A()
+var n = a.one()

@@ -1,0 +1,2 @@
+namespace struct_constructor
+struct A(i32 x) { i32 x }

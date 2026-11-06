@@ -145,15 +145,18 @@ public sealed partial class CodeGen {
     if (value.Kind == "Tuple" && value.Children.Count != fields.Count) {
       throw Error($"the field group '{group}' has {fields.Count} fields, the tuple {value.Children.Count} items", assign);
     }
-    if (value.Kind != "Tuple" && !IsSimpleReceiver(value)) {
-      throw NotSupported("Assigning to a field group the result of an expression (use a tuple literal or a variable)", assign);
-    }
     var targets = Synthetic("Targets", assign);
     foreach (string field in fields) {
       targets.Add(FieldOfGroup(receiver, group, field, assign));
     }
     var values = Synthetic("Values", assign);
-    values.Children.AddRange(value.Kind == "Tuple" ? value.Children : fields.Select(field => Synthetic("Member", value, field).Add(CopyTree(value))));
+    if (value.Kind == "Tuple") {
+      values.Children.AddRange(value.Children);
+    } else {
+      // a struct (spec 11.1.5.8) is assigned field by field in order; a tuple variable by the names of the fields. The type is known only
+      // when the assignment is compiled (EmitMultiAssign)
+      values.Add(Synthetic("GroupValue", value, string.Join(",", fields)).Add(value));
+    }
     assign.Kind = "MultiAssign";
     assign.Text = null;
     assign.Children.Clear();

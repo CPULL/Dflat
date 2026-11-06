@@ -1,0 +1,7 @@
+namespace struct_group_size
+struct Three { r32 x, r32 y, r32 z }
+class Sprite {
+  public pos { r32 x, r32 y }
+}
+var s = Sprite()
+s.pos = Three(1.0, 2.0, 3.0)

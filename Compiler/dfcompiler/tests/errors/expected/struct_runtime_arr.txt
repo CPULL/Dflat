@@ -1,0 +1,1 @@
+struct_runtime_arr.df(2): error: a struct cannot have an array of undefined size: an arr field needs a size known at compile time, arr<T>[N] (spec 11.1.5.4)

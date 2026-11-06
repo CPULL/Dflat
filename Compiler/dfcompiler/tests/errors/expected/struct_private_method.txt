@@ -1,0 +1,1 @@
+struct_private_method.df(7): error: 'hidden' is a private method of A: only the methods of A call it

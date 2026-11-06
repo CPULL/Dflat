@@ -28,9 +28,9 @@ Nothing is final. Based on spec 13.1 (functions) and 4 (strings).
 
 ## STRINGS
 - null and "" are the same string (section 4); plain string stays non-nullable.
-- string? is an opt-in nullable string: to be implemented, with constructors
+- string? is an opt-in nullable string
   string(addr) and string(->addr).
-- string(addr) idea: a header with a free class (12 or 14; 13 is "moved") holding the C
+- string(addr) idea: a header with class 12 holding the C
   pointer, read-only, converted to a normal string at the first edit.
 - Who owns/frees C memory varies per library: nothing assumed.
 - Observation: string(->addr) must free with the allocator it came from (C free);
@@ -39,7 +39,7 @@ Nothing is final. Based on spec 13.1 (functions) and 4 (strings).
 
 ## OWNERSHIP / WHO FREES
 - C headers and libraries do not express it; it is in the manual at best.
-- Wanted: a marker saying who frees. Candidates: [T] brackets, or ->*addr.
+- Wanted: a marker saying who frees. Candidates: [~functionName] just before the item that should be freed and by calling which function. [~] for standard free(addr)
   Parameter: the receiver owns it and must free it. Result: the caller frees it.
 - The library's free function is an ordinary function call, not the problem.
 

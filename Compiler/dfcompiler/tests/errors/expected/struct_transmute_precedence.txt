@@ -1,0 +1,1 @@
+struct_transmute_precedence.df(5): error: the struct 'Pair' has no field 'value'

@@ -1,0 +1,1 @@
+struct_nullable.df(3): error: a struct is never nullable; 'A?' is not allowed (spec 11.1.5)

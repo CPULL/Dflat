@@ -1940,3 +1940,165 @@ VAR TUPLES AND SEVERAL RETURN VALUES (2026-11-01, spec 6.8.1, point 20)
 - AddImplicitDrops: a MultiAssign whose only value is a call of program functions with several values (GivesOwnMultiValues): its arr Decl
   targets with local uses get an ArrDrop and ownedArrayDecls; AssignTarget sets OwnsArray.
 - Test arrmulti.
+
+STRUCTS, STEP 1 (2026-11-06, spec 11.1.5, compiler 0.0.54alpha; CodeGen.Structs.cs)
+- Parser.ParseStruct: struct is a keyword only before a name or '<' (Lexer unchanged). Node Struct (Text = name), optional Layout child
+  (<fixed> / <compact>), one Field per field (type, optional Size for arr<T>[N], optional Init) and the Fun nodes of the methods. Fields
+  are separated by ',' (a newline alone between two fields is an error); a visibility keyword or another modifier on a field is an
+  error; '(' after the name (a constructor), '<' (generics) and ':' (inheritance) are errors.
+- CodeGen: StructInfo (fields in order). DeclareStructs before DeclareClasses (the names; a struct inside a class, a function or a
+  block is an error); RegisterStructs after the enums, before RegisterClasses: field types, then EmitStructType writes
+  typedef struct s_Name { ... f_<field> } s_Name into typeDefs, the structs it holds first (a struct that holds itself: error).
+- Field types of step 1: numbers, bool, char, addr, enums, bitfields, date / time / clock / lapse, nullables of those, other structs.
+  arr<T> without a size: error (spec 11.1.5.4). Strings, objects, tuples, arr<T>[N] and the layout tags: NotSupported (later steps).
+- CType = s_Name; IsKnownType includes the structs; Name? is an error (never nullable). ZeroValue = StructZero: a compound literal
+  with the start values (compiled at each use with an empty scope: a start value cannot read variables) or zero; classes and globals
+  get it through ZeroValue. ArrayNew fills arr<S>[n] with StructZero when the struct (or a struct it holds) has start values.
+- Creation (Call, before the function values): a Name that is a struct and not a variable -> StructCreate: by name any subset, by
+  position all the fields, not both (CHOICE: mixing is an error); a statement expression that starts from StructZero and writes the
+  given fields in the order they are written.
+- Reads: MemberValue -> StructMember ((obj).f_x); .sizeof / .offset / .hash: NotSupported. Writes: LValue Member -> StructLValue,
+  also for an item of arr / vec (StructItemLValue: a pointer to the slot after the index check, (*({ ...; &slot; }))).
+- Parameters: plain = a C copy marked VarInfo.ReadOnlyStruct: writing its fields is an error (spec 13.1, 11.1.5.2); assigning the whole
+  parameter is not checked, as for the other values. &S = a pointer (the existing by-pointer path).
+- == (StructEquals): field by field with EqualsCode; two different struct types: error. Printing (StrOf -> StructPrinter): one C
+  function df_str_s_Name per struct in structCode (after the enums, before the array helpers): the name, the first 3 fields, ", ...".
+  Built in this step because vec<S> compiles its has / indexOf and its printing.
+- Tests structs, errors/struct_* (13).
+
+STRUCTS, STEP 2: METHODS (2026-11-06, spec 11.1.5.2, compiler 0.0.55alpha; CodeGen.Structs.cs)
+- RegisterStructMethods (after RegisterClasses): RegisterFun(fun, null, null, struct) names it Struct.method; FunSig.Struct, Visibility
+  from the modifiers (private by default), IsUnrestricted. static: NotSupported; override, asparent, extern and a method named like a
+  field: errors.
+- Signature: the first C parameter is [const] s_Name* self (const for unrestricted). EmitFun: currentStruct; this = (*self), IsConst and
+  ReadOnlyStruct for an unrestricted method.
+- Bare names: StructBareField turns x into this.x (Name expression and LValue Name), when no variable has the name. Bare calls:
+  BareMethodCall sends len() to StructMethodCall with this.
+- StructMethodCall (Call, before the value receivers): MayBeStructReceiver (a variable / field / const path, an index, a creation or a
+  call of program functions that all return a struct) -> ExprOf; not a struct: null (the normal path goes on). Private methods: only
+  from a method of the same struct. A place (Name, Member, Index): ReadOnlyPlace (ReadOnlyStruct parameter or this, ReadOnlyRef /
+  CapturedReadOnly reference, const struct) allows only unrestricted methods; the address &(place) from LValue / StructItemLValue
+  (a place LValue refuses, for an unrestricted method or a read-only place: a copy). A value: ({ s_Name t = value; call(&t, ...); }).
+- UserCall takes the receiver (self) as an extra first argument.
+- StructLValue uses ReadOnlyPlace: the messages for this (unrestricted), a read-only parameter, a read-only reference, a constant.
+  ConstWrite: this = ... in an unrestricted method has its own message.
+- Tests structmethods, errors/struct_unrestricted_write, struct_unrestricted_calls_writer, struct_unrestricted_this,
+  struct_readonly_call, struct_readonly_object_call, struct_private_method, struct_method_field_name, struct_override,
+  struct_unknown_method.
+
+STRUCTS, STEP 3: STRINGS AND OBJECTS INSIDE, STATIC FUNCTIONS (2026-11-06, spec 11.1.5.3, 11.1.5.2, compiler 0.0.56alpha;
+CodeGen.StructObjects.cs)
+- Field types: string, string? and objects (collections too). A class that cannot be cloned (NotClonableReason): error. A struct with an
+  object sets cloneUsed (df_clone_obj needs the clone slots).
+- StructHoldsObjects: a field is a string, a string?, an object, or a struct that holds them. C helpers in structCode:
+  df_sclone_s_Name(v) (CloneValue for each owning field, the inner structs first) and df_sdrop_s_Name(&v) (df_str_free, df_drop, inner
+  structs; the fields are left NULL). CloneValue of such a struct uses df_sclone (class clones, arr items).
+- Owners: every struct variable owns its struct, except a plain parameter (ReadOnlyStruct, a lend) and a & parameter (the caller's; its
+  replacement drops the old one). VarInfo.OwnsStruct: typed locals (IsStructObjDecl, also var with a creation or a call of program
+  functions returning such a struct; any other var is NotSupported), ->S parameters (IsGift; StructDropNode at the end of the function).
+  AddImplicitDrops adds a StructDrop atEnd (EmitStmt case StructDrop); LoopStatements makes a loop body with one a scope of its own.
+- Values: Expr.Fresh means "a new struct nobody owns": StructCreate, UserCall of a function returning such a struct, ->s (StructGift:
+  the place is left as {0}), s! (Copy: df_sclone unless fresh), returns. StructOwnedCode takes a fresh value and clones any other one; used
+  by declarations, StructAssign (IsStructOwner: a field, a static, an owning variable, a pointer parameter or this; the old value is
+  dropped after the new one is made) and returns (a local is cloned, then ends with its scope).
+- StructCreate: the given values first (in the order written, each in a temp), then a compound literal with the start values of the
+  others (a start value is made only when it is used). StructFieldValue: strings and string? get their own copy, an object field needs a
+  new object or ->x, an inner struct goes through StructOwnedCode.
+- Field writes: StructLValue marks a field that owns something as IsField, so the existing paths drop the old value: df_str_put for
+  strings, OwnedAssign for objects (new or ->x), StructAssign for an inner struct.
+- Temporaries: TempStruct puts a fresh struct on the temporaries of the statement (TempBoxCode with df_sdrop) when it is read
+  (MemberValue), printed (StrOf), compared (StructEquals) or lent (StructArg). A method on a fresh struct drops the copy after the call.
+  A statement f() drops its struct (DroppedStructCode).
+- Arguments (StructArg, ArgCode): ->S needs a fresh value (->s, s!); S lends, ->s on it is an error.
+- Classes: EmitArrayFieldDrops and EmitDropGlue drop struct fields; StaticEndCode drops static ones.
+- CheckStructItems (ResolveType of the program's types, EmitDecl): collections and tuples of such structs are NotSupported.
+- A plain parameter that holds objects cannot be replaced (an error); natives-only structs keep the step 1 behaviour.
+- Printing: a string field is not freed by the printer (df_str_cat); an object field prints as in classes (null or Type{}).
+- Static functions: RegisterStructMethods sets IsStatic; no self parameter and no this. Struct.f(args) in Call -> StructStaticCall
+  (statics only, private only from the struct). s.f() of a static: error; Struct.m() of a method: error. A bare call inside the struct
+  resolves among all its functions (BareMethodCall): a static one is called without self; a method needs this.
+- Tests structobjects, structobjects2 (each Dog prints when it ends), errors/struct_notclonable, struct_object_borrowed,
+  struct_gift_needs_move, struct_lend_with_arrow, struct_collection_objects, struct_var_copy, struct_static_on_value,
+  struct_method_as_static, struct_readonly_replace, struct_tuple_objects. Checked by hand with DF_STR_TRACE: no strings left (the one
+  alive at exit is there in every program).
+
+STRUCTS, STEP 4: BUFFERS AND BIG STRUCTS (2026-11-06, spec 11.1.5.4, 11.1.5.5, compiler 0.0.57alpha; CodeGen.StructBuffers.cs)
+- A Field with a Size: StructField.Buffer = N (BufferLength: an integer literal, or a top-level const whose value is an integer literal,
+  found in the program node because the global consts are declared later; 1 to int.MaxValue). The type stays arr<T>. The items are
+  checked after every struct has its fields: numbers, enums, bitfields, bool, char, addr, date, time, clock, structs without objects.
+  A start value is an array literal of exactly N items.
+- C: T f_name[N] in the typedef (the struct of the items first). Zero: {0}; start value and creation from a literal: an initializer
+  { a, b, ... } (BufferInitializer); creation from another buffer: memmove after the struct is made (StructCreateCode now builds a named
+  struct, then the copies).
+- Read (StructFieldRead): (df_arr_T){ (T*)s.f_name, N }, so every arr path works on the items in the struct (index, len, for, arr members,
+  printing, StructItemLValue for ps.points[1].x = 4, IndexAssign for s.m[i] = v). Buffers hold no objects: StructHoldsObjects and the clone
+  and drop helpers skip them; a struct copy copies them (C).
+- Whole writes (BufferAssign, first thing in AssignCodeOf): only =, from an array literal of N items (a C array temp, memcpy) or from
+  another buffer of the same type and N (memmove); anything else is an error. StructLValue refuses a buffer (&s.m, ->s.m, +=).
+- Read-only places (CheckStructWritable, shared with StructLValue): IndexAssign and StructItemLValue (CheckBufferWrite), and
+  CheckReadOnlyCall for the arr members that change the array (not in ReadOnlyCollectionMembers).
+- == of buffers: item by item (BufferEquals). The struct helpers now have prototypes in structProtos (before arrayCode) and bodies in
+  structCode (after it): the array printers call the struct printers and the other way round.
+- Big structs: LayoutOf computes the C size and alignment; above 64 KB (BigStructBytes) a typed local, or var with a creation, is in
+  bigStructDecls (AddImplicitDrops, with a StructDrop; LoopStatements makes a loop body with one a scope). HoistDeclarations makes its
+  variable (*v_name_id) with HeapName; EmitHoists allocates the block with df_calloc; StructDrop frees it after dropping its objects.
+  EmitDecl with no value or a creation: BigStructFill writes the given values and the start values field by field into the block (no
+  copy of the struct on the stack); any other value is copied in with *v = value.
+- A plain parameter of a big struct: Ref 1 (const S*, ReadOnlyStruct), the argument is &v or a compound literal (ReferenceArg).
+- EmitHoists: a hoisted struct that holds objects starts as {0} (its start objects are made by the declaration, not twice).
+- Tests structbuffers, errors/struct_buffer_size_var, struct_buffer_objects, struct_buffer_literal_size, struct_buffer_readonly,
+  struct_buffer_readonly_fill, struct_buffer_from_array, struct_buffer_compound, struct_buffer_start_size, struct_buffer_zero.
+
+STRUCTS, STEP 5: LAYOUT TAGS AND C INTEROP (2026-11-06, spec 11.1.5.6, 15.9, compiler 0.0.58alpha; CodeGen.StructLayout.cs)
+- StructInfo.Layout (fixed / compact) from the Layout node. CheckLayoutFields (after every struct has its fields): numbers, bool, char,
+  addr, enums, bitfields, date, time, clock, buffers of those, structs with the same tag; anything else (strings, objects, lapse,
+  nullables, an untagged struct or one with the other tag) is an error. A buffer of bool in a <fixed> struct: NotSupported.
+- C: <fixed> is the normal C struct with its bool fields as int32_t; StructFieldRead reads them as (f != 0) (also for ==); writing a
+  bool into one is a C conversion (1 / 0). <compact> is the typedef between #pragma pack(push, 1) and #pragma pack(pop).
+- LayoutOf (the 64 KB rule) follows the tags: 4-byte bool for <fixed>, alignment 1 for <compact>.
+- .sizeof: StructMember (s.sizeof) and MemberValue (Vec2.sizeof) -> (df_uns)sizeof(s_Name). .offset(x): StructMethodCall (s.offset(x))
+  and StructStaticCall (Vec2.offset(x)) -> (df_uns)offsetof(s_Name, f_x); the argument is the bare name of a field. A method or a field of
+  the program with the same name wins. Both work on any struct.
+- Extern functions: IsExternValueType includes tagged structs (parameters by value and results). RegisterFun: for an extern function a
+  parameter typed *S or &*S of a struct becomes ParamSig.Pointer 1 / 2 with type S (the type node is replaced by the struct's).
+  ExternDeclarations: const S* / S* in the C prototype and in the wrapper. ArgCode -> StructPointerArg: the call writes *s (AddressOf)
+  or &*s (WritablePointerOf) on a variable, a field or an item; &* refuses a read-only place or a const; the code is &(place).
+  A struct without a tag as a parameter or a result of an extern function: error. Other pointers stay NotSupported.
+- Tests projects/externstructs (main.df + native.c: by value, *S, &*S, a returned struct, a 4-byte bool, a compact struct, a buffer, and
+  the sizes and offsets checked against the C compiler's sizeof / offsetof), errors/struct_layout_string, struct_layout_mixed_tags,
+  struct_layout_untagged, struct_layout_lapse, struct_layout_unknown_tag, struct_layout_nullable, struct_extern_untagged,
+  struct_extern_pointer_marker, struct_extern_readonly_pointer, struct_offset_unknown. errors/extern_string_return: the message now
+  names the tagged structs.
+
+STRUCTS, STEP 6: TRANSMUTE (2026-11-06, spec 11.1.5.7, 3.5, 2.5.1, compiler 0.0.59alpha; CodeGen.StructTransmute.cs)
+- Precedence: the parser already gave Transmute a ParseUnary operand, which includes the postfix members: [T]s.f is the view of s.f, a
+  field of the view is ([T]s).f. Nothing changed in the parser; the spec table (2.5.1) now says the same.
+- Transmute (CodeGen.cs) sends [T]x with a struct on either side to StructTransmuteExpr. CheckStructTransmute: both sides are structs of
+  plain values or numbers / enums / char / addr; LayoutOf(T) must not be larger than LayoutOf(x) (error), and a _Static_assert in
+  structProtos repeats the check for the C compiler.
+- The view: (*(df_alias_T*)&(place)), where df_alias_T is a typedef of T with __attribute__((__may_alias__)) (AliasCType, in
+  structProtos), so the optimizer keeps the reads and writes of both layouts in order (no -fno-strict-aliasing needed). TransmutePlace:
+  a Name, Member, Index (StructItemLValue for items of structs) or another Transmute, through parentheses; a node that LValue refuses
+  gives null. Not a place: ({ S copy = value; *(df_alias_T*)&copy; }) (read only).
+- LValue: Paren -> its content; Transmute -> StructTransmuteLValue (a view that is written needs a place: error otherwise).
+- Methods through a view: MayBeStructReceiver and StructMethodCall accept Paren and Transmute receivers, so ([Whole]pair).clear() changes
+  pair. ReadOnlyPlace walks through Paren and Transmute: a view of a read-only parameter is read-only.
+- Tests structtransmute, errors/struct_transmute_larger, struct_transmute_objects, struct_transmute_readonly,
+  struct_transmute_write_value, struct_transmute_precedence, struct_transmute_string.
+
+STRUCTS, STEP 7: FIELD GROUPS, TUPLES, HASH (2026-11-06, spec 11.1.5.8, 11.1.5.9, compiler 0.0.60alpha; CodeGen.StructTuples.cs)
+- Field groups: AssignGroup (LowerFieldGroups, before the types are known) keeps a tuple literal as it was; any other value becomes a
+  MultiAssign with one GroupValue node (Text: the fields of the group). EmitMultiAssign decides: a struct goes in field by field in order;
+  anything else becomes the old value.field list (by name, a simple receiver only, as before).
+- a, b = s (EmitMultiAssign, one value of a struct type): StructTupleFields (2 fields or more; a buffer or an object: NotSupported), the
+  struct in a temp, each field a value (a string is new when the struct is new, otherwise copied by the targets).
+- Conversion to a tuple: Assignable(tuple or multi, struct) -> StructToTupleAssignable (same count, each field assignable to its item);
+  Convert -> StructToTupleCode ({ S t = v; (Tuple){ items } }, strings copied unless the struct is new). MultiReturnCode takes a struct
+  for a function with several results (return size).
+- s.hash: StructMember -> HashOf -> HashCode -> StructHashCode: the first field starts the hash and df_hash_comb adds the others, as for
+  tuples; a buffer adds each item. IsStableType: a struct is stable when its fields are.
+- Not built: structs as keys of map / hmap / set / hset (the B+ tree and the hash table know only native and string keys; tuples are not
+  keys either): MapKeyBuilt says so. Note: map<K, V>() written as a call reports a wrong key type at a line of the library (490); the
+  declared form map<K, V> m = [] reports the line of the program (an older problem, also for tuples).
+- Tests structtuples, errors/struct_group_size, struct_tuple_one_field, struct_tuple_types, struct_tuple_object, struct_map_key,
+  struct_destructure_count.

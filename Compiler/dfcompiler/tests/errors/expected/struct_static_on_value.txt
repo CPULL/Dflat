@@ -1,0 +1,1 @@
+struct_static_on_value.df(7): error: 'one' is a static function of A: call it with the name of the struct, A.one(...) (spec 11.1.5.2)

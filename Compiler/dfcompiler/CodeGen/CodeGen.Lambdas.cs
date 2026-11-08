@@ -80,9 +80,6 @@ public sealed partial class CodeGen {
 
   // fun(i32), fun i32(string), i32(string) (spec 13.3.2)
   string ResolveFunType(Node n) {
-    if (nestedTypeDepth > 0) {
-      throw NotSupported("a function type in a collection, an array or a tuple (spec 13.3.2)", n);
-    }
     var returns = n.Children.FirstOrDefault(child => child.Kind == "Returns");
     string ret = returns == null ? "void" : ResolveType(returns.Children[0]);
     var list = n.Children.First(child => child.Kind == "ParamTypes");
@@ -179,6 +176,7 @@ public sealed partial class CodeGen {
     var fields = new StringBuilder();
     var inits = new StringBuilder();
     var ends = new StringBuilder();
+    var clones = new StringBuilder();   // f! (spec 13.3.3): what the lambda owns is cloned; borrows are copied as they are
     foreach (var (name, outer, kind, at) in captures) {
       if (outer.IsCounted || outer.IsWeak) {
         throw NotSupported($"the counted or weak '{name}' in a lambda (@{name}, %{name}, spec 13.3.1)", at);
@@ -220,22 +218,25 @@ public sealed partial class CodeGen {
             fields.Append($"  df_string v_{name};\n");
             inits.Append($"c_->v_{name} = df_str_dup({outer.CName}); ");
             ends.Append($"  df_str_free({field});\n");
+            clones.Append($"  n->v_{name} = df_str_dup(c->v_{name});\n");
             lambda.LambdaVars.Add((name, new VarInfo(type, field, false) { RefSlot = true }));
           } else if (type == "string?") {
             fields.Append($"  df_opt_string v_{name};\n");
             inits.Append($"c_->v_{name} = df_opt_str_dup({outer.CName}); ");
             ends.Append($"  df_str_free({field}.val);\n");
+            clones.Append($"  n->v_{name} = df_opt_str_dup(c->v_{name});\n");
             lambda.LambdaVars.Add((name, new VarInfo(type, field, false)));
           } else if (IsFunType(type)) {
             fields.Append($"  df_fn v_{name};\n");
             inits.Append($"c_->v_{name} = df_fn_retain({outer.CName}); ");
             ends.Append($"  df_fn_release({field});\n");
+            clones.Append($"  n->v_{name} = df_fn_clone(c->v_{name});\n");
             borrows |= outer.FnBorrows;
             lambda.LambdaVars.Add((name, new VarInfo(type, field, false) { FnBorrows = outer.FnBorrows }));
           } else if (IsArr(type) || IsClass(type) && !IsTraitType(type)) {
             // a clone (12.6): the lambda owns it
             var copy = ExprOf(Synthetic("Copy", at).Add(Synthetic("Name", at, name)), scope);
-            OwnedCapture(name, type, copy.Code, fields, inits, ends, lambda);
+            OwnedCapture(name, type, copy.Code, fields, inits, ends, clones, lambda, at);
           } else {
             throw NotSupported($"{name}! of a {type} in a lambda (spec 13.3.1)", at);
           }
@@ -248,9 +249,10 @@ public sealed partial class CodeGen {
             fields.Append($"  df_string v_{name};\n");
             inits.Append($"c_->v_{name} = {GiftExpr(moved, scope).Code}; ");
             ends.Append($"  df_str_free({field});\n");
+            clones.Append($"  n->v_{name} = df_str_dup(c->v_{name});\n");
             lambda.LambdaVars.Add((name, new VarInfo(type, field, false) { RefSlot = true }));
           } else if (IsArr(type) || IsClass(type) && !IsTraitType(type)) {
-            OwnedCapture(name, type, GiftExpr(moved, scope).Code, fields, inits, ends, lambda);
+            OwnedCapture(name, type, GiftExpr(moved, scope).Code, fields, inits, ends, clones, lambda, at);
           } else if (IsFunType(type)) {
             if (outer.IsParam) {
               throw Error($"'{name}' is a parameter: it only borrows its function, ->{name} cannot take it", at);
@@ -258,6 +260,7 @@ public sealed partial class CodeGen {
             fields.Append($"  df_fn v_{name};\n");
             inits.Append($"c_->v_{name} = {outer.CName}; {outer.CName} = (df_fn){{0}}; ");
             ends.Append($"  df_fn_release({field});\n");
+            clones.Append($"  n->v_{name} = df_fn_clone(c->v_{name});\n");
             borrows |= outer.FnBorrows;
             lambda.LambdaVars.Add((name, new VarInfo(type, field, false) { FnBorrows = outer.FnBorrows }));
           } else {
@@ -278,7 +281,8 @@ public sealed partial class CodeGen {
     }
     lambdaHelpers.Append($"typedef struct {{\n  df_lhead h;\n{fields}}} {ctxName};\n\n");
     lambdaHelpers.Append($"static void df_lend_{id}(void* p) {{\n  {ctxName}* c = ({ctxName}*)p;\n  (void)c;\n{ends}}}\n\n");
-    string code = $"({{ {ctxName}* c_ = ({ctxName}*)df_alloc(sizeof({ctxName})); c_->h.rc = 1; c_->h.end = df_lend_{id}; {inits}"
+    lambdaHelpers.Append($"static void* df_lclone_{id}(const void* p) {{\n  const {ctxName}* c = (const {ctxName}*)p;\n  {ctxName}* n = ({ctxName}*)df_alloc(sizeof({ctxName}));\n  *n = *c;\n  n->h.rc = 1;\n{clones}  return n;\n}}\n\n");
+    string code = $"({{ {ctxName}* c_ = ({ctxName}*)df_alloc(sizeof({ctxName})); c_->h.rc = 1; c_->h.end = df_lend_{id}; c_->h.clone = df_lclone_{id}; {inits}"
       + $"(df_fn){{ (void*){lambda.CName}, &c_->h }}; }})";
     return new Expr(code, fnType, true);
   }
@@ -300,18 +304,21 @@ public sealed partial class CodeGen {
   }
 
   // a capture the lambda owns (a clone or a move): an object (dropped) or an array (its items end with it) when the lambda ends
-  void OwnedCapture(string name, string type, string value, StringBuilder fields, StringBuilder inits, StringBuilder ends, FunSig lambda) {
+  void OwnedCapture(string name, string type, string value, StringBuilder fields, StringBuilder inits, StringBuilder ends, StringBuilder clones, FunSig lambda, Node at) {
     string cType = CType(type);
     if (IsArr(type)) {
       fields.Append($"  {cType} v_{name};\n");
       inits.Append($"c_->v_{name} = {value}; ");
       ends.Append($"  {ArrDropHelper(type)}(c->v_{name});\n");
+      clones.Append($"  n->v_{name} = {ArrCloneHelper(type, at)}(c->v_{name});\n");
       lambda.LambdaVars.Add((name, new VarInfo(type, $"c->v_{name}", false) { OwnsArray = true }));
       return;
     }
     fields.Append($"  void* v_{name};\n");
     inits.Append($"c_->v_{name} = (void*)({value}); ");
     ends.Append($"  df_drop(c->v_{name});\n");
+    cloneUsed = true;   // a clone of the lambda clones its object through the class
+    clones.Append($"  n->v_{name} = df_clone_obj(c->v_{name});\n");
     lambda.LambdaVars.Add((name, new VarInfo(type, $"(*({cType}*)&c->v_{name})", false) { Own = true }));
   }
 
@@ -343,6 +350,8 @@ public sealed partial class CodeGen {
     "Name" => scope.Find(value.Text!)?.FnBorrows ?? false,
     "Paren" => FnMayBorrow(value.Children[0], scope),
     "Call" or "Null" => false,
+    "Member" or "Index" => false,              // a field or an item keeps only values that do not borrow
+    "Copy" => FnMayBorrow(value.Children[0], scope),
     _ => true
   };
 
@@ -352,7 +361,8 @@ public sealed partial class CodeGen {
 
   // a function-type local declared with its type: its usage ends with the scope
   static bool IsFunDecl(Node decl) =>
-    decl.Children.FirstOrDefault(child => TypeNodeKinds.Contains(child.Kind)) is { Kind: "FunType" };
+    decl.Children.FirstOrDefault(child => TypeNodeKinds.Contains(child.Kind)) is Node typeNode
+    && (typeNode.Kind == "FunType" || typeNode.Kind == "ResolvedType" && typeNode.Text!.StartsWith("fun("));   // also T gone = ->items[i] of a collection of function values
 
   string FnDeclCode(Node decl, Expr? initValue, string code) {
     if (!IsFunDecl(decl)) {
@@ -365,16 +375,16 @@ public sealed partial class CodeGen {
     if (op != "=") {
       throw Error($"'{op}' is not defined on a function value", at);
     }
-    if (target.Variable == null || target.IsField) {
-      throw NotSupported("a function value in a field (spec 13.3.2)", at);
+    if (target.Variable == null && !target.IsField && !target.IsStatic) {
+      throw NotSupported("a function value in this place (spec 13.3.2)", at);
     }
-    if (target.Variable.IsParam) {
+    if (target.Variable is { IsParam: true }) {
       throw Error($"'{targetNode.Text}' is a parameter: it is read-only", at);
     }
     var value = ExprOf(valueNode, scope, target.Type);
     string converted = Convert(value, target.Type, valueNode);
     if (FnMayBorrow(valueNode, scope)) {
-      throw Error($"this function value borrows variables, so it cannot be kept in '{targetNode.Text}', which may outlive them: declare a new variable for it, or capture with x! or ->x (spec 13.3.4)", at);
+      throw Error($"this function value borrows variables, so it cannot be kept in '{targetNode.Text}', which may outlive them: {(target.Variable == null ? "a field keeps only lambdas that own their captures: capture" : "declare a new variable for it, or capture")} with x! or ->x (spec 13.3.4)", at);
     }
     MarkAssigned(target.Variable);
     return $"df_fn_set(&{target.Code}, {FnOwned(value with { Code = converted })})";
@@ -450,7 +460,26 @@ public sealed partial class CodeGen {
     if (callee.Kind == "Name" && scope.Find(callee.Text!) is VarInfo variable && IsFunType(variable.Type)) {
       return FnValueCall(new Expr(variable.CName, variable.Type), args, scope, at);
     }
-    if (callee.Kind is "Lambda" or "Paren" or "Call") {
+    // a field of a function type: onKey(5) inside a method of the class, obj.onKey(5), this.onKey(5) (spec 13.3.2)
+    if (callee.Kind == "Name" && scope.Find(callee.Text!) == null && currentClass != null && FindField(currentClass, callee.Text!) is { } own
+        && IsFunType(own.Type) && LookupMethods(currentClass, callee.Text!).Count == 0) {
+      return FnValueCall(ExprOf(callee, scope), args, scope, at);
+    }
+    // an item of a tuple: t.f(3)
+    if (callee.Kind == "Member" && Path(callee.Children[0]) is string tuplePath && scope.Find(tuplePath.Split('.')[0]) is VarInfo { } holder
+        && IsTuple(holder.Type) && ExprOf(callee.Children[0], scope) is { } tuple && IsTuple(tuple.Type)
+        && TupleElems(tuple.Type).Any(item => item.Name == callee.Text && IsFunType(item.Type))) {
+      return FnValueCall(ExprOf(callee, scope), args, scope, at);
+    }
+    if (callee.Kind == "Member" && FunFieldNames.Contains(callee.Text!) && Path(callee.Children[0]) is string path
+        && (scope.Find(path.Split('.')[0]) != null || currentClass != null && FindField(currentClass, path.Split('.')[0]) != null)) {
+      var receiver = ExprOf(callee.Children[0], scope);
+      if (IsClass(receiver.Type) && FindField(ObjInfo(receiver.Type), callee.Text!) is { } field && IsFunType(field.Type)
+          && LookupMethods(ObjInfo(receiver.Type), callee.Text!).Count == 0) {
+        return FnValueCall(ExprOf(callee, scope), args, scope, at);
+      }
+    }
+    if (callee.Kind is "Lambda" or "Paren" or "Call" or "Index") {
       var value = ExprOf(callee, scope);
       if (!IsFunType(value.Type)) {
         throw Error($"this {value.Type} is not a function: it cannot be called", at);
@@ -470,8 +499,11 @@ public sealed partial class CodeGen {
   // the analysis of exceptions: a call through a function value may raise UnassignedFunctionCallException. The analysis has no types,
   // so any call of a name that is not a function, a class or a library function counts.
   bool FlowMayCallFunValue(Node callee) {
-    if (callee.Kind is "Lambda" or "Paren" or "Call") {
+    if (callee.Kind is "Lambda" or "Paren" or "Call" or "Index") {
       return true;
+    }
+    if (callee.Kind == "Member" && FunFieldNames.Contains(callee.Text!)) {
+      return true;   // obj.onKey(5): a field of a function type (the analysis has no types)
     }
     if (callee.Kind != "Name") {
       return false;
@@ -483,4 +515,26 @@ public sealed partial class CodeGen {
     }
     return currentFlowFun?.Class is not ClassInfo cls || LookupMethods(cls, name).Count == 0;
   }
+
+  // the names of the fields of a function type of every class: obj.name(...) may call a function value
+  HashSet<string>? funFieldNames;
+  HashSet<string> FunFieldNames => funFieldNames ??= classes.Values.SelectMany(cls => cls.Fields).Where(member => IsFunType(member.Type))
+    .Select(member => member.Name).ToHashSet();
+
+  // a collection keeps its items: a function value that borrows variables cannot go in (spec 13.3.4)
+  void CheckStoredFunction(FunSig f, ParamSig param, Node arg, Scope scope) {
+    if (IsFunType(param.Type) && f.Node.Line >= LibraryLine && !LibraryCode && FnMayBorrow(arg, scope)) {
+      throw Error(BorrowedIntoStore("a collection"), arg);
+    }
+  }
+
+  // a function value that borrows, stored where it may outlive what it borrows
+  void CheckNotBorrowingFunction(string type, Node value, Scope scope, string where) {
+    if (IsFunType(type) && !LibraryCode && FnMayBorrow(value, scope)) {
+      throw Error(BorrowedIntoStore(where), value);
+    }
+  }
+
+  static string BorrowedIntoStore(string where) =>
+    $"this function value borrows variables, so {where} cannot keep it: it may outlive them; capture with x! or ->x (spec 13.3.4)";
 }

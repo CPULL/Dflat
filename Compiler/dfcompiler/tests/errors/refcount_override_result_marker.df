@@ -1,0 +1,8 @@
+namespace refcount_override_result_marker
+class Dog { }
+class Base {
+  public fun &@Dog get() { @Dog() }
+}
+class Child : Base {
+  override fun @Dog get() { Dog() }
+}

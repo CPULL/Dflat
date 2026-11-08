@@ -1,0 +1,11 @@
+15 stats 0 users 2
+42 true users 2
+copy board, users 2
+Renamed 2
+Renamed ends
+[5, 10] reader 10
+reader 11
+[105, 111] reader 111
+a!
+item write without the lock
+---- exit code 0 ----

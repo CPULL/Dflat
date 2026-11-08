@@ -3,4 +3,13 @@ info: ready
 1
 6
 35
+6
+20
+3
+rexfido
+maxrex
+plain
+variadic
+vec locked during the call
+2
 ---- exit code 0 ----

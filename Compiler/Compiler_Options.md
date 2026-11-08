@@ -16,7 +16,11 @@ Option names are not case sensitive. The arguments after `CL:`, file names and p
 - `--COptMode <mode>` what the C compiler optimizes for: `size` (`-Os`) or `speed` (`-O<COptLev>`, the default).
 - `--debug` and `--release` the value of the preprocessor variable `build`. The default is `--debug`. A debug build keeps the line and the stack trace of the exceptions (`Line`, `StackTrace`), a release build gives line 0 and a null stack trace (spec 15.2); for now the options only set the variable.
 - `--suppresswarning <level>` suppress the warnings of the specified level and of the less important levels (1 is the most important, 3 the least): `--suppresswarning 2` suppresses the warnings of levels 2 and 3. In the future we will see how to suppress specific warnings.
-- `--chaindepth<type> <number>` limit the number of copies for a specific type of collections for different types of objects. They are defaulted to 16 and can be any number between 1 and 256. Arrays are by default limited to 64. Valid types are `arr, list, map, hmap, tree, htree, set` (see the proposal below)
+- Limits of the generated copies (spec 11.3.12), each from 1 to 256, per kind of collection:
+  - `--max-<kind>-chain-depth <n>` (default 16) and `--max-<kind>-copies <n>` (default 64), where `<kind>` is `vec`, `list`, `map`, `hmap`, `set` or `hset` (`bmap` and `bset` are aliases of `map` and `set`).
+  - `--max-customcollection-chain-depth <n>` and `--max-customcollection-copies <n>`: one pair shared by all the custom collections (the classes that implement a collection trait: `MyAwesomeList`, `MyFastMap` ...), applied to each custom collection type.
+  - `--max-chain-depth <n>` (default 16) and `--max-copies <n>` (default 16): the other generics of the program.
+  - `arr` has no limit. In the project file the keys are the same names without `--`.
 - Live silent exception classes: at most 64, because the observed mask is 64 bits (to be discussed, see the proposal below)
 - `--native-int <bits>`, `--native-real <bits>`, `--native-addr <bits>` force the native size of the integers, of the reals and of the addresses to the specified number of bits. There is no option for `uns`: it always has the same size as `int`. For example `--native-int 32` forces the native size of the integers to be 32 bits. Sizes supported are 8, 16, 32, 64, 128, 256 (some may not be possible on specific target architectures, and a type may accept only some of them, for example a real has no 8 bits).
   - The native size of `int` and `uns` (and of the unsuffixed integer literals) comes from `--native-int`, then `native-int=` of the project, then the size of the cpu (`--cpu`, the target, or the machine running the compiler: 64 on `x64` and `arm64`, 32 on `x86`; `arm64_32` is a 64-bit cpu with 32-bit addresses, so `int` is 64 and `addr` is 32). `addr` has its own size (`--native-addr`) so that 8-bit cpus can be supported.
@@ -78,12 +82,6 @@ A library can need C code and C libraries. Until the libraries can describe this
 - A folder given in the project file wins over the search. Nothing found is a compiler error that names what is missing and the key to write. macOS is not supported yet (it needs MoltenVK).
 
 ### Claude proposals
-**Limits of the generated copies (spec 11.3.12).** Replace the `--chaindepth<type>` line with three families of options, each between 1 and 256:
-- `--max-chain-depth <n>`: nested instantiations (a generic that instantiates another that instantiates another). The default is 16.
-- `--max-copies <n>`: different type combinations of one generic in the user code. The default is 16.
-- `--max-copies-<collection> <n>`: the same for each collection of the library: `vec`, `list`, `map`, `hmap`, `set`, `hset` (`bmap` and `bset` are aliases of `map` and `set`). The default is 64.
-- `arr` has no limit (spec 11.3.12), and `tree` and `htree` are not names of the specification. In the project file the keys are the same names without `--`.
-
 **Live silent exception classes.** Keep it as an internal limit, not an option. Today the mask has 64 bits, so at most 64 silent exception classes can be handled by catches at the same time (a compile error says so). On a small target it could follow the native size of `int` (16 bits would allow 16 classes).
 
 **Always passed to the C compiler, not options.** `-fwrapv` makes signed overflow wrap around, as Dflat defines it; without it C treats the overflow as undefined behavior and may optimize wrongly. The target flags (`--target=...`, `-lm`, `-D_CRT_SECURE_NO_WARNINGS`) come from `--target`. If a way to add arguments for the C compiler is needed, one passthrough option is enough: `--cflags "<arguments>"`.

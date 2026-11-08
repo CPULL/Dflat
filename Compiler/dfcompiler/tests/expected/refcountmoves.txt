@@ -1,0 +1,18 @@
+a: list len 1, users 1
+a ends
+b: list len 0
+d: vec len 2, slot null true
+x: arr slot null true, users 1
+keep y, users 1
+y ends
+arr slot null true
+x ends
+d ends
+c ends
+b ends
+years 0
+years 1
+Writer ends
+Reader ends
+birthday without the lock
+---- exit code 0 ----

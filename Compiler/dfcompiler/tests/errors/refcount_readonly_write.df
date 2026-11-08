@@ -1,0 +1,7 @@
+namespace refcount_readonly_write
+class Dog { public i32 age }
+fun f() {
+  @Dog d = Dog()
+  d.age = 3
+}
+f()

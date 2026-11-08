@@ -28,12 +28,14 @@ scores[7] += 7                           // a missing key starts from 0
 r.Console.log(scores)                            // [-100: 1, -5: 50, 0: 0, 7: 7, 10: 105]
 
 // tryGet
-i32 found = 0
-r.Console.log(scores.tryGet(-5, &found))       // true
+bool here, i32 found = scores.tryGet(-5)        // found, and the value (spec 6.6)
+r.Console.log(here)                              // true
 r.Console.log(found)                             // 50
-r.Console.log(scores.tryGet(4, &found))        // false
+here, found = scores.tryGet(4)
+r.Console.log(here)                              // false
 r.Console.log(found)                             // 0
-r.Console.log(scores.tryGet(4, &found, -1))    // false
+here, found = scores.tryGet(4, -1)
+r.Console.log(here)                              // false
 r.Console.log(found)                             // -1
 
 // ->m[k] takes the value out and removes the entry; removeAt removes by key

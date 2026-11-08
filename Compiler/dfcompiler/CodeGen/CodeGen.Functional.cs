@@ -28,7 +28,8 @@ public sealed partial class CodeGen {
     if (!isFunction) {
       return null;
     }
-    string fnType = MakeFunType(Normalize("int"), new[] { elem, elem });
+    string itemType = BoxInner(elem) ?? elem;   // a collection of counted objects: the lambda compares the objects (spec 12.7)
+    string fnType = MakeFunType(Normalize("int"), new[] { itemType, itemType });
     string value = FnArg(new ParamSig("comparer", fnType, null), arg, scope);
     string compare = SortComparer(elem);
     string saved = NewTemp();
@@ -49,9 +50,15 @@ public sealed partial class CodeGen {
     if (sortComparers.Add(name)) {
       string item = CType(elem);
       string pair = ResultPair(CType(Normalize("int")));
+      string inner = BoxInner(elem) is string counted ? CType(counted) : item;
+      string Read(string p) => BoxInner(elem) is string boxedValue && IsCountedValueType(boxedValue)
+        ? CellRead($"(*({item}*){p} != NULL ? (*({item}*){p})->{BoxField(elem)} : NULL)", boxedValue)   // the value of a counted value item
+        : BoxInner(elem) != null
+        ? $"(*({item}*){p} != NULL ? DF_RC_OBJ({inner}, (*({item}*){p})->{BoxField(elem)}) : NULL)"   // the object of the box
+        : $"*({item}*){p}";
       // after an exception the comparisons answer 0: the sort finishes, and the exception is raised after it
       lambdaHelpers.Append($"static int {name}(const void* a, const void* b) {{\n  if (df_sort_err) {{\n    return 0;\n  }}\n"
-        + $"  {pair} r = (({pair} (*)(void*, {item}, {item}))df_sort_fn.code)((void*)df_sort_fn.ctx, *({item}*)a, *({item}*)b);\n"
+        + $"  {pair} r = (({pair} (*)(void*, {inner}, {inner}))df_sort_fn.code)((void*)df_sort_fn.ctx, {Read("a")}, {Read("b")});\n"
         + "  if (r.err) {\n    df_sort_err = r.err;\n    return 0;\n  }\n"
         + "  return r.value < 0 ? -1 : r.value > 0 ? 1 : 0;\n}\n\n");
     }

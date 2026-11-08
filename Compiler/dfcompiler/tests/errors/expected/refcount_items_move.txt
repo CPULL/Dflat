@@ -1,1 +1,1 @@
-refcount_items_move.df(7): error: a ->T parameter receives a plain owned object: ->pack[...] passes a usage only to a @T parameter (spec 12.7)
+refcount_items_move.df(7): error: 'pack[0]' is counted: ->pack[0] gives its usage only to a counted receiver (@Dog x = ->pack[0], a @T parameter); to take the object out of the counting use removeRefCounting() on a counted variable, which gives it to the last user (spec 12.7)

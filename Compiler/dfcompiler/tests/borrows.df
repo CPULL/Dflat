@@ -1,0 +1,33 @@
+// Borrowing locals (spec 13.1.1): a plain borrow is read-only, &Dog d borrows read/write; while a local borrows from an object only its unrestricted methods can be called
+namespace borrows
+alias Root as r
+class Dog(string name) {
+  public string name
+  public i32 hunger = 5
+  unrestricted fun bark() { r.Console.log($"{name}: woof") }
+  public fun eat(i32 amount) { hunger -= amount }
+}
+class Kennel {
+  Dog boss = Dog("Rex")
+  public fun Dog leader() { boss }
+  public fun &Dog leaderRw() { boss }
+  unrestricted fun greet() { boss.bark() }
+  public fun feed() { boss.eat(2) }
+  public fun retire() { boss = Dog("Max") }
+}
+fun f() {
+  Kennel k = Kennel()
+  Dog d = k.leader()
+  d.bark()
+  k.greet()
+  r.Console.log(d.name)
+  k.retire()
+  &Dog w = k.leaderRw()
+  w.eat(1)
+  r.Console.log(w.hunger)
+  Dog v = k.leaderRw()
+  v.bark()
+  Dog mine = Dog("Fido")
+  mine.eat(3)
+}
+f()

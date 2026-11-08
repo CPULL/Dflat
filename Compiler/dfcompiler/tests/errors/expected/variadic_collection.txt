@@ -1,0 +1,1 @@
+variadic_collection.df(1): error: a variadic parameter takes basic values, objects or structs, not a collection (vec<i32>) (spec 13.4)

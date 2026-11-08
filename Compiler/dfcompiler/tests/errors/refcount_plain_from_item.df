@@ -1,0 +1,8 @@
+namespace refcount_plain_from_item
+class Dog { }
+fun f() {
+  list<@Dog> pack = []
+  pack.add(Dog())
+  Dog p = ->pack[0]
+}
+f()

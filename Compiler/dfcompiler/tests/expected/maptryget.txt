@@ -1,0 +1,10 @@
+true Rex: woof
+false true
+true 3 7
+ex
+end of f
+Rex ends
+Max
+Max ends
+len 0
+---- exit code 0 ----

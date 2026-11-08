@@ -1,0 +1,59 @@
+namespace lambdastored
+alias Root as r
+
+public class Dog(string name) {
+  public string name
+} atEnd {
+  r.Console.log("  end " + name)
+}
+
+class Button(string label) {
+  public string label
+  public fun(i32) onClick
+  public i32(i32) transform = (i32 x) { x * 2 }
+
+  public fun click(i32 times) {
+    onClick(times)
+    r.Console.log(transform(times))
+  }
+}
+
+i32 total = 0
+var b = Button("ok")
+r.Console.log(b.transform(1))
+r.Console.log(b)
+string prefix = "clicked "
+b.onClick = (i32 n; prefix!) { r.Console.log(prefix + n.toStr()) }
+b.click(3)
+b.onClick(4)
+b.transform = (i32 x) { x + 100 }
+b.click(5)
+
+// f!: a new context, its own captures
+i32 counter = 0
+fun(i32) count = (i32 by; counter!) {
+  counter += by
+  r.Console.log($"counter {counter}")
+}
+count(1)
+count(1)
+fun(i32) other = count!
+other(10)
+count(1)
+other(10)
+
+// a lambda that owns an object: the clone owns a clone
+Dog rex = Dog("rex")
+fun() bark = (; ->rex) { r.Console.log(rex.name + " barks") }
+fun() bark2 = bark!
+bark()
+bark2()
+
+// a field copied out shares the context
+fun(i32) kept = b.onClick
+kept(7)
+
+// the clone of an object clones its function values
+var b2 = b!
+b2.click(8)
+r.Console.log("end")

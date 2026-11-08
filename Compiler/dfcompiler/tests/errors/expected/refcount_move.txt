@@ -1,1 +1,1 @@
-refcount_move.df(4): error: feature not supported: This use of the counted variable 'first' (->, &, ++, swap, out arguments)
+refcount_move.df(4): error: 'first' is counted: ->first gives its usage only to a counted receiver (@Dog x = ->first, a @T parameter); to take the object out of the counting use first.removeRefCounting(), which gives it to the last user (spec 12.7)

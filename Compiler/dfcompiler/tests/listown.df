@@ -29,7 +29,7 @@ Dog old = kennel.replace(0, Dog("zed"))
 r.Console.log($"{old.name} {kennel[0].name}")
 kennel.fill(null)
 r.Console.log(kennel[0] == null)
-kennel.clear()                     // the items become null (spec 6.6): the size is kept
+kennel.clear()                     // all the items go and end, as truncate(0) (spec 6.6)
 r.Console.log(kennel.len)
 kennel.truncate(0)
 r.Console.log(kennel.len)

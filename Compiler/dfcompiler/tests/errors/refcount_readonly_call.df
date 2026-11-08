@@ -1,0 +1,10 @@
+namespace refcount_readonly_call
+class Dog {
+  public i32 age
+  public fun birthday() { age++ }
+}
+fun f() {
+  @Dog d = Dog()
+  d.birthday()
+}
+f()

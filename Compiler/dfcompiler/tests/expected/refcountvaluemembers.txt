@@ -1,0 +1,12 @@
+0 counter 10 5, users 2
+1 6 7, users 2
+Counter { shared: 6, hits: 1, label: renamed, ... }
+click without the lock
+5 5 hi rex 3, users 1 1
+[1, 2, 7, ...] (4 items) 7, users 2, len 4
+10, first is still 1; has true at 2
+9 3 5 [42, null]
+loop 42
+loop 0
+[a], users 2; [4, 5] 9
+---- exit code 0 ----

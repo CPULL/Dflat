@@ -2102,3 +2102,277 @@ STRUCTS, STEP 7: FIELD GROUPS, TUPLES, HASH (2026-11-06, spec 11.1.5.8, 11.1.5.9
   declared form map<K, V> m = [] reports the line of the program (an older problem, also for tuples).
 - Tests structtuples, errors/struct_group_size, struct_tuple_one_field, struct_tuple_types, struct_tuple_object, struct_map_key,
   struct_destructure_count.
+
+CONSOLE.READKEY AND CONSOLE.MOVECURSOR (2026-11-06, stdlib 0.0.11 section 2, compiler 0.0.61alpha)
+- Runtime.cs df_console_read_key: as df_console_read; Windows: the second code after 0 / 0xE0 gives the arrows (72 up, 80 down, 75 left,
+  77 right); POSIX (raw terminal): ESC [ X or ESC O X with one final byte gives the arrows (df_arrow_key), a sequence with parameters
+  (modifiers) gives null, DEL (0x7F) is Backspace '\b', '\r' is '\n'. The arrows are U+2190 left, 2191 up, 2192 right, 2193 down.
+- df_console_move_cursor: Windows SetConsoleCursorPosition from the top-left of the window (srWindow, as clear); POSIX ESC [ row;col H;
+  negative values are 0; nothing when stdout is not a console.
+- CodeGen.Stdlib: Root.Console.readKey (char?) and Root.Console.moveCursor(i32, i32). The KEY_ constants: ConsoleKeys in CodeGen.cs,
+  read in MemberValue as char constants (Root.Console.KEY_LEFT through the alias too).
+- Test consolekeys (no console in the test runner: the constants, readKey gives null, moveCursor does nothing). The keys themselves are
+  checked by hand in a console.
+
+CONSOLE.SETCOLORS (2026-11-06, stdlib 0.0.11 section 2, compiler 0.0.62alpha)
+- The colours: a library enum ConsoleColor (AddPrelude, when the program mentions setColors or a member / type named Color), in the ANSI
+  order (Black 0 ... White 7, Gray 8 ... BrightWhite 15). The program writes Console.Color: StripLibraryQualifier maps Root.Console.Color
+  and Console.Color to ConsoleColor (types), MemberValue maps Root.Console.Color.X to the entry (values).
+- SetColorsCall (Call): two values, each ConsoleColor, ConsoleColor? or null, passed as an int (-1 for null) to df_console_set_colors.
+- Runtime df_console_set_colors: ESC [ fg ; bg m (30-37 / 90-97, 40-47 / 100-107, 39 / 49 for the default); Windows switches the console
+  to escape sequences as clear does, or uses SetConsoleTextAttribute on an old console (the red and blue bits swapped, the original
+  attributes kept for null); the first call registers df_console_reset_colors with atexit. Nothing when stdout is not a console.
+- Test consolecolors (no console: plain output). Code examples/racer.df uses it with readKey and moveCursor (a screen buffer of chars and
+  colours printed in runs, so setColors is called only where the colours change).
+
+LAMBDAS: FIELDS, COLLECTIONS, TUPLES, f! (2026-11-06, spec 13.3.6, 13.3.3, compiler 0.0.63alpha; CodeGen.Lambdas.cs)
+- Runtime: df_lhead has a clone slot; df_fn_clone(f) calls it (a lambda without captures is returned as it is). LambdaExpr writes
+  df_lclone_N next to df_lend_N: a copy of the context with rc 1, and for what the lambda owns a clone (df_str_dup, df_opt_str_dup,
+  df_fn_clone, ArrCloneHelper, df_clone_obj with cloneUsed); borrowed captures are copied as they are.
+- f!: the Copy expression of a function value is df_fn_clone (a fresh lambda is taken as it is). CloneValue of a function value (class
+  clones) is df_fn_clone too.
+- Fields: FieldInfo no longer refuses function types. FnAssign takes fields and statics (df_fn_set); a borrowing value is an error.
+  EmitArrayFieldDrops releases them (df_fn_drop); the class printer prints null or the type. Calls: TryFnValueCall handles a bare
+  field inside the class, obj.f(...) when f is a function field of the class of obj and not a method (FunFieldNames, cached), and t.f(...)
+  for a tuple item; FlowMayCallFunValue counts obj.f(...) for those names.
+- Collections: ResolveFunType no longer refuses nesting. The item helpers treat a function value as an owned item: IsStrItem includes it,
+  StrItemAs / StrOwnedAs give FnOwned (a usage), StrItemDup df_fn_retain, StrItemFree df_fn_release, StrItemPut df_fn_set; ArrDropHelper,
+  the vec and list drop glue, DropListItem, arr clear and the moves out (->items[i]) handle it. IsFunDecl also takes a ResolvedType of a
+  function type (T gone = ->items[i] in the library ends its usage). The code of the library compares two function values (has,
+  indexOf: same code and context) and prints one as its type; the program still compares them only with null.
+- Tuples: TupleHoldsArrays counts function items, so the tuple-array ownership applies: TupleCopies retains an item that is not new,
+  TupleDropCode and DroppedResultCode release them.
+- Borrowing values stored: CheckStoredFunction (UserCall and ArgCodes, for parameters of the library: collection members),
+  CheckNotBorrowingFunction (array literals, item assignment, tuple literals); both after the value is compiled (a lambda is known to
+  borrow once LambdaExpr ran).
+- Fixed on the way: EmitTmpRelease did not see df_fn_tmp, so the usage of a lambda passed to a call lived until a later statement;
+  AddImplicitDrops now ends function variables declared in a MultiAssign.
+- Tests lambdastored, lambdacollections (each Dog prints when it ends; string trace clean), errors/lambda_field_borrow,
+  lambda_vec_borrow, lambda_array_borrow, lambda_tuple_borrow. errors/lambda_fun_field (a function field was "not supported") is
+  obsolete: to be deleted by the user.
+
+REFERENCE COUNTING 4b PART A, RANGE COPIES (2026-11-07, spec 12.7, 6.5, 12.6, compiler 0.0.64alpha)
+- ->k.field (CountedArg, CountedValue): TakeFieldUsage takes the block out of the field (CountedFieldTarget) and leaves NULL; CountedValue
+  also takes ->a / ->k.field for a counted declaration or assignment (the usage moves, no count change).
+- Multiple assignments: LowerCountedDecls refuses only the form with one value for several targets (a call with several results).
+  EmitMultiAssign: CountedTarget (a @T declaration, a counted variable or field) takes its usage with CountedValue into a df_rc* temp first
+  (CountedUsageType); AssignCountedTarget then stores it (the hoisted variable of a declaration, or the place, releasing the old usage).
+  AddImplicitDrops gives the counted declarations of a MultiAssign their DoneDropNode.
+- atEnd bodies go through LoopStatements, so a body with counted (or other dropped) locals is a block of its own.
+- Destructor fragments: a counted parameter or local becomes a hidden counted field (IsCounted), assigned with a new usage.
+- Static counted fields: the global is a df_rc*; CountedRef knows Kennel.shared and a bare static inside the class; StaticField reads
+  the object; StaticEndCode releases them.
+- Collections: BoxTypeFor takes arr and the call form vec<@T>() (GenericRef). UnboxRead and CountedItemRef read an empty slot (no box) as
+  null. arr<@T>: literals box their items (ArrayLiteral), a[i] = x boxes (IndexAssign), fill gives each slot a box (CountedArrFill).
+  CountedItemsMembers adds sort, sortUnstable, resize, fillAtCapacity, getIterator. SortByFunction / SortComparer give the lambda the
+  objects of the boxes. CountedResize: resize (reserve through the library, new boxes, the boxes that leave end) and fillAtCapacity.
+  UnboxTupleResult (MethodCall and the value-receiver path of Call): next() of an iterator of boxes gives (T value, bool isValid) with the
+  object, borrowed. Views: the error is gone; reading an item already goes through UnboxRead. CountedBlockOf takes the @ marker.
+- c[a..b]! (Copy of an Index with a Range, before the view is made): CopyRange builds a new arr (calloc), vec (constructor + reserve) or
+  list (nodes) and copies each item of the range with CloneValue when it owns something (objects cloned, boxes: a new box with one more
+  user, strings and arrays copied). CloneValue of a tuple copies its strings, arrays, function values and inner tuples; a tuple with
+  objects stays an error (objects in tuples are not owned yet).
+- var x = y! (ObjectTypeOf): the variable owns the copy. The implicit drop (Finalize "implicit") does nothing when the variable turns out
+  not to own an object (a string or an array copy).
+- Tests refcountmore, refcountcollections, rangecopies (each Dog prints when it ends; string trace clean), errors/refcount_multi_from_call,
+  clone_tuple_object. Obsolete, to be deleted by the user: errors/refcount_field_static, errors/refcount_items_view (and
+  errors/lambda_fun_field from 0.0.63).
+
+REFERENCE COUNTING: MOVES AND READ-ONLY @T (2026-11-07, spec 0.0.26 12.7, compiler 0.0.65alpha)
+- ->rc into a plain receiver: GiftExpr (and GiftIndex for items, ArgCode for a ->T parameter) throws PlainGiftOfCounted, which names
+  the moved expression (first, k.boss, pack[0]) and points to removeRefCounting(). The old "feature not supported" (LValue) is no
+  longer reached for ->rc.
+- ->pack[i] into a counted receiver: CountedValue and CountedArg call TakeSourceUsage, which picks TakeUsage (variable), TakeFieldUsage
+  (field) or TakeItemUsage (item). TakeItemUsage runs GiftIndex with countedItemGift set: a list gives the box through takeAt (already
+  unboxed to @T by the method call), a vec or an arr takes the box out of the slot (NULL left); UnboxTaken moves the usage out of the box.
+- Read-only @T: ReadOnlyCounted (a CountedRef that is not IsWritableRef; a weak variable inside its enforce counts as @T) is checked in
+  CheckReadOnlyCall (only unrestricted and static methods) and in the field assignment of a Member (compile error).
+- &@T: a call through it of a method that is not unrestricted or static (MethodNeedsLock) is wrapped with the WriteLockCheck of the
+  callee, so it raises WritingOnRefCountWithoutLockingException without the lock. The exception analysis (FlowNode, Call) adds the
+  exception when the receiver path goes through a &@T or &%T name (FlowWritesThroughLock) and some method of the program with that name
+  can write (FlowMethodNeedsLock, by name only: an over-approximation).
+- DefinedAt: the read-only errors (reference, parent, struct, @T) end with "'name' is defined at file.df(line)" (SourceMap.Short, the file
+  name without its folder); nothing for library functions.
+- Tests refcountmoves (each Dog prints when it ends), errors/refcount_plain_from_item, refcount_plain_from_field, refcount_readonly_call,
+  refcount_readonly_write, refcount_readonly_item_call, weak_readonly_call. refcount, refcountitems: bark is unrestricted; weak: ctx2 is
+  filled before it is counted. Ten error expectations changed only in their message.
+
+COUNTED TRAITS AND TYPE CHECKS (2026-11-07, spec 0.0.26 12.7, compiler 0.0.66alpha)
+- @Animal a = @Dog(), @Animal parameters and list<@Animal> already worked (the counting block holds the object pointer; a trait value is
+  the object pointer too).
+- if x is Dog d { } (IsBinding): when x is a CountedRef, CountedIsBinding tests the object of its block and keeps the block in a df_rc*
+  temp; the block of the if is wrapped (WithUsage) with a synthetic declaration of d as a counted variable (Counted, ReadWrite from a
+  &@T) whose Init is a CValue df_rc_use(block): the usual frame code releases it on every way out. When x is a weak reference outside its
+  enforce, WeakIsBinding needs the object alive and declares d as a weak variable (Weak + WeakInit with a CValue df_rc_weak(block));
+  WeakValue takes a CValue as it is. EmitIf and IfThen use the wrapped block. PlainIsBinding is the old code; IsTarget is the target half
+  of IsParts.
+- Tests refcounttraits (each object prints when it ends), errors/refcount_downcast_readonly, weak_downcast_read.
+- Not built (as before): @T in the signatures of trait functions and overrides (errors/refcount_trait_param).
+
+PRIMARY CONSTRUCTOR OBJECT PARAMETERS (2026-11-07, spec 0.0.26 11.1.1, compiler 0.0.67alpha)
+- RegisterFields: a plain object parameter (a class or a collection; strings and arrays keep their copy into the field) is looked up by
+  PrimaryParamUsedAsField (a use by a method, an accessor, a secondary constructor, the atEnd of the class, a lambda, or a redeclaration;
+  a field initializer only reads it). Not used: only a ParamSig, no field, so the init function reads it as a plain (read-only) parameter.
+  Used: a level 1 warning, and the ParamSig is IsGift + IsImplicitGift (GivenTo names the class).
+- ArgCode: an IsImplicitGift parameter wraps a Name, Member or Index argument in a Gift node (GiftExpr checks the ownership and nulls the
+  source) and records a Name in pendingMoves. EmitStmt moves pendingMoves into movedVars at the next statement; ExprOf of a Name in
+  movedVars is a compile error; a plain = to the variable removes it. Conservative: a move inside an if makes later uses errors; a move
+  inside a loop of a variable declared outside it is not seen (the runtime NullPointerException as before).
+- Tests primarylend (each object prints when it ends), errors/primary_given_used, primary_lend_readonly, primary_given_borrowed.
+
+COUNTED VALUES AND STRINGS (2026-11-07, spec 0.0.26 12.7, 13.1, compiler 0.0.68alpha)
+- Runtime: df_rc has a kind (0 an object, 1 a value cell, 2 a string cell); df_rc_new_val copies a value into a cell, df_rc_new_str
+  keeps a fresh string or makes a compact copy (df_str_dup); df_rc_release frees a cell (and its string) instead of df_drop;
+  DF_RC_CAN_COPY is the automatic lock of a copy (alive and not locked; no threads: a busy lock fails at once).
+- CodeGen.CountedValues.cs: IsCountedValueType (numbers, bool, char, enums, strings, and their ? forms). A counted value variable is a
+  VarInfo with IsCounted and the value type; StringVar gives it no owner flag and EmitStrDrop skips it (the release of the block ends it).
+  CellRead (a null block reads as the zero value, or null for T?), NewCell, CopyCell (from a &@T: DF_RC_CAN_COPY unless an enclosing
+  enforce holds the lock, heldLocks; on failure the zero value, or no cell for T?), CountedCellValue (declarations and @T / &@T
+  arguments: a counted variable shares the cell with df_rc_use, a &@string into a @string is copied, ->x moves the usage, any other value
+  makes a new cell), CountedValueAssign (= on a read-only @T: a new cell with a copy, the old one released; compound operators are
+  errors), CountedValuePlace (the LValue of a &@T cell, so =, +=, ++ go through the usual code; WriteLockCheck and IncDec check the lock
+  for a Name target, FlowWritesThroughLock knows it), CountedValueRead (a &@string outside an enforce that holds its lock is a compile
+  error; ZeroLike of the enforce expression only asks the type: typingOnly).
+- CountedTypeOf takes values only for parameters (and EmitCountedDecl for variables); fields, results and items keep a "not supported".
+  CountedArgCost, CheckNotBorrowOfCounted, CountsMember and the enforce checks (a counted nullable is checked by its block; the expression
+  form no longer skips a counted string) know counted values.
+- Tests refcountvalues (DF_STR_TRACE clean: 1 string alive, as an empty program), errors/refcount_value_readonly_write,
+  refcount_rwstring_read, refcount_value_rw_from_ro, refcount_value_field.
+
+COUNTED VALUES AS FIELDS, RESULTS AND ITEMS (2026-11-07, spec 0.0.26 12.7, compiler 0.0.69alpha)
+- Fields: @T / &@T value fields in the body and in the header (CountedTypeOf with values); static ones are not built. CountedFieldRead
+  reads the cell (a &@string field is an error: it is read through a variable that shares it, inside enforce). LValue of a &@T value field
+  (by its bare name or k.field) is CountedValueFieldPlace: the cell, with the null check and the lock check in the place itself (a field is
+  never named by an enforce: its lock is held through a variable that shares the cell). AssignCodeOf: a start value (initializing) or = on
+  a read-only field is CountedValueFieldRebind (the constructor shares a counted source, a read-only field takes a copy). BuildConstructor
+  gives a value field without a start value a zero cell. The drop glue skips counted string fields in the plain string loops (the release
+  of the block ends them); printing reads the cell; FlowWritesThroughLock knows a write to a &@ field itself.
+- Results: fun @i32 / fun &@string (CountedTypeOf with values); CountedValueReturn (a variable gives its usage, a field or an item adds a
+  user, any other value makes a cell; a @string result out of a &@string is a copy). CountedCellValue adopts a counted result
+  (AdoptedCell: a &@string result into a @string is copied and the given usage released). A counted value result used as a plain value
+  is the same error as for objects.
+- Items: list<@T>, vec<@T>, arr<@T> of values use the boxes Rc__T (the header parameter of the box is a counted value). UnboxRead, the loop
+  variable (an empty slot reads as zero), the printing of a box, BoxEquals (compares the values) and the comparer of sort(lambda) read the
+  cell. list<&@T> of values is "not supported" (= on an item would replace it instead of writing the shared cell).
+- Tests refcountvaluemembers (DF_STR_TRACE clean), errors/refcount_value_rw_items, refcount_value_result_plain,
+  refcount_rwstring_field_read, refcount_value_field_readonly. errors/refcount_value_field (fields "not supported") was replaced.
+
+COUNTED SIGNATURES IN TRAITS AND OVERRIDES (2026-11-07, spec 12.7, compiler 0.0.70alpha)
+- The "not supported" check of FunSignature now covers only extern functions: trait functions (with or without a body) and overrides take
+  @T, &@T, %T parameters and counted results; the virtual call already passed the counting blocks.
+- CheckOverrideMarkers (both override paths, class and trait): an override keeps the read/write markers of each parameter (@T against &@T,
+  %T against &%T) and of a counted result (RetWritable); the type itself was already compared.
+- Tests refcounttraitsigs, errors/refcount_override_marker, refcount_override_result_marker. errors/refcount_trait_param (a counted
+  parameter in a trait was "not supported") is obsolete: to be deleted by the user.
+
+OBJECTS IN TUPLES, COUNTED VALUES AMONG SEVERAL RESULTS (2026-11-07, spec 0.0.26 3.2, 13.1.1, compiler 0.0.71alpha)
+- Tuples own their objects with the machinery of the tuples that hold arrays (CodeGen.TupleArrays.cs): TupleHoldsArrays now asks
+  IsTupleOwnedPart (arrays, function values, objects, counted usages). TupleCopies clones an object that is not new (CloneValue, cloneUsed,
+  NotClonableReason: a compile error) and adds a user to a counted part; TuplePartDrop ends each part (df_drop, df_rc_release, arrays,
+  function values, inner tuples) for TupleDropCode and DroppedResultCode. CloneValue clones tuples with objects and counted parts.
+- Several results: the parser keeps a marker per result (c<i> counted, r<i> read/write counted; one counted result alone stays
+  "counted" / "counted-rw"); the result tuple has @T items. MultiReturnCode takes each counted value with CountedPartReturn (as the result
+  of fun @T). EmitMultiAssign: a counted item goes to a counted target (CountedUsageType), a discarded one is released, a plain target is an
+  error; a counted target of a given (->T) object item starts counting it (df_rc_new), of a value item makes a cell. LowerCountedDecls
+  accepts a counted target with a single call. The per-value form (@i32 c, @string t = 5, "five") uses CountedCellValue for values.
+  Not built: &@T among several results.
+- Tests tupleobjects, refcountmulti (each object prints when it ends; DF_STR_TRACE clean), errors/refcount_multi_plain_target,
+  refcount_multi_rw_result, tuple_object_notclonable. Obsolete, to be deleted by the user: errors/clone_tuple_object,
+  errors/refcount_multi_from_call.
+
+MAPS OF OBJECTS, USE AFTER A MOVE, REFCOUNT LEFTOVERS (2026-11-07, spec 0.0.26 6.6, 12.4, 12.7, 13.1.1, compiler 0.0.72alpha)
+- Maps (CodeGen.Map.cs, shared by map and hmap): IsMapObjectValue; the slot holds the object pointer. MapValueItem refuses a borrowed object
+  (outside the library); StoreValue ends the old object; MapRemove with no receiver ends it; DropEntry ends it (clear, the end of the map,
+  removeAll); tryGet on a map of objects is a compile error at the call (MethodCall: spec 6.6 and 13.1 disagree on out), the library body still compiles; new tree members tree_setCopy (add(other), clone: the value cloned), tree_copyOf (tryGet with
+  otherwise), tree_none (the zero value), tree_remove (removeAt ends the value). MapViewCopy clones (m.values!). The library classes map
+  and hmap: add(K key, ->V value) moves the value into tree_set, ->V takeAt, removeAt calls tree_remove, add(other) uses tree_setCopy.
+- map<K, @T>: BoxTypeFor takes maps; MapValueItem puts a value in a box (BoxCall); the map loop unboxes the value (UnboxRead).
+- Use after a move (spec 12.4): GiftExpr (a local Name) and TakeUsage record a pending move; EmitStmt applies the pending moves at the next
+  statement (TryAdd: the first reason wins), = clears it; EmitFrameBody applies the pending moves of the statement that holds the body, keeps a
+  copy and restores it at the end (a move inside a branch, a loop or a nested body is not certain after it). ExprOf of a moved Name is an
+  error unless nullCheckRead (x == null, x != null, set by Binary). This replaces the conservative "if" rule of 0.0.67.
+- Leftovers: static counted values (StaticInitCode: NULL for counted and weak statics, a zero cell for a value without a start value; the
+  static initializer runs with initializing); list<&@T> of values (AssignCodeOf marks a CellItem target, LValue gives CountedValueItemPlace,
+  ++ on an item goes through AssignCode); &@T among several results (parser marks r<i>, FunSig.WritableCounted, CountedPartReturn checks
+  the source, a @string target of a &@string result is copied); extern functions: a counted parameter or result is a compile error.
+- Not built: counted properties (accessor blocks on @T fields): what R: gives (a usage or a lend) is a design question.
+- Tests mapobjects, moves, refcountleftovers (DF_STR_TRACE clean), errors/move_use_after, move_counted_use_after,
+  move_counted_plain_use_after, refcount_extern_counted, map_object_borrowed, map_object_tryget. Obsolete, to be deleted by the user: errors/map_object_value,
+  errors/hmap_object_value. Removed (mine, from today): errors/refcount_multi_rw_result, errors/refcount_value_rw_items.
+
+TRYGET WITH SEVERAL RESULTS, LOCKS ON BORROWED ITEMS (2026-11-07, spec 0.0.26 6.6, 12, 13.1.1, compiler 0.0.73alpha)
+- The library classes map and hmap: tryGet(K key) and tryGet(K key, V otherwise) return bool, V (tree_get lends, tree_none the zero
+  value); tryGet(k, &out) is gone (the tests map, hmap, mapstrings use the new form). The MethodCall refusal and tree_copyOf are removed.
+- Parser: &Dog dog is a declaration (TryParseDecl: a plain & before a type name, the ReadWrite child). EmitDecl refuses it outside the
+  targets of several results ("not supported").
+- EmitMultiAssign: CheckLentPartTarget allows &T only for an object whose function lends read/write (Writes, or tryGet of map / hmap);
+  a new variable that receives a lent object part (not in Gives) is ReadOnlyRef unless written &T, and CheckLentTarget locks the receiver of
+  the call until its last use (RecordFollowingStatements maps the Decl targets of a MultiAssign).
+- Lends.cs: LockLenders is the old loop of CheckBorrowLock; FindChangingCall refuses, while an item is borrowed (Dog d = c[i], tryGet), the
+  members of the collections that are not in ReadOnlyCollectionMembers (calls on other objects are still not checked, spec 99).
+- Fixed (from 0.0.71): a result nobody keeps with several values ended a lent object part (DroppedResultCode): an object part ends only
+  when the function gives it (Gives).
+- Tests maptryget, errors/map_tryget_readonly, map_tryget_locked, map_tryget_rw_number, lend_rw_from_readonly. errors/map_object_tryget
+  (mine, from 0.0.72) was removed.
+
+UNRESTRICTED IS CHECKED (2026-11-07, spec 0.0.26 1.6.2, compiler 0.0.74alpha)
+- CodeGen.Unrestricted.cs: InUnrestrictedMethod (a method of a class, not of a struct: structs have their own check). SelfRoot finds the field of
+  this a place starts from (this.a.b[3], a.b, a[0].c). CheckUnrestrictedWrite (AssignCodeOf, IncDecOf, GiftExpr, EmitFinalize, EmitDone, a &x
+  argument in ArgCode, the targets of a MultiAssign, an in-place string statement in EmitInPlaceStatement). CheckUnrestrictedCall (MethodCall,
+  a receiver code of self: self, self->, (self); calls through the parent reference are free; library members: the read-only collection
+  members, get_, the read-only File members). CheckUnrestrictedValueCall (the value receivers: the changing members of the collections,
+  append / prepend / insert / remove / replaceAt / clear on a string).
+- Tests: inheritance (Kind), traits (Label, Area) mark their reading methods unrestricted; readonlyrefs: touch() reads now (its output
+  changes from 105 to 5). New: unrestrictedreads, errors/unrestricted_class_write, unrestricted_class_deep_call, unrestricted_class_self_call,
+  unrestricted_class_collection, unrestricted_class_string, unrestricted_class_move.
+
+BORROW RULES: READ-ONLY BORROWS, &T LOCALS, CALLS ON A LENDER (2026-11-07, spec 0.0.26 13.1.1, compiler 0.0.75alpha)
+- SetBorrowAccess (Lends.cs, after CheckBorrowLock in EmitDecl): a local of an object type that borrows (DeclBorrows, not owned, not counted,
+  not weak) is ReadOnlyRef unless declared &T; &T needs a source that lends read/write (ReadOnlySource: a &T result, or a place rooted at
+  this / a field (not inside an unrestricted method), an owned local, a & parameter or a read/write borrow). &T on a value type is "not
+  supported" (it comes with the &T results of values); &T on a new value is an error.
+- LockLenders / FindChangingCall: while a local borrows from an object, a method that is not unrestricted or static called on it is an error;
+  on a collection, the changing members only while one of its items is borrowed (an item read, tryGet).
+- The read-only message of a local borrow says "declare &T x".
+- Tests changed: lends (leader and at are unrestricted), ownership2 (the dead-borrow demo became a compile-time case: drop() after the last
+  use; its output changed), refcounttraitsigs / traits / traits2 / vecspec (&Keeper, &Shape, &TraitA, &IndexCollection where they write);
+  errors/map_tryget_locked, ref_borrowed_object (messages). New: borrows, errors/borrow_readonly_call, borrow_lender_call,
+  borrow_readonly_from_rw, borrow_rw_from_readonly, borrow_readonly_field.
+
+&T RESULTS OF VALUES (2026-11-07, spec 0.0.26 13.1.1, compiler 0.0.76alpha)
+- CodeGen.ValueLends.cs: a function written fun &i32 / &string / &Vec2 (a value, not an object or an array) has the internal result type "&T"
+  (CType T*, ZeroValue NULL). LendReturnCode gives the address of the place: LValue of a variable / field / & parameter / global, an item of
+  an arr or a vec (PlaceAddress, bounds checked), or the &T result of another call. ExprOf of a Call goes through DerefLend: (*address), which
+  is also an LValue (LValue of a Call to such a function: f() = v, +=, ++; a string place owns its string: IsField).
+- &i32 s = f() / &i32 n = board.score: EmitLendDecl; the variable has LendPointer and CName (*l_s_n) (declared in place, or in EmitHoists when
+  the frame hoists); a string is a RefSlot, as a & parameter. The lenders are locked (LockLenders) until its last use.
+- ReadOnlySource: a lend from a &@T needs an enforce that holds its lock (heldLocks); CheckWritableLend: an unrestricted method cannot have a
+  & result from this. Multi-results with a & value part stay "not supported".
+- Tests valuelends (DF_STR_TRACE clean), errors/lend_value_lender_call, lend_value_from_readonly, lend_value_counted_unlocked,
+  lend_value_unrestricted, lend_value_not_place; errors/result_writable_basic has the new message.
+
+COUNTED PROPERTIES (2026-11-07, spec 0.0.26 11.1.4, compiler 0.0.77alpha)
+- PropertyMethods: a counted field with accessor blocks gets fun @T get_x() (Returns "counted" / "counted-rw") and set_x(@T value) (the
+  parameter has Counted / ReadWrite). field inside the blocks: CountedRef knows a RawField of a counted storage, RawFieldExpr reads its object.
+  A field with accessors is never a CountedRef from outside (CountedFieldOf, the bare name): it goes through its getter.
+- Reads: CountedPropertyUsage (CountedValue for objects, CountedCellValue for values, also through @x) sets wantCountedUsage, so PropertyGet
+  gives the usage of R: to the counted receiver. Any other read (k.boss.name) keeps the usage for the statement: df_tmpf(usage,
+  df_rc_release_tmp) and reads its object or its cell.
+- Writes: k.boss = @rex goes to the setter, whose @T parameter takes the marker as any counted argument.
+- Tests countedproperties (DF_STR_TRACE clean), errors/counted_property_marker.
+
+STEP 5 OF THE DECIDED ITEMS (2026-11-07, spec 0.0.26, compiler 0.0.78alpha)
+- clear(): the library list.clear() is checkUnlocked() + node_truncate(0) (node_clear removed); maps and sets already checked the counter.
+- ModifiedObjectUsedAsKeyException: StandardExceptions 52 and df_desc_ModifiedObjectUsedAsKeyException in Runtime.cs.
+- Variadics (CodeGen.Variadics.cs): CheckVariadicParam at the signature (default, markers, collection type); CodeGen.cs refuses a
+  second variadic; MapArgs refuses a named variadic. VariadicLend at both call sites: one arr is passed as it is, a vec goes through
+  ViewExpr of c[..] (the view holds the counter of open iterators for the statement, TempObject), a view gives
+  {items.p + start, count}; a list or a listView is an error; items mixed with a collection are an error. LentObjects: an arr<Class>
+  of borrowed references, its block released with df_tmpf(p, free), new objects through TempObject. ResolveOverload: a collection
+  lent whole costs 0; when any non-variadic candidate applies, the variadic ones are dropped.
+- Limits: Program.cs Settings.Limits from --max-... and the .dsprj keys (LimitKey, ParseLimit 1-256, the command line wins), passed
+  to CodeGen.Compile as copyLimits (static). ClassLimits: a library generic takes the limits of the collection its name starts with
+  (vecView, mapKeys ... share them), other library generics (arr views, traits) have none; a user class whose Bases list Collection,
+  IndexCollection, MapCollection or SetCollection takes the customcollection pair; the rest and the generic functions take the
+  global pair. The messages name the option.
+- Tests variadic (extended), clearrules, errors/variadic_*, projects/errors/limit_copies, limit_vec_copies, limit_custom.

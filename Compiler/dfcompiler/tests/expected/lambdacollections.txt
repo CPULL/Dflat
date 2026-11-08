@@ -1,0 +1,23 @@
+1 vec
+first 2
+second 20
+second 50
+2
+2 arr and list
+4
+13
+9
+117
+3 owned captures end with the collection
+a barks
+  end a
+removed
+b barks
+  end b
+4 tuples and several results
+t here
+7
+7
+end
+  end t
+---- exit code 0 ----

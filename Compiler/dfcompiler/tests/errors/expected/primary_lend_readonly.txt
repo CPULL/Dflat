@@ -1,0 +1,1 @@
+primary_lend_readonly.df(7): error: 'd' is a read-only reference: 'grow' needs an owned or writable reference (mark it unrestricted, or take &d); 'grow' is defined at primary_lend_readonly.df(4)

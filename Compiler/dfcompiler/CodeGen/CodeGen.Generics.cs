@@ -62,8 +62,26 @@ sealed class NeedInstanceException : Exception {
 // a use with concrete type arguments makes a copy of the tree with the parameters replaced, and the copy is compiled
 // like any other function or class. Sets (Generic Name { types }) are compile-time lists used as constraints.
 public sealed partial class CodeGen {
-  public int MaxChainDepth { get; set; } = 16;
-  public int MaxCopies { get; set; } = 16;
+  // the limits of the generated copies (spec 11.3.12): "vec-copies", "customcollection-chain-depth", "copies" ... (the options without --max-)
+  static IReadOnlyDictionary<string, int> limits = new Dictionary<string, int>();
+  static readonly string[] LimitedCollections = { "hmap", "hset", "vec", "list", "map", "set" };
+  static readonly HashSet<string> CollectionTraits = new() { "Collection", "IndexCollection", "MapCollection", "SetCollection" };
+
+  static int Limit(string key, int fallback) => limits.TryGetValue(key, out int value) ? value : fallback;
+
+  // the copies and the chain depth a generic class can reach, and the option that sets them; null: no limit (arr, the traits of the library)
+  (int Copies, int Depth, string Option)? ClassLimits(GenericClass generic) {
+    if (generic.Node.Line >= LibraryLine) {
+      // vec and its views and iterators share the limits of vec ...
+      string? kind = LimitedCollections.FirstOrDefault(name => generic.Name.StartsWith(name));
+      return kind == null ? null : (Limit(kind + "-copies", 64), Limit(kind + "-chain-depth", 16), "--max-" + kind);
+    }
+    var bases = generic.Node.Children.FirstOrDefault(child => child.Kind == "Bases");
+    if (bases != null && bases.Children.Any(baseType => CollectionTraits.Contains(baseType.Text ?? ""))) {
+      return (Limit("customcollection-copies", 16), Limit("customcollection-chain-depth", 16), "--max-customcollection");
+    }
+    return (Limit("copies", 16), Limit("chain-depth", 16), "--max");
+  }
 
   readonly GenericSeeds seeds;
   readonly Dictionary<string, GenericFun> genericFuns = new();
@@ -92,8 +110,9 @@ public sealed partial class CodeGen {
 
   // Compiles the tree. A generic class instance that the code needs and the attempt has not made (found while resolving
   // a type) is added to the seeds and the whole compilation starts again from a fresh copy of the tree.
-  public static (string C, IReadOnlyList<string> Warnings) Compile(Node tree, bool release = false, int nativeBits = 64) {
+  public static (string C, IReadOnlyList<string> Warnings) Compile(Node tree, bool release = false, int nativeBits = 64, IReadOnlyDictionary<string, int>? copyLimits = null) {
     ReleaseBuild = release;
+    limits = copyLimits ?? new Dictionary<string, int>();
     NativeInt = nativeBits >= 64 ? "i64" : "i32";
     NativeUns = nativeBits >= 64 ? "u64" : "u32";
     var seeds = new GenericSeeds();
@@ -511,13 +530,16 @@ public sealed partial class CodeGen {
     if (seeds.Classes.Any(seed => seed.Template == key && seed.Args.SequenceEqual(args))) {
       throw new CompileException($"internal error: the generic class instance {mangled} was not created", at.Line);
     }
-    if (seeds.Classes.Count(seed => seed.Template == key) >= MaxCopies) {
-      throw Error($"Generic {generic.Name} defined in line {SourceMap.RealLine(generic.Node.Line)} was used with more than {MaxCopies} instances"
-        + $" in {(currentFun != null ? "function " + currentFun.Name : "the program")}", at);
-    }
-    int nesting = args.Max(NestingOf);
-    if (nesting + 1 > MaxChainDepth) {
-      throw Error($"Generic {generic.Name} defined in line {SourceMap.RealLine(generic.Node.Line)} is nested more than {MaxChainDepth} levels deep", at);
+    if (ClassLimits(generic) is var (maxCopies, maxDepth, option)) {
+      string defined = generic.Node.Line >= LibraryLine ? "(a library collection)" : $"defined in line {SourceMap.RealLine(generic.Node.Line)}";
+      if (seeds.Classes.Count(seed => seed.Template == key) >= maxCopies) {
+        throw Error($"Generic {generic.Name} {defined} was used with more than {maxCopies} instances"
+          + $" in {(currentFun != null ? "function " + currentFun.Name : "the program")} (the limit is set by {option}-copies)", at);
+      }
+      int nesting = args.Max(NestingOf);
+      if (nesting + 1 > maxDepth) {
+        throw Error($"Generic {generic.Name} {defined} is nested more than {maxDepth} levels deep (the limit is set by {option}-chain-depth)", at);
+      }
     }
     seeds.Classes.Add((key, args));
     throw new NeedInstanceException();
@@ -727,13 +749,15 @@ public sealed partial class CodeGen {
       return existing[0];
     }
     string where = currentFun != null ? "function " + currentFun.Name : "the program";
-    if (generic.Copies >= MaxCopies) {
-      throw Error($"Generic {generic.Name} defined in line {SourceMap.RealLine(generic.Node.Line)} was used with more than {MaxCopies} instances in {where}", at);
+    int maxCopies = Limit("copies", 16);
+    int maxDepth = Limit("chain-depth", 16);
+    if (generic.Copies >= maxCopies) {
+      throw Error($"Generic {generic.Name} defined in line {SourceMap.RealLine(generic.Node.Line)} was used with more than {maxCopies} instances in {where} (the limit is set by --max-copies)", at);
     }
     int depth = (currentFun?.InstanceDepth ?? 0) + 1;
     string chain = currentFun != null ? currentFun.InstanceChain + " -> " + mangled : mangled;
-    if (depth > MaxChainDepth) {
-      throw Error($"Generic {generic.Name} defined in line {SourceMap.RealLine(generic.Node.Line)}: more than {MaxChainDepth} nested instantiations ({chain})", at);
+    if (depth > maxDepth) {
+      throw Error($"Generic {generic.Name} defined in line {SourceMap.RealLine(generic.Node.Line)}: more than {maxDepth} nested instantiations ({chain}) (the limit is set by --max-chain-depth)", at);
     }
     CheckConstraints(generic.Params, args, at, generic.Name);
     var map = generic.Params.Zip(args).ToDictionary(pair => pair.First.Name, pair => pair.Second);

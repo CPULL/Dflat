@@ -1,0 +1,1 @@
+refcount_value_result_plain.df(4): error: this call gives a counted i32: keep it in a counted variable (@i32 x = ...) to use it (spec 12.7)

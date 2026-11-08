@@ -1,0 +1,1 @@
+unrestricted_class_deep_call.df(13): error: an unrestricted method does not change its object: 'eat' is not unrestricted; 'eat' is defined at unrestricted_class_deep_call.df(6) (spec 1.6.2)

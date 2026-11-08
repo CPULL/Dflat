@@ -1,1 +1,1 @@
-struct_readonly_object_call.df(8): error: 'b' is a read-only reference: only the unrestricted methods of A can be called, not 'grow' (spec 1.6.2, 11.1.5.2)
+struct_readonly_object_call.df(8): error: 'b' is a read-only reference: only the unrestricted methods of A can be called, not 'grow'; 'grow' is defined at struct_readonly_object_call.df(4) (spec 1.6.2, 11.1.5.2)

@@ -1,0 +1,10 @@
+namespace map_tryget_readonly
+class Dog(string name) {
+  public string name
+}
+fun f() {
+  map<string, Dog> dogs = ["rex": Dog("Rex")]
+  bool here, Dog dog = dogs.tryGet("rex")
+  dog.name = "Max"
+}
+f()

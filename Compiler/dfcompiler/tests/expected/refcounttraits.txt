@@ -1,0 +1,14 @@
+woof, users 1
+Rex: a @Dog, users 2
+after the check, users 1
+tricks 1
+not a dog, users 1
+early Max, users 3
+after early, users 1
+item Max, users 3
+inside enforce Max, users 4
+through the weak Max
+cat ends
+Max ends
+Rex ends
+---- exit code 0 ----

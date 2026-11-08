@@ -1,0 +1,11 @@
+namespace lend_rw_from_readonly
+class Dog { public i32 n }
+class K {
+  public Dog boss = Dog()
+  public fun Dog, i32 lead() { return boss, 1 }
+}
+fun f() {
+  K k = K()
+  &Dog d, i32 n = k.lead()
+}
+f()

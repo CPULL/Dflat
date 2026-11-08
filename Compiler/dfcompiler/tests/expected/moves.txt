@@ -1,0 +1,15 @@
+took A
+A ends
+took B
+B ends
+e is null: true
+C
+C ends
+A
+took B
+B ends
+e is null: true
+C
+C ends
+A ends
+---- exit code 0 ----

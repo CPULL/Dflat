@@ -43,8 +43,8 @@ words[2] = "TWO"
 words[1] += "!"
 r.Console.log(words)                               // [1: one!, 2: TWO, 3: three]
 r.Console.log(words[9] == "")                      // true: a missing key reads as ""
-string got = ""
-r.Console.log(words.tryGet(3, &got))             // true
+bool hasThree, string got = words.tryGet(3)
+r.Console.log(hasThree)                            // true
 r.Console.log(got)                                 // three
 r.Console.log(words.has("TWO"))                    // true
 r.Console.log(words.keyOf("three"))                // 3

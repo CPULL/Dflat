@@ -1,0 +1,7 @@
+namespace app
+set<i32> a = [1]
+set<i64> b = [2]
+set<u8> c = [3]
+vec<u8> d = [4]
+vec<i64> e = [4]
+vec<i32> f = [4]

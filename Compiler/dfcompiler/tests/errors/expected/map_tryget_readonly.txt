@@ -1,0 +1,1 @@
+map_tryget_readonly.df(8): error: 'dog' is a read-only reference: its fields cannot be assigned

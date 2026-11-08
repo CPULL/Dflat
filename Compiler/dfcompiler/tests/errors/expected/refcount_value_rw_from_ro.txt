@@ -1,0 +1,1 @@
+refcount_value_rw_from_ro.df(4): error: 'ro' is read-only (@i32): only a &@i32 gives a read/write one (spec 12.7)

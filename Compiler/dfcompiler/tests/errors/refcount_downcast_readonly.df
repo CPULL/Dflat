@@ -1,0 +1,16 @@
+namespace refcount_downcast_readonly
+trait Animal {
+  unrestricted fun i32 legs()
+}
+class Dog : Animal {
+  public i32 tricks
+  override fun i32 legs() { 4 }
+  public fun learn() { tricks++ }
+}
+fun f() {
+  @Animal a = @Dog()
+  if a is Dog d {
+    d.learn()
+  }
+}
+f()

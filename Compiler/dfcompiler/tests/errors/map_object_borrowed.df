@@ -1,0 +1,8 @@
+namespace map_object_borrowed
+class Dog { }
+fun f() {
+  map<string, Dog> m = []
+  Dog rex = Dog()
+  m.add("rex", rex)
+}
+f()

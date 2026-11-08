@@ -1,0 +1,11 @@
+namespace primary_given_used
+class Dog { public i32 size }
+class Home(Dog d) {
+  unrestricted fun i32 size() { d.size }
+}
+fun f() {
+  Dog max = Dog()
+  Home h = Home(max)
+  max.size = 2
+}
+f()

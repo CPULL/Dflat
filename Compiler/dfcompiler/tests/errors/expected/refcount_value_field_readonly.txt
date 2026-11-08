@@ -1,0 +1,1 @@
+refcount_value_field_readonly.df(4): error: 'hits' is a read-only counted value (@i32): it is written through a &@i32 (spec 12.7)

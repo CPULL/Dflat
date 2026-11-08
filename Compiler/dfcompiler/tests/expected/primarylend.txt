@@ -1,0 +1,13 @@
+kennel of Rex, size 3, rex is still here: Rex
+Temp ends
+kennel of Temp
+home of Max
+Other
+home of Fresh
+home ends
+Fresh ends
+home ends
+Max ends
+Other ends
+Rex ends
+---- exit code 0 ----

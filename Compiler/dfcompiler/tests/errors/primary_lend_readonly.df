@@ -1,0 +1,8 @@
+namespace primary_lend_readonly
+class Dog {
+  public i32 size = 3
+  public fun i32 grow() { size++; size }
+}
+class Kennel(Dog d) {
+  public i32 size = d.grow()
+}

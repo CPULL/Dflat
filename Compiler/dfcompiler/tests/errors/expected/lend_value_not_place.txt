@@ -1,0 +1,1 @@
+lend_value_not_place.df(11): error: &i32 n: this is a value, not a place that can be lent read/write; write i32 n (spec 13.1.1)

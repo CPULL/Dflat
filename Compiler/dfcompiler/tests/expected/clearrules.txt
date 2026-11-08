@@ -1,0 +1,11 @@
+0
+[4]
+[0, 0, 0]
+[0, 0]
+list iterated
+2
+map iterated
+0
+set iterated
+0
+---- exit code 0 ----

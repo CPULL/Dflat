@@ -41,7 +41,7 @@ r.Console.log(b.OnlyA())
 Plain p = Plain()
 r.Console.log(p.TraitA.Who())
 r.Console.log(p.TraitB.Who())
-TraitA viewA = p
+&TraitA viewA = p
 r.Console.log(viewA.Who())
 r.Console.log(viewA.tag)
 

@@ -35,50 +35,51 @@ public class hmap<K, V> : MapCollection<K, V> {
   }
 
   // adds the pair, or replaces the value of an existing key: false when it replaced (spec 6.6)
-  public fun bool add(K key, V value) {
+  public fun bool add(K key, ->V value) {
     if this.tree_hasKey(key) {
-      this.tree_set(key, value)
+      this.tree_set(key, ->value)
       return false
     }
     checkUnlocked()
-    this.tree_set(key, value)
+    this.tree_set(key, ->value)
     return true
   }
 
   // merges another hmap: the new value wins (spec 6.6); the entries are copied, other is unchanged
   public fun add(hmap<K, V> other) {
     for (K key, V value) in other {
-      add(key, value)
+      if !this.tree_hasKey(key) {
+        checkUnlocked()
+      }
+      this.tree_setCopy(key, value)
     }
   }
 
-  public fun bool tryGet(K key, &V result) {
+  // found, and the value (spec 6.6): an object is lent, read-only (Dog d) or read/write (&Dog d) as the caller declares it; a missing key
+  // gives false and the zero value (null for an object), or otherwise
+  public fun bool, V tryGet(K key) {
     if !this.tree_hasKey(key) {
-      V none
-      result = none
-      return false
+      return false, this.tree_none()
     }
-    result = this.tree_get(key)
-    return true
+    return true, this.tree_get(key)
   }
 
-  public fun bool tryGet(K key, &V result, V otherwise) {
+  public fun bool, V tryGet(K key, V otherwise) {
     if !this.tree_hasKey(key) {
-      result = otherwise
-      return false
+      return false, otherwise
     }
-    result = this.tree_get(key)
-    return true
+    return true, this.tree_get(key)
   }
 
   // the value of key leaves the map with its entry (->m[k], spec 6.6); a missing key gives the zero value
-  public fun V takeAt(K key) {
+  public fun ->V takeAt(K key) {
     checkUnlocked()
     return this.tree_take(key)
   }
 
   public fun removeAt(K key) {
-    V gone = takeAt(key)
+    checkUnlocked()
+    this.tree_remove(key)
   }
 
   // the first entry in the order of the table that holds the value
@@ -470,7 +471,7 @@ public class hset<T> : SetCollection<T> {
 
   bool HmapValueBuilt(string value) {
     string inner = BaseOf(value);
-    return IsInt(inner) || inner is "bool" or "char" or "r32" or "r64" || IsTimeType(inner) || IsEnum(inner) || value == "string";
+    return IsInt(inner) || inner is "bool" or "char" or "r32" or "r64" || IsTimeType(inner) || IsEnum(inner) || value == "string" || IsMapObjectValue(value);
   }
 
   // the C type and the width in bits of the value of a native key (an enum: its value type)

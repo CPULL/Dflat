@@ -1,0 +1,1 @@
+refcount_value_readonly_write.df(4): error: 'ro' is a read-only counted value (@i32): it is written through a &@i32 (spec 12.7)

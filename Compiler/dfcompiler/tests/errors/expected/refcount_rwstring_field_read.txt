@@ -1,0 +1,1 @@
+refcount_rwstring_field_read.df(8): error: 'text' is a &@string: read it through a variable that shares it (&@string s = ...), inside enforce s { } (spec 12.7)

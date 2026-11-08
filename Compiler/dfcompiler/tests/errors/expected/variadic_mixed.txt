@@ -1,0 +1,1 @@
+variadic_mixed.df(3): error: 'items...' takes items or one collection, not both: give the items, or only the arr<i32> (spec 13.4)

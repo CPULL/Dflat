@@ -31,6 +31,7 @@ sealed class FunSig {
   public string Ret { get; }
   public HashSet<int> Gives { get; init; } = new();   // the results written ->T: the caller owns them (spec 13.1.1)
   public HashSet<int> Writes { get; init; } = new();  // the results written &T: lent read/write, the caller changes them in place
+  public HashSet<int> WritableCounted { get; init; } = new();   // several results: the ones written &@T (read/write counted, spec 12.7)
   public List<ParamSig> Params { get; }
   public Node Node { get; }
   public string? EnumName { get; }
@@ -81,6 +82,8 @@ sealed class ParamSig {
   public Node? Default { get; }
   public bool IsVariadic { get; init; }   // T name...: an arr<T> filled from the extra arguments
   public bool IsGift { get; init; }       // ->T name: the function owns the object it is given
+  public bool IsImplicitGift { get; init; }   // a plain primary parameter used as a field: given without -> in the call (spec 11.1.1)
+  public string? GivenTo { get; init; }    // its class, for the error of a use after the call
   public int Ref { get; init; }           // 0 a copy, 1 a read-only reference, 2 &T name (writable reference, the call writes &x)
   public bool IsParent { get; init; }     // T name as parent: the object pointer is kept in a field (spec 12.5)
   public bool IsWeak { get; init; }       // _T name (spec 12): a weak reference, used through enforce
@@ -124,6 +127,7 @@ sealed class VarInfo {
   public string? HeapName { get; set; }      // a local struct above 64 KB: the C pointer to its block on the heap (spec 11.1.5.5)
   public bool OwnsStruct { get; set; }       // a struct variable that owns its strings and objects: they end with it (spec 11.1.5.3)
   public bool ReadOnlyStruct { get; set; }   // a plain struct parameter: a read-only lend, its fields are not written (spec 11.1.5.2)
+  public string? LendPointer { get; set; }   // &i32 s = f(): the C pointer to the place it lends; CName is (*pointer) (spec 13.1.1)
 }
 
 sealed class Scope {
@@ -158,6 +162,33 @@ public sealed partial class CodeGen {
   static readonly HashSet<string> TypeNodeKinds = new() {
     "Type", "ResolvedType", "Nullable", "TupleType", "FunType", "Pointer", "WritablePointer", "Volatile", "Specific", "Any"
   };
+
+  // the keys that Console.readKey gives for the keys without a character (stdlib 2)
+  static readonly Dictionary<string, int> ConsoleKeys = new() {
+    ["KEY_LEFT"] = 0x2190, ["KEY_UP"] = 0x2191, ["KEY_RIGHT"] = 0x2192, ["KEY_DOWN"] = 0x2193,
+    ["KEY_ENTER"] = 0x0A, ["KEY_ESC"] = 0x1B, ["KEY_BACKSPACE"] = 0x08, ["KEY_TAB"] = 0x09
+  };
+
+  // Console.setColors(Color? text, Color? background): each value is its number (0-15) or -1 for the default colour (stdlib 2)
+  Expr SetColorsCall(List<Node> args, Scope scope, Node at) {
+    if (args.Count != 2 || args.Any(arg => arg.Kind == "Named")) {
+      throw Error("setColors takes the colour of the text and the colour of the background: Console.setColors(Console.Color.White, null)", at);
+    }
+    var codes = new List<string>();
+    foreach (var arg in args) {
+      var value = ExprOf(arg, scope, "ConsoleColor?");
+      if (value.Type == "null") {
+        codes.Add("-1");
+      } else if (value.Type == "ConsoleColor") {
+        codes.Add($"(int)({value.Code})");
+      } else if (value.Type == "ConsoleColor?") {
+        codes.Add(WithTemp(value, held => $"({held}.has ? (int){held}.val : -1)"));
+      } else {
+        throw Error($"setColors takes Console.Color values or null, not {value.Type}", arg);
+      }
+    }
+    return new Expr($"df_console_set_colors({codes[0]}, {codes[1]})", "void");
+  }
 
   static readonly Dictionary<string, string> MathConsts = new() {
     ["PI"] = "3.141592653589793",
@@ -416,10 +447,15 @@ public sealed partial class CodeGen {
         bool isMainInt = enumName == null && funNode.Text == "main" && rets.Children[0] is { Kind: "Type", Text: "int" };
         ret = isMainInt ? "i32" : ResolveType(rets.Children[0]);
         if (rets.Text is "counted" or "counted-rw") {
-          ret = CountedTypeOf(ret, rets);   // fun @Dog make(): the caller receives the usage (spec 12.7)
+          ret = CountedTypeOf(ret, rets, true);   // fun @Dog make(): the caller receives the usage (spec 12.7)
         }
       } else {
-        ret = "*" + MakeTuple(rets.Children.Select(typeNode => (ResolveType(typeNode), (string?)null)));
+        var resultMarks = rets.Text is string text && text.StartsWith("marks:") ? text[6..].Split(',') : Array.Empty<string>();
+        ret = "*" + MakeTuple(rets.Children.Select((typeNode, index) => {
+          string type = ResolveType(typeNode);
+          bool counted = resultMarks.Contains("c" + index) || resultMarks.Contains("r" + index);   // fun @Dog, i32 pick(), fun &@i32, bool get()
+          return (counted ? CountedTypeOf(type, typeNode, true) : type, (string?)null);
+        }));
       }
     }
     var ps = new List<ParamSig>();
@@ -427,6 +463,9 @@ public sealed partial class CodeGen {
     foreach (var p in paramsNode.Children) {
       if (ParamFeatures.TryGetValue(p.Kind, out var feature)) {
         throw NotSupported(feature, p);
+      }
+      if (p.Kind == "VariadicParam" && paramsNode.Children.Count(other => other.Kind == "VariadicParam") > 1) {
+        throw Error("a function has at most one variadic parameter (T name...) (spec 13.4)", p);
       }
       if (p.Kind == "VariadicParam" && p != paramsNode.Children[^1]) {
         throw Error("a variadic parameter (T name...) must be the last one", p);
@@ -449,6 +488,9 @@ public sealed partial class CodeGen {
       }
       string paramType = ResolveType(p.Children[0]);
       bool variadic = p.Kind == "VariadicParam";
+      if (variadic) {
+        CheckVariadicParam(p, paramType);   // spec 13.4
+      }
       // &T: a writable lend (spec 13.1); a plain parameter keeps the old behaviour until the read-only lend is built (1.6.2)
       int reference = p.Kind == "WritableRefParam" ? 2 : 0;
       if (reference == 0 && p.Kind == "Param" && IsBigStruct(paramType)) {
@@ -462,7 +504,7 @@ public sealed partial class CodeGen {
         throw Error("only objects have weak references", p);
       }
       if (p.Children.Any(child => child.Kind == "Counted")) {
-        paramType = CountedTypeOf(paramType, p);   // @Dog dog: the function holds its own usage (spec 12.7)
+        paramType = CountedTypeOf(paramType, p, true);   // @Dog dog, @i32 n: the function holds its own usage (spec 12.7)
       }
       if (weakParam) {
         paramType = "_" + paramType;   // _Dog dog: the function holds its own weak reference (spec 12.7)
@@ -478,9 +520,9 @@ public sealed partial class CodeGen {
     }
     bool isExtern = funNode.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ').Contains("extern") == true;
     bool noBody = funNode.Children.Any(child => child.Kind == "NoBody");
-    if ((IsCountedType(ret) || ps.Any(param => IsCountedType(param.Type)))
-        && (cls?.IsTrait == true || noBody || isExtern || funNode.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ').Contains("override") == true)) {
-      throw NotSupported("Counted parameters and results in traits, overrides and extern functions", funNode);
+    if ((IsCountedType(ret) || ps.Any(param => IsCountedType(param.Type))) && isExtern) {
+      // C knows no counting block: an extern function takes and gives plain values (spec 15.9); a counted variable is passed by its value
+      throw Error("an extern function takes and gives plain values, not counted ones (@T): pass the value itself (spec 12.7, 15.9)", funNode);
     }
     if (isExtern) {
       CheckExtern(funNode, cls, enumName, ret, ps, noBody);
@@ -503,11 +545,15 @@ public sealed partial class CodeGen {
     }
     var marked = rets?.Text is string marks && marks.StartsWith("marks:") ? marks[6..].Split(',') : Array.Empty<string>();
     var gives = marked.Where(mark => mark[0] == 'g').Select(mark => int.Parse(mark[1..])).ToHashSet();
+    var writableCounted = marked.Where(mark => mark[0] == 'r').Select(mark => int.Parse(mark[1..])).ToHashSet();
     var writes = marked.Where(mark => mark[0] == 'w').Select(mark => int.Parse(mark[1..])).ToHashSet();
     foreach (int written in writes) {
       string writtenType = IsMulti(ret) ? TupleElems(ret)[written].Type : ret;
       if (!(IsClass(writtenType) || IsArr(writtenType))) {
-        throw NotSupported("& results of basic values and strings (spec 13.1.1)", rets!);
+        if (IsMulti(ret)) {
+          throw NotSupported("& results of values among several results (spec 13.1.1)", rets!);
+        }
+        ret = "&" + ret;   // fun &i32 scoreRef(): the address of the place (spec 13.1.1)
       }
     }
     foreach (int given in gives) {
@@ -516,7 +562,7 @@ public sealed partial class CodeGen {
         Warn($"-> on a {DisplayName(givenType)} result is ignored: a basic value is a copy (spec 13.1.1)", rets!, 1);
       }
     }
-    var fun = new FunSig(name, ret, ps, funNode, enumName) { OverloadIndex = overloads.Count, IsExtern = isExtern, RetWritable = rets?.Text == "counted-rw", Gives = gives, Writes = writes };
+    var fun = new FunSig(name, ret, ps, funNode, enumName) { OverloadIndex = overloads.Count, IsExtern = isExtern, RetWritable = rets?.Text == "counted-rw", Gives = gives, Writes = writes, WritableCounted = writableCounted };
     overloads.Add(fun);
     return fun;
   }
@@ -680,7 +726,19 @@ public sealed partial class CodeGen {
 
   static string Pad(int indent) => new(' ', indent * 2);
 
+  // variables given away without -> (Ken(rex) with a plain primary parameter used as a field, spec 11.1.1): a later use is a compile error.
+  // The move takes effect at the next statement, so the arguments of the same call still see the variable; = gives it a value again
+  readonly Dictionary<VarInfo, string> movedVars = new();
+  readonly List<(VarInfo Variable, string To)> pendingMoves = new();
+
   void EmitStmt(Node s, StringBuilder sb, Scope scope, int indent) {
+    foreach (var (variable, to) in pendingMoves) {
+      movedVars.TryAdd(variable, to);
+    }
+    pendingMoves.Clear();
+    if (s.Kind == "Assign" && s.Text == "=" && s.Children[0].Kind == "Name" && scope.Find(s.Children[0].Text!) is VarInfo reassigned) {
+      movedVars.Remove(reassigned);   // rex = Dog("new"): usable again
+    }
     string pad = Pad(indent);
     if (s.Children.Any(child => child.Kind == "AtEnd" && child.Text == "trailing")) {
       throw NotSupported("atEnd after a statement (14.2, form 3): only after a function or a class", s);
@@ -798,14 +856,19 @@ public sealed partial class CodeGen {
         }
         var thenScope = scope;
         string condition;
+        Node? usage = null;
         if (s.Children[0].Kind == "Is" && s.Children[0].Text != null) {
-          (condition, thenScope) = IsBinding(s.Children[0], scope);   // if x is Circle c then ...
+          (condition, thenScope, usage) = IsBinding(s.Children[0], scope);   // if x is Circle c then ...
         } else {
           condition = BoolOf(ExprOf(s.Children[0], scope), s);
         }
         sb.Append($"{pad}if ({condition}) {{\n");
         var before = assign.Clone();
-        EmitStatementAsBlock(s.Children[1], sb, thenScope, indent + 1);
+        if (usage != null) {
+          EmitBlock(WithUsage(s.Children[1], usage), sb, thenScope, indent + 1);   // a counted binding (spec 12.7)
+        } else {
+          EmitStatementAsBlock(s.Children[1], sb, thenScope, indent + 1);
+        }
         assign = AssignState.Merge(new[] { assign, before });
         sb.Append(pad).Append("}\n");
         return;
@@ -909,6 +972,11 @@ public sealed partial class CodeGen {
       CheckNotShadowing(s.Text!, scope, s);   // the temporary usage of enforce w { } has the name of w (spec 12.7)
     }
     var init = s.Children.FirstOrDefault(c => c.Kind is "Init" or "WeakInit");
+    if (s.Children.Any(c => c.Kind == "ReadWrite") && !IsCountedDecl(s) && !s.Children.Any(c => c.Kind is "Weak" or "WeakInit")
+        && LendsAsAddress(ResolveDeclType(s, scope))) {
+      EmitLendDecl(s, ResolveDeclType(s, scope), s.Children.FirstOrDefault(c => c.Kind == "Init"), sb, scope, pad);   // &i32 s = f() (spec 13.1.1)
+      return;
+    }
     if (IsCountedDecl(s)) {
       EmitCountedDecl(s, type, init, sb, scope, pad);
       return;
@@ -1013,6 +1081,7 @@ public sealed partial class CodeGen {
     scope.Vars[s.Text!] = variable;
     variable.IsLocal = currentFun != null && !fn!.IsMain;
     CheckBorrowLock(s, type, init?.Children[0], variable, scope);   // spec 12
+    SetBorrowAccess(s, type, init?.Children[0], variable, scope);   // read-only or read/write borrow (spec 13.1.1)
     if (init == null) {
       assign.Unassigned.Add(variable);
     } else {
@@ -1024,15 +1093,16 @@ public sealed partial class CodeGen {
     string pad = Pad(indent);
     var thenScope = scope;
     string condition;
+    Node? usage = null;
     if (s.Children[0].Kind == "Is" && s.Children[0].Text != null) {
-      (condition, thenScope) = IsBinding(s.Children[0], scope);   // if v is Circle c { }
+      (condition, thenScope, usage) = IsBinding(s.Children[0], scope);   // if v is Circle c { }
     } else {
       condition = BoolOf(ExprOf(s.Children[0], scope), s);
     }
     string head = $"if ({condition}) {{\n";
     sb.Append(isElseIf ? head : pad + head);
     var before = assign.Clone();
-    EmitBlock(s.Children[1], sb, thenScope, indent + 1);
+    EmitBlock(WithUsage(s.Children[1], usage), sb, thenScope, indent + 1);
     var afterThen = assign;
     assign = before.Clone();
     sb.Append(pad).Append('}');
@@ -1297,6 +1367,9 @@ public sealed partial class CodeGen {
     if (IsCountedType(currentRet!)) {
       return CountedReturnCode(s.Children[0], scope, s);
     }
+    if (IsValueLend(currentRet!)) {
+      return LendReturnCode(s.Children[0], scope);   // fun &i32 scoreRef() { score }: the address of score (spec 13.1.1)
+    }
     var returned = ExprOf(s.Children[0], scope, currentRet);
     if (s.Children[0].Kind == "Name" && scope.Find(s.Children[0].Text!) is { OwnsArray: true } owned) {
       // return a: the array moves to the caller, the local is emptied so its end frees nothing (spec 6.8.1)
@@ -1339,6 +1412,9 @@ public sealed partial class CodeGen {
       }
       if (variable == null && currentClass != null && FindField(currentClass, target.Text!, target) is FieldInfo ownField) {
         var bare = BareField(target.Text!, scope, target, true)!.Value;
+        if (ownField.IsCounted && !countedFieldWrite && IsCountedValueType(ownField.Type)) {
+          return CountedValueFieldPlace(bare.Code, ownField, target);   // hits += 1 inside the class (spec 12.7)
+        }
         if ((ownField.IsCounted || ownField.IsWeak) && !countedFieldWrite) {
           throw NotSupported($"This use of the counted field '{ownField.Name}' (->, &, swap, out arguments)", target);
         }
@@ -1358,6 +1434,9 @@ public sealed partial class CodeGen {
       if (variable == null) {
         throw Error($"unknown variable '{target.Text}'", target);
       }
+      if (IsCountedValueVar(variable)) {
+        return CountedValuePlace(variable, target);   // &@i32 n: the cell, written in place (spec 12.7)
+      }
       if (variable.IsCounted) {
         // the C variable is the counting block: only =, is done. and the reads are built (spec 12.7)
         throw NotSupported($"This use of the counted variable '{target.Text}' (->, &, ++, swap, out arguments)", target);
@@ -1366,6 +1445,13 @@ public sealed partial class CodeGen {
         throw Error($"'{target.Text}' is a weak reference: use it through enforce {target.Text} {{ }} else {{ }} (spec 12.7)", target);
       }
       return new LValueInfo(variable.CName, variable.Type, variable.IsConst, variable);
+    }
+    if (target.Kind == "Call" && ExprOf(target, scope) is { } lentPlace && lentPlace.Code.StartsWith("(*")
+        && CalleesOf(target) is { Count: > 0 } lendingCallees && lendingCallees.All(f => IsValueLend(f.Ret))) {
+      return new LValueInfo(lentPlace.Code, lentPlace.Type, false, null, lentPlace.Type == "string");   // board.scoreRef() += 1 (spec 13.1.1)
+    }
+    if (target.Kind == "CellItem" && CountedItemRef(target.Children[0], scope) is CountedRefInfo cellItem) {
+      return CountedValueItemPlace(cellItem, target.Children[0]);   // the shared cell of a list<&@i32> item (spec 12.7)
     }
     if (target.Kind == "Paren") {
       return LValue(target.Children[0], scope);   // (x).f = v
@@ -1400,20 +1486,37 @@ public sealed partial class CodeGen {
 
   string AssignCodeOf(Node s, Scope scope) {
     var targetNode = s.Children[0];
+    CheckUnrestrictedWrite(targetNode, scope);   // spec 1.6.2
     if (targetNode.Kind == "Member" && structs.Count > 0 && BufferAssign(s, scope) is string buffer) {
       return buffer;   // s.m = [ ... ] (spec 11.1.5.4)
     }
-    if (targetNode.Kind == "Index" && !TupleIndexTarget(targetNode, scope)) {
+    if (targetNode.Kind == "Index" && !LibraryCode && CountedItemRef(targetNode, scope) is { Writable: true } cellItem && IsCountedValueRef(cellItem)) {
+      // team[0] += 1 on a list<&@i32>: writes the shared cell of the item, with its lock (spec 12.7)
+      targetNode = Synthetic("CellItem", targetNode).Add(targetNode);
+      s = Synthetic("Assign", s, s.Text).Add(targetNode).Add(s.Children[1]);
+    } else if (targetNode.Kind == "Index" && !TupleIndexTarget(targetNode, scope)) {
       return IndexAssign(s, scope);
     }
     if (PropertyTarget(targetNode, scope) is var (propertyObj, property)) {
       return PropertyAssign(s, targetNode, propertyObj, property, scope);   // through the setter (spec 11.1.4)
     }
     if (targetNode.Kind == "Name" && scope.Find(targetNode.Text!) is VarInfo { IsCounted: true } counted) {
-      return CountedAssign(s, counted, scope);   // spec 12.7
+      if (!IsCountedValueVar(counted)) {
+        return CountedAssign(s, counted, scope);   // spec 12.7
+      }
+      if (CountedValueAssign(s, counted, scope) is string valueAssign) {
+        return valueAssign;   // a read-only @T value: a new cell with a copy
+      }
+      // a &@T value: written in place below, through the place of its cell
     }
-    if (CountedRef(targetNode, scope) is { Field: not null }) {
-      return CountedFieldAssign(s, scope);   // k.friend = value (spec 12.7)
+    if (CountedRef(targetNode, scope) is { Field: not null } countedField) {
+      if (!IsCountedValueRef(countedField)) {
+        return CountedFieldAssign(s, scope);   // k.friend = value (spec 12.7)
+      }
+      if (initializing || !IsWritableRef(countedField)) {
+        return CountedValueFieldRebind(s, countedField, scope);   // a start value, or = on a read-only @T field: a cell of its own
+      }
+      // a &@T value field: written in place below, through its cell
     }
     if (WeakRef(targetNode, scope) != null) {
       return WeakAssign(s, scope);   // w = _first, k.watcher = w (spec 12.7)
@@ -1534,6 +1637,14 @@ public sealed partial class CodeGen {
             throw Error($"'{n.Text}' is a weak reference: use it through enforce {n.Text} {{ }} else {{ }}", n);
           }
           ReadCheck(v, n.Text!, n);
+          if (!nullCheckRead && movedVars.TryGetValue(v, out var movedTo)) {
+            throw Error(movedTo.StartsWith("the constructor")
+              ? $"'{n.Text}' was given to {movedTo}: it cannot be used after it (spec 11.1.1)"
+              : $"'{n.Text}' was {movedTo}: it cannot be used until it gets a new value (spec 12.4)", n);
+          }
+          if (IsCountedValueVar(v)) {
+            return CountedValueRead(v, n);   // the value of the cell (spec 12.7)
+          }
           if (v.IsCounted) {
             return new Expr($"DF_RC_OBJ({CType(v.Type)}, {v.CName})", v.Type);   // the object of the counting block (spec 12.7)
           }
@@ -1613,7 +1724,7 @@ public sealed partial class CodeGen {
       case "Transmute":
         return Transmute(n, scope);
       case "Call":
-        return RemoveCountingCall(n, scope) ?? CloneCall(n, scope) ?? Call(n, scope);
+        return DerefLend(RemoveCountingCall(n, scope) ?? CloneCall(n, scope) ?? Call(n, scope));   // a &T result of a value: (*address)
       case "CtorChain":
         return CtorChainCall(n, scope);
       case "Member":
@@ -1670,6 +1781,9 @@ public sealed partial class CodeGen {
         if (MapViewOf(n.Children[0], scope) is (Expr viewMap, bool viewKeys)) {
           return MapViewCopy(viewMap, viewKeys, n);
         }
+        if (n.Children[0] is { Kind: "Index" } ranged && ranged.Children.Count == 2 && ranged.Children[1].Kind == "Range" && ranged.Children[0].Kind != "GenericRef") {
+          return CopyRange(ranged, scope);   // c[a..b]!: a new collection with the items of the range (spec 12.6)
+        }
         // a! of a string: a copy (the objects need cloning, spec 12.6)
         var copied = ExprOf(n.Children[0], scope);
         if (MapViewKind(copied.Type) is string viewKind) {
@@ -1677,6 +1791,10 @@ public sealed partial class CodeGen {
         }
         if (copied.Type == "string") {
           return new Expr(copied.Fresh ? copied.Code : $"df_str_dup({copied.Code})", "string", true);
+        }
+        if (IsFunType(copied.Type)) {
+          // f!: a new context, with what the lambda owns cloned (spec 13.3.3)
+          return new Expr(copied.Fresh ? copied.Code : $"df_fn_clone({copied.Code})", copied.Type, true);
         }
         if (IsStruct(copied.Type)) {
           // s!: a copy with its own strings and objects (spec 11.1.5.3)
@@ -1725,11 +1843,12 @@ public sealed partial class CodeGen {
 
   Expr IncDec(Node n, Scope scope) {
     var e = IncDecOf(n, scope);
-    return n.Children[0].Kind == "Member" && WriteLockCheck(n.Children[0], scope) is string check ? e with { Code = $"({{ {check}{e.Code}; }})" } : e;
+    return n.Children[0].Kind is "Member" or "Name" && WriteLockCheck(n.Children[0], scope) is string check ? e with { Code = $"({{ {check}{e.Code}; }})" } : e;
   }
 
   Expr IncDecOf(Node n, Scope scope) {
     var targetNode = n.Children[0];
+    CheckUnrestrictedWrite(targetNode, scope);   // spec 1.6.2
     if (PropertyTarget(targetNode, scope) is var (propertyObj, property)) {
       return PropertyIncDec(n, propertyObj, property, scope);
     }
@@ -2001,7 +2120,19 @@ public sealed partial class CodeGen {
 
   // ---------------------------------------------------------------- operators
 
+  // a moved variable compared with null: it reads as null (spec 12.4), this is not a use after the move
+  bool nullCheckRead;
+
   Expr Binary(Node n, Scope scope, string? expected) {
+    if (n.Text is "==" or "!=" && n.Children.Count == 2 && (n.Children[0].Kind == "Null" || n.Children[1].Kind == "Null")
+        && (n.Children[0].Kind == "Name" || n.Children[1].Kind == "Name") && !nullCheckRead) {
+      nullCheckRead = true;
+      try {
+        return Binary(n, scope, expected);
+      } finally {
+        nullCheckRead = false;
+      }
+    }
     string op = n.Text!;
     if (op is "&&" or "||" or "^^") {
       string l = BoolOf(ExprOf(n.Children[0], scope), n);
@@ -2352,14 +2483,20 @@ public sealed partial class CodeGen {
         throw Error($"this call gives a counted {CountedBase(receiver.Type)}: keep it in a counted variable (@{CountedBase(receiver.Type)} x = ...) to use it (spec 12.7)", n);
       }
       CheckReadOnlyCall(callee.Children[0], receiver, callee.Text!, scope, n);
-      return TryReceiverCall(receiver, callee.Text!, args, scope, n)
-        ?? throw Error($"{receiver.Type} has no function '{callee.Text}'", n);
+      CheckUnrestrictedValueCall(callee.Children[0], receiver, callee.Text!, scope, n);   // spec 1.6.2
+      var called = UnboxTupleResult(TryReceiverCall(receiver, callee.Text!, args, scope, n)
+        ?? throw Error($"{receiver.Type} has no function '{callee.Text}'", n));   // it.next() of an iterator of counted objects (spec 12.7)
+      // a method that is not unrestricted, called through a &@T, needs its lock (spec 12.7)
+      return MethodNeedsLock(receiver, callee.Text!) && WriteLockCheck(callee, scope) is string check ? called with { Code = $"({{ {check}{called.Code}; }})" } : called;
     }
 
     string? path = Path(callee);
     if (path != null && scope.Find(path.Split('.')[0]) == null) {
       if (path == "string" && callee.Kind == "Name") {
         return StringFromAddr(args, scope, n);   // string(addr), string(->addr) (spec 4.4.6)
+      }
+      if (path == "Root.Console.setColors") {
+        return SetColorsCall(args, scope, n);   // stdlib 2
       }
       if (path == "Root.Random.shuffle") {
         return ShuffleCall(args, scope, n);
@@ -2413,12 +2550,12 @@ public sealed partial class CodeGen {
     for (int index = 0; index < f.Params.Count; index++) {
       var param = f.Params[index];
       Node arg = slots[index] ?? param.Default!;
-      // a single array given to a variadic parameter is passed as it is
-      if (param.IsVariadic && arg.Kind == "List" && arg.Children.Count == 1
-          && ExprOf(arg.Children[0], scope).Type == param.Type) {
-        arg = arg.Children[0];
+      if (VariadicLend(param, arg, scope) is string lent) {
+        codes.Add(lent);   // an arr, a vec or a view given alone to T name... (spec 13.4)
+        continue;
       }
       codes.Add(ArgCode(param, arg, scope));
+      CheckStoredFunction(f, param, arg, scope);   // after the value: a lambda says whether it borrows once it is compiled
     }
     if (self != null) {
       codes.Insert(0, self);   // a method of a struct: the address of the struct (spec 11.1.5.2)
@@ -2431,6 +2568,12 @@ public sealed partial class CodeGen {
     string? path = Path(n);
     if (path != null && scope.Find(path.Split('.')[0]) == null) {
       string name = path[(path.LastIndexOf('.') + 1)..];
+      if (path.StartsWith("Root.Console.Color.") && path.Split('.').Length == 4 && enums.ContainsKey("ConsoleColor")) {
+        return EnumEntryExpr("ConsoleColor", name) ?? throw Error($"Console.Color has no colour '{name}'", n);   // stdlib 2
+      }
+      if (path.StartsWith("Root.Console.") && ConsoleKeys.TryGetValue(name, out int keyCode)) {
+        return new Expr($"((uint32_t){keyCode}u)", "char");   // Console.KEY_LEFT ... (stdlib 2)
+      }
       if (path.StartsWith("Root.Math.") && MathConsts.TryGetValue(name, out var v)) {
         return new Expr($"({v})", "r64");
       }

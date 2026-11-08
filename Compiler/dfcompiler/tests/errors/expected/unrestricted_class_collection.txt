@@ -1,0 +1,1 @@
+unrestricted_class_collection.df(13): error: an unrestricted method does not change its object: 'add' changes 'dogs' (spec 1.6.2)

@@ -13,6 +13,12 @@ public sealed partial class CodeGen {
       if (statements[index].Kind == "Decl") {
         followingStatements[statements[index]] = statements.Skip(index + 1).ToList();
       }
+      if (statements[index].Kind == "MultiAssign") {
+        // bool here, Dog dog = m.tryGet(k): each new variable locks what it borrows from, as a declaration does
+        foreach (var target in statements[index].Children[0].Children.Where(target => target.Kind == "Decl")) {
+          followingStatements[target] = statements.Skip(index + 1).ToList();
+        }
+      }
     }
   }
 
@@ -76,6 +82,13 @@ public sealed partial class CodeGen {
     }
     // Dog f = pack[0]: replacing an item of pack ends the object f borrows; a view or an array item of plain values is not ended (spec 6.4)
     bool items = init.Kind == "Index" && !(init.Children.Count > 1 && init.Children[1].Kind == "Range") && IsClass(type);
+    LockLenders(decl, after, lenders, items, IsClass(type), scope);   // the calls that can change a lender (spec 13.1.1)
+  }
+
+  // until the last use of the borrowing variable, its lenders stay as they are (spec 12): not assigned, ended, moved, passed as &, their
+  // fields not written; when an item of a collection is borrowed (Dog d = pack[0], m.tryGet(k)) also no member that changes the collection,
+  // which could end the item (calls on other objects are not checked yet, spec 99)
+  void LockLenders(Node decl, List<Node> after, List<string> lenders, bool items, bool objects, Scope scope) {
     int last = -1;
     for (int index = 0; index < after.Count; index++) {
       if (Mentions(after[index], decl.Text!)) {
@@ -86,7 +99,99 @@ public sealed partial class CodeGen {
       if (FindRelease(after[index], lenders, items) is (Node at, string path)) {
         throw Error($"'{path}' is lent to '{decl.Text}' until its last use: until then it and its fields cannot be assigned, ended, moved or passed as & (spec 12)", at);
       }
+      if (objects && FindChangingCall(after[index], lenders, items, scope) is (Node call, string changed, string member)) {
+        throw Error($"'{changed}' is lent to '{decl.Text}' until its last use: until then only its unrestricted methods can be called, not '{member}' (spec 13.1.1)", call);
+      }
     }
+  }
+
+  // Dog d = k.leader(): a local that borrows an object is read-only, also when the source lends read/write; &Dog d = ... borrows read/write
+  // and needs a source that lends read/write (spec 13.1.1)
+  void SetBorrowAccess(Node decl, string type, Node? init, VarInfo variable, Scope scope) {
+    if (LibraryCode || init == null || !IsClass(type) || variable.Own || variable.IsCounted || variable.IsWeak || !DeclBorrows(init, type, scope)) {
+      if (decl.Children.Any(child => child.Kind == "ReadWrite") && !variable.IsCounted && !variable.IsWeak) {
+        throw Error($"&{DisplayName(type)} {decl.Text}: a read/write borrow needs an object that is lent (a place or a &T result), not a new value", decl);
+      }
+      return;
+    }
+    bool readWrite = decl.Children.Any(child => child.Kind == "ReadWrite");
+    if (readWrite && ReadOnlySource(init, scope) is string why) {
+      throw Error($"&{DisplayName(type)} {decl.Text}: {why}; write {DisplayName(type)} {decl.Text} (spec 13.1.1)", decl);
+    }
+    variable.ReadOnlyRef = !readWrite;
+  }
+
+  // why a source cannot be borrowed read/write, or null when it can: a &T result, or a place the code can write
+  string? ReadOnlySource(Node init, Scope scope) {
+    // a lend from a read/write counted object only while an enforce holds its lock (spec 13.1.1, 12.7)
+    var lender = init.Kind == "Call" && init.Children[0] is { Kind: "Member" } lendCall ? lendCall.Children[0] : init;
+    while (lender.Kind is "Member" or "Index" or "Paren" && lender.Children.Count > 0 && CountedRef(lender, scope) == null) {
+      lender = lender.Children[0];
+    }
+    if (!LibraryCode && CountedRef(lender, scope) is CountedRefInfo counted && IsWritableRef(counted) && !heldLocks.Contains(counted.Code)) {
+      return $"a lend from the &@{counted.Type} '{counted.Name}' is valid only inside enforce {counted.Name} {{ }}, which holds its lock";
+    }
+    if (init.Kind == "Call") {
+      return CalleesOf(init) is { Count: > 0 } callees && callees.All(f => f.Writes.Contains(0)) ? null : "this value is lent read-only";
+    }
+    var root = init;
+    while (root.Kind is "Member" or "Index" or "Paren" && root.Children.Count > 0) {
+      root = root.Children[0];
+    }
+    if (root is { Kind: "Name", Text: "this" } || root.Kind == "Name" && scope.Find(root.Text!) == null && currentClass != null && FindField(currentClass, root.Text!) != null) {
+      return InUnrestrictedMethod ? "an unrestricted method does not change its object" : null;
+    }
+    if (root.Kind == "Name" && scope.Find(root.Text!) is VarInfo held) {
+      if (held.ReadOnlyRef || held.IsParam && !held.RefSlot && !held.Own) {
+        return $"'{root.Text}' is read-only here";
+      }
+      return null;
+    }
+    return "this is a value, not a place that can be lent read/write";
+  }
+
+  // bool here, Dog dog = m.tryGet(k): a new variable of several results that receives a lent object borrows it from the receiver of the call
+  void CheckLentTarget(Node target, Node call, VarInfo variable, Scope scope) {
+    if (LibraryCode || !followingStatements.TryGetValue(target, out var after)) {
+      return;
+    }
+    var lenders = LenderPaths(call, scope);
+    if (lenders.Select(path => path.Split('.')[0]).FirstOrDefault(root => LocalLender(root, scope)) is string local) {
+      variable.LentFromLocal = scope.Find(local)?.LentFromLocal ?? local;
+    }
+    if (lenders.Count > 0) {
+      LockLenders(target, after, lenders, true, true, scope);   // tryGet lends an item of the map
+    }
+  }
+
+  // the first call of the statement that can change one of the lenders: lender.member(...) where member is not unrestricted (a class) or
+  // changes the collection (spec 1.6.2: the members of the collections that do not change them)
+  (Node, string, string)? FindChangingCall(Node node, List<string> lenders, bool items, Scope scope) {
+    if (node.Kind is "Fun" or "Lambda") {
+      return null;
+    }
+    if (node is { Kind: "Call" } && node.Children[0] is { Kind: "Member" } callee && LendPath(callee.Children[0]) is string path
+        && lenders.FirstOrDefault(lender => path == lender || path.StartsWith(lender + ".")) is string lender && callee.Text is string member) {
+      string? type = null;
+      try {
+        type = PlaceType(callee.Children[0], scope);
+      } catch (CompileException) {
+      }
+      bool collection = type != null && (IsArr(type) || IsVec(type) || IsList(type) || IsMap(type) || IsSet(type) || IsView(type));
+      // a collection: while one of its items is borrowed, its changing members; another object: every method that is not unrestricted
+      bool changes = type != null && (collection
+        ? items && !ReadOnlyCollectionMembers.Contains(member) && !member.StartsWith("get_")
+        : IsClass(type) && LookupMethods(ObjInfo(type), member).Any(f => !f.IsUnrestricted && !f.IsStatic));
+      if (changes) {
+        return (node, lender, member);
+      }
+    }
+    foreach (var child in node.Children) {
+      if (FindChangingCall(child, lenders, items, scope) is { } found) {
+        return found;
+      }
+    }
+    return null;
   }
 
   // the first place of the statement that replaces, releases, moves or hands out one of the lenders (or what holds it), or writes one of its
@@ -149,6 +254,9 @@ public sealed partial class CodeGen {
   void CheckWritableLend(Node value, string type, Scope scope) {
     if (LibraryCode) {
       return;
+    }
+    if (InUnrestrictedMethod) {
+      throw Error("an unrestricted method does not change its object: it cannot lend it read/write (a & result) (spec 1.6.2)", value);
     }
     if (value.Kind == "Call") {
       if (CalleesOf(value) is { Count: > 0 } callees && callees.All(f => f.Writes.Contains(0))) {

@@ -1,0 +1,67 @@
+// Counted objects through trait types and type checks that keep the marker (spec 12.7)
+namespace refcounttraits
+alias Root as r
+
+trait Animal {
+  unrestricted fun string sound()
+}
+
+class Dog(string name) : Animal {
+  public string name
+  public i32 tricks
+  override fun string sound() { "woof" }
+  public fun learn() { tricks++ }
+} atEnd {
+  r.Console.log($"{name} ends")
+}
+
+class Cat : Animal {
+  override fun string sound() { "meow" }
+} atEnd {
+  r.Console.log("cat ends")
+}
+
+fun ->string early(@Animal a) {
+  if a is Dog d {
+    return $"early {d.name}, users {d.usersCount}"   // d is released on the way out
+  }
+  "not a dog"
+}
+
+fun f() {
+  @Animal rex = @Dog("Rex")                          // the same counter as the Dog
+  r.Console.log($"{rex.sound()}, users {rex.usersCount}")
+  if rex is Dog d {
+    r.Console.log($"{d.name}: a @Dog, users {d.usersCount}")
+  }
+  r.Console.log($"after the check, users {rex.usersCount}")
+
+  &@Animal max = @Dog("Max")
+  if max is Dog d {
+    enforce d { d.learn() }                          // from a &@Animal: a &@Dog
+    r.Console.log($"tricks {d.tricks}")
+  }
+
+  @Animal cat = @Cat()
+  if cat is Dog d {
+    r.Console.log("wrong")
+  } else {
+    r.Console.log($"not a dog, users {cat.usersCount}")
+  }
+
+  r.Console.log(early(@max))
+  r.Console.log($"after early, users {max.usersCount}")
+
+  list<@Animal> zoo = [max, cat]
+  if zoo[0] is Dog z then r.Console.log($"item {z.name}, users {z.usersCount}")
+
+  %Animal w = %max
+  enforce w {
+    if w is Dog inside { r.Console.log($"inside enforce {inside.name}, users {inside.usersCount}") }
+  } else { }
+  if w is Dog wd {                                   // a weak check: wd is a %Dog
+    enforce wd { r.Console.log($"through the weak {wd.name}") } else { }
+  }
+}
+
+f()

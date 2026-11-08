@@ -1,7 +1,7 @@
 # Dflat Language
 A new language D♭ that is the same as C# but easier to write and faster to execute
 
-**Version** 0.0.25  2026/11/06 by CPU
+**Version** 0.0.26  2026/11/07 by CPU
 
 ## D♭ — Dflat Language Specification (draft)
 
@@ -128,7 +128,9 @@ It is important to note that 2 special cases are used to decide who is allowed t
   - a `public` method cannot be called;
   - an `unrestricted` method can be called;
   - an `asparent` method can be called by the object itself and by its children (12.5).
-- `unrestricted` is meant for methods that do not change the object or where the developer takes responsibility. The compiler does not perform checks.
+- `unrestricted` is a promise checked by the compiler: the method does not change its object. Inside an `unrestricted` method it is a compile error to write a field of `this`, to call a method of `this` that is not `unrestricted` or static, and to call a method that is not `unrestricted` on what the object owns (its fields and their items: the check is deep). Reading, calling `unrestricted` methods and changing local variables are allowed.
+- Visibility order: `unrestricted` > `public` > `internal` > private (no keyword); `asparent` is apart, for the parent and its children (12.5).
+- A borrowing local is read-only (13.1.1): through `Dog d = k.leader()` only `unrestricted` methods can be called and no field can be written, also when the source lends read/write.
 - `getIterator()` can always be called through a read-only reference: iterating reads the collection (6.7).
 - The collections of the compiler, through a read-only reference, give only the members that do not change them: `has`, `indexOf`, `indexOfFrom`, `hasKey`, `tryGet`, `keyOf`, `clone`, the set operations that make a new set (`union`, `intersection`, `difference`, `symmetricDifference`) and the set tests (`isSubsetOf`, `isSupersetOf`, `isDisjointFrom`); reading items and properties is allowed, assigning items is a compile error.
 - A `File` (17.6.3) only holds a path, so the members that do not change the path can be called through a read-only reference: `exists`, `copyTo`, `getAllFiles`, `readAll`, `readAllText`, `writeAll`, `writeAllText`, `delete`, `open`, `createDirectory`. A stream changes when it is read, written or moved, so it needs `&`.
@@ -315,6 +317,15 @@ Tuple need to have **at least 2 elements**; items can be accessed by name (`reco
 The index is a literal, a `const` or an enum value only; out of range is a compile error. Indexes apply left to right: in an array of tuples, `myTuple[2][1]` is the second item of the third tuple.
 
 A tuple that holds arrays carries its own copy of them: assigning or returning the tuple copies its arrays (6.8.1).
+
+A tuple that holds objects owns them, as a struct does (11.1.5.3): a copy of the tuple (`=`, a return, a field, `t!`) clones its objects, a new tuple (a literal with new objects, the result of a function) is taken as it is, and the objects end with the tuple or when it is replaced. An object that cannot be cloned (`notclonable`, a child of a parent, 12.5) makes a copy of the tuple a compile error: the tuple then takes only new objects. A counted item (`@Dog`) is one more user on a copy and releases its usage when the tuple ends.
+
+```
+Dog rex = Dog("Rex")
+(Dog d, i32 n) a = (Dog("A"), 1)      // the tuple owns the new Dog
+(Dog d, i32 n) b = (rex, 2)           // a copy: b holds a clone of rex
+a = b                                 // the old Dog of a ends; a gets another clone
+```
 
 An item of a tuple can be a writable reference `&Type` (`(&Item value, bool isValid)`, the result of `writableNext()`, 6.7). The borrow lives as long as the tuple. A tuple that holds a `&` follows the rule of the iterators and the views (6.5): if it is not given away it lives only inside the scope that created it, so it cannot outlive the iterator it comes from.
 
@@ -774,7 +785,7 @@ for i32 index = 1..=10 { }                       // a range is a virtual collect
   - A collection has an internal counter of its open iterators and views. Creating an iterator or a view increments it; the default `atEnd` of the iterator or of the view decrements it, through the `asparent` method `releaseIterator()` of the collection. An explicit iterator (made with `getIterator()`) counts too: it holds a reference to its collection, declared with `as parent` (6.7), to decrement the counter. The collection is the parent of its iterators and views: when it ends, it nulls their reference to it (12.5). The counter and its checks are provided by the trait `Collection` (11.2), so maps, sets, views and custom collections get them too.
   - While the counter is above zero the size of the collection cannot change: a changing operation raises `ModifyingIteratedCollectionException` (15.3, not silent). In Debug builds it is catchable; in Release builds it is a `Panic`, and a `catch` for it is ignored with a level 3 warning (the same rule as `IndexOutOfRangeException`, 6.1). Every changing method of a collection checks the counter at runtime.
   - Forbidden while the counter is above zero: `add`, `add(collection)`, `insert`, `pop`, `remove`, `removeAll`, `removeAt`, `resize`, `truncate`, `fillAtCapacity`, `fill(count, value)`, `reserve`, `shrinkToFit`, `sort`, `sortUnstable`, `reverse`, `copyFrom`, and `->c[i]` on a `list` (the node is removed).
-  - Allowed: reads, `swap`, `replace`, `c[i] = v` (objects included), `fill(value)`, `clear()`, `->c[i]` on `arr` and `vec`, and changes made in place to the value or to the fields of an item.
+  - Allowed: reads, `swap`, `replace`, `c[i] = v` (objects included), `fill(value)`, `clear()` on `arr` and `vec`, `->c[i]` on `arr` and `vec`, and changes made in place to the value or to the fields of an item. `clear()` on `list`, maps and sets removes the items: it is forbidden while they are iterated.
   - Compile-time proof: the compiler proves only the direct case, when the body of the loop calls a changing member, or assigns an element, of the same variable (or field path) that the loop iterates; it is a compile error (Rust style, no cost at runtime). Everything else stays a runtime check (C# style). The proof will be improved later.
 - Iterating custom collections: 6.9. For the collections of the compiler the `for` is emitted as a direct loop in C.
 
@@ -792,7 +803,7 @@ arr<i32> middle = scores[2..5]!       // copy
 - Iterators and `for` can run over a view: it has a begin and an end.
 - Lock: the same rules as the iterators (6.4). A view is a child of its collection, declared with `as parent` like an iterator, and increments the counter of open iterators and views of its collection, so the collection keeps its size while the view is used.
 - Where iterators and views live: an iterator or a view is a child of its collection (`as parent`, 6.7). If not given away, it lives only inside the scope that created it (the call to `getIterator()` or `c[a..b]`) and ends before its collection. If it is moved with `->`, it is an adopted child (12.5): when the collection ends first, it nulls the reference of the iterator or view, and using it raises `UsageOfDestroyedObjectException`. The collection becomes changeable again only when the last holder ends.
-- `c[a..b]!` copies the items into a new collection of type `C` and leaves the original unchanged. It needs `.clone()` (12) to be fully implemented.
+- `c[a..b]!` copies the items into a new collection of type `C` and leaves the original unchanged; objects are cloned (12.6), counted objects get one more user (12.7).
 
 ## 6.6 Members
 
@@ -816,13 +827,13 @@ arr<i32> middle = scores[2..5]!       // copy
 | `remove(v)` bool | – | ✓ | ✓ | by value | by value | ✓ | ✓ |
 | `removeAll(v)` count | – | ✓ | ✓ | by value | by value | – | – |
 | `removeAt(k / range)` | – | ✓ | ✓ | by key | by key | – | – |
-| `tryGet(k, &out[, default])` bool | – | – | – | ✓ | ✓ | – | – |
+| `tryGet(k[, default])` bool, value | – | – | – | ✓ | ✓ | – | – |
 | `replace(pos, value)` | ✓ | ✓ | ✓ | – | – | – | – |
 | `swap(key, new)` | – | – | – | ✓ | ✓ | – | – |
 | `swap(i, j)` | ✓ | ✓ | ✓ | – | – | – | – |
 | `swap(key1, key2)` | – | – | – | ✓ | ✓ | – | – |
 | `->c[k]` moves the item out | zeroed | zeroed | removed | removed | removed | removed | removed |
-| `clear()` | defaults | defaults | defaults | ✓ | ✓ | ✓ | ✓ |
+| `clear()` | defaults | defaults | removes all | ✓ | ✓ | ✓ | ✓ |
 | `fill(value)` | ✓ | ✓ | ✓, and `fill(count, value)` | – | – | – | – |
 | `fillAtCapacity(value)`, `resize` | – | ✓ | – | – | – | – | – |
 | `truncate` | – | ✓ | ✓ | – | – | – | – |
@@ -842,7 +853,7 @@ A member marked `–` is a compile error on that collection (for example `hasKey
 - `c[k] = v`: on `arr`, `vec` and `list` it replaces an existing item only; an index past the end raises `IndexOutOfRangeException` (not silent). On `map` and `hmap` it replaces the value, or adds the key and the value when the key is missing.
 - Reading a missing map key gives the null or zero value of the value type; no exception. Use `hasKey` or `tryGet` to know whether the key exists. With objects as values the result is null, so `map["a"].name` raises `NullPointerException` like any other access through null.
 - `add(v)`: appends to `vec` and `list`. `add(k, v)`: adds the pair to a map, or replaces the value of an existing key; returns `false` when it replaced, `true` when the key is new. On sets it returns `true` if the value was added.
-- A map owns its keys and its values: existing objects are moved in with `m.add(->key, ->value)` (6.1). The keys are read-only through the map (6.2).
+- A map owns its keys and its values: existing objects are moved in with `m.add(->key, ->value)` (6.1). The keys are read-only through the map (6.2). An object value: `m.add(k, Dog())`, `m.add(k, ->rex)` or `m[k] = x` take it (a borrowed object is a compile error), `m[k]` lends it, `takeAt` and `->m[k]` give it to the caller, a replaced or removed value ends; `m.values!`, `add(other)` and `clone()` give copies (the objects are cloned, 12.6). `map<K, @T>` holds a usage per value (12.7).
 - `add(collection)`: appends the items of another collection to `vec` and `list`; on maps it merges another map (the new value wins, no return value); on sets it returns the number of items actually added.
   - On `vec` and `list`: items of basic types are copied. Objects are moved with `v.add(->other)`: the items move, the other collection ends and its variable becomes null (12); a plain `v.add(other)` clones the items, with the rules of `other!` (12.6), and leaves `other` unchanged. The same collection as source and target raises `ModifyingProtectedSourceException`.
   - On maps: only a map of the same kind (`map` with `map`, `hmap` with `hmap`); mixing them is a compile error. `m.add(other)` clones the entries (12.6) and leaves `other` unchanged; `m.add(->other)` moves them.
@@ -854,9 +865,18 @@ A member marked `–` is a compile error on that collection (for example `hasKey
 - `keyOf(v)`: key of the first entry found with that value, or the default value of the key type when there is none; it raises no exception. Use `hasKey` to test a key.
 - `remove(v)`: removes the first match and returns `true` if something was removed. `removeAll(v)`: removes all matches and returns the number removed. On maps both work by value. Sets hold a value once, so they have `remove` only.
 - `removeAt(k / range)`: removes by index or range on `vec` and `list`, by key on maps. The range forms are those of 6.5 (`a..b`, `a..=b`, `..b`, `a..`); the items removed end. A range outside the collection raises `IndexOutOfRangeException` (as `copyFrom`).
-- `bool tryGet(k, &out[, default])`: reads a map entry into `out` (`&` because the call writes to it) and returns `true` when the key exists. When the key is missing it returns `false` and `out` gets `default`, or the default value of its type when no `default` is given.
-  - For objects `out` is a borrow: the map keeps owning the object. The borrow is valid while the map exists and is not structurally modified (the rules of the views, 6.4, 6.5).
-  - `&` only lets `tryGet` write the variable: assigning to `out` afterwards (`out = otherDog`) re-points the variable and leaves the map unchanged; replacing the value in the map needs `map[k] = v`. Changing the fields of the object through `out` changes the object in the map.
+- `tryGet(k[, default])` gives two results (13.1.1): `true` when the key exists, and the value. When the key is missing the first is `false` and the value is `default`, or the null or zero value of its type.
+
+```
+bool here, Dog dog = dogs.tryGet("rex")       // read-only: dog borrows the map's object
+bool here, &Dog dog = dogs.tryGet("rex")      // read/write: dog.name = "Max" changes the object in the map
+bool here, i32 n = ages.tryGet("max")         // numbers and strings: a copy
+_, Dog dog = dogs.tryGet("rex", other)        // missing key: dog lends other
+```
+
+  - For objects the value is a lend: the map keeps owning the object. `Dog dog` is read-only (only `unrestricted` methods, no field writes); `&Dog dog` writes the object in place. `&` on a number or a string is a compile error (they are copies).
+  - While the borrowing variable is still used, the map cannot be assigned, ended, moved or passed as `&`, and the members that change it (`add`, `remove`, `removeAt`, `clear`, `m[k] = v` ...) are compile errors; after its last use they are allowed (12). The same holds for an item read with `Dog d = c[i]`.
+  - To take the object out of the map use `->m[k]` or `takeAt`; for a copy, `m[k]!`.
 - Replace and swap, with the old item and the ownership:
   - `var old = sequence.replace(pos, value)` (`arr`, `vec`, `list`): puts the new item at `pos` and returns the old one; the ownership of the old item moves to the caller and the collection owns the new one. A new object that already exists needs `->` (6.1). If the result is not assigned, the old item ends at the end of the statement.
   - `sequence.swap(posA, posB)` only exchanges two items of `arr`, `vec` or `list`; no ownership changes. There is no `swap(position, new)` form (use `replace`).
@@ -866,7 +886,7 @@ A member marked `–` is a compile error on that collection (for example `hasKey
 - `+=` and `-=` on maps and sets call the members, so they follow the same rules (a custom collection gets them from its members); `|=`, `&=` and `^=` are not defined on collections:
   - maps: `m += (key, value)` (a tuple) calls `add(key, value)`; `m += other` calls `add(other)`; `m -= key` calls `removeAt(key)`; `m -= s`, with `s` a `set` or an `hset` of the key type, removes every key of `s` with its value.
   - sets: `s += v` calls `add(v)` and `s += other` calls `add(other)`; `s -= v` calls `remove(v)`; `s -= other` removes every item of `other`, a collection with the same item type (the in-place difference).
-- `clear()`: on `arr`, `vec` and `list` it cleans up the values: every item is set to the default value and the size is kept (the objects dropped end, 6.1). On maps and sets it removes all items. To remove all the items of a `vec` or a `list`, use `truncate(0)`.
+- `clear()`: on `arr` and `vec` it cleans up the values: every item is set to the default value and the size is kept (the objects dropped end, 6.1). On `list` it removes all the items (a shortcut for `truncate(0)`); on maps and sets too. To remove all the items of a `vec`, use `truncate(0)`; `truncate(n)` keeps the first `n` items.
 - `fill(value)`: sets every item up to the current `.len` (the whole array for `arr`; on an empty `list` it does nothing). `fillAtCapacity(value)` (`vec`): fills the whole capacity and sets `.len` to the capacity.
 - The value of `fill` can be any value: basic values, strings (each item gets its own copy, shrunk, 4), dates, times and every other type that is not a class. `null` is allowed: every item becomes null and the objects they held are no longer owned by the collection (they end, running their `atEnd` if they have one). A class instance is a compile error (the items would share one object).
 - `list` also has `fill(count, value)`: it adds `count` items with that value, under the same rules (`myList.fill(256, 'c')`).
@@ -1130,7 +1150,7 @@ bool isValid = numbers.pop(&last)       // false (and last = 0) when the vec is 
 | `removeAt(index)`, `->c[i]` | O(1) at 0, otherwise O(n) | removing the last node needs the previous one |
 | `remove(v)`, `removeAll(v)`, `has(v)`, `indexOf(v)` | O(n) | |
 | `replace(pos, value)`, `swap(i, j)` | O(n) | walk to the positions |
-| `clear()` | O(n) | sets every item to the default value |
+| `clear()` | O(n) | removes every item (`truncate(0)`) |
 | `truncate(n)` | O(n) | walks to the new last node and drops the rest |
 | `sort`, `sortUnstable` | O(n log n) | bottom-up merge sort by relinking the nodes, no item copies |
 | `reverse()` | O(n) | relinks the nodes |
@@ -1904,6 +1924,7 @@ Foo foo = Foo(5, "a")
 
 - A constructor has a visibility, the class name and parameters. Several constructors can exist as long as their parameters differ (13.2 rules, including the ambiguity error).
 - Primary constructor: written in the class header; its parameters become private fields. Redeclaring a name in the body (with or without `public`) does not create a new field: it sets the visibility of the existing one. The same name with a different type is a compile error. An initializer on the redeclaration is allowed (level 3 warning, the value in the body wins).
+- A plain primary parameter of an object or a collection (`class Ken(Dog d)`) is a read-only lend, as for every function (13.1), while it is used only during the construction (field initializers and constructor bodies): `class Ken(Dog d) { i32 size = d.size }` does not keep `d`, and `d` is not a field. When it is used as a field (by a method, an accessor, a lambda, or redeclared in the body), the object is given to the new object, as with `->Dog d`, with a level 1 warning: "the Dog d is given implicitly to the constructor of Ken (file, line, column); write ->Dog d to give it explicitly". The call does not change (`Ken(rex)`), and using `rex` after it is a compile error (use after a move). Written `->Dog d`, `@Dog d` or `%Dog d`, the parameter follows its marker (13.1) and gives no warning. A plain primary parameter of a string or an array is not given: its field gets a copy of its own and the caller keeps the original.
 - Primary constructors are better without default values in the parameters; secondary constructors can have them (style, not enforced).
 - Secondary constructors chain `: Class(...)`, plus parent and trait constructors, and can have a body with their own initialization code.
 - When the class has a primary constructor, every secondary constructor must reach it, directly or through other secondary constructors; one that does not is a compile error (no field is left in an unpredictable state).
@@ -1988,6 +2009,16 @@ public i32 level { R: { field } private W: { field = 0 } }    // private writer
 - Primary constructor parameters (11.1.1) become fields with the default accessibility rules. They can be redeclared in the body of the class or trait when they need something more specific.
 - Static properties work in the same way, but their accessors can use only static functions and other static fields or properties (11.1.2).
 - Moving a property out with `->`: 12.4.
+- A counted property (`@T`, 12.7): the storage `field` is a counted field; `R:` gives a usage (as `fun @T`) and `W:` takes one (`value` is a `@T` parameter, the assignment repeats the marker: `k.boss = @rex`). A read used directly in an expression (`k.boss.name`) takes a temporary usage that ends with the statement: an accessor runs at once, it never waits.
+
+```
+class Kennel {
+  public @Dog boss { R: { field } W: { field = value } }   // the same as: public @Dog boss
+}
+k.boss = @rex                  // W: takes a usage
+@Dog b = k.boss                // R: gives a usage: b is one more user
+log(k.boss.name)               // a temporary usage for the statement
+```
 
 ### 11.1.4.1 Field groups
 
@@ -2202,8 +2233,8 @@ trait IndexCollection<Item> : Collection<Item> {
   - Two `executeAfter` blocks (11.2), on `get_hash()` and on `compareTo`, so the check runs after every override and cannot be removed. Both start from the counter: at 0 nothing is done (the object is not a key, its hash can be anything); when it goes from 0 to 1 the hash is computed and stored; above 0 the hash (`get_hash.result`, or recomputed through `get_hash()` in the block of `compareTo`) is compared with the stored one, and an exception is raised when they differ.
   - The check runs only for `Keyable` objects: value-type keys (natives, strings, tuples of them) are never hashed again.
   - Each use of a key by a collection runs the check. A key that is already in the collection keeps the counter as it is; a new key is checked first and, if the check passes, it is added and the counter is incremented. The counter counts entries, not uses. Reading a missing key (`m[x]`) runs the check too, without incrementing, so a problem shows up as early as possible.
-  - The stored hash is never cleared: at 0 it is overwritten at the next step from 0 to 1. Example: `Person p`, `m[p] = true`, remove `p` (counter 0), `p.age++`, `m[p] = true` (valid: technically a new key), `p.age++`, `m.tryGet(p, &out)` raises the exception.
-  - The exception for a changed hash is a normal exception (not a panic, not silent; its name is open, 99). It reports the problem and does not repair the collection. The object is invalid as a key (not as an object) until its hash is exactly the stored one again. After the exception the behavior of the collection is no longer deterministic.
+  - The stored hash is never cleared: at 0 it is overwritten at the next step from 0 to 1. Example: `Person p`, `m[p] = true`, remove `p` (counter 0), `p.age++`, `m[p] = true` (valid: technically a new key), `p.age++`, `m.tryGet(p)` raises the exception.
+  - The exception for a changed hash is `ModifiedObjectUsedAsKeyException` (ID 52, 15.3), a normal exception (not a panic, not silent). It reports the problem and does not repair the collection. The object is invalid as a key (not as an object) until its hash is exactly the stored one again. After the exception the behavior of the collection is no longer deterministic.
   - A `Keyable` class with a field of a collection, iterator or view type (owned or a reference) gets a level 1 warning (19.3): its identity can change without changing its hash.
   - Use the trait `Keyable` on a class only if it really needs to be used as a key in a collection. It substantially increases the cost of comparing objects and of calculating their hash. The reason: a hash check is added to every `get_hash()` and `compareTo` call while the object is a key.
 
@@ -2446,7 +2477,7 @@ The value on the right is evaluated first. If it converts implicitly (section 6)
 
 ### 11.3.12 Limits of the generated copies
 
-- Three limits stop runaway code generation. Each one is set by its own compiler parameter, from 1 to 256:
+- Three limits stop runaway code generation. Each one is set by its own compiler option, from 1 to 256, per kind of collection (Compiler_Options.md): `--max-<kind>-chain-depth` and `--max-<kind>-copies` for `vec`, `list`, `map`, `hmap`, `set`, `hset`; one shared pair for all the custom collections (`--max-customcollection-chain-depth`, `--max-customcollection-copies`, applied to each custom collection type); `--max-chain-depth` and `--max-copies` for the other generics:
 
 | Limit | Meaning | Default |
 |---|---|---|
@@ -2454,7 +2485,7 @@ The value on the right is evaluated first. If it converts implicitly (section 6)
 | Copies per generic | different type combinations of one generic in the user code | 16 |
 | Copies per library collection | the same, for each collection defined by this specification (`vec`, `list`, `map`, `hmap`, `set`, `hset`) | 64 |
 
-- The copies are counted per generic: 64 different `list` types and 64 different `map` types are allowed. A custom collection, even one built on the library ones, uses the user limit. `arr<T>` (a class with direct generated code, 6.1) has no limit.
+- The copies are counted per generic: 64 different `list` types and 64 different `map` types are allowed. A custom collection, even one built on the library ones, uses the limits of the custom collections. `arr<T>` (a class with direct generated code, 6.1) has no limit.
 - The same type arguments are one copy: `smaller<i32>` called many times is generated once. Identical machine code produced by different types is merged by the backend (the linker); the limits count the type combinations before any merging.
 - Exceeding a limit is a compile error with a clear message, for example: `Generic XYZ defined in file abc.df was used with more than 16 instances in function FunName in file def.df`. For the chain depth the message lists the chain.
 
@@ -2622,7 +2653,7 @@ function(->a.c)                    // a.c is null afterwards, a stays usable
 }
 ```
 
-- `->a.c` moves a field out of an object (also chains such as `->a.c.d`). The field holds null afterwards and the object stays usable; its class `atEnd` sees the field as null. Using a variable after `->` raises `UsageOfDestroyedObjectException`, or is a compile error when the compiler can detect it.
+- `->a.c` moves a field out of an object (also chains such as `->a.c.d`). The field holds null afterwards and the object stays usable; its class `atEnd` sees the field as null. Using a variable after `->` raises `UsageOfDestroyedObjectException`, or is a compile error when the compiler can detect it: a move in the same block before the use (`take(->d)` then `d.name`), also `->rc` of a counted variable and `@plain`. A move inside a branch, a loop or another block is not certain after it. A new value (`d = Dog()`) makes the variable usable again, and `d == null` / `d != null` are allowed (the variable reads as null).
 - The owner of `a`, or a writable borrow `&A a`, can move a field out; a read-only borrow cannot (compile error).
 - `->` on a variable or field of a basic type is ignored and behaves like a plain copy; it is a level 1 warning (`i32 a; call(->a)` is the same as `call(a)`).
 - Moving out of a stored field or property: a value is copied; an object is passed with its ownership and the field becomes null. If the property is computed (its `R` returns a new object that is not stored), `->` gives away that new object, which needs no owner here; the property value is nullified in every case (11.1.4). Collections: `->c[k]` (6.6).
@@ -2739,11 +2770,38 @@ Users and owner
 - `!` is always a clone: `@Dog third = first!` makes a new object counted from 1 (12.6). The default clone of an object does not clone its counted fields: the clone becomes another user of the same objects.
 - `==` works as on plain objects (11.1.3); `@` changes nothing.
 - Counted objects and weak references cannot be keys of a map or items of a set (6.2).
+- A counted object can be held through a trait type: `@Animal a = @Dog("Rex")` shares the same counter. A type check keeps the marker of the checked value: `if a is Dog d { }` gives an `@Dog d` from an `@Animal`, a `&@Dog d` from a `&@Animal`, a `%Dog d` from a `%Animal`; `d` is a new usage (or weak reference) while the branch runs. A plain `Dog d` from a counted value is a compile error.
+
+Counted values and strings
+- `@` and `&@` also apply to value types and strings (`@i32`, `&@i32`, `@string`, `&@string`, `@Vec3`): the value lives in a counting block on the heap, shared by its users, and is no longer a plain value (never kept in a register). There is no `*` in these types: `&@i32` is the writable form (`f(&@x)`).
+- `@T` of a value type or a string is read-only and needs no lock. `&@T` has a lock, as for objects: a write needs it (`enforce x { x += 1 }`), otherwise `WritingOnRefCountWithoutLockingException` is raised.
+- A `&@string` is also read only inside `enforce`, in the statement or the expression form (7.2.6): a write can move its text. A read outside `enforce` is a compile error; nothing is locked automatically, so a failed lock is always visible in the code: `log(enforce rwStr lockfail { "cannot read" })`.
+- A new variable or parameter shares the cell: `@i32 ro = rw`, `&@i32 other = rw`, `f(@rw)` add a user of the same cell, so `ro` sees the changes made through `rw`. A read without the lock gives no guarantee on the value: it may be the old one or the new one (as for objects, reads see a valid state, not necessarily the latest).
+- On a `&@T` value, `=` writes the shared cell: every user sees the new value. It needs the lock, like `+=` and `++`: `enforce rw { rw = 6 }`.
+- On a read-only `@T` value, `=` cannot write the shared cell: the variable gets a new cell of its own with a copy of the value, and the other users of its old cell see no change. From a `&@T` the copy takes the lock of `rw` automatically, with its default timeout; when the lock fails, the variable gets the zero value (`""` for a string), or null when its type is nullable (`@string? ro`, `@i32? n`). The explicit form is `ro = enforce rw lockfail { ... }`.
+- Strings are always copied out of a `&@string`, never shared with it, because a write can move the text: a new `@string` variable or parameter made from a `&@string` gets its own compact copy (exactly the size of the text), taken with the automatic lock as above. Between read-only `@string` variables the cell is shared.
+
+```
+&@i32 rw = 1                          // a new cell
+@i32 ro = rw                          // the same cell: 2 users
+enforce rw { rw = 6 }                 // writes the cell: ro is 6
+ro = rw                               // ro gets a new cell with a copy
+
+@string roStr
+@string? nullStr
+&@string rwStr = "I am changing"
+roStr = rwStr                         // a copy; "" when the lock fails
+nullStr = rwStr                       // a copy; null when the lock fails
+roStr = enforce rwStr lockfail { "busy" }
+@string kept = rwStr                  // a new variable from a &@string: a compact copy, not shared
+```
 
 Functions
 - `fun f(@Dog dog)` takes a usage: the count goes up when entering and down when returning; the function uses the object read-only. `fun f(&@Dog dog)` is the read/write form, as `T` / `&T`. A counted argument to a `Dog` or `&Dog` parameter is a compile error.
 - `->a` is allowed if and only if the code owns `a`, counted or not. An `@Dog dog` parameter holds one usage, so it can pass it down with `->dog` (no count change), or store the object with `=` (count +1) and release its own usage on return. A borrower (read-only or `&`) owns nothing and can never use `->`.
 - `f(->rc)` gives the caller's usage to the function: no count change on the call, `rc` cannot be used afterwards, and the usage is released when the function is done, unless it passes it on. Other users are never affected.
+- `->rc` moves a usage only into a counted receiver (`@T`, `&@T`). Into a `->T` parameter or a plain receiver (`take(->rc)` with `fun take(->Dog d)`, `Dog p = ->rc`) it is a compile error: the object is shared and nobody can own it alone. The error points to `rc.removeRefCounting()`, which gives the plain object when `rc` is the last user.
+- Through a read-only `@T` (a variable, field, parameter or item) only the `unrestricted` and static methods can be called (1.6.2), and its fields cannot be written. Through a `&@T` every public method can be called, holding the lock (`enforce`), as for the field writes.
 - A method call on a counted object (`first.bark()`) is a usage until the method returns, so the object cannot be released while the method runs. The compiler may leave out the count when another usage of the caller already keeps the object alive for the whole call (the variable it is called on, a field of an object the caller holds).
 - A function returning `@Dog` passes the usage of the returned variable to the caller (`return dog` moves it, the count does not change).
 - `fun &@Dog make()` returns a read/write usage: it returns a `&@T` (or a `&%T` made into one by its `enforce`) or a new object, never a read-only `@T`. Its result can be kept in a `&@T` or an `@T`; `var x = make()` is a `&@T`. The result of a `fun @Dog` cannot be kept in a `&@T` (compile error).
@@ -2755,7 +2813,7 @@ Releasing
 - `usersCount` gives the number of users, `weakrefsCount` the number of weak references; both are valid on every counted object (`weakrefsCount` is 0 when nothing points at it) and a compile error on a type that cannot be counted.
 
 Weak references
-- A weak reference exists only on a counted object; it does not count as a user. It is made with `%` in the type and in the expression (`%Dog weak = %first`, `var weak2 = %first`); `=` assigns it. Each weak reference adds one to `weakrefsCount`.
+- A weak reference exists only on a counted object; it does not count as a user. It is made with `%` in the type and in the expression (`%Dog weak = %first`, `var weak2 = %first`), so the code always shows what it deals with: `%Dog weak = first` is a compile error. `=` assigns it. Each weak reference adds one to `weakrefsCount`.
 - It is used only through `enforce` (7.2): inside the block it is a temporary usage of the object, released when the `enforce` ends; `null on w` (or `else`) runs when the object is gone (its user count reached 0).
 - `%T` is read-only, also when its object is a `&@T`: inside the `enforce` it is a temporary `@T` usage.
 - `&%T` is a weak reference to a read/write object. It is made only from a `&@T` or another `&%T` (`&%Player watcher = %player`); from a read-only `@T` or `%T` it is a compile error. `enforce watcher { }` checks that the object is alive, takes a temporary read/write usage and takes the lock, with the object's default timeout or the `timeout` written in the `enforce` (7.2.2); inside the block `watcher` writes as a `&@T`. A `&%T` field and a `&%T` parameter follow the same rules.
@@ -2775,12 +2833,14 @@ Fields and collections
 - An `@T` or `&@T` field is a user like any other: it releases its usage when its object dies. A `%T` field is a weak reference, seen as gone once the object is destroyed. A borrowed field (`&T`) is not allowed (a borrow cannot outlive its lender, 12).
 - A collection of counted objects (`list<@Dog>`) holds its own usage for each item (`pack.add(@first)` adds a user). Collections are structurally immutable while being iterated (6.4); the loop variable is a temporary usage, acquired at the start of each iteration and released at its end, with no borrow involved: `for var dog in pack { }` and `for @Dog dog in pack { }` are the same. The collection keeps its own usage of the item and cannot change while the loop runs, so the compiler may leave out the count of the loop variable.
 - The members that search (`has`, `indexOf`, `remove`, `removeAll`) take a counted object or null; a plain object is a compile error. The items compare by the rules of their objects (`equals`, `==`, or identity, 11.1.3). The value searched is only looked at: it gains no usage.
+- Counted values as items, `list<&@i32>`: `team[0] = 5`, `team[0] += 1` and `team[0]++` write the shared cell of the item (with its lock), as `=` on a `&@T` variable. A static field can be a counted value too (`static &@i32 total = 10`, a zero cell without a start value).
 - `list<&@Dog>` and `vec<&@Dog>` hold read/write usages: only a `&@T`, a new object or a `&@T` result goes in (`add`, `insert`, `replace`, `fill`), and the members that give an item (`replace`, `takeAt`, `pop`) give a read/write usage (`&@Dog old = team.takeAt(0)`). The loop variable is read/write: `for p in team { enforce p { p.score++ } }` takes the lock of each item; a write without it raises `WritingOnRefCountWithoutLockingException`.
 - The members that give an item pass its usage to the caller: `@Dog old = pack.replace(0, @other)`. A counted `var` comes only from a function that returns `@T` (`var x = f()`); for a counted item the type is written (`var old = pack.replace(0, @other)` is a compile error that asks for `@Dog old`).
+- `->pack[i]` takes an item out as on plain collections (6.4): a `list` loses the node, an `arr` or a `vec` keeps null in the slot. The usage of the item moves to the receiver, which must be counted (`@Dog d = ->pack[0]`, count unchanged); a plain receiver is a compile error, as for `->rc` above.
 
 Read-only and read/write
 - `@T` is a read-only counted object, `&@T` a read/write one. `&@T` includes a lock in its runtime representation, so it is a distinct counted type.
-- Reads never need the lock; a write needs the caller to hold the object's lock, and writing without it raises `WritingOnRefCountWithoutLockingException` (not silent, 15.3). `enforce x { }` takes the lock and releases it when the `enforce` ends, after its last `atEnd` (7.2.2, 7.2.5); `lockfail on x { }` runs when the lock cannot be taken.
+- Reads never need the lock (except a `&@string`, see above); a write needs the caller to hold the object's lock, and writing without it raises `WritingOnRefCountWithoutLockingException` (not silent, 15.3). `enforce x { }` takes the lock and releases it when the `enforce` ends, after its last `atEnd` (7.2.2, 7.2.5); `lockfail on x { }` runs when the lock cannot be taken.
 - Reads without the lock always see a valid state of the object, but not necessarily the latest one; several reads that must be consistent hold the lock.
 - The lock lives in the counting block of the object, with the queue of the callers waiting for it and the default timeout. The default timeout is set where the read/write counted object is made: `&@Player player = @Player() timeout 100` (milliseconds), also when the class has no parameter of that name (`timeout` is not an argument of the constructor). Without it the default is 0: the lock is tried once. A `timeout` written in an `enforce` replaces the default for that `enforce` (7.2.2). `timeout` after a creation is valid only when the result is a `&@T` (compile error otherwise).
 - Every change of the lock state (taking, releasing, joining or leaving the queue, a timeout) is exclusive and atomic: two `enforce` never change it at the same time.
@@ -2866,7 +2926,7 @@ clear(&*level)
 - `&this` is a compile error: the function could replace the object while its method runs.
 - `x!` gives a copy: it fits a `->` parameter; to a plain parameter it lends a temporary copy, which ends with the statement (12).
 - `->` on a native value is a plain copy with a level 1 warning (12.4).
-- A counted argument is accepted only by `@` and `&@` parameters, and a weak one only by `%` and `&%` parameters; `f(Dog d)` and `f(&Dog d)` with a counted argument are compile errors (12.7). A `&@T` argument can go to an `@T` parameter (`f(@x)`, read-only); an `@T` argument to a `&@T` parameter is a compile error. `@x` on a plain `x` makes it counted and `x` is lost (12.7).
+- A counted argument is accepted only by `@` and `&@` parameters, and a weak one only by `%` and `&%` parameters; `f(Dog d)` and `f(&Dog d)` with a counted argument are compile errors (12.7). A `&@T` argument can go to an `@T` parameter (`f(@x)`, read-only; it shares the object or the value cell, except a `&@string`, which is copied, 12.7); an `@T` argument to a `&@T` parameter is a compile error. `@x` on a plain `x` makes it counted and `x` is lost (12.7).
 - Function types and lambda captures use the same markers (13.3).
 - A mismatched call is a compile error, a missing or different marker included (`rename(rex)`, `adopt(rex)`, `keep(shared)`).
 - A new object, the result of a call and `null` need no marker, as for `->` (12.4): `keep(Dog("Fido"))`, `pack.add(make())`. A collection literal and `c[i] = x` are not calls: `list<@Dog> pack = [rex]` takes a usage of `rex` without `@`.
@@ -2917,10 +2977,38 @@ Dog mine = make()                                 // mine owns the new dog
 - A lent result (plain or `&`) can come only from something that lives after the return: the object of the method (`this` and its fields), a parameter that was itself lent to the function, or static data (`const`, literals, static fields). The lend follows the rules of 12: while the caller holds it, the lender cannot be released, moved or given away.
 - The compiler checks borrows inside a function, by the order of the statements: until the last use of a local that borrows an object or an array (`Dog view = rex`, `Dog d = k.leader()`, `Dog f = pack[0]`), what it borrows from (`rex`; the receiver `k` and the lent arguments of the call; `pack`) cannot be assigned, ended with `is atEnd.`, moved with `->` or passed as `&`, and its fields cannot be written (`k.boss = x`, `k.visits++`, `k.dogs[0] = x`), as in Rust. After the last use it can. Strings are not locked: they keep their identity when changed in place, and a borrow sees the change (4.1, 4.4).
 - A `&T` result lends what the function can write: `this` and its fields, an item of them, a `&` parameter, a global that is not `const`, or the `&T` result of another call. A plain (read-only) parameter, a `const` or a new value (`fun &Dog f() { Dog("x") }`, which is `->`) is a compile error; a result cannot be both `->` and `&`.
+- While a local borrows from an object (`Dog d = k.leader()`), only the `unrestricted` and static methods of that object can be called until the last use of `d` (an `unrestricted` method does not change it, 1.6.2); while an item of a collection is borrowed (`Dog d = c[i]`, `tryGet`), the members that change the collection are compile errors too.
+- A local that borrows (from a place, or from a plain or `&T` result) is read-only when it is declared plain, also when the source lends read/write (no error, no warning); `&Dog d = ...` declares a read/write borrow and needs a source that lends read/write (a `&T` result, an item or a field the code can write). A local that owns (a new object, `->x`, a `->T` result) is not affected.
+
+```
+Dog g = Dog("rex")            // owns: everything allowed
+Dog d = kennel.leader()       // a read-only borrow
+&Dog w = kennel.at(0)         // a read/write borrow
+Dog v = kennel.at(0)          // a read/write lend kept read-only: allowed
+```
+
+- `&T` results of values (numbers, `bool`, `char`, enums, `string`, structs): the function returns the address of the place, with the same sources as above. `&T x = f()` lends the place read/write; a plain `T x = f()` copies the value; the call itself can be assigned (`f() = v`, `f() += v`, `f()++`). The lender is locked until the last use of `x`, as for objects; the lend cannot be stored in a field or a collection, nor returned except as another `&T` result.
+
+```
+class Board {
+  i32 score
+  string title
+  public fun &i32 scoreRef() { score }
+  public fun &string titleRef() { title }
+}
+&i32 s = board.scoreRef()
+s += 10                       // writes board.score
+board.scoreRef()++
+&string t = board.titleRef()
+t += "!"                      // writes board.title in place
+```
+
+- A lend from a read/write counted object (`&@T`, 12.7) is valid only inside an `enforce` that holds its lock, and cannot leave that block: the writes through it are under the lock, which `enforce` releases on every way out, exceptions included (7.2.5). There is no lock for each operation: a plain object has one owner, so only a counted one can be reached by two tasks.
 - A lent result of a local of the function is a compile error: the local ends at the return. The error points to `->` (`fun Dog make() { Dog("a") }` asks for `fun ->Dog make()`).
 - Native data (numbers, `bool`, `char`, enums) are values: a plain result is the value itself and it can come from a local (`fun u64 fib(u64 n)`). `->` on such a result is ignored, with a level 1 warning.
 - `->`: a local is given by `return x` with no marker, because it ends anyway; a field is given with `->` (`return ->field`, the field becomes null, 12.4). Strings, arrays and collections built in the function need `->` too (`fun ->string greet() { $"Hi {name}" }`).
 - A tuple result or several results follow the rule of each item: `fun (&Item value, bool isValid) writableNext()`, `fun ->arr<Dog>, uns pack()`.
+- Several results can hold counted values, each with its own marker (12.7): `fun @Dog, i32 pick()`, kept by counted targets (`@Dog a, i32 n = pick()`); a plain target for a counted result is a compile error; a result nobody keeps (`pick()`, `_, n = pick()`) releases its usage. A counted target can also take an object the function gives (`@Dog a, i32 n = make()` with `fun ->Dog, i32 make()`): it starts counting it. A read/write counted result among several results (`fun &@i32, bool scoreCell()`) gives a read/write usage, as `fun &@T`; a read-only usage is a compile error there, and a `@string` target of a `&@string` result gets a compact copy. An extern function takes and gives plain values only: a counted parameter or result there is a compile error (15.9).
 - Accessors (11.1.4): the default `R` lends the stored field, so reading a property makes no copy; an `R` that computes a new object or string gives it, and the reader owns the result (12.4).
 
 ## 13.2 Overloading
@@ -3012,15 +3100,17 @@ fun(i32) f3 = f1!                                      // a copy
 - For each lambda expression the compiler writes two pieces of code: the creation code, where the lambda is written (once: it takes the borrows, makes the copies, does the moves, adds the usages), and the end code, when the last holder of the context lets it go (once: it ends the owned values and gives back the usages and the weak references). A call only passes the context.
 - A lambda that does not escape (given to a call, not stored and not returned) has its context on the stack, with no allocation and no count. A lambda that is stored or returned has its context on the heap, with a count. The code written by the user is the same.
 
-### 13.3.6 What is built (compiler 0.0.53)
+### 13.3.6 What is built (compiler 0.0.63)
 
 - Function types for local variables, parameters and results, null by default; a call of a null one raises `UnassignedFunctionCallException`. A result of a function type is written with the keyword form: `fun ->fun i32(i32) adder(i32 n)` (the form `i32(i32)` reads as the name of the function there).
 - Lambdas with typed parameters, called where they are written, kept in a variable declared with the function type (`var` is a compile error), passed to a parameter and returned. The result type comes from the function type expected there; without one the lambda returns nothing.
 - Captures: unlisted (read-only borrow), `&a` of numbers, `bool`, `char`, dates and objects, `a!` of those values, strings, `string?`, function values, objects (a clone, 12.6) and arrays, `->a` of strings, objects, arrays and function values. Inside a method the fields are captured by their bare names, with the same forms; a borrowed field borrows the object.
 - Borrows (13.3.4), until the lifetime of borrows is checked: a lambda with a borrowed capture (unlisted or `&`), and a function-type parameter, can be called, passed to a call or kept in a new local; assigning it to an existing variable or returning it is a compile error.
 - Every context is on the heap with a count (the stack form of 13.3.5 is not built).
+- Function values in fields of classes (`public fun(i32) onClick`), in `arr`, `vec` and `list`, and in tuples (also several results: `fun fun(), i32 make()`). A field, an item or a tuple keeps only a function value that does not borrow (a lambda whose captures are copies or moves, a function): a borrowing lambda put there is a compile error. Each holder has a usage; the usage ends when the field, the item or the tuple is replaced or ends. Called as `obj.onClick(3)`, `onClick(3)` inside the class, `handlers[0](3)`, `t.f(3)`. A class prints a function field as its type, or `null`.
+- `f1!` (13.3.3): a new context with what the lambda owns cloned (strings copied, objects and arrays cloned, function values copied with `!` too); the captures it borrows stay borrowed. A clone of an object copies its function fields with `!`.
 - Exceptions: a lambda lets its exceptions out as a function does (15), to the code that called it; a silent one is ignored there unless a catch handles it. Every lambda returns its exception (a call through a function value cannot know which lambda it reaches). In `sort` the first exception stops the comparisons (the sort finishes in an unspecified order) and is raised after the sort; in `filter`, `map` and `reduce` it stops the loop, what was built so far ends, and it is raised.
-- Not built yet: counted and weak captures (`@a`, `&@a`, `%a`, `&%a`), `&a` of strings and arrays, counted, weak, parent and property fields in a lambda, the parameter modes in function types (`string(&MyObj)`), function types in fields, collections and tuples, `f1!`, and the lock of the outer variable while a `&a` capture lives. `sort` with a lambda and the functional members (6.6) are built.
+- Not built yet: counted and weak captures (`@a`, `&@a`, `%a`, `&%a`), `&a` of strings and arrays, counted, weak, parent and property fields in a lambda, the parameter modes in function types (`string(&MyObj)`), function types in maps, sets and struct fields, the compile error of `f1!` with a `&` capture (13.3.3: the copy is made, the capture stays borrowed), and the lock of the outer variable while a `&a` capture lives. `sort` with a lambda and the functional members (6.6) are built.
 
 ### 13.3.7 Examples
 
@@ -3057,7 +3147,11 @@ fun logAll(string level, string messages...) {
 logAll("info", "started", "ready")
 ```
 
-- `T name...` accepts any number of `T` arguments; it is equivalent to passing a collection of them.
+- `T name...` accepts any number of `T` arguments, none included. It is the last parameter, and a function has at most one; it has no default value and cannot be named in the call.
+- Inside the function `name` is a read-only `arr<T>`: it is read (`name[i]`, `name.len`, `for`) and never changed. There are no `->T name...`, `@T name...` or `&T name...` forms: the arguments are always lent read-only (objects: only their `unrestricted` methods).
+- `T` is a basic type, a class or a struct; a collection (`arr`, `vec`, `list`, maps, sets, views) is a compile error.
+- An existing `arr<T>` or `vec<T>`, or a view of one, given as the only argument in the variadic place is lent as the whole variadic part, with no copy: `logAll("info", msgs)`, `logAll("info", msgs[1..])`. A `list` is not accepted there (the error points to `transformTo<arr>()`). Items and a collection cannot be mixed in one call.
+- When a call matches a variadic and a non-variadic overload, the non-variadic one wins.
 
 ---
 
@@ -3229,6 +3323,7 @@ class Exception {
 | 49 | `ObjectNotClonableException` (12.6) | |
 | 50 | `WritingOnRefCountWithoutLockingException` (12.7) | |
 | 51 | `UnassignedFunctionCallException` (13.3.2), a child of `NullPointerException` | |
+| 52 | `ModifiedObjectUsedAsKeyException` (11.2.1): the hash of a `Keyable` key changed while it is a key | |
 
 - The list grows during development; each new standard exception takes the next ID.
 - `UsageOfDestroyedObjectException`: raised when an object that is gone is used: a child whose parent ended (12.5), or a variable released with `->` or `is atEnd.` (12.4). It is not silent and is catchable in Debug and Release builds (no `Panic` in Release).
@@ -3564,6 +3659,7 @@ Level 1 = most important, level 3 = least.
 | 1 | `->` on a variable or field of a basic type | 12.4 |
 | 1 | `->` on a result of a basic type (`fun ->i32 f()`) | 13.1.1 |
 | 1 | Same constraint repeated inline and in `where` | 11.3.1 |
+| 1 | Plain primary constructor parameter used as a field: the object is given implicitly | 11.1.1 |
 | 1 | Possible cycle of counted objects (zombie objects): two classes with `@` fields of each other's type, or a class with an `@` field of its own type | 12.7 |
 | 2 | Cast out of range saturates | 3.5 |
 | 2 | Upward type check | 11.1 |
@@ -3587,7 +3683,6 @@ Level 1 = most important, level 3 = least.
 
 # 99. Open items
 
-- Variadic parameters: position in the parameter list, passing an existing collection
 - Locale details
 - Date formatting week rules
 - Panic exit codes (all -1000 for now)
@@ -3599,7 +3694,6 @@ Level 1 = most important, level 3 = least.
 - Generics: `where` on class and trait headers
 - Generics: whether `clock`, `lapse`, `addr` and pointers (nullable by default, 7.1) count as real nullables in a set, like `date`, `time` and objects (11.3.8)
 - Generics: whether the level 1 warning of `->` on a basic type (12.4) fires inside generic code
-- Generics: names of the compiler parameters for the chain depth, the copies per generic and the copies per library collection (11.3.12)
 - Generics: minimal intermediate form exported by compiled libraries for public generics (11.3.14), after 0.1.0
 - Stdlib: strings, files, time, collections extras (queue/stack)
 - Bitfields: whether `set`, `clear`, `setAs` and `toggle` modify the value in place or return a new value; nullability of bitfields (3.1.1, 7.1)
@@ -3608,12 +3702,10 @@ Level 1 = most important, level 3 = least.
 - Collections: views are read-only; revisit with tasks (6.5), the full Rust borrow model stays an option
 - Collections: shared C helpers against one copy per type (code size, 11.3.12); the B-tree (6.8.4.1) and the hash table (6.8.5.1) are decided
 - Collections: widening of the stuck buckets of `hmap` / `hset` (6.8.5.1)
-- Keys: the name of the exception raised by `Keyable` for a changed hash (11.2.1)
 - Collections: the lifetime of a borrow of an item taken outside a `for` loop (`&c[k]`), which an insert or a delete can move
 - Collections: the other non-silent exceptions of the collection operations, to be formalized during the implementation (out of memory is decided, 6.1, 15.3)
 - Strings: borrowed strings in the advanced cases (who releases them, lifetimes across fields and collections)
 - Ownership: when a local borrow ends (last use or end of scope)
-- Reference counting (12.7): `->` from a counted variable into a `->T` parameter or a plain receiver (removing the counting); `->pack[0]` on a list of counted items; counted natives and strings (`@i32`, `@string`); counted traits and downcasts; borrowed parameters of a primary constructor; whether a weak reference can be made without `%` in the expression; which methods a read-only `@T` can call; the call form of a `&@T` parameter
 - Reference counting: the order of the locks, waiting and deadlocks with threads; nested locking of the same `&@T`
 - Reference counting: generics with counted type arguments (`Stack<@Dog>`), after 0.1.0; the `Rc` / `Arc` split, with threads
 - Properties: position of `readonly` / `readwrite` / `writeonly` next to `public` and `static`, and their use together with a body (11.1.4); `override` of a property with only one half; access to a property through a trait-typed value (`any`), left to the compiler
@@ -3625,8 +3717,8 @@ Level 1 = most important, level 3 = least.
 - Function pointers (objects); C function tables (COM vtables, Vulkan dispatch tables)
 - C interop: calling conventions, callbacks, returned arrays, UTF-16 strings, `string?` as map keys and values and set items (7.1), ownership across the boundary, unions, bit flags, varargs (the minimal extern fun is in 15.9)
 - Deferred: async/await, locks/atomics, tasks, SIMD, EF syntax, Vulkan, shaders
-- `&T` results of basic values and strings (`fun &i32 counter()`): not built (they need a pointer to the place)
-- Borrow locks: borrows across functions, loops and method calls (a method that replaces a field of its object while the caller holds a lend from it) are not checked yet
+- `&T` results of values (13.1.1), counted properties (11.1.4), the checks of `unrestricted` (1.6.2), read-only borrowing locals: decided, not built
+- Borrow locks: borrows across functions and loops are not checked yet (method calls: 13.1.1)
 - Pointers: the exact way to convert `*T` to `&*T` in unsafe code, the syntax of the `unsafe` block and what it allows, handling of null pointers in safe code, which cases the compiler can prove valid, pointer equality, `.hash` and `toStr()`, and pointers in generics
 
 ---
@@ -4226,3 +4318,30 @@ Level 1 = most important, level 3 = least.
 - 11.1.5.2 Static functions of a struct: called with the name of the struct, never through a value
 - 15.9 Structs with a layout tag passed to C functions by value or by address (`*S`, `&*S`) and returned; removed from "Not yet"
 - 11.1.5.7 Transmute: the view is never larger than the original; numbers on either side; no structs with strings or objects; writing needs a place
+- 13.3.6 Built: function values in fields, arrays, vecs, lists and tuples (only values that do not borrow), `f1!`
+- 6.5 `c[a..b]!` built: objects cloned, counted objects shared (one more user)
+
+## Changes in 0.0.26
+
+- 12.7 `->rc` into a `->T` parameter or a plain receiver is a compile error that points to `removeRefCounting()`; `->pack[i]` on counted collections moves the usage to a counted receiver
+- 12.7 Counted value types and strings (new): `@i32`, `&@i32`, `@string`, `&@string`; a new variable or parameter shares the cell; `=` on a `&@T` value writes the shared cell (with the lock), on a read-only `@T` it gives the variable a new cell with a copy (automatic lock from a `&@T`, the zero value or null when it fails); reads without the lock give no guarantee on the value; a `&@string` is read only inside `enforce` and is always copied (compact) into a `@string`, never shared; 13.1 updated
+- 12.7 Counted objects through trait types (`@Animal a = @Dog()`); a type check keeps the marker (`@`, `&@`, `%`)
+- 12.7 A weak reference needs `%` in the expression (`%Dog w = first` is a compile error); through `@T` only `unrestricted` and static methods, through `&@T` every public method holding the lock
+- 11.1.1 The primary constructor rule covers objects and collections; a string or an array parameter gives its field a copy
+- 11.1.1, 19.3 A plain primary parameter of an object used only during the construction is a read-only lend, not a field; used as a field it is given implicitly (level 1 warning), and using the argument after the call is a compile error
+- 99 Reference counting: the open points of 12.7 settled (the call form of `&@T` was already in 13.1)
+- 3.2 Objects in tuples (new): the tuple owns them as a struct does (a copy clones them, a new tuple is taken as it is, they end with the tuple); an object that cannot be cloned makes a copy a compile error; a counted item is one more user on a copy
+- 13.1.1 Counted values among several results (`fun @Dog, i32 pick()`), kept by counted targets; a counted target takes a given object (`->Dog`) and starts counting it
+- 6.6 Maps of objects: `add` takes the value, `m[k]` lends it, `takeAt` gives it, a replaced or removed one ends; `m.values!`, `add(other)`, `clone()` give clones; `map<K, @T>`
+- 6.6 `tryGet(k[, default])` gives `bool, value` (was `tryGet(k, &out[, default])`): an object is lent, read-only (`Dog d`) or read/write (`&Dog d`); while it is used the map cannot change (12); `&Dog d` is valid as a target of several results that lend read/write
+- 12 While an item of a collection is borrowed (`Dog d = c[i]`, `tryGet`), the members that change the collection are compile errors until the last use of the borrow
+- 1.6.2 `unrestricted` is checked (no field of `this` written, only `unrestricted` methods called on `this` and on what it owns); the visibility order; borrowing locals are read-only
+- 11.1.4 Counted properties: `R:` gives a usage, `W:` takes one, a read in an expression takes a temporary usage
+- 13.1.1 While a local borrows from an object only its `unrestricted` methods can be called; `&Dog d = ...` read/write borrows; `&T` results of values (numbers, strings, structs: the address of the place); a lend from a `&@T` only inside the `enforce` that holds its lock
+- 6.6 `clear()` on `list` removes all the items (as `truncate(0)`); on `list`, maps and sets it is forbidden while iterated (6.4); `arr` and `vec` keep the size
+- 11.2.1, 15.3 `ModifiedObjectUsedAsKeyException` (ID 52)
+- 11.3.12 The limits are per kind of collection, one shared pair for the custom collections (the option names in Compiler_Options.md)
+- 13.4 Variadic parameters defined: the last parameter, a read-only `arr<T>`, no collections as `T`, an existing `arr` or `vec` lent as a whole
+- 99 Removed: variadic parameters, the name of the `Keyable` exception, the names of the limits
+- 12.4 Use after a move: a compile error when the move is certain (same block, before the use); a branch or a loop does not count; `x == null` is allowed
+- 12.7 `list<&@T>` of values: = and the compound operators on an item write its shared cell; static counted values; 13.1.1 `&@T` among several results; extern functions refuse counted parameters and results

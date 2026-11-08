@@ -94,7 +94,11 @@ public sealed partial class CodeGen {
     sb.Append($"({{ {CType(type)} {array} = {{ ({CType(elem)}*)df_calloc({list.Children.Count}, sizeof({CType(elem)})), {list.Children.Count} }}; ");
     for (int index = 0; index < list.Children.Count; index++) {
       var item = list.Children[index];
+      if (BoxInner(elem) != null) {
+        item = BoxCall(item, elem);   // [first, Dog("x")] of an arr<@Dog>: a new box takes a usage (spec 12.7)
+      }
       var itemValue = ArrItemValue(item, Adopted(ExprOf(item, scope, elem), item), elem, item);
+      CheckNotBorrowingFunction(elem, item, scope, "an array");
       if (IsClass(elem) && !itemValue.Fresh && itemValue.Type != "null") {
         throw Error("a collection owns its items: put a new object in the literal, or move one in with ->x", item);
       }
@@ -159,9 +163,6 @@ public sealed partial class CodeGen {
     }
     if (n.Children[1].Kind == "Range") {
       var viewed = ExprOf(n.Children[0], scope);
-      if ((IsVec(viewed.Type) || IsList(viewed.Type)) && BoxInner(IsVec(viewed.Type) ? VecElem(viewed.Type) : ListElem(viewed.Type)) != null) {
-        throw NotSupported("Views of a collection of counted objects", n);
-      }
       return ViewExpr(n, scope);
     }
     var obj = ExprOf(n.Children[0], scope);
@@ -209,7 +210,7 @@ public sealed partial class CodeGen {
     if (obj.Type == "string") {
       return StrSetChar(target, s.Children[1], s.Text!, scope, s);
     }
-    if ((IsVec(obj.Type) || IsList(obj.Type)) && (IsVec(obj.Type) ? VecElem(obj.Type) : ListElem(obj.Type)) is string boxed && BoxInner(boxed) != null) {
+    if ((IsVec(obj.Type) || IsList(obj.Type) || IsArr(obj.Type)) && (IsVec(obj.Type) ? VecElem(obj.Type) : IsList(obj.Type) ? ListElem(obj.Type) : ArrElem(obj.Type)) is string boxed && BoxInner(boxed) != null) {
       if (s.Text != "=") {
         throw Error("an item of a collection of counted objects takes only = (spec 12.7)", s);
       }
@@ -248,6 +249,7 @@ public sealed partial class CodeGen {
     string value;
     if (op == "=") {
       var assigned = ArrItemValue(s.Children[1], Adopted(ExprOf(s.Children[1], scope, elem), s), elem, s);
+      CheckNotBorrowingFunction(elem, s.Children[1], scope, "a collection");
       if (IsClass(elem) && !assigned.Fresh && assigned.Type != "null" && s.Line < LibraryLine) {
         throw Error("a collection owns its items: move an existing object in with ->x, or put a new one", s);
       }
@@ -311,6 +313,9 @@ public sealed partial class CodeGen {
       }
       case "fill": {
         Arity(1);
+        if (CountedArrFill(array, args, scope, at) is Expr countedFill) {
+          return countedFill;   // arr<@T>: a box of its own for every slot (spec 12.7)
+        }
         if (IsClass(elem) && args[0].Kind != "Null") {
           throw Error("fill would put one object in every item: a class instance is not allowed, fill(null) is", at);
         }
@@ -349,6 +354,7 @@ public sealed partial class CodeGen {
           ? $"if ({{0}} != NULL) {{{{ void* {gone} = (void*){{0}}; {{0}} = NULL; df_drop({gone}); }}}}"
           : elem == "string" ? "df_str_free({0}); {0} = NULL;"
           : elem == "string?" ? "df_opt_str_drop(&{0});"
+          : IsFunType(elem) ? "df_fn_drop(&{0});"
           : IsArr(elem) ? $"{ArrDropHelper(elem)}({{0}}); {{0}} = {ZeroValue(elem)};" : $"{{0}} = {ZeroValue(elem)};";
         string code = WithTemp(array, a =>
           $"({{ for (df_uns {i} = 0; {i} < {a}.len; {i}++) {{ {string.Format(reset, Elem(a, i))} }} }})");
@@ -858,7 +864,7 @@ public sealed partial class CodeGen {
         throw Error("for (k, &V v) in m is not built yet (writable values come with a later step)", s);
       }
       loopVars.Add((names[0], "", MapKey(collection.Type)));
-      loopVars.Add((names[1], "", MapValue(collection.Type)));
+      loopVars.Add((names[1], "", BoxInner(MapValue(collection.Type)) ?? MapValue(collection.Type)));   // map<K, @T>: the object or the value of each box
     } else {
       loopVars.Add((varNode, "", elem));
     }
@@ -957,13 +963,16 @@ public sealed partial class CodeGen {
       sb.Append($"{innerPad}  df_rc* {cname} = ({itemCode})->{BoxField(boxedElem!)};\n");
     } else {
       if (boxedElem != null) {
-        itemCode = $"DF_RC_OBJ({CType(elem)}, ({itemCode})->{BoxField(boxedElem)})";
+        itemCode = IsCountedValueType(elem)
+          ? CellRead($"(({itemCode}) != NULL ? ({itemCode})->{BoxField(boxedElem)} : NULL)", elem)   // a counted value item; an empty slot reads as zero (spec 12.7)
+          : $"DF_RC_OBJ({CType(elem)}, ({itemCode})->{BoxField(boxedElem)})";
       }
       sb.Append($"{innerPad}  {CType(type)} {cname} = {Convert(new Expr(itemCode, elem), type, s)};\n");
     }
     if (overMap && mapPart == null) {
       var (valueNode, valueType, valueElem) = loopVars[1];
-      sb.Append($"{innerPad}  {CType(valueType)} v_{valueNode.Text} = {Convert(new Expr(ReadSlot(collection.Type, CursorValue(whole, collection.Type, position)), valueElem), valueType, s)};\n");
+      var slotValue = UnboxRead(new Expr(ReadSlot(collection.Type, CursorValue(whole, collection.Type, position)), MapValue(collection.Type)));   // spec 12.7
+      sb.Append($"{innerPad}  {CType(valueType)} v_{valueNode.Text} = {Convert(new Expr(slotValue.Code, valueElem), valueType, s)};\n");
     }
     var before = assign.Clone();
     loopDepth++;

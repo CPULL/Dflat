@@ -1,0 +1,55 @@
+namespace lambdacollections
+alias Root as r
+
+public class Dog(string name) {
+  public string name
+} atEnd {
+  r.Console.log("  end " + name)
+}
+
+fun ->fun i32(i32) adder(i32 n) { (i32 x; n!) { x + n } }
+
+fun fun(), i32 pair(string who) {
+  Dog d = Dog(who)
+  return (; ->d) { r.Console.log(d.name + " here") }, 7
+}
+
+r.Console.log("1 vec")
+var handlers = vec<fun(i32)>()
+handlers.add((i32 x) { r.Console.log($"first {x}") })
+handlers.add((i32 x) { r.Console.log($"second {x * 10}") })
+for fun(i32) h in handlers {
+  h(2)
+}
+handlers[1](5)
+r.Console.log(handlers.len)
+
+r.Console.log("2 arr and list")
+arr<i32(i32)> ops = [adder(1), adder(10), (i32 x) { x * x }]
+for i32(i32) op in ops {
+  r.Console.log(op(3))
+}
+var steps = list<i32(i32)>()
+steps.add(adder(100))
+steps.add(ops[2])
+r.Console.log(steps[0](1) + steps[1](4))
+
+r.Console.log("3 owned captures end with the collection")
+{
+  var barks = vec<fun()>()
+  Dog a = Dog("a")
+  Dog b = Dog("b")
+  barks.add((; ->a) { r.Console.log(a.name + " barks") })
+  barks.add((; ->b) { r.Console.log(b.name + " barks") })
+  barks[0]()
+  barks.removeAt(0)
+  r.Console.log("removed")
+  barks[0]()
+}
+r.Console.log("4 tuples and several results")
+fun() call, i32 n = pair("t")
+call()
+r.Console.log(n)
+(i32(i32) f, i32 k) t = (adder(5), 2)
+r.Console.log(t.f(t.k))
+r.Console.log("end")

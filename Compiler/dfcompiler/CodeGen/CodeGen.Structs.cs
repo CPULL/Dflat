@@ -529,7 +529,7 @@ public sealed partial class CodeGen {
           ReadOnlyKind.Constant => $"'{name}' is a constant",
           _ => $"'{name}' is a read-only reference"
         };
-        throw Error($"{what}: only the unrestricted methods of {info.Name} can be called, not '{callee.Text}' (spec 1.6.2, 11.1.5.2)", at);
+        throw Error($"{what}: only the unrestricted methods of {info.Name} can be called, not '{callee.Text}'{DefinedAt(new[] { f }, callee.Text!)} (spec 1.6.2, 11.1.5.2)", at);
       }
       LValueInfo? place = null;
       try {

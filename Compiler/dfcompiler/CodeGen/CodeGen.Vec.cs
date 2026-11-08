@@ -440,9 +440,10 @@ public class list<T> : IndexCollection<T> {
     return this.node_removeAll(value)
   }
 
-  // every item gets its default value and the size is kept (spec 6.6): the objects held end
+  // all the items go, as truncate(0) (spec 6.6): the size changes, so not while the list is iterated
   override fun clear() {
-    this.node_clear()
+    checkUnlocked()
+    this.node_truncate(0)
   }
 
   public fun fill(T value) {
@@ -520,50 +521,51 @@ public class map<K, V> : MapCollection<K, V> {
   }
 
   // adds the pair, or replaces the value of an existing key: false when it replaced (spec 6.6)
-  public fun bool add(K key, V value) {
+  public fun bool add(K key, ->V value) {
     if this.tree_hasKey(key) {
-      this.tree_set(key, value)
+      this.tree_set(key, ->value)
       return false
     }
     checkUnlocked()
-    this.tree_set(key, value)
+    this.tree_set(key, ->value)
     return true
   }
 
   // merges another map of the same kind: the new value wins (spec 6.6); the entries are copied, other is unchanged
   public fun add(map<K, V> other) {
     for (K key, V value) in other {
-      add(key, value)
+      if !this.tree_hasKey(key) {
+        checkUnlocked()
+      }
+      this.tree_setCopy(key, value)
     }
   }
 
-  public fun bool tryGet(K key, &V result) {
+  // found, and the value (spec 6.6): an object is lent, read-only (Dog d) or read/write (&Dog d) as the caller declares it; a missing key
+  // gives false and the zero value (null for an object), or otherwise
+  public fun bool, V tryGet(K key) {
     if !this.tree_hasKey(key) {
-      V none
-      result = none
-      return false
+      return false, this.tree_none()
     }
-    result = this.tree_get(key)
-    return true
+    return true, this.tree_get(key)
   }
 
-  public fun bool tryGet(K key, &V result, V otherwise) {
+  public fun bool, V tryGet(K key, V otherwise) {
     if !this.tree_hasKey(key) {
-      result = otherwise
-      return false
+      return false, otherwise
     }
-    result = this.tree_get(key)
-    return true
+    return true, this.tree_get(key)
   }
 
   // the value of key leaves the map with its entry (->m[k], spec 6.6); a missing key gives the zero value
-  public fun V takeAt(K key) {
+  public fun ->V takeAt(K key) {
     checkUnlocked()
     return this.tree_take(key)
   }
 
   public fun removeAt(K key) {
-    V gone = takeAt(key)
+    checkUnlocked()
+    this.tree_remove(key)
   }
 
   // the first entry in key order that holds the value
@@ -1009,8 +1011,8 @@ public class set<T> : SetCollection<T> {
 
   // ->v[i]: the item goes to the receiver and the slot is zeroed (spec 6.6); a basic value is copied
   Expr GiftIndex(Node gift, Node operand, Scope scope) {
-    if (CountedItemRef(operand, scope) != null) {
-      throw NotSupported("->c[i] on a collection of counted objects (open, spec 99)", gift);
+    if (!countedItemGift && CountedItemRef(operand, scope) is CountedRefInfo counted) {
+      throw PlainGiftOfCounted(counted, operand, gift);   // a counted receiver takes it through TakeItemUsage (spec 12.7)
     }
     if (operand.Children[0].Kind != "Index" && IsView(ExprOf(operand.Children[0], scope).Type)) {
       throw Error("a view is read-only: its items cannot be moved out (spec 6.5)", gift);
@@ -1065,6 +1067,9 @@ public class set<T> : SetCollection<T> {
     }
     if (VecElem(cls.Name) == "string?") {
       sb.Append($"  for (df_uns i = 0; i < self->{items}.len; i++) {{ df_opt_str_drop(&self->{items}.p[i]); }}\n");   // spec 7.1
+    }
+    if (IsFunType(VecElem(cls.Name))) {
+      sb.Append($"  for (df_uns i = 0; i < self->{items}.len; i++) {{ df_fn_drop(&self->{items}.p[i]); }}\n");   // spec 13.3.5
     }
     if (IsArr(VecElem(cls.Name))) {
       // spec 6.8.1
@@ -1174,7 +1179,7 @@ public class set<T> : SetCollection<T> {
     sb.Append(LockCheck(held, vec.Type));
     sb.Append($"df_uns {amount} = {SourceLength(sourceType, s)}; {VecReserve(held, vec.Type, $"{count} + {amount}")}");
     sb.Append(ForEachSourceItem(sourceType, s, "0", amount, item =>
-      $"{items}.p[{count}] = {(cloning ? CloneValue(item, elem, at) : IsStrItem(elem) && !moving ? StrItemDup(elem, item) : item)}; {count} += 1; " + (moving && (IsClass(elem) || elem == "string") ? $"{item} = NULL; " : moving && (IsArr(elem) || elem == "string?") ? $"{item} = {ZeroValue(elem)}; " : "")));
+      $"{items}.p[{count}] = {(cloning ? CloneValue(item, elem, at) : IsStrItem(elem) && !moving ? StrItemDup(elem, item) : item)}; {count} += 1; " + (moving && (IsClass(elem) || elem == "string") ? $"{item} = NULL; " : moving && (IsArr(elem) || elem == "string?" || IsFunType(elem)) ? $"{item} = {ZeroValue(elem)}; " : "")));
     if (moving && sourceIsObject) {
       sb.Append($"df_drop((void*){s}); ");   // the collection was moved in: its items are gone and it ends
     }

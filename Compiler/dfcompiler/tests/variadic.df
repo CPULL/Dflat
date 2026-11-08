@@ -13,3 +13,35 @@ r.Console.log(total(1))
 r.Console.log(total(1, 2, 3))
 arr<i32> more = [10, 20]
 r.Console.log(total(5, more))
+vec<i32> grown = [1, 2, 3]
+r.Console.log(total(0, grown))
+r.Console.log(total(0, more[1..]))
+r.Console.log(total(0, grown[..2]))
+class Dog(string name) {
+  unrestricted fun string label() { name }
+}
+fun ->string names(Dog dogs...) {
+  string all = ""
+  for Dog d in dogs { all += d.label() }
+  return all
+}
+Dog rex = Dog("rex")
+Dog fido = Dog("fido")
+r.Console.log(names(rex, fido))
+r.Console.log(names(Dog("max"), rex))
+fun string pick(i32 a, i32 b) { "plain" }
+fun string pick(i32 a, i32 rest...) { "variadic" }
+r.Console.log(pick(1, 2))
+r.Console.log(pick(1, 2, 3))
+vec<i32> watched = [1, 2]
+fun u64 grow(&vec<i32> target, i32 values...) {
+  target.add(9)
+  return values.len
+}
+fun string tryGrow(&vec<i32> watched) {
+  r.Console.log(grow(&watched, watched))
+  return "grown"
+  catch ModifyingIteratedCollectionException { return "vec locked during the call" }
+}
+r.Console.log(tryGrow(&watched))
+r.Console.log(watched.len)

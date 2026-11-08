@@ -1,0 +1,1 @@
+refcount_multi_plain_target.df(5): error: this value is a counted Dog: its target is a counted variable (@Dog x) (spec 12.7)

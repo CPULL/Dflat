@@ -1,0 +1,1 @@
+limit_custom.dsprj(2): error: max-customcollection-copies takes a number from 1 to 256, not '300'

@@ -1,0 +1,7 @@
+namespace lambda_field_borrow
+class Button {
+  public fun(i32) onClick
+}
+var b = Button()
+i32 total = 0
+b.onClick = (i32 n) { Root.Console.log(n + total) }

@@ -1,0 +1,1 @@
+map_tryget_locked.df(8): error: 'dogs' is lent to 'dog' until its last use: until then only its unrestricted methods can be called, not 'removeAt' (spec 13.1.1)

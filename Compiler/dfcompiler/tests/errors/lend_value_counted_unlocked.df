@@ -1,0 +1,14 @@
+namespace lend_value_counted_unlocked
+alias Root as r
+class Board {
+  public i32 score
+  public string title = "board"
+  public fun &i32 scoreRef() { score }
+  public fun &string titleRef() { title }
+  public fun reset() { score = 0 }
+}
+fun f() {
+  &@Board shared = @Board()
+  &string t = shared.titleRef()
+}
+f()

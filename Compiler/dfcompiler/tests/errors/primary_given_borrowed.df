@@ -1,0 +1,8 @@
+namespace primary_given_borrowed
+class Dog { public i32 size }
+class Home(Dog d) {
+  unrestricted fun i32 size() { d.size }
+}
+fun f(Dog lent) {
+  Home h = Home(lent)
+}

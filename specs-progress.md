@@ -1,4 +1,4 @@
-# Specs progress (Specs0.0.22, compiler 0.0.45alpha, 2026/11/03)
+# Specs progress (Specs0.0.26, compiler 0.0.64alpha, 2026/11/07)
 
 What is left of the design work and what the compiler does not build yet. It replaces `To_discuss_for_collections.txt` and `ownership-management.md`; everything decided there is in the specification (Specs<section> is a section of dflat-spec.md). The point numbers of the collections are kept from the old file.
 
@@ -10,11 +10,11 @@ Tags: TOBEDISCUSSED (open, needed shortly), UNDERDISCUSSION (being discussed), P
 
 - The members and the cursor types of the map iterator (`MapIterator`); subclassing of the default collections (`vec`, `list`, `map`, `hmap`, `set`, `hset`; `arr` cannot) and the dispatch of the overridden methods; how a custom class receives the literals; `get_view` for custom collections (point 34); lists of pointers and references (with the pointers work).
 
-### 45. [TOBEDISCUSSED] Code size of the generic maps
+### 45. [DECIDED 2026-11-07] Code size of the generic maps
 
-Specs11.3.12 limits the copies per library collection to 64; each (Key, Value) pair is one copy. The four node layouts of the B-tree (branch and leaf, single-type and multi-type key, Specs6.8.4.1) add to the number of variants of the tree code. See also point 72.
+Closed: the heavy code is the shared runtime C (df_bt, df_ht); the limits stay as a safety net, per kind of collection (Compiler_Options.md; options built 0.0.78alpha). Was: Specs11.3.12 limits the copies per library collection to 64; each (Key, Value) pair is one copy. The four node layouts of the B-tree (branch and leaf, single-type and multi-type key, Specs6.8.4.1) add to the number of variants of the tree code. See also point 72.
 
-### 66. [TOBEDISCUSSED] Variadic parameters and existing collections
+### 66. [DECIDED 2026-11-07, Specs13.4, built 0.0.78alpha] Variadic parameters and existing collections
 
 Specs13.4, Specs99: the position of a variadic parameter and passing an existing collection (`f(...v)`). A `vec` as the variadic argument is the natural case.
 
@@ -22,11 +22,11 @@ Specs13.4, Specs99: the position of a variadic parameter and passing an existing
 
 Specs6.7, 6.7.2, Specs99: the shape of `MapIterator` and its `next()` (the cursors of `map` and `hmap` are defined in Specs6.8.4.1 and 6.8.5.1; `SetIterator` is decided in Specs6.7.3).
 
-### 79. [TOBEDISCUSSED] The name of the Keyable exception
+### 79. [DECIDED 2026-11-07, declared 0.0.78alpha; raised when Keyable is built] The name of the Keyable exception: ModifiedObjectUsedAsKeyException, ID 52 (Specs11.2.1, 15.3)
 
 Specs11.2.1, Specs99: the exception raised when the hash of a key changed. (Exception IDs are set at Specs0.1.0.)
 
-### [TOBEDISCUSSED] clear() on maps and sets
+### [DECIDED 2026-11-07, Specs6.6, built 0.0.78alpha] clear(): arr and vec keep the size, list / maps / sets remove all the items (forbidden while iterated)
 
 Specs99: `clear()` on maps and sets empties them, while `clear()` on the index collections keeps the size (Specs6.6); to be confirmed.
 
@@ -40,32 +40,34 @@ The decided rules are in Specs12 and 12.7 (Specs0.0.19). Principle: the Rust mod
 
 ### Borrows and temporaries (moved from the collections)
 
-- 83. [TOBEDISCUSSED] Lifetime of borrows of items. A borrow of an item taken outside a `for` loop (`(*)i32 p = (&)m[k]`, `f((&)m[k])`, `(&)v[3]`) points into the collection. An insert or delete in a `map` moves the inline values of a leaf (Specs6.8.4.1), and an `add` that reallocates a `vec` moves its items, so the borrow points to the wrong place. Inside `for (&)` it is safe (the counter blocks changes, Specs6.4); `tryGet(k, (&)out)` is safe. PROPOSAL: a borrow of an item increments the counter of the collection, like an iterator, as long as the borrow lives; meanwhile a change raises `ModifyingIteratedCollectionException`. This needs the compiler to track the lifetime of borrows in general. Prerequisite of the writable map values (step 5 of the map build order).
-- 85. [TOBEDISCUSSED] Temporary objects that never end. A new object that is not kept and not returned (a temporary inside an expression) is never ended by the compiler. For a view its counter is never given back, so its collection stays locked for good (`r.Console.log(v[1..3])` then `v.add(5)` raises `ModifyingIteratedCollectionException`; the same with `v[1..3].len` or a view passed to a function). PROPOSAL: a temporary ends at the end of the statement that made it, like the temporary strings, unless it is kept (a variable, a field, an item, a returned value, an argument moved with `->`).
-- UNDERDISCUSSION (preference: last use, as Rust; the alternative is the end of the scope): how the end of a local borrow of a plain object is decided. Example: `&Dog view = plainDog`, `show(view)`, then `plainDog is atEnd.` is legal because `view` is not used afterwards.
+- 83. [DECIDED, built 0.0.73alpha: the lock of borrowed items, Specs12, 13.1.1] Lifetime of borrows of items. A borrow of an item taken outside a `for` loop (`(*)i32 p = (&)m[k]`, `f((&)m[k])`, `(&)v[3]`) points into the collection. An insert or delete in a `map` moves the inline values of a leaf (Specs6.8.4.1), and an `add` that reallocates a `vec` moves its items, so the borrow points to the wrong place. Inside `for (&)` it is safe (the counter blocks changes, Specs6.4); `tryGet(k, (&)out)` is safe. PROPOSAL: a borrow of an item increments the counter of the collection, like an iterator, as long as the borrow lives; meanwhile a change raises `ModifyingIteratedCollectionException`. This needs the compiler to track the lifetime of borrows in general. Prerequisite of the writable map values (step 5 of the map build order).
+- 85. [DECIDED, built: a temporary ends with its statement] Temporary objects that never end. A new object that is not kept and not returned (a temporary inside an expression) is never ended by the compiler. For a view its counter is never given back, so its collection stays locked for good (`r.Console.log(v[1..3])` then `v.add(5)` raises `ModifyingIteratedCollectionException`; the same with `v[1..3].len` or a view passed to a function). PROPOSAL: a temporary ends at the end of the statement that made it, like the temporary strings, unless it is kept (a variable, a field, an item, a returned value, an argument moved with `->`).
+- DECIDED (built: the last use, as Rust): how the end of a local borrow of a plain object is decided. Example: `&Dog view = plainDog`, `show(view)`, then `plainDog is atEnd.` is legal because `view` is not used afterwards.
 
 ### Counted objects
 
-- UNDERDISCUSSION: what "owns" means in the `->` rule for counted variables (Specs12.7: `->a` is allowed if and only if the code owns `a`; a counted variable holds a usage).
-- UNDERDISCUSSION: `a(->rc)` is accepted only by `@T` and `(@)T` parameters; a `->T` parameter receives a plain owned object, so `a(->rc)` into it is a compile error (the receiver always knows from its signature if the object is counted).
-- UNDERDISCUSSION (idea, conditional): `->rc` as the way to remove the refcounting: the receiver decides what arrives (`@Dog shared = ->rc` passes the usage, `Dog plain = ->rc` removes the refcounting and is null if `rc` is not the last user), the same for functions (`->T` parameter) and for lists (`->pack[0]`). `removeRefCounting()` could then go away. Open: whether `rc` is lost or stays valid when it fails (`removeRefCounting()` leaves it valid), and a `->T` parameter possibly receiving null.
-- UNDERDISCUSSION (preference, "not sure yet" on the result): `->pack[0]` on a `list<@Dog>` works like `removeRefCounting()`: if the list is the only user you get the whole object and the list loses the item; otherwise null with a silent exception. Open: the result is a plain `Dog` or a moved `@Dog` usage.
-- UNDERDISCUSSION: collections of counted items: `pack[0].bark()` takes a temporary usage for the call, `@Dog first = pack[0]` holds a usage until `first` ends while the list keeps its own (no borrows). The loop variable is decided (Specs12.7).
+- DECIDED (2026-11-07, written in Specs0.0.26, built 0.0.65-0.0.68alpha): all the users of a counted object share its ownership; `->rc` moves one usage (the receiver gains it, `rc` becomes null, the count does not change) (Specs12.7).
+- DECIDED (2026-11-07, written in Specs0.0.26, built 0.0.65-0.0.68alpha): `->rc` into a `->T` parameter or a plain receiver (`Dog p = ->rc`) is a compile error that points to `removeRefCounting()` (Specs12.7). `removeRefCounting()` stays the only way out of the counting.
+- DECIDED (2026-11-07, written in Specs0.0.26, built 0.0.65-0.0.68alpha): `->pack[i]` on counted collections works as on plain ones (a `list` loses the node, `arr` / `vec` keep null); the usage moves to a counted receiver; a plain receiver is the compile error above (Specs12.7).
+- DECIDED (Specs12.7, built): collections of counted items: `pack[0].bark()` takes a temporary usage for the call, `@Dog first = pack[0]` holds a usage until `first` ends while the list keeps its own (no borrows). The loop variable is decided (Specs12.7).
 - DECIDED (2026-10-31, written in Specs12.7, built): `has`, `indexOf`, `remove` and `removeAll` of a `list<@T>` / `vec<@T>` take a counted object or null (a plain object is a compile error) and compare the objects by their own rules (`equals`, `==`, or identity, Specs11.1.3); `var old = c.replace(i, v)` is a compile error that asks for `@T old` (the counted `var` of Specs12.7 is decided before the types are known, for calls of functions only).
-- UNDERDISCUSSION (first reaction "seems right"): fields. An `@Dog` field is a user and releases its usage when its object dies; a `_Dog` field is a weak reference, null once the object is gone; a `&Dog` field is not allowed (a borrow cannot outlive its lender). Written in Specs12.7 as it follows from the decided rules; to confirm.
-- UNDERDISCUSSION: a `&` parameter in a primary constructor header cannot be used with refcounts: it is not known where the borrow ends.
-- UNDERDISCUSSION: an object moves to and from counting only through an explicit operation (`@plain`, `removeRefCounting()`); the old runtime switch `.asRefCount` is removed.
-- Open: whether a weak reference can be made without the marker (`_Dog w = first`, with a counted `first`): Specs12.7 makes it with `_` in the expression, as `@plain`.
-- Open: which methods can be called on a read-only `@T` (all the methods, or only those that do not write, as `unrestricted` through `&`, Specs12.5).
-- PROBABLY DECIDED (Java style): counted natives and strings (`@i32`, `(@)i32`, `@string`, `(@)string`) are valid: a native is a memory portion that stores the value and carries the refcount, like any other counted object (same counting block). This also makes `@X` valid in generic code whatever `X` is. Ownership, weak-reference, clone and locking rules are identical to class instances. `@i32 a = @10` and `@i32 b = a` are two users of the same counted value; `@i32 c = a!` is a new counted object with the same value.
-- UNDERDISCUSSION: counted traits (`@any Shape`): the count is on the object, `other = shape` adds a user. A downcast (`if sh is Bl b { }`) gives a counted reference of the same kind as the main variable and adds a user: `sh` and `b` are both valid inside the block, `b` is released at the end of its scope.
+- DECIDED (Specs12.7, built): fields. An `@Dog` field is a user and releases its usage when its object dies; a `_Dog` field is a weak reference, null once the object is gone; a `&Dog` field is not allowed (a borrow cannot outlive its lender). Written in Specs12.7 as it follows from the decided rules; to confirm.
+- DECIDED (2026-11-07, written in Specs0.0.26, built 0.0.65-0.0.68alpha): a plain primary parameter of an object or a collection (`class Ken(Dog d)`; strings and arrays give their field a copy) used only during the construction is a read-only lend, not a field; used as a field it is given implicitly (level 1 warning), and using the argument after the call is a compile error (Specs11.1.1, 19.3).
+- DECIDED (Specs12.7, built): an object moves to and from counting only through an explicit operation (`@plain`, `removeRefCounting()`); the old runtime switch `.asRefCount` is removed.
+- DECIDED (2026-11-07, written in Specs0.0.26, built 0.0.65-0.0.68alpha): a weak reference needs `%` in the expression (`%Dog w = first` is a compile error) (Specs12.7).
+- DECIDED (2026-11-07, written in Specs0.0.26, built 0.0.65-0.0.68alpha): through a read-only `@T` only `unrestricted` and static methods, no field writes; through `&@T` every public method, holding the lock (Specs12.7).
+- DECIDED (2026-11-07, written in Specs0.0.26, built 0.0.65-0.0.68alpha): counted value types and strings (`@i32`, `&@i32`, `@string`, `&@string`): a counting block on the heap; `&@T` writes need the lock; a `&@string` is also read only inside `enforce` (statement or expression form), no automatic lock; a new variable or parameter shares the cell; `=` on a `&@T` value writes the shared cell (lock needed), on a read-only `@T` it gives a new cell with a copy that locks automatically and gives the zero value (or null for a nullable target) when the lock fails; reads give no guarantee on the value; strings out of a `&@string` are always compact copies (Specs12.7, 13.1). Built for variables, parameters, fields, results and items (0.0.69alpha); not yet: static counted values, list<&@T> of values.
+- DECIDED (2026-11-07, written in Specs0.0.26, built 0.0.65-0.0.68alpha): counted traits: `@Animal a = @Dog()` shares the counter; a type check keeps the marker (`@`, `&@`, `%`) and is a new usage for the branch; a plain `Dog d` from a counted value is a compile error (Specs12.7).
+- DECIDED (2026-11-07, written in Specs0.0.26, built 0.0.71alpha): objects in tuples are owned as in structs (Specs3.2, a copy clones them); counted values among several results, each with its own marker (Specs13.1.1). Not yet: &@T among several results.
+- DECIDED (2026-11-07, Specs0.0.26, built 0.0.72alpha): maps own object values (Specs6.6; the copies clone), map<K, @T>; tryGet redone as bool, value (Specs6.6, 2026-11-07, built 0.0.73alpha): Dog d read-only, &Dog d read/write, the map locked while lent; use after a certain move is a compile error (Specs12.4; branches and loops do not count, x == null allowed); list<&@T> of values, static counted values, &@T among several results; extern functions refuse counted values. Counted properties: built 0.0.77alpha.
+- DECIDED (2026-11-07, Specs0.0.26): `unrestricted` checked (built 0.0.74alpha); the borrow rule on method calls, read-only borrowing locals and `&Dog d` (13.1.1, built 0.0.75alpha); counted properties (Specs11.1.4, built 0.0.77alpha); `&T` results of values, a lend from `&@T` only inside its enforce (13.1.1, built 0.0.76alpha).
 
 ### Read/write counted objects and enforce
 
 - DECIDED (2026-10-31, written in Specs7.2): the new `enforce`: checks (null, alive, locks in variable order), clauses `null [on ...]`, `lockfail [on ...]`, `catch E [ex] [on ...]`, `atEnd`, the order of the clauses, the releases at the very end, `return` / `break`, `else` only alone, `default` (the catch-all, 2026-11-01), the expression form (the variables of the expression are enforced, clauses give values, 2026-11-01). Built: steps 1-4 (2026-10-31/11-01: the clauses, the checks, null, catch / atEnd, catch on x, return). Not built: `default`, the expression form, `(@)T` and `lockfail`. Before: today the compiler has only `enforce a, b { } else { }` for `T?` and weak references.
 
 Decided (Specs12.7): `@T` read-only, `(@)T` read/write with a lock in the object; reads never lock; writes need the lock; `enforce x { }` takes it and releases it when the `enforce` ends (Specs7.2.5); writing without it is an exception.
-- UNDERDISCUSSION: at the call only the writing forms are marked (`a((@)rc)`, as `b((&)v)`); read-only is written only in the definition (`a(rc)`). No transformation between read-only and read/write: it is decided at creation.
+- SUPERSEDED (the markers of Specs0.0.23, 13.1): at the call only the writing forms are marked (`a((@)rc)`, as `b((&)v)`); read-only is written only in the definition (`a(rc)`). No transformation between read-only and read/write: it is decided at creation.
 - Decided 2026-11-02 (Specs7.2.1, 7.2.2, 12.7): waiting with a timeout, `@Player() timeout 100` as the default of the object (0 when not written: tried once), `enforce p timeout 500` per variable wins; the lock, the queue of waiters and the default timeout live in the counting block; atomic changes; built 2026-11-02 without threads (see the reference counting point). Open: `timeout` in the expression form, nested locking in method bodies (reentrant lock or lock held for the whole call), the order of the locks and deadlocks with threads (FUTURE). The exception for a write without the lock is `WritingOnRefCountWithoutLockingException`, ID 50.
 - Not mapped yet: mutation through several users (Rust `RefCell`, `Mutex`, `RwLock`, `Rc::get_mut`, `Rc::make_mut`).
 

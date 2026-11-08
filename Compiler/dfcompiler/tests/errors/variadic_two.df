@@ -1,0 +1,2 @@
+fun i32 sum(i32 first...) { 0 }
+fun i32 two(i32 a..., i32 b...) { 0 }

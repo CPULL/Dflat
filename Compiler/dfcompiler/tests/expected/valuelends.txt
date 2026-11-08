@@ -1,0 +1,7 @@
+score 10
+copy 10, score 16, cell 3 is 7
+board!
+99
+Vec2 { x: 3, y: 2 } Vec2 { x: 3, y: 2 }
+board!
+---- exit code 0 ----

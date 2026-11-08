@@ -12,9 +12,10 @@ ages[-3] = 30
 ages[2] += 5
 r.Console.log($"{ages[1]} {ages[2]} {ages[-3]} {ages[99]}")   // 11 25 30 0
 r.Console.log($"{ages.hasKey(2)} {ages.hasKey(99)} {ages.has(30)} {ages.has(31)}")
-i32 found = 0
-r.Console.log($"{ages.tryGet(2, &found)} {found}")
-r.Console.log($"{ages.tryGet(7, &found, -1)} {found}")
+bool hit, i32 found = ages.tryGet(2)
+r.Console.log($"{hit} {found}")
+hit, found = ages.tryGet(7, -1)
+r.Console.log($"{hit} {found}")
 r.Console.log(ages.keyOf(30))                    // -3
 r.Console.log(ages.len)                          // 3
 r.Console.log(ages)

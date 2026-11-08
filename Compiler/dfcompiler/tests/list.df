@@ -50,7 +50,7 @@ work.add(2)
 work.removeAt(1)
 work.add(3)
 r.Console.log(work)
-work.clear()                       // every item gets its default value, the size is kept
+work.clear()                       // all the items go, as truncate(0) (spec 6.6)
 r.Console.log($"{work.len} {work}")
 work.truncate(0)
 r.Console.log($"{work.len} {work}")

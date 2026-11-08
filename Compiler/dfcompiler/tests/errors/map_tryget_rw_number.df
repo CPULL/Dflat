@@ -1,0 +1,6 @@
+namespace map_tryget_rw_number
+fun f() {
+  map<string, i32> ages = ["a": 1]
+  bool here, &i32 n = ages.tryGet("a")
+}
+f()

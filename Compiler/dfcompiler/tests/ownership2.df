@@ -15,7 +15,7 @@ public class Car(->Engine engine, string plate) {
 }
 
 trait Shape {
-  public fun string Name()
+  unrestricted fun string Name()
 }
 public class Square : Shape {
   override fun string Name() { "square" }
@@ -53,18 +53,14 @@ pick(true)
 r.Console.log("  after the statement")
 
 r.Console.log("a dead object")
-// the compiler stops a release it can see while a borrow is alive (spec 12); one inside a method is found at run time
+// the compiler stops a release while a borrow is alive (spec 12), also one inside a method: while view is used, only the
+// unrestricted methods of holder can be called (spec 13.1.1); after its last use drop() is allowed
 public class Holder {
   public Square sq = Square()
   public fun drop() { sq is atEnd. }
 }
 Holder holder = Holder()
 Square view = holder.sq
+r.Console.log("  " + view.Name())               // the last use of view
 holder.drop()
 r.Console.log("  the owner is null: " + (holder.sq == null))
-i32 caught = 0
-r.Console.log(view.Name())
-catch NullPointerException {
-  caught += 1
-}
-r.Console.log("  the borrow found the object dead: " + caught)

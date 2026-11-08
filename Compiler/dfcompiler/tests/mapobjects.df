@@ -1,0 +1,42 @@
+// Maps of objects (spec 6.6): the map owns its values; add takes them (->x or a new object), m.values!, add(other) and clone give copies; map<K, @T>
+namespace mapobjects
+alias Root as r
+class Dog(string name) {
+  public string name
+} atEnd {
+  r.Console.log($"{name} ends")
+}
+fun f() {
+  map<string, Dog> dogs = []
+  dogs.add("rex", Dog("Rex"))
+  Dog max = Dog("Max")
+  dogs.add("max", ->max)
+  r.Console.log($"{dogs.len} {dogs["rex"].name} {dogs}")
+  dogs["rex"] = Dog("Rex2")
+  r.Console.log("replaced")
+  dogs.removeAt("max")
+  r.Console.log("removed")
+  Dog taken = dogs.takeAt("rex")
+  r.Console.log($"taken {taken.name}, len {dogs.len}")
+  hmap<i32, Dog> h = [1: Dog("One"), 2: Dog("Two")]
+  var copy = h!
+  r.Console.log($"{copy.len} copy has {copy[1].name}")
+  for (i32 k, Dog d) in h { r.Console.log($"{k}: {d.name}") }
+  r.Console.log("end of f")
+}
+fun counted() {
+  @Dog rex = Dog("Rex")
+  map<string, @Dog> pack = []
+  pack.add("rex", @rex)
+  pack.add("max", Dog("Max"))
+  r.Console.log($"{pack["rex"].name} users {rex.usersCount} {pack}")
+  @Dog got = pack["max"]
+  r.Console.log($"{got.name} users {got.usersCount}")
+  for (string k, Dog d) in pack { r.Console.log($"{k}: {d.name}") }
+  pack.removeAt("rex")
+  r.Console.log($"users {rex.usersCount}")
+  hmap<i32, @i32> counters = [1: 10]
+  r.Console.log($"{counters[1]} {counters}")
+}
+f()
+counted()

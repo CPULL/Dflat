@@ -1,5 +1,0 @@
-namespace refcount_trait_param
-class Dog { }
-trait Walker {
-  fun walk(@Dog d)
-}

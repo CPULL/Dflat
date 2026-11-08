@@ -189,6 +189,9 @@ public sealed partial class CodeGen {
             ctx.Flow.Raises.Add((StandardExceptions["UnassignedFunctionCallException"], ctx.Cover));
             ctx.Flow.Raises.Add((AnyException, ctx.Cover));
           }
+          if (node.Children[0] is { Kind: "Member" } method && FlowWritesThroughLock(method, currentFlowFun) && FlowMethodNeedsLock(method.Text!)) {
+            ctx.Flow.Raises.Add((StandardExceptions["WritingOnRefCountWithoutLockingException"], ctx.Cover));   // a method through a &@T (spec 12.7)
+          }
           if (node.Children[0] is { Kind: "Member", Text: "tryClone" }) {
             ctx.Flow.Raises.Add((StandardExceptions["ObjectNotClonableException"], ctx.Cover));   // spec 12.6
           }

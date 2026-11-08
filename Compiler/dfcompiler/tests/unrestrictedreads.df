@@ -1,0 +1,21 @@
+// unrestricted is checked (spec 1.6.2): reading, unrestricted calls on this and on what it owns, read-only collection members and locals are allowed
+namespace unrestrictedreads
+class Dog(string name) {
+  public string name
+  public i32 hunger = 5
+  unrestricted fun bark() { }
+  public fun eat(i32 n) { hunger -= n }
+}
+class Kennel {
+  Dog boss = Dog("Rex")
+  vec<Dog> dogs = []
+  i32 visits
+  string label = "k"
+  unrestricted fun bool f() { boss.bark(); i32 local = visits; local++; dogs.has(boss) || local == 1 }
+}
+alias Root as r
+fun f() {
+  Kennel k = Kennel()
+  r.Console.log(k.f())
+}
+f()

@@ -1,0 +1,1 @@
+borrow_readonly_call.df(20): error: 'd' is a read-only borrow: 'eat' needs a read/write one (mark it unrestricted, or declare &Dog d)

@@ -1,0 +1,7 @@
+namespace refcount_multi_plain_target
+class Dog { }
+fun @Dog, i32 pick() { return Dog(), 3 }
+fun f() {
+  Dog d, i32 n = pick()
+}
+f()

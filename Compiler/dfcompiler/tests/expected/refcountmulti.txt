@@ -1,0 +1,13 @@
+Picked 3 users 1
+Boss users 2
+7 seven
+Picked ends
+Picked ends
+only 3
+Picked ends
+Picked again
+Boss ends
+Picked ends
+Made 1 users 1 5 five
+Made ends
+---- exit code 0 ----

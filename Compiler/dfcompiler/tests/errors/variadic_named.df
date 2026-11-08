@@ -1,0 +1,2 @@
+fun u64 sum(i32 items...) { items.len }
+Root.Console.log(sum(items: 3))

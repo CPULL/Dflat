@@ -1,0 +1,5 @@
+namespace refcount_value_field_readonly
+class Counter {
+  public @i32 hits
+  public fun click() { hits += 1 }
+}

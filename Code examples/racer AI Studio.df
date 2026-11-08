@@ -1,0 +1,431 @@
+// Racer for Dflat — stdlib 0.0.11 (Object-Oriented & Lambda Test)
+
+namespace racer
+
+alias Root.Console as console
+
+const i32 WIDTH = 80
+const i32 HEIGHT = 24
+const i32 HORIZON = 8
+const r64 VIEW = 200.0
+const r64 FRAME = 0.05
+
+class Screen {
+  arr<char> cells = arr<char>[(uns)(WIDTH * HEIGHT)]
+  arr<console.Color> fronts = arr<console.Color>[(uns)(WIDTH * HEIGHT)]
+  arr<console.Color> backs = arr<console.Color>[(uns)(WIDTH * HEIGHT)]
+
+  public fun put(i32 x, i32 y, char c, console.Color front, console.Color back) {
+    if x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT then return
+    uns at = (uns)(y * WIDTH + x)
+    cells[at] = c
+    fronts[at] = front
+    backs[at] = back
+  }
+
+  public fun over(i32 x, i32 y, char c, console.Color front) {
+    if x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT then return
+    uns at = (uns)(y * WIDTH + x)
+    cells[at] = c
+    fronts[at] = front
+  }
+
+  public fun text(i32 x, i32 y, string words, console.Color front, console.Color back) {
+    i32 column = x
+    for char c in words {
+      put(column, y, c, front, back)
+      column++
+    }
+  }
+
+  public fun show() {
+    for i32 y in 0..HEIGHT {
+      console.moveCursor(0, y)
+      i32 x = 0
+      while x < WIDTH {
+        uns first = (uns)(y * WIDTH + x)
+        console.Color front = fronts[first]
+        console.Color back = backs[first]
+        string run = ""
+        while x < WIDTH {
+          uns at = (uns)(y * WIDTH + x)
+          if fronts[at] != front || backs[at] != back then break
+          run += cells[at]
+          x++
+        }
+        console.setColors(front, back)
+        console.print(run)
+      }
+    }
+  }
+}
+
+// -------------------------------------------------------------
+// UNSEEN SYNTAX TEST 1: Struct with constructor and methods
+// -------------------------------------------------------------
+struct Opponent {
+  r64 distance = 0.0,
+  r64 x = 0.0,
+  r64 speed = 0.0,
+  console.Color color = console.Color.BrightYellow
+
+  public fun Opponent(r64 dist, r64 xPos, r64 spd, console.Color col) {
+    distance = dist
+    x = xPos
+    speed = spd
+    color = col
+  }
+
+  public fun move(r64 dt) {
+    distance += speed / 3.6 * dt
+  }
+
+  unrestricted fun bool isColliding(r64 playerDist, r64 playerX) {
+    r64 ahead = distance - playerDist
+    ahead > -1.5 && ahead < 2.5 && Root.Math.abs(x - playerX) < 0.35
+  }
+
+  public fun bool isPassed(r64 playerDist) {
+    distance < playerDist - 15.0
+  }
+}
+
+class Racer {
+  Screen screen = Screen()
+
+  r64 speed = 0.0
+  r64 distance = 0.0
+  r64 carX = 0.0
+  r64 curve = 0.0
+  r64 curveTarget = 0.0
+  r64 pieceLeft = 100.0
+  r64 skyShift = 0.0
+  r64 nextTree = 60.0
+  vec<r64> trees = vec<r64>()
+  i64 frame = 0
+  i64 throttleUntil = -1
+  i64 brakeUntil = -1
+  i64 steerUntil = -1
+  r64 steer = 0.0
+  bool quit = false
+
+  // -----------------------------------------------------------
+  // UNSEEN SYNTAX TEST 2: Generic Vector holding Custom Struct
+  // -----------------------------------------------------------
+  r64 nextCar = 80.0
+  vec<Opponent> cars = vec<Opponent>()
+  i64 crashUntil = -1
+  i32 carsPassed = 0
+
+  r64 timeLeft = 45.0
+  r64 nextCheckpoint = 1000.0
+  i64 checkpointUntil = -1
+
+  string mountains = "      /\\            /\\/\\        ___/\\        /\\          /\\__/\\     /\\           "
+
+  public fun bool running() { !quit }
+  public fun r64 km() { distance / 1000.0 }
+  public fun i32 passed() { carsPassed }
+
+  // -----------------------------------------------------------
+  // UNSEEN SYNTAX TEST 3: Higher-Order Function accepting a Lambda
+  // -----------------------------------------------------------
+  fun bool anyCar(vec<Opponent> list, bool(Opponent) predicate) {
+		for Opponent car in list {
+			if predicate(car) then return true
+		}
+		return false
+	}
+
+  public fun keys() {
+    char? key = console.readKey()
+    while key != null {
+      char k = (key ?? ' ').toLower()
+      if k == 'w' || k == console.KEY_UP {
+        throttleUntil = frame + 12
+        brakeUntil = -1
+      } else if k == 's' || k == console.KEY_DOWN {
+        brakeUntil = frame + 6
+        throttleUntil = -1
+      } else if k == 'a' || k == console.KEY_LEFT {
+        steer = -1.0
+        steerUntil = frame + 3
+        carX -= 0.04
+      } else if k == 'd' || k == console.KEY_RIGHT {
+        steer = 1.0
+        steerUntil = frame + 3
+        carX += 0.04
+      } else if k == 'q' || k == console.KEY_ESC {
+        quit = true
+      }
+      key = console.readKey()
+    }
+  }
+
+  public fun move() {
+    frame++
+    timeLeft -= FRAME
+    if timeLeft <= 0.0 {
+      timeLeft = 0.0
+      quit = true
+    }
+
+    bool offRoad = carX < -1.1 || carX > 1.1
+    if frame < throttleUntil {
+      speed += 3.0
+    } else if frame < brakeUntil {
+      speed -= 9.0
+    } else {
+      speed -= 0.6
+    }
+    if offRoad && speed > 60.0 {
+      speed -= 7.0
+    }
+    speed = Root.Math.max(0.0, Root.Math.min(speed, 290.0))
+
+    r64 meters = speed / 3.6 * FRAME
+    distance += meters
+
+    if distance >= nextCheckpoint {
+      timeLeft += 20.0
+      nextCheckpoint += 1000.0
+      checkpointUntil = frame + 40
+    }
+
+    if frame < steerUntil {
+      carX += steer * 0.05 * Root.Math.min(1.0, speed / 60.0)
+    }
+    carX -= curve * (speed / 290.0) * (speed / 290.0) * meters * 0.012
+    carX = Root.Math.max(-2.6, Root.Math.min(carX, 2.6))
+
+    pieceLeft -= meters
+    if pieceLeft <= 0.0 {
+      r64 pick = Root.Random.real()
+      curveTarget = pick < 0.35 ? { true: 0.0, false: (Root.Random.real() < 0.5 ? { true: -1.0, false: 1.0 }) * Root.Random.realRange(0.25, 1.0) }
+      pieceLeft = Root.Random.realRange(150.0, 450.0)
+    }
+    curve += (curveTarget - curve) * Root.Math.min(1.0, meters * 0.012)
+    skyShift += curve * meters * 0.08
+
+    while nextTree < distance + VIEW {
+      trees.add(Root.Random.real() < 0.5 ? { true: -nextTree, false: nextTree })
+      nextTree += Root.Random.realRange(25.0, 120.0)
+    }
+    while trees.len > 0 && Root.Math.abs(trees[0]) < distance {
+      trees.removeAt(0)
+    }
+
+    // Spawn opponent objects using constructor
+    while nextCar < distance + VIEW {
+      console.Color carColor = (cars.len % 2 == 0) ? { true: console.Color.BrightYellow, false: console.Color.BrightWhite }
+      Opponent opp = Opponent(nextCar, Root.Random.realRange(-0.7, 0.7), Root.Random.realRange(80.0, 150.0), carColor)
+      cars.add(opp)
+      nextCar += Root.Random.realRange(50.0, 120.0)
+    }
+
+    // Move opponent objects
+    for i32 idx in 0..(i32)cars.len {
+      cars[(uns)idx].move(FRAME)
+    }
+
+    // ---------------------------------------------------------
+    // UNSEEN SYNTAX TEST 4: Passing a Lambda Expression
+    // ---------------------------------------------------------
+    bool collided = anyCar(cars, (Opponent c) { c.isColliding(distance, carX) })
+    if collided {
+      crashUntil = frame + 12
+      if speed > 50.0 {
+        speed = 50.0
+      }
+    }
+
+    // Remove passed cars
+    i32 i = 0
+    while i < (i32)cars.len {
+      uns u = (uns)i
+      if cars[u].isPassed(distance) {
+        cars.removeAt(u)
+        carsPassed++
+      } else {
+        i++
+      }
+    }
+  }
+
+  fun r64 middleAt(r64 p) {
+    r64 far = 1.0 - p
+    r64 half = (0.05 + p * 0.42) * (r64)WIDTH
+    return (r64)WIDTH * (0.5 + curve * far * far * far * 0.5) - carX * half
+  }
+
+  fun r64 halfAt(r64 p) { (0.05 + p * 0.42) * (r64)WIDTH }
+
+  public fun draw() {
+    drawSky()
+    drawRoad()
+    drawTrees()
+    drawCars()
+    drawPlayerCar()
+    drawPanel()
+    screen.show()
+  }
+
+  fun drawSky() {
+    i64 shift = (i64)skyShift
+    i64 shape = (i64)mountains.len
+    for i32 y in 1..HORIZON {
+      for i32 x in 0..WIDTH {
+        screen.put(x, y, ' ', console.Color.White, console.Color.Blue)
+      }
+    }
+    for i32 x in 0..WIDTH {
+      i64 at = ((i64)x + shift) % shape
+      if at < 0 then at += shape
+      char c = mountains[(uns)at]
+      if c != ' ' {
+        screen.put(x, HORIZON - 2, c, console.Color.White, console.Color.Blue)
+        screen.put(x, HORIZON - 1, ' ', console.Color.Gray, console.Color.Gray)
+      }
+    }
+  }
+
+  fun drawRoad() {
+    i32 rows = HEIGHT - HORIZON
+    for i32 row in 0..rows {
+      r64 p = (r64)(row + 1) / (r64)rows
+      r64 far = 1.0 - p
+      r64 middle = middleAt(p)
+      r64 half = halfAt(p)
+      r64 kerb = half * 0.12
+      bool lightGrass = Root.Math.sin(20.0 * far * far * far + distance * 0.25) > 0.0
+      bool redKerb = Root.Math.sin(60.0 * far * far + distance * 0.5) > 0.0
+      bool line = Root.Math.sin(40.0 * far * far + distance * 0.5) > 0.0
+      console.Color grass = lightGrass ? { true: console.Color.BrightGreen, false: console.Color.Green }
+      console.Color kerbColour = redKerb ? { true: console.Color.Red, false: console.Color.BrightWhite }
+      i32 y = HORIZON + row
+      for i32 x in 0..WIDTH {
+        r64 at = (r64)x + 0.5
+        if at < middle - half - kerb || at > middle + half + kerb {
+          screen.put(x, y, ' ', console.Color.Black, grass)
+        } else if at < middle - half || at > middle + half {
+          screen.put(x, y, ' ', console.Color.Black, kerbColour)
+        } else if line && Root.Math.abs(at - middle) < 0.5 + p * 0.5 {
+          screen.put(x, y, ' ', console.Color.Black, console.Color.BrightWhite)
+        } else {
+          screen.put(x, y, ' ', console.Color.White, console.Color.Black)
+        }
+      }
+    }
+  }
+
+  fun drawTrees() {
+    i32 rows = HEIGHT - HORIZON
+    for r64 tree in trees {
+      r64 ahead = Root.Math.abs(tree) - distance
+      if ahead <= 0.0 || ahead >= VIEW then continue
+      r64 p = 1.0 - Root.Math.cbrt(ahead / VIEW)
+      i32 row = (i32)(p * (r64)rows) - 1
+      if row < 0 then continue
+      r64 side = tree < 0.0 ? { true: -1.0, false: 1.0 }
+      r64 x = middleAt(p) + side * (halfAt(p) * 1.12 + 3.0 + p * 12.0)
+      i32 column = (i32)x
+      i32 y = HORIZON + row
+      screen.over(column, y, '♣', console.Color.Black)
+      if p > 0.5 {
+        screen.over(column - 1, y, '♣', console.Color.Black)
+        screen.over(column + 1, y, '♣', console.Color.Black)
+        screen.over(column, y + 1, '║', console.Color.Yellow)
+      }
+    }
+  }
+
+  fun drawCars() {
+    i32 rows = HEIGHT - HORIZON
+    // ---------------------------------------------------------
+    // UNSEEN SYNTAX TEST 5: Foreach over struct collection
+    // ---------------------------------------------------------
+    for Opponent car in cars {
+      r64 ahead = car.distance - distance
+      if ahead <= 1.0 || ahead >= VIEW then continue
+
+      r64 p = 1.0 - Root.Math.cbrt(ahead / VIEW)
+      i32 row = (i32)(p * (r64)rows) - 1
+      if row < 1 || row >= rows then continue
+
+      r64 middle = middleAt(p)
+      r64 half = halfAt(p)
+      r64 x = middle + car.x * half
+      i32 col = (i32)x
+      i32 y = HORIZON + row
+
+      if p < 0.4 {
+        screen.over(col, y, 'o', car.color)
+      } else if p < 0.75 {
+        screen.over(col - 1, y, '(', car.color)
+        screen.over(col, y, '=', car.color)
+        screen.over(col + 1, y, ')', car.color)
+      } else {
+        screen.over(col - 2, y - 1, '(', car.color)
+        screen.over(col - 1, y - 1, '-', car.color)
+        screen.over(col, y - 1, '^', car.color)
+        screen.over(col + 1, y - 1, '-', car.color)
+        screen.over(col + 2, y - 1, ')', car.color)
+
+        screen.over(col - 2, y, '[', console.Color.Gray)
+        screen.over(col - 1, y, '=', car.color)
+        screen.over(col, y, 'O', car.color)
+        screen.over(col + 1, y, '=', car.color)
+        screen.over(col + 2, y, ']', console.Color.Gray)
+      }
+    }
+  }
+
+  fun drawPlayerCar() {
+    i32 x = WIDTH / 2 - 4
+    i32 lean = frame < steerUntil ? { true: (i32)steer, false: 0 }
+    console.Color carColor = (frame < crashUntil && frame % 2 == 0) ? { true: console.Color.Yellow, false: console.Color.BrightRed }
+    screen.text(x + lean, HEIGHT - 3, " _.-^-._ ", carColor, console.Color.Black)
+    screen.text(x, HEIGHT - 2, "[|=====|]", carColor, console.Color.Black)
+    screen.text(x, HEIGHT - 1, " O     O ", console.Color.Gray, console.Color.Black)
+  }
+
+  fun drawPanel() {
+    for i32 x in 0..WIDTH {
+      screen.put(x, 0, ' ', console.Color.BrightWhite, console.Color.Black)
+    }
+    string kmh = ((i64)speed).toStr().padLeft(3)
+    string driven = $"{km():D02}"
+    string sec = ((i64)timeLeft).toStr().padLeft(2)
+
+    screen.text(2, 0, $"SPEED {kmh} km/h", console.Color.BrightYellow, console.Color.Black)
+    screen.text(20, 0, $"DIST {driven} km", console.Color.BrightWhite, console.Color.Black)
+    screen.text(37, 0, $"TIME {sec}s", (timeLeft < 10.0) ? { true: console.Color.BrightRed, false: console.Color.BrightYellow }, console.Color.Black)
+
+    if frame < crashUntil {
+      screen.text(50, 0, "** CRASH! **", console.Color.BrightRed, console.Color.Black)
+    } else if frame < checkpointUntil {
+      screen.text(48, 0, "CHECKPOINT +20s", console.Color.BrightGreen, console.Color.Black)
+    } else if carX < -1.1 || carX > 1.1 {
+      screen.text(52, 0, "OFF ROAD", console.Color.BrightRed, console.Color.Black)
+    } else {
+      screen.text(49, 0, $"CARS PASSED: {carsPassed}", console.Color.BrightGreen, console.Color.Black)
+    }
+
+    screen.text(68, 0, "W/S A/D Q", console.Color.Gray, console.Color.Black)
+  }
+}
+
+fun int main() {
+  Racer game = Racer()
+  console.clear()
+  while game.running() {
+    game.keys()
+    game.move()
+    game.draw()
+    Root.Time.sleep(50)
+  }
+  console.setColors(null, null)
+  console.clear()
+  console.log($"Game Over! You drove {game.km():D02} km and passed {game.passed()} cars!")
+  return 0
+}

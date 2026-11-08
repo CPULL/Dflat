@@ -1,0 +1,12 @@
+namespace move_use_after
+alias Root as r
+class Dog(string name) {
+  public string name
+}
+fun take(->Dog d) { }
+fun f(bool c) {
+  Dog d = Dog("a")
+  take(->d)
+  r.Console.log(d.name)
+}
+f(true)

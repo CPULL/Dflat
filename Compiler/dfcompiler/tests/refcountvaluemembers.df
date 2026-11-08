@@ -1,0 +1,73 @@
+// Counted values as fields, results and items (spec 12.7)
+namespace refcountvaluemembers
+alias Root as r
+
+class Counter(&@i32 shared) {                    // a header parameter shares the caller's cell
+  public &@i32 hits                              // starts with a cell of its own holding 0
+  public @string label = "counter"
+  public @i32 limit = 10
+  public fun click() { hits += 1 }               // writes the cell: needs its lock
+  public fun bumpShared() { shared++ }
+  public fun relabel() { label = "renamed" }     // a read-only field gets a new cell
+  public fun &@i32 hitsCell() { hits }           // gives a user of the same cell
+  unrestricted fun i32 total() { hits + shared }
+}
+
+fun @i32 five() { 5 }
+fun @string greet(string who) { "hi " + who }
+fun &@i32 counter() {
+  &@i32 c = 0
+  c                                              // the variable gives its usage
+}
+
+fun fields() {
+  &@i32 common = 5
+  Counter c = Counter(&@common)
+  r.Console.log($"{c.hits} {c.label} {c.limit} {c.total()}, users {common.usersCount}")
+  &@i32 h = c.hitsCell()
+  enforce h { c.click() }                        // the lock of the cell is held through h
+  enforce common { c.bumpShared() }
+  r.Console.log($"{c.hits} {common} {c.total()}, users {h.usersCount}")
+  c.relabel()
+  r.Console.log($"{c}")
+  c.click()                                      // no lock: raises
+  r.Console.log("not reached")
+}
+
+fun results() {
+  @i32 a = five()
+  var b = five()
+  @string g = greet("rex")
+  &@i32 c = counter()
+  enforce c { c += 3 }
+  r.Console.log($"{a} {b} {g} {c}, users {a.usersCount} {c.usersCount}")
+}
+
+fun items() {
+  @i32 shared = 7
+  list<@i32> l = [1, 2]
+  l.add(@shared)                                 // the item shares the cell
+  l.add(3)
+  r.Console.log($"{l} {l[2]}, users {shared.usersCount}, len {l.len}")
+  @i32 first = l[0]
+  l[0] = 10                                      // the slot gets a new cell
+  r.Console.log($"{l[0]}, first is still {first}; has {l.has(@shared)} at {l.indexOf(@shared)}")
+  vec<@i32> v = [5, 3, 9]
+  v.sort((i32 x, i32 y) { x - y })
+  @i32 last
+  v.pop(&last)
+  @i32 old = v.replace(0, 42)
+  @i32 taken = ->v[1]                            // the slot keeps null
+  r.Console.log($"{last} {old} {taken} {v}")
+  for i32 item in v { r.Console.log($"loop {item}") }
+  list<@string> names = ["a", "b"]
+  @string w = names.takeAt(0)
+  names.fill(@w)
+  arr<@i32> numbers = [4, 5]
+  r.Console.log($"{names}, users {w.usersCount}; {numbers} {numbers[0] + numbers[1]}")
+}
+
+fields()
+catch WritingOnRefCountWithoutLockingException { r.Console.log("click without the lock") }
+results()
+items()

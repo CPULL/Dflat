@@ -1,0 +1,1 @@
+lend_value_unrestricted.df(12): error: an unrestricted method does not change its object: it cannot lend it read/write (a & result) (spec 1.6.2)

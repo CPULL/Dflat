@@ -13,7 +13,7 @@ vec<string> words = ["a", "b"]
 r.Console.log(sizeOf(numbers))
 r.Console.log(contains(words, "b"))
 r.Console.log(contains(words, "z"))
-IndexCollection<i32> indexed = numbers
+&IndexCollection<i32> indexed = numbers   // a read/write borrow: clear changes it
 r.Console.log(indexed.len)
 indexed.clear()
 r.Console.log(numbers)             // clear keeps the size (spec 6.6)

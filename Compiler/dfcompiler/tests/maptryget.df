@@ -1,0 +1,35 @@
+// tryGet with several results (spec 6.6): found, and the value; an object is lent read-only (Dog d) or read/write (&Dog d); the map stays as it is while it is lent
+namespace maptryget
+alias Root as r
+class Dog(string name) {
+  public string name
+  unrestricted fun ->string bark() { $"{name}: woof" }
+} atEnd {
+  r.Console.log($"{name} ends")
+}
+fun f() {
+  map<string, Dog> dogs = ["rex": Dog("Rex")]
+  bool here, Dog dog = dogs.tryGet("rex")
+  r.Console.log($"{here} {dog.bark()}")
+  bool missing, Dog none = dogs.tryGet("max")
+  r.Console.log($"{missing} {none == null}")
+  dogs.tryGet("rex")
+  map<string, i32> ages = ["a": 3]
+  bool hasA, i32 a = ages.tryGet("a")
+  _, i32 b = ages.tryGet("b", 7)
+  r.Console.log($"{hasA} {a} {b}")
+  map<string, string> names = ["x": "ex"]
+  _, string s = names.tryGet("x")
+  r.Console.log(s)
+  r.Console.log("end of f")
+}
+fun writes() {
+  map<string, Dog> dogs = ["rex": Dog("Rex")]
+  bool here, &Dog dog = dogs.tryGet("rex")
+  dog.name = "Max"                                 // changes the object in the map
+  r.Console.log(dogs["rex"].name)
+  dogs.removeAt("rex")                             // allowed: dog is not used any more
+  r.Console.log($"len {dogs.len}")
+}
+f()
+writes()

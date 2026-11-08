@@ -1,0 +1,1 @@
+lambda_array_borrow.df(3): error: this function value borrows variables, so an array cannot keep it: it may outlive them; capture with x! or ->x (spec 13.3.4)

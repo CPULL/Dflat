@@ -1,0 +1,1 @@
+lend_rw_from_readonly.df(9): error: &Dog d: this value is lent read-only; write Dog d (spec 13.1.1)

@@ -1,0 +1,1 @@
+tuple_object_notclonable.df(5): error: a copy of a tuple clones its objects: F cannot be cloned, F is notclonable; give the tuple a new object or move it with -> (spec 3.2)

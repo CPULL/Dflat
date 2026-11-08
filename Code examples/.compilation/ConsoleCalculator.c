@@ -30,6 +30,12 @@ typedef uint64_t df_uns;
 typedef struct df_strh df_strh;
 typedef df_strh* df_string;
 
+/* string? (spec 7.1): null is has == false; "" is has == true with the empty string. A string? variable always owns its string */
+typedef struct {
+  bool has;
+  df_string val;
+} df_opt_string;
+
 /* the text of a string, for the code that reads it */
 typedef struct {
   const char* p;   /* UTF-8 bytes, followed by a 0 */
@@ -126,6 +132,8 @@ static const df_descriptor df_desc_InvalidIteratorReleaseException = { 47, "Inva
 static const df_descriptor df_desc_UsageOfDestroyedObjectException = { 48, "UsageOfDestroyedObjectException", &df_desc_Exception, false };
 static const df_descriptor df_desc_ObjectNotClonableException = { 49, "ObjectNotClonableException", &df_desc_Exception, false };
 static const df_descriptor df_desc_WritingOnRefCountWithoutLockingException = { 50, "WritingOnRefCountWithoutLockingException", &df_desc_Exception, false };
+static const df_descriptor df_desc_UnassignedFunctionCallException = { 51, "UnassignedFunctionCallException", &df_desc_NullPointerException, false };
+static const df_descriptor df_desc_ModifiedObjectUsedAsKeyException = { 52, "ModifiedObjectUsedAsKeyException", &df_desc_Exception, false };
 
 /* The exception of a function is a local of that function (df_err in the generated code) and travels back to the caller as the second
    value it returns. The runtime functions written in C cannot return it that way: they leave it here, and the code generated around
@@ -218,12 +226,17 @@ static void df_panic_unhandled(const df_exception* error) {
    The class is in the low 4 bits of the first byte.
    0-7  single block of 32 << class bytes: byte length in the high 4 bits of byte 0 and in byte 1, char length in bytes 2-3, text at byte 4
    11   literal: char length and byte length, each as two 32-bit words (low first), at bytes 4 and 12; text at byte 20
+   12   C string (string(addr), string(->addr)): char length and byte length as for 11, the pointer to the C text at byte 20; the high bit
+        of its first byte (DF_STR_COWNED) says that the string owns the C text and frees it. Read-only: the first change makes it a
+        regular string (the first allocation becomes class 13), and an owned C text is freed then
    13   moved: pointer to the new location at byte 4
    15   block string: a root (df_sroot) and a chain of 4 KB blocks (df_sblock), for the strings above 4091 bytes
-   The text of classes 0-11 ends with a 0. A class 11 with the high bit of its first byte (DF_STR_HEAP) is on the heap; a literal of the
+   The text of classes 0-12 ends with a 0. A class 11 with the high bit of its first byte (DF_STR_HEAP) is on the heap; a literal of the
    program has it clear and is never freed. */
 
 #define DF_STR_LITERAL 11
+#define DF_STR_CSTR 12
+#define DF_STR_COWNED 0x80
 #define DF_STR_MOVED 13
 #define DF_STR_BLOCK 15
 #define DF_STR_SINGLE_MAX 4091
@@ -307,6 +320,13 @@ static uint64_t df_str_w64(const uint8_t* at) {
   return (uint64_t)w[0] | ((uint64_t)w[1] << 32);
 }
 
+/* the C text of a class 12 string */
+static char* df_cstr_text(const uint8_t* h) {
+  char* text;
+  memcpy(&text, h + 20, sizeof text);
+  return text;
+}
+
 static df_sv df_view(df_string s) {
   df_sv v = { "", 0 };
   const uint8_t* h = df_str_res(s);
@@ -315,6 +335,9 @@ static df_sv df_view(df_string s) {
   }
   if ((h[0] & 0x0F) == DF_STR_LITERAL) {
     v.p = (const char*)h + 20;
+    v.len = df_str_w64(h + 12);
+  } else if ((h[0] & 0x0F) == DF_STR_CSTR) {
+    v.p = df_cstr_text(h);
     v.len = df_str_w64(h + 12);
   } else if (df_is_block(h)) {
     v.len = ((const df_sroot*)h)->bytes;
@@ -358,7 +381,7 @@ static uint64_t df_str_chars(df_string s) {
   if (!h) {
     return 0;
   }
-  if ((h[0] & 0x0F) == DF_STR_LITERAL) {
+  if ((h[0] & 0x0F) == DF_STR_LITERAL || (h[0] & 0x0F) == DF_STR_CSTR) {
     return df_str_w64(h + 4);
   }
   if (df_is_block(h)) {
@@ -425,6 +448,40 @@ static df_string df_str_alloc(uint64_t bytes, uint64_t chars, char** text) {
   }
   (*text)[bytes] = 0;
   return (df_string)h;
+}
+
+/* string(addr) and string(->addr) (spec 4.4.6): a class 12 string on the C text p, a UTF-8 text ended by a 0. owned: the string frees p
+   with free() when it ends or changes. A null p, or an empty text, is "" (an owned empty text is freed at once) */
+static df_string df_str_from_c(void* p, bool owned) {
+  const char* text = (const char*)p;
+  if (!text || !text[0]) {
+    if (text && owned) {
+      free(p);
+    }
+    return NULL;
+  }
+  uint64_t bytes = strlen(text);
+  uint64_t chars = df_utf8_count(text, bytes);
+  DF_STR_TRACE_ALLOC();
+  uint8_t* h = (uint8_t*)df_alloc(32);
+  uint32_t w[4] = { (uint32_t)chars, (uint32_t)(chars >> 32), (uint32_t)bytes, (uint32_t)(bytes >> 32) };
+  h[0] = (uint8_t)(DF_STR_CSTR | (owned ? DF_STR_COWNED : 0));
+  h[1] = h[2] = h[3] = 0;
+  memcpy(h + 4, w, sizeof w);
+  memcpy(h + 20, &p, sizeof p);
+  return (df_string)h;
+}
+
+/* a class 12 string gives up its C text (freed when it owns it); the first allocation is then reused as a moved string (class 13) */
+static void df_cstr_release(uint8_t* h) {
+  if (h[0] & DF_STR_COWNED) {
+    free(df_cstr_text(h));
+  }
+  h[0] = DF_STR_CSTR;
+}
+
+static bool df_is_cstr(const uint8_t* t) {
+  return t && (t[0] & 0x0F) == DF_STR_CSTR;
 }
 
 /* ---- block strings (spec 4.4.4): the counts are per block, a code point never straddles two blocks ---- */
@@ -771,6 +828,9 @@ static void df_str_free(df_string s) {
   if ((h[0] & 0x0F) == DF_STR_LITERAL && !(h[0] & DF_STR_HEAP)) {
     return;
   }
+  if (df_is_cstr(h)) {
+    df_cstr_release(h);
+  }
   if (df_is_block(h)) {
     df_bs_free_blocks((df_sroot*)h);
   }
@@ -866,6 +926,9 @@ static uint64_t df_str_cap(const uint8_t* t) {
 }
 
 static char* df_str_text(uint8_t* t) {
+  if (df_is_cstr(t)) {
+    return df_cstr_text(t);
+  }
   return (char*)t + ((t[0] & 0x0F) <= 7 ? 4 : 20);
 }
 
@@ -926,6 +989,9 @@ static void df_str_become(df_string* slot, bool* owned, df_string value) {
   if (f != t) {
     df_str_free((df_string)t);
   } else {
+    if (df_is_cstr(f)) {
+      df_cstr_release(f);   /* a C string becomes a regular one */
+    }
     unsigned old = (f[0] & 0x0F) <= 7 ? (f[0] & 0x0F) : 0x0F;
     f[0] = (uint8_t)(DF_STR_MOVED | (old << 4));
   }
@@ -945,7 +1011,7 @@ static uint8_t* df_str_room(df_string* slot, bool* owned, uint64_t bytes, uint64
   if (t && keep) {
     memcpy(text, df_str_text(t), keep);
   }
-  if (!t || df_str_cap(t) == 0) {
+  if (!t || (df_str_cap(t) == 0 && !df_is_cstr(t))) {
     *slot = (df_string)n;   /* the empty string or a literal: the variable gets a string of its own */
     *owned = true;
     return n;
@@ -953,6 +1019,9 @@ static uint8_t* df_str_room(df_string* slot, bool* owned, uint64_t bytes, uint64
   if (f != t) {
     df_str_free((df_string)t);   /* moved already: the previous target was reached only through the first allocation */
   } else {
+    if (df_is_cstr(f)) {
+      df_cstr_release(f);   /* a C string becomes a regular one: its text was copied above */
+    }
     unsigned old = (f[0] & 0x0F) <= 7 ? (f[0] & 0x0F) : 0x0F;
     f[0] = (uint8_t)(DF_STR_MOVED | (old << 4));
   }
@@ -967,6 +1036,12 @@ static void df_str_clear(df_string* slot, bool* owned) {
   }
   if (df_is_block(t)) {
     df_bs_free_blocks((df_sroot*)t);   /* it stays a block string, empty */
+    return;
+  }
+  if (df_is_cstr(t)) {
+    df_cstr_release(t);   /* a C string becomes a regular one, empty: its 32-byte first allocation is a class 0 */
+    t[0] = 0;
+    df_str_set_lens(t, 0, 0);
     return;
   }
   if (df_str_cap(t) == 0) {
@@ -1025,7 +1100,7 @@ static void df_str_take(df_string* slot, bool* owned, df_string value) {
     return;
   }
   df_sv v = df_view(value);
-  if (!t || df_str_cap(t) == 0) {
+  if (!t || (df_str_cap(t) == 0 && !df_is_cstr(t))) {
     *slot = value;   /* the empty string or a literal: the new string becomes the variable's own */
     *owned = value != NULL;
     return;
@@ -1174,6 +1249,7 @@ static bool df_str_owner = true;
    ones above the mark it took when it started, so the temporaries of its callers stay */
 static df_string* df_tmps = NULL;
 static bool* df_tmp_objs = NULL;   /* the entry is an object (dropped), not a string (freed) */
+static void (**df_tmp_fns)(void*) = NULL;   /* the entry is a block ended by its own function (the arrays of a tuple) */
 static size_t df_tmp_top = 0;
 static size_t df_tmp_cap = 0;
 static void df_drop(void* obj);
@@ -1183,11 +1259,13 @@ static void df_tmp_push(void* p, bool object) {
     df_tmp_cap = df_tmp_cap ? df_tmp_cap * 2 : 64;
     df_tmps = (df_string*)realloc(df_tmps, df_tmp_cap * sizeof(df_string));
     df_tmp_objs = (bool*)realloc(df_tmp_objs, df_tmp_cap * sizeof(bool));
-    if (!df_tmps || !df_tmp_objs) {
+    df_tmp_fns = (void (**)(void*))realloc(df_tmp_fns, df_tmp_cap * sizeof(void (*)(void*)));
+    if (!df_tmps || !df_tmp_objs || !df_tmp_fns) {
       df_out_of_memory();
     }
   }
   df_tmp_objs[df_tmp_top] = object;
+  df_tmp_fns[df_tmp_top] = NULL;
   df_tmps[df_tmp_top++] = (df_string)p;
 }
 
@@ -1198,6 +1276,42 @@ static df_string df_tmp(df_string s) {
   return s;
 }
 
+/* ---- string? (spec 7.1): the variable owns its string ---- */
+
+/* a new string? that is only read: its string ends with the statement */
+static df_opt_string df_opt_str_tmp(df_opt_string o) {
+  o.val = df_tmp(o.val);
+  return o;
+}
+
+/* a copy that its receiver owns */
+static df_opt_string df_opt_str_dup(df_opt_string o) {
+  o.val = o.has ? df_str_dup(o.val) : NULL;
+  return o;
+}
+
+/* the variable takes value, which it owns; its old string ends */
+static void df_opt_str_set(df_opt_string* slot, df_opt_string value) {
+  df_string old = slot->val;
+  *slot = value;
+  if (old != value.val) {
+    df_str_free(old);
+  }
+}
+
+/* the end of a string? variable */
+static void df_opt_str_drop(df_opt_string* slot) {
+  df_str_free(slot->val);
+  slot->has = false;
+  slot->val = NULL;
+}
+
+/* string(addr) (spec 4.4.6): a null addr is null */
+static df_opt_string df_str_from_c_opt(void* p, bool owned) {
+  df_opt_string o = { p != NULL, df_str_from_c(p, owned) };
+  return o;
+}
+
 /* a new object only used in a statement (an argument to a borrowing parameter, a receiver): it ends when the statement ends */
 static void* df_tmpo(void* o) {
   if (o) {
@@ -1206,10 +1320,87 @@ static void* df_tmpo(void* o) {
   return o;
 }
 
+/* a value only used in a statement that has its own way to end (a tuple that holds arrays): a copy of it in a block, ended by fn */
+/* ---- function values (spec 13.3.5): { code, context }. A lambda without captures has no context; a context is counted: every holder
+   has a usage, and the last one runs the end code of the lambda (it ends what the lambda owns) and frees the context ---- */
+typedef struct df_lhead {
+  int64_t rc;
+  void (*end)(void*);
+  void* (*clone)(const void*);   /* f! (spec 13.3.3): a new context, with what the lambda owns cloned and one usage */
+} df_lhead;
+
+typedef struct {
+  void* code;
+  df_lhead* ctx;
+} df_fn;
+
+static df_fn df_fn_retain(df_fn f) {
+  if (f.ctx) {
+    f.ctx->rc++;
+  }
+  return f;
+}
+
+static void df_fn_release(df_fn f) {
+  if (f.ctx && --f.ctx->rc == 0) {
+    f.ctx->end(f.ctx);
+    free(f.ctx);
+  }
+}
+
+/* f! (spec 13.3.3): the same code with a context of its own; a lambda without captures is the same value */
+static df_fn df_fn_clone(df_fn f) {
+  if (f.ctx) {
+    f.ctx = (df_lhead*)f.ctx->clone(f.ctx);
+  }
+  return f;
+}
+
+/* a variable takes a function value it owns a usage of; the old one is released */
+static void df_fn_set(df_fn* slot, df_fn value) {
+  df_fn old = *slot;
+  *slot = value;
+  df_fn_release(old);
+}
+
+/* sort(lambda) (spec 6.6): the lambda the comparer of the sort calls; saved and restored around each sort, so a sort inside a comparer works */
+static df_fn df_sort_fn;
+/* the exception the lambda of a sort let out: the comparer keeps the first one and the sort finishes; it is raised after the sort */
+static df_exception* df_sort_err;
+
+static void df_fn_drop(df_fn* slot) {
+  df_fn_release(*slot);
+  slot->code = NULL;
+  slot->ctx = NULL;
+}
+
+static void* df_tmpf(void* p, void (*fn)(void*));
+
+static void df_fn_ctx_release(void* ctx) {
+  df_fn f = { NULL, (df_lhead*)ctx };
+  df_fn_release(f);
+}
+
+/* a new function value only used in this statement (called, or passed to a call): its usage ends with the statement */
+static df_fn df_fn_tmp(df_fn f) {
+  if (f.ctx) {
+    df_tmpf(f.ctx, df_fn_ctx_release);
+  }
+  return f;
+}
+
+static void* df_tmpf(void* p, void (*fn)(void*)) {
+  df_tmp_push(p, false);
+  df_tmp_fns[df_tmp_top - 1] = fn;
+  return p;
+}
+
 static void df_tmp_drop(size_t mark) {
   while (df_tmp_top > mark) {
     --df_tmp_top;
-    if (df_tmp_objs[df_tmp_top]) {
+    if (df_tmp_fns[df_tmp_top]) {
+      df_tmp_fns[df_tmp_top]((void*)df_tmps[df_tmp_top]);
+    } else if (df_tmp_objs[df_tmp_top]) {
       df_drop((void*)df_tmps[df_tmp_top]);
     } else {
       df_str_free(df_tmps[df_tmp_top]);
@@ -1321,7 +1512,7 @@ static void df_drop(void* obj) {
 /* reference counting (spec 12.7, the Rust Rc model): a counted variable holds the counting block of its object; the counting system owns the
    object and each holder is a user. The last release ends the object; the block stays while weak references need it. A null variable holds
    no block (NULL) and no usage */
-typedef struct df_rc { df_uns users; df_uns weaks; void* obj; } df_rc;
+typedef struct df_rc { df_uns users; df_uns weaks; void* obj; bool locked; int64_t timeout; uint8_t kind; } df_rc;   /* kind: 0 an object, 1 a value cell, 2 a string cell */
 
 static df_rc* df_rc_new(void* obj) {
   if (obj == NULL) {
@@ -1331,6 +1522,27 @@ static df_rc* df_rc_new(void* obj) {
   rc->users = 1;
   rc->weaks = 0;
   rc->obj = obj;
+  rc->locked = false;
+  rc->timeout = 0;
+  rc->kind = 0;
+  return rc;
+}
+
+/* a counted value (spec 12.7, @i32, &@i32): a cell on the heap with a copy of the value, shared by its users */
+static df_rc* df_rc_new_val(const void* value, size_t size) {
+  void* cell = df_alloc(size);
+  memcpy(cell, value, size);
+  df_rc* rc = df_rc_new(cell);
+  rc->kind = 1;
+  return rc;
+}
+
+/* a counted string (@string, &@string): the cell owns its string ('fresh' says whether it is already owned, otherwise a compact copy) */
+static df_rc* df_rc_new_str(df_string value, bool fresh) {
+  df_string* cell = (df_string*)df_alloc(sizeof(df_string));
+  *cell = fresh ? value : df_str_dup(value);
+  df_rc* rc = df_rc_new(cell);
+  rc->kind = 2;
   return rc;
 }
 
@@ -1348,14 +1560,62 @@ static void df_rc_release(df_rc* rc) {
     return;
   }
   void* obj = rc->obj;
+  uint8_t kind = rc->kind;
   rc->obj = NULL;
   if (rc->weaks == 0) {
     free(rc);
   }
-  df_drop(obj);
+  if (kind == 0) {
+    df_drop(obj);
+    return;
+  }
+  if (kind == 2) {
+    df_str_free(*(df_string*)obj);
+  }
+  free(obj);
 }
 
+/* the automatic lock of a copy out of a &@T value (spec 12.7): true when the cell can be read now (alive and not locked); with no
+   threads a busy lock fails at once, as in enforce */
+#define DF_RC_CAN_COPY(rc) ((rc) != NULL && (rc)->users > 0 && !(rc)->locked)
+
 #define DF_RC_OBJ(T, rc) ((T)((rc) != NULL ? (rc)->obj : NULL))
+
+/* a usage kept for one statement (a counted property read in an expression, spec 11.1.4): released with the temporaries of the statement */
+static void df_rc_release_tmp(void* rc) {
+  df_rc_release((df_rc*)rc);
+}
+
+/* the lock of a read/write counted object (spec 7.2.2, 12.7). @T() timeout ms sets the default wait of the object (0: tried once) */
+static df_rc* df_rc_timeout(df_rc* rc, int64_t ms) {
+  if (rc != NULL) {
+    rc->timeout = ms < 0 ? 0 : ms;
+  }
+  return rc;
+}
+
+/* enforce takes the lock, waiting at most ms (-1: the default of the object), and holds a usage with it so the object stays while it is
+   locked. There are no threads yet: a busy lock is held by this same thread, which cannot release it while it waits, so the wait would
+   always run out; it fails at once. With threads this becomes the queue of the waiters, a timed wait and an atomic hand-over */
+static bool df_rc_lock(df_rc* rc, int64_t ms) {
+  (void)ms;
+  if (rc == NULL || rc->users == 0 || rc->locked) {
+    return false;
+  }
+  rc->locked = true;
+  rc->users++;
+  return true;
+}
+
+static void df_rc_release(df_rc* rc);
+
+static void df_rc_unlock(df_rc* rc) {
+  rc->locked = false;
+  df_rc_release(rc);
+}
+
+/* a write through a &@T needs its lock (spec 12.7) */
+#define DF_RC_WRITABLE(rc) ((rc) == NULL || (rc)->locked)
 
 /* weak references (spec 12.7): they hold the counting block, not a usage; the object is gone when its user count is 0 */
 static df_rc* df_rc_weak(df_rc* rc) {
@@ -1856,6 +2116,190 @@ static void df_console_clear(void) {
   fputs("\x1b[H\x1b[2J", stdout);
   fflush(stdout);
 #endif
+}
+
+/* Console.readKey (stdlib 2): as Console.read, and the keys without a character it can name: the arrows give the arrow characters
+   (KEY_LEFT U+2190, KEY_UP U+2191, KEY_RIGHT U+2192, KEY_DOWN U+2193), Backspace '\b' (also the DEL that terminals send), Esc 0x1B,
+   Tab '\t', Enter '\n'; function keys and the others -1 (null). Not a terminal: the next character of the input, as read */
+static int64_t df_arrow_key(int code) {
+  switch (code) {
+    case 'A': return 0x2191;
+    case 'B': return 0x2193;
+    case 'C': return 0x2192;
+    case 'D': return 0x2190;
+    default: return -1;
+  }
+}
+
+static int64_t df_console_read_key(void) {
+  fflush(stdout);
+#ifdef _WIN32
+  if (_isatty(_fileno(stdin))) {
+    if (!_kbhit()) {
+      return -1;
+    }
+    wint_t key = _getwch();
+    if (key == 0 || key == 0xE0) {
+      switch (_getwch()) {     /* the second code of a key without a character */
+        case 72: return 0x2191;
+        case 80: return 0x2193;
+        case 75: return 0x2190;
+        case 77: return 0x2192;
+        default: return -1;
+      }
+    }
+    if (key >= 0xD800 && key <= 0xDBFF) {
+      wint_t low = _getwch();
+      return 0x10000 + (((int64_t)key - 0xD800) << 10) + ((int64_t)low - 0xDC00);
+    }
+    return key == '\r' ? '\n' : (int64_t)key;
+  }
+#else
+  if (isatty(STDIN_FILENO)) {
+    df_tty_enter_raw();
+    unsigned char first;
+    if (read(STDIN_FILENO, &first, 1) != 1) {
+      return -1;
+    }
+    if (first == 0x1B) {
+      /* an escape sequence arrives in one piece: ESC [ A ... or ESC O A ...; Esc alone is its character */
+      unsigned char next;
+      if (read(STDIN_FILENO, &next, 1) != 1) {
+        return 0x1B;
+      }
+      if (next == '[' || next == 'O') {
+        unsigned char part = 0;
+        int count = 0;
+        while (read(STDIN_FILENO, &part, 1) == 1) {
+          count++;
+          if (part >= 0x40 && part <= 0x7E) {
+            break;
+          }
+        }
+        return count == 1 ? df_arrow_key(part) : -1;   /* ESC [ 1 ; 5 A (with a modifier) and the others: null */
+      }
+      return -1;
+    }
+    if (first == 0x7F) {
+      return '\b';   /* Backspace sends DEL on most terminals */
+    }
+    if (first == '\r') {
+      return '\n';
+    }
+    if (first < 0x80) {
+      return first;
+    }
+    int extra = (first & 0xE0) == 0xC0 ? 1 : (first & 0xF0) == 0xE0 ? 2 : (first & 0xF8) == 0xF0 ? 3 : 0;
+    int64_t code = first & (0x3F >> extra);
+    for (int index = 0; index < extra; index++) {
+      unsigned char part;
+      if (read(STDIN_FILENO, &part, 1) != 1) {
+        return -1;
+      }
+      code = (code << 6) | (part & 0x3F);
+    }
+    return code;
+  }
+#endif
+  int first = getc(stdin);
+  if (first == EOF) {
+    return -1;
+  }
+  return (int64_t)df_decode_utf8(first, df_read_stdin_byte);
+}
+
+/* Console.moveCursor (stdlib 2): x is the column, y the row, (0, 0) the top-left corner of the window (as after clear); negative
+   values count as 0; nothing when the output is not a console */
+static void df_console_move_cursor(int32_t x, int32_t y) {
+  fflush(stdout);
+  if (x < 0) {
+    x = 0;
+  }
+  if (y < 0) {
+    y = 0;
+  }
+#ifdef _WIN32
+  HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+  CONSOLE_SCREEN_BUFFER_INFO info;
+  if (!GetConsoleScreenBufferInfo(out, &info)) {
+    return;   // not a console (redirected output)
+  }
+  COORD at = { (SHORT)(info.srWindow.Left + (x > 32000 ? 32000 : x)), (SHORT)(info.srWindow.Top + (y > 32000 ? 32000 : y)) };
+  SetConsoleCursorPosition(out, at);
+#else
+  if (!isatty(STDOUT_FILENO)) {
+    return;
+  }
+  printf("\x1b[%d;%dH", (int)y + 1, (int)x + 1);
+  fflush(stdout);
+#endif
+}
+
+/* Console.setColors (stdlib 2): the colours of the text and of the background from now on; 0-15 are Console.Color (the 8 ANSI colours,
+   then their bright versions), -1 the default colour of the terminal. Escape sequences (Windows: after switching the console to them, as
+   clear; an old console: SetConsoleTextAttribute); nothing when the output is not a console. The default colours come back when the
+   program ends */
+static bool df_colors_changed = false;
+#ifdef _WIN32
+static WORD df_colors_original = 0;
+static bool df_colors_legacy = false;
+static WORD df_colors_legacy_now = 0;
+#endif
+
+static void df_console_reset_colors(void) {
+  fflush(stdout);
+#ifdef _WIN32
+  if (df_colors_legacy) {
+    SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), df_colors_original);
+    return;
+  }
+#endif
+  fputs("\x1b[0m", stdout);
+  fflush(stdout);
+}
+
+static void df_console_set_colors(int fg, int bg) {
+  fflush(stdout);
+#ifdef _WIN32
+  HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+  DWORD mode;
+  if (!GetConsoleMode(out, &mode)) {
+    return;   // not a console (redirected output)
+  }
+  if (!df_colors_changed) {
+    CONSOLE_SCREEN_BUFFER_INFO info;
+    if (GetConsoleScreenBufferInfo(out, &info)) {
+      df_colors_original = info.wAttributes;
+      df_colors_legacy_now = info.wAttributes;
+    }
+    df_colors_legacy = !(mode & ENABLE_VIRTUAL_TERMINAL_PROCESSING) && !SetConsoleMode(out, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+    df_colors_changed = true;
+    atexit(df_console_reset_colors);
+  }
+  if (df_colors_legacy) {
+    /* the console attributes have blue in bit 0 and red in bit 2: the ANSI order has them the other way round */
+    #define DF_WIN_COLOR(c) ((WORD)(((c) & 2) | (((c) & 1) << 2) | (((c) & 4) >> 2) | ((c) & 8)))
+    WORD now = df_colors_legacy_now;
+    WORD front = fg < 0 ? (WORD)(df_colors_original & 0x0F) : DF_WIN_COLOR(fg);
+    WORD back = bg < 0 ? (WORD)(df_colors_original & 0xF0) : (WORD)(DF_WIN_COLOR(bg) << 4);
+    now = (WORD)((now & ~0xFF) | front | back);
+    df_colors_legacy_now = now;
+    SetConsoleTextAttribute(out, now);
+    return;
+  }
+#else
+  if (!isatty(STDOUT_FILENO)) {
+    return;
+  }
+  if (!df_colors_changed) {
+    df_colors_changed = true;
+    atexit(df_console_reset_colors);
+  }
+#endif
+  int front = fg < 0 ? 39 : fg < 8 ? 30 + fg : 90 + (fg - 8);
+  int back = bg < 0 ? 49 : bg < 8 ? 40 + bg : 100 + (bg - 8);
+  printf("\x1b[%d;%dm", front, back);
+  fflush(stdout);
 }
 
 /* Root.exit (stdlib 1): ends the program at once; the output is flushed, atEnd blocks and destructors do not run */

@@ -1,5 +1,5 @@
 **Standard library**
-Version 0.0.10 2026/10/25 by CPU
+Version 0.0.11 2026/11/06 by CPU
 - Type members live on the types: `d.year`, `d.addDays(3)`, `s.split(",")`, `c.isDigit`, `list.sort()`.
 
 # 1 Program
@@ -18,13 +18,40 @@ Access to stdinput and stdoutput and stderror
 | `logError(any value)` | `Root.Console.logError("Hello")` | Converts the object to string if needed, prints on stderr appending a newline |
 | `print(any value)` | `Root.Console.print("Hello")` | Converts the object to string if needed, prints on stdout |
 | `char? read()` | `char? c = Root.Console.read()` | Does not wait: returns the character of a key already pressed, or `null` when no key is waiting. No echo and no Enter needed. Details below |
+| `char? readKey()` | `char? k = Root.Console.readKey()` | As `read()`, and it also gives the keys without a character that a game needs: the arrows, Esc, Backspace, Tab. Compare them with the `KEY_` constants. Details below |
 | `string readLine()` | `string line = Root.Console.readLine()` | Reads a line from stdin and returns it, the line is not stripped of the newline character, if any. Returns "" at end of input |
 | `clear()` | `Root.Console.clear()` | Clears the console and puts the cursor at the top-left corner, so the program can write a full "screen" again. Details below |
+| `moveCursor(i32 x, i32 y)` | `Root.Console.moveCursor(10, 2)` | Puts the cursor at column `x`, row `y`; the next print writes there. (0, 0) is the top-left corner. Details below |
+| `setColors(Color? text, Color? background)` | `Root.Console.setColors(Root.Console.Color.Yellow, Root.Console.Color.Black)` | The colours of what is printed from now on; `null` is the default colour of the terminal. Details below |
 
 - `read()`:
-  - Keys without a character (arrows, function keys) give `null`. Enter gives `'\n'` on every OS. A full input system (all the keys, key up and down) is a separate library, later.
+  - Keys without a character (arrows, function keys) give `null`; `readKey()` gives the arrows and a few more. Enter gives `'\n'` on every OS. A full input system (all the keys, key up and down) is a separate library, later.
   - When the input is not a console (redirected from a file or a pipe), `read()` returns the next character of the input, and `null` at the end of the input.
   - `readLine()` waits for Enter and echoes the text as usual, also after calls of `read()`.
+- `readKey()`:
+  - Does not wait, no echo and no Enter, as `read()`; `null` when no key is waiting.
+  - Letters, digits and symbols give their character, as `read()`. The keys without a character give these constants of `Console`, so the code never writes the characters itself:
+
+    | Key | Constant | Value |
+    |---|---|---|
+    | ← ↑ → ↓ | `KEY_LEFT`, `KEY_UP`, `KEY_RIGHT`, `KEY_DOWN` | the arrow characters `'←'` `'↑'` `'→'` `'↓'` (U+2190 to U+2193) |
+    | Enter | `KEY_ENTER` | `'\n'` |
+    | Esc | `KEY_ESC` | `'\u001B'` |
+    | Backspace | `KEY_BACKSPACE` | `'\b'` |
+    | Tab | `KEY_TAB` | `'\t'` |
+
+  - Function keys and the other keys without a character give `null`.
+  - The constants are `char` values: `if key == Root.Console.KEY_LEFT then x--`; printing one shows its character.
+  - When the input is not a console, `readKey()` returns the next character of the input, as `read()`.
+- `moveCursor(x, y)`:
+  - `x` is the column and `y` the row, counted from 0; (0, 0) is the top-left corner of the window, where `clear()` leaves the cursor. Negative values count as 0.
+  - A game can draw only what changes instead of clearing the screen every frame (no flicker).
+  - Does nothing when the output is not a console.
+- `setColors(text, background)`:
+  - `Console.Color` has 16 colours: `Black`, `Red`, `Green`, `Yellow`, `Blue`, `Magenta`, `Cyan`, `White`, `Gray`, `BrightRed`, `BrightGreen`, `BrightYellow`, `BrightBlue`, `BrightMagenta`, `BrightCyan`, `BrightWhite`. They exist on every console (Windows, Linux, macOS); the exact shade depends on the terminal.
+  - `null` is the default colour of the terminal for that part: `setColors(null, null)` goes back to the default colours. The default colours also come back when the program ends.
+  - The colours stay until the next call; `clear()` fills the screen with the background colour of the moment.
+  - Does nothing when the output is not a console.
 - `clear()`:
   - Works the same on every OS: the runtime uses the method of the OS (ANSI sequences on Linux and macOS, the console API on Windows), so the program needs no `##if`.
   - Does nothing when the output is not a console (redirected to a file or a pipe) or on a target without a console.

@@ -7,8 +7,22 @@ namespace dfcompiler;
 // or the result of a function of the program) or a copy (any other tuple), and the arrays end with the tuple or when it is replaced.
 // A return gives the caller its own copy; a tuple inside a tuple follows the same rules. Not covered: parameters (they borrow),
 // destructuring and collections of such tuples (an error).
+// Objects follow the same rules as in a struct (spec 3.2, 11.1.5.3): the tuple owns them, a copy clones them, a new tuple is taken as it
+// is, and they end with the tuple; a counted part (@T) is one more user on a copy and releases its usage at the end.
 public sealed partial class CodeGen {
-  bool TupleHoldsArrays(string type) => IsTuple(type) && TupleElems(type).Any(elem => IsArr(elem.Type) || TupleHoldsArrays(elem.Type));
+  bool TupleHoldsArrays(string type) => IsTuple(type) && TupleElems(type).Any(elem => IsTupleOwnedPart(elem.Type) || TupleHoldsArrays(elem.Type));
+
+  // the parts a tuple owns: arrays, function values, objects (spec 3.2) and counted usages (spec 12.7)
+  bool IsTupleOwnedPart(string type) => IsArr(type) || IsFunType(type) || IsClass(type) || IsCountedType(type);
+
+  // the end of one part of a tuple
+  string TuplePartDrop(string type, string code) =>
+    IsArr(type) ? $"{ArrDropHelper(type)}({code}); {code} = {ZeroValue(type)}; "
+    : IsFunType(type) ? $"df_fn_drop(&{code}); "
+    : IsCountedType(type) ? $"df_rc_release({code}); {code} = NULL; "
+    : IsClass(type) ? $"if ({code} != NULL) {{ void* o = (void*){code}; {code} = NULL; df_drop(o); }} "
+    : TupleHoldsArrays(type) ? TupleDropCode(type, code)
+    : "";
 
   // the value a tuple owner takes: its arrays are its own (also those of the tuples inside it)
   string TupleOwnedCode(Node valueNode, Expr value, string type, Node at) {
@@ -34,6 +48,16 @@ public sealed partial class CodeGen {
       Node? item = valueNode is { Kind: "Tuple" } && index < valueNode.Children.Count ? TupleItemNode(valueNode.Children[index]) : null;
       if (IsArr(elems[index].Type) && !(item != null && GivesOwnArray(item))) {
         copies += $"{code}.e{index} = {ArrCloneHelper(elems[index].Type, at)}({code}.e{index}); ";
+      } else if (IsFunType(elems[index].Type) && !(item is { Kind: "Lambda" or "Call" or "Copy" or "Null" })) {
+        copies += $"{code}.e{index} = df_fn_retain({code}.e{index}); ";   // one more usage (spec 13.3.5)
+      } else if (IsCountedType(elems[index].Type) && !(item is { Kind: "Call" or "Null" or "Gift" })) {
+        copies += $"{code}.e{index} = df_rc_use({code}.e{index}); ";   // one more user (spec 12.7)
+      } else if (IsClass(elems[index].Type) && !(item is { Kind: "Call" or "Copy" or "Null" or "Gift" })) {
+        if (NotClonableReason(ObjInfo(elems[index].Type)) is string reason) {
+          throw Error($"a copy of a tuple clones its objects: {DisplayName(elems[index].Type)} cannot be cloned, {reason}; give the tuple a new object or move it with -> (spec 3.2)", at);
+        }
+        cloneUsed = true;
+        copies += $"{code}.e{index} = {CloneValue($"{code}.e{index}", elems[index].Type, at)}; ";   // a copy clones the object (spec 3.2)
       } else if (TupleHoldsArrays(elems[index].Type)) {
         copies += TupleCopies(item, elems[index].Type, $"{code}.e{index}", at);   // a tuple inside the tuple
       }
@@ -48,11 +72,7 @@ public sealed partial class CodeGen {
     var elems = TupleElems(type);
     string drops = "";
     for (int index = 0; index < elems.Count; index++) {
-      if (IsArr(elems[index].Type)) {
-        drops += $"{ArrDropHelper(elems[index].Type)}({code}.e{index}); {code}.e{index} = {ZeroValue(elems[index].Type)}; ";
-      } else if (TupleHoldsArrays(elems[index].Type)) {
-        drops += TupleDropCode(elems[index].Type, $"{code}.e{index}");   // a tuple inside the tuple
-      }
+      drops += TuplePartDrop(elems[index].Type, $"{code}.e{index}");   // a tuple inside the tuple ends its own parts
     }
     return drops;
   }
@@ -148,18 +168,19 @@ public sealed partial class CodeGen {
       return $"{ArrDropHelper(e.Type)}({e.Code})";
     }
     bool fromProgram = CalleesOf(call) is { Count: > 0 } callees && callees.All(f => f.Node.Line < LibraryLine);
-    if (!fromProgram || !(TupleHoldsArrays(e.Type) || IsMulti(e.Type) && TupleElems(e.Type).Any(elem => IsArr(elem.Type) || TupleHoldsArrays(elem.Type)))) {
+    if (!fromProgram || !(TupleHoldsArrays(e.Type) || IsMulti(e.Type) && TupleElems(e.Type).Any(elem => IsTupleOwnedPart(elem.Type) || TupleHoldsArrays(elem.Type)))) {
       return null;
     }
     string held = NewTemp();
     string drops = "";
     var elems = TupleElems(e.Type);
+    var resultCallees = CalleesOf(call);
     for (int index = 0; index < elems.Count; index++) {
-      if (IsArr(elems[index].Type)) {
-        drops += $"{ArrDropHelper(elems[index].Type)}({held}.e{index}); ";
-      } else if (TupleHoldsArrays(elems[index].Type)) {
-        drops += TupleDropCode(elems[index].Type, $"{held}.e{index}");
+      // several results: an object part ends only when the function gives it (->T); a plain one is a lend (spec 13.1.1)
+      if (IsMulti(e.Type) && IsClass(elems[index].Type) && !resultCallees.All(f => f.Gives.Contains(index))) {
+        continue;
       }
+      drops += TuplePartDrop(elems[index].Type, $"{held}.e{index}");
     }
     return $"({{ {CType(e.Type)} {held} = {e.Code}; {drops}}})";
   }

@@ -1,0 +1,1 @@
+variadic_named.df(2): error: the variadic parameter 'items...' cannot be named in a call: give its items after the other arguments (spec 13.4)

@@ -241,6 +241,9 @@ public sealed partial class CodeGen {
       if (typeNode.Text == "var" && init?.Children[0] is { Kind: "Index" } ranged && ranged.Children.Count > 1 && ranged.Children[1].Kind == "Range") {
         return "var";   // var part = c[a..b]: a view (spec 6.5)
       }
+      if (typeNode.Text == "var" && init?.Children[0] is { Kind: "Copy" }) {
+        return "var";   // var h2 = h!, var part = c[a..b]!: a new object, the variable owns it (spec 12.6)
+      }
       if (typeNode.Text == "var" && init?.Children[0] is { Kind: "MapLit" }) {
         return "var";   // var ages = ["one": 1]: a new map
       }
@@ -267,7 +270,7 @@ public sealed partial class CodeGen {
   }
 
   static Node DropNode(string name, Node at) {
-    var finalize = Synthetic("Finalize", at).Add(Synthetic("Name", at, name));
+    var finalize = Synthetic("Finalize", at, "implicit").Add(Synthetic("Name", at, name));   // added by the compiler, not written
     var statement = Synthetic("ExprStmt", at).Add(finalize);
     return Synthetic("AtEnd", at, "drop").Add(Synthetic("Block", at).Add(statement));
   }
@@ -297,7 +300,12 @@ public sealed partial class CodeGen {
       drops.Add(TupleDropNode(statement.Text!, statement));
     }
     foreach (var target in statements.Where(statement => statement.Kind == "MultiAssign")
-               .SelectMany(statement => statement.Children[0].Children).Where(target => target.Kind == "Decl" && IsStringDecl(target))) {
+               .SelectMany(statement => statement.Children[0].Children).Where(target => target.Kind == "Decl" && IsCountedDecl(target))) {
+      owners.Add(target);   // @Dog a, @Dog b = x, y: each usage is released with the scope (spec 12.7)
+      drops.Add(DoneDropNode(target.Text!, target));
+    }
+    foreach (var target in statements.Where(statement => statement.Kind == "MultiAssign")
+               .SelectMany(statement => statement.Children[0].Children).Where(target => target.Kind == "Decl" && (IsStringDecl(target) || IsFunDecl(target)))) {
       owners.Add(target);
       drops.Add(StrDropNode(target.Text!, target));
     }
@@ -529,6 +537,7 @@ public sealed partial class CodeGen {
       string item = IsClass(elem) ? "if (a.p[i] != NULL) { df_drop((void*)a.p[i]); }"
         : elem == "string" ? "df_str_free(a.p[i]);"
         : elem == "string?" ? "df_str_free(a.p[i].val);"
+        : IsFunType(elem) ? "df_fn_release(a.p[i]);"
         : IsArr(elem) ? $"{ArrDropHelper(elem)}(a.p[i]);" : "";
       string arrType = ArrCType(elem);
       classCode.Append($"static void {name}({arrType} a) {{\n");
@@ -590,8 +599,12 @@ public sealed partial class CodeGen {
   // ->x and ->a.c
   Expr GiftExpr(Node n, Scope scope) {
     var operand = n.Children[0];
+    CheckUnrestrictedWrite(operand, scope);   // ->field changes the object (spec 1.6.2)
     if (operand.Kind == "Name" && operand.Text == "this") {
       throw Error("an object cannot give away its own ownership: ->this", n);
+    }
+    if (operand.Kind is "Name" or "Member" && !LibraryCode && CountedRef(operand, scope) is CountedRefInfo counted) {
+      throw PlainGiftOfCounted(counted, operand, n);   // ->rc into a plain receiver (spec 12.7)
     }
     if (operand.Kind == "Index") {
       return GiftIndex(n, operand, scope);
@@ -615,6 +628,9 @@ public sealed partial class CodeGen {
     }
     var target = LValue(operand, scope);
     CheckMovable(operand, target, scope);
+    if (operand.Kind == "Name" && target.Variable != null && !LibraryCode) {
+      pendingMoves.Add((target.Variable, $"moved away with ->{operand.Text}"));   // a later use is a compile error (spec 12.4)
+    }
     string slot = NewTemp();
     string taken = NewTemp();
     string code = $"({{ {CType(value.Type)}* {slot} = &({target.Code}); {CType(value.Type)} {taken} = *{slot}; *{slot} = NULL; {taken}; }})";
@@ -649,6 +665,7 @@ public sealed partial class CodeGen {
 
   // x is atEnd.
   void EmitFinalize(Node finalize, StringBuilder sb, Scope scope, string pad) {
+    CheckUnrestrictedWrite(finalize.Children[0], scope);   // field is atEnd. (spec 1.6.2)
     var subject = finalize.Children[0];
     if (CountedRef(subject, scope) is CountedRefInfo counted) {
       throw Error($"'{counted.Name}' is counted: release its usage with '{counted.Name} is done.'; 'is atEnd.' is only for plain owners (spec 12.4)", finalize);
@@ -657,6 +674,9 @@ public sealed partial class CodeGen {
       throw Error($"'{weak.Name}' is a weak reference: release it with '{weak.Name} is done.'; 'is atEnd.' is only for plain owners (spec 12.4)", finalize);
     }
     var target = LValue(subject, scope);
+    if (finalize.Text == "implicit" && (!IsClass(target.Type) || target.Variable is { Own: false })) {
+      return;   // the end of a var that turned out not to own an object (var s = t! of a string): nothing to end
+    }
     if (!IsClass(target.Type)) {
       throw Error("'is atEnd.' ends the life of an object: this is " + target.Type, finalize);
     }
@@ -731,8 +751,9 @@ public sealed partial class CodeGen {
   // @T x = @e and var x = @e are @T x = e with the marker kept on the Init (Text "marked"), so every pass sees a counted declaration
   // as a Decl with a "Counted" child (local variables and fields). Multiple assignments are not built yet.
   void LowerCountedDecls(Node node) {
-    if (node.Kind == "MultiAssign" && node.Children[0].Children.Any(target => target.Children.Any(child => child.Kind == "Counted"))) {
-      throw NotSupported("Counted variables in a multiple assignment", node);
+    if (node.Kind == "MultiAssign" && node.Children[0].Children.Any(target => target.Children.Any(child => child.Kind == "Counted"))
+        && node.Children[1].Children.Count != node.Children[0].Children.Count && node.Children[1].Children.Count != 1) {
+      throw NotSupported("Counted variables from several return values (a, b = f())", node);
     }
     if (node.Kind == "Decl") {
       var init = node.Children.FirstOrDefault(child => child.Kind == "Init");
@@ -782,9 +803,12 @@ public sealed partial class CodeGen {
   static bool IsCountedType(string type) => type.Length > 1 && type[0] == '@';
   static string CountedBase(string type) => type[1..];
 
-  string CountedTypeOf(string type, Node at) {
+  string CountedTypeOf(string type, Node at, bool values = false) {
+    if (values && IsCountedValueType(type)) {
+      return "@" + type;   // @i32, @string: a counted value (spec 12.7)
+    }
     if (!IsClass(type)) {
-      throw NotSupported($"Counted values of type {type} (only objects are counted for now, spec 12.7)", at);
+      throw NotSupported(IsCountedValueType(type) ? $"Counted values (@{type}) as fields, results and items (only variables and parameters for now, spec 12.7)" : $"Counted values of type {type} (spec 12.7)", at);
     }
     return "@" + type;
   }
@@ -799,15 +823,27 @@ public sealed partial class CodeGen {
     while (value.Kind == "Paren") {
       value = value.Children[0];
     }
+    if (value.Kind == "RawField" && currentClass != null && FindField(currentClass, value.Text!) is { IsCounted: true } storage) {
+      return new CountedRefInfo($"self->{storage.CName}", storage.Type, storage.Name, null, storage);   // field in the accessors of a counted property
+    }
     if (value.Kind == "Name") {
       var variable = scope.Find(value.Text!);
       if (variable != null) {
         return variable.IsCounted ? new CountedRefInfo(variable.CName, variable.Type, value.Text!, variable, null) : null;
       }
-      if (currentClass is { IsTrait: false } && scope.Find("this") != null && FindField(currentClass, value.Text!) is { IsCounted: true, IsStatic: false } own) {
+      if (currentClass is { IsTrait: false } && scope.Find("this") != null && FindField(currentClass, value.Text!) is { IsCounted: true, IsStatic: false, HasAccessors: false } own) {
         return new CountedRefInfo($"self->{own.CName}", own.Type, value.Text!, null, own);
       }
+      if (currentClass is { IsTrait: false } && FindField(currentClass, value.Text!) is { IsCounted: true, IsStatic: true } ownStatic) {
+        return new CountedRefInfo(ownStatic.CName, ownStatic.Type, value.Text!, null, ownStatic);   // a static counted field of the class (spec 12.7)
+      }
       return null;
+    }
+    // Kennel.shared: a static counted field
+    if (value is { Kind: "Member", Children: [{ Kind: "Name" } owner] } && scope.Find(owner.Text!) == null && classes.TryGetValue(owner.Text!, out var named)
+        && FindField(named, value.Text!) is { IsCounted: true, IsStatic: true } shared) {
+      CheckAccess(shared.Visibility, shared.Owner, value.Text!, value);
+      return new CountedRefInfo(shared.CName, shared.Type, value.Text!, null, shared);
     }
     if (value.Kind == "Member" && CountedFieldOf(value, scope) is FieldInfo field) {
       var stored = ObjectField(ExprOf(value.Children[0], scope), value.Text!, value, true);
@@ -830,11 +866,20 @@ public sealed partial class CodeGen {
     if (!IsClass(owner.Type) || ObjInfo(owner.Type).IsTrait) {
       return null;
     }
-    return FindField(ObjInfo(owner.Type), member.Text) is { IsCounted: true, IsStatic: false } field ? field : null;
+    return FindField(ObjInfo(owner.Type), member.Text) is { IsCounted: true, IsStatic: false, HasAccessors: false } field ? field : null;
   }
 
   // reading a counted field gives its object
-  Expr CountedFieldRead(Expr stored, FieldInfo field) => new($"DF_RC_OBJ({CType(field.Type)}, {stored.Code})", field.Type);
+  Expr CountedFieldRead(Expr stored, FieldInfo field, Node? at = null) {
+    if (IsCountedValueType(field.Type)) {
+      // a counted value field: the value of its cell; a &@string is read through a local that shares it, inside enforce (spec 12.7)
+      if (BaseOf(field.Type) == "string" && field.IsWritable && !typingOnly) {
+        throw Error($"'{field.Name}' is a &@string: read it through a variable that shares it (&@string s = ...), inside enforce s {{ }} (spec 12.7)", at ?? field.At);
+      }
+      return new Expr(CellRead(stored.Code, field.Type), field.Type);
+    }
+    return new($"DF_RC_OBJ({CType(field.Type)}, {stored.Code})", field.Type);
+  }
 
   // return value in a function that returns @T: a counted variable gives its usage (no count change, it is null afterwards, so the end of the
   // scope releases nothing), a counted field adds a user, anything else is taken as by a counted variable (a new object, @plain, null,
@@ -842,6 +887,9 @@ public sealed partial class CodeGen {
   string CountedReturnCode(Node value, Scope scope, Node at) {
     string type = CountedBase(currentRet!);
     bool writable = currentFun?.RetWritable == true;   // fun &@T: only read/write usages go out (spec 12.7)
+    if (IsCountedValueType(type)) {
+      return CountedValueReturn(value, scope, type, writable, at);
+    }
     if (CountedRef(value, scope) is CountedRefInfo counted) {
       if (!IsSubtype(counted.Type, type)) {
         throw Error($"'{counted.Name}' is a {counted.Type}, not a {type}", at);
@@ -850,6 +898,23 @@ public sealed partial class CodeGen {
       return counted.Variable != null ? TakeUsage(counted.Variable) : $"df_rc_use({counted.Code})";
     }
     return CountedValue(value, scope, type, false, at, writable);
+  }
+
+  // a counted property read by a counted receiver: the usage its R: gives, or null when value is not one
+  string? CountedPropertyUsage(Node value, Scope scope, string type, bool writable, Node at) {
+    if (value.Kind is not ("Member" or "Name") || PropertyTarget(value, scope) is not var (_, property) || !property.IsCounted) {
+      return null;
+    }
+    wantCountedUsage = true;
+    var got = ExprOf(value, scope);
+    wantCountedUsage = false;
+    if (!IsCountedType(got.Type) || !IsSubtype(CountedBase(got.Type), type) && BaseOf(CountedBase(got.Type)) != BaseOf(type)) {
+      throw Error($"'{property.Name}' gives a counted {CountedBase(got.Type)}, not a {type}", at);
+    }
+    if (writable && !property.IsWritable) {
+      throw Error($"'{property.Name}' gives a read-only @{CountedBase(got.Type)}: a read/write &@{type} needs a &@T property (spec 12.7)", at);
+    }
+    return got.Code;
   }
 
   // a variable, parameter or field declared &@T or &%T: read/write, its object has a lock (spec 12.7)
@@ -881,6 +946,9 @@ public sealed partial class CodeGen {
   // x.name = v through a &@T x, or through the read/write usage of a &%T in its enforce: the lock must be held, otherwise the write raises
   // WritingOnRefCountWithoutLockingException (spec 12.7). Writes made by the methods of the object are not checked yet
   string? WriteLockCheck(Node target, Scope scope) {
+    if (!LibraryCode && target.Kind == "Name" && scope.Find(target.Text!) is VarInfo cell && IsCountedValueVar(cell) && cell.IsWritable) {
+      return $"if (!DF_RC_WRITABLE({cell.CName})) {{ df_raise(&df_desc_WritingOnRefCountWithoutLockingException, {fn!.NameConst}); {RaiseJump} }} ";   // &@i32 n (spec 12.7)
+    }
     if (LibraryCode || target.Kind is not ("Member" or "Index")) {
       return null;
     }
@@ -894,10 +962,19 @@ public sealed partial class CodeGen {
     }
   }
 
+  // a method of a class of the program that can write its object: not unrestricted and not static (spec 12.7)
+  bool MethodNeedsLock(Expr receiver, string name) =>
+    !LibraryCode && IsClass(receiver.Type) && classes.TryGetValue(receiver.Type, out var cls) && cls.Node.Line < LibraryLine
+      && LookupMethods(ObjInfo(receiver.Type), name).Any(f => !f.IsUnrestricted && !f.IsStatic);
+
+  // the same for the analysis of the exceptions, which knows only the name: some method of the program with that name can write its object
+  bool FlowMethodNeedsLock(string name) =>
+    funs.Any(entry => entry.Key.EndsWith("." + name) && entry.Value.Any(f => f.Class is { IsTrait: false } && f.Class.Node.Line < LibraryLine && !f.IsUnrestricted && !f.IsStatic));
+
   // the same seen by the analysis of the exceptions (CodeGen.Leaks.cs): a write whose target goes through a name or a field declared
   // &@T or &%T
   bool FlowWritesThroughLock(Node target, FunSig? fun) {
-    if (target.Kind is not ("Member" or "Index")) {
+    if (target.Kind is not ("Member" or "Index" or "Name")) {
       return false;
     }
     bool WritableField(string name) =>
@@ -919,6 +996,12 @@ public sealed partial class CodeGen {
       Walk(fun.Node);
       return found || fun.Class != null && WritableField(name);
     }
+    if (target.Kind == "Name") {
+      return WritableName(target.Text!) || WritableField(target.Text!);   // &@i32 n = ..., a &@i32 field by its bare name (spec 12.7)
+    }
+    if (target.Kind == "Member" && target.Text != null && WritableField(target.Text)) {
+      return true;   // k.hits += 1 on a &@i32 field
+    }
     for (var node = target.Children[0]; ; node = node.Children[0]) {
       if (node.Kind == "Name" && WritableName(node.Text!) || node.Kind == "Member" && node.Text != null && WritableField(node.Text)) {
         return true;
@@ -932,27 +1015,86 @@ public sealed partial class CodeGen {
   // a read/write target takes only read/write sources: a read-only usage cannot become a writing one (spec 12.7)
   void CheckWritableSource(CountedRefInfo source, bool writable, Node at) {
     if (writable && !IsWritableRef(source)) {
-      throw Error($"'{source.Name}' is read-only (@{source.Type}): only a &@{source.Type} or a &%{source.Type} gives a read/write one (spec 12.7)", at);
+      throw Error(IsCountedValueType(source.Type)
+        ? $"'{source.Name}' is read-only (@{source.Type}): only a &@{source.Type} gives a read/write one (spec 12.7)"
+        : $"'{source.Name}' is read-only (@{source.Type}): only a &@{source.Type} or a &%{source.Type} gives a read/write one (spec 12.7)", at);
     }
+  }
+
+  // ->rc into a ->T parameter or a plain receiver: the object is shared, nobody can own it alone (spec 12.7)
+  CompileException PlainGiftOfCounted(CountedRefInfo counted, Node source, Node at) {
+    string Text(Node n) => n.Kind switch {
+      "Name" => n.Text!,
+      "Paren" => Text(n.Children[0]),
+      "Member" => Text(n.Children[0]) + "." + n.Text,
+      "Index" => Text(n.Children[0]) + "[" + (n.Children.Count > 1 && n.Children[1].Kind is "Name" or "Int" ? n.Children[1].Text : "i") + "]",
+      _ => counted.Name
+    };
+    string name = Text(source);
+    string way = source.Kind == "Index" ? "removeRefCounting() on a counted variable" : $"{name}.removeRefCounting()";
+    return Error($"'{name}' is counted: ->{name} gives its usage only to a counted receiver (@{counted.Type} x = ->{name}, "
+      + $"a @T parameter); to take the object out of the counting use {way}, which gives it to the last user (spec 12.7)", at);
+  }
+
+  // ->x of a counted variable, field or item (CountedRef) into a counted receiver: its usage leaves it, the source is null afterwards (spec 12.7)
+  string TakeSourceUsage(CountedRefInfo source, Node gift, Scope scope) {
+    var operand = gift.Children[0];
+    while (operand.Kind == "Paren") {
+      operand = operand.Children[0];
+    }
+    if (source.Variable != null) {
+      return TakeUsage(source.Variable);
+    }
+    return source.Field == null && operand.Kind == "Index" ? TakeItemUsage(gift, operand, scope) : TakeFieldUsage(operand, scope);
+  }
+
+  // ->pack[i] of a collection of counted objects: as on plain collections a list loses the node and an arr or a vec keeps null in the
+  // slot; the usage of the item goes to the receiver, no count change (spec 12.7)
+  bool countedItemGift;
+
+  string TakeItemUsage(Node gift, Node operand, Scope scope) {
+    bool saved = countedItemGift;
+    countedItemGift = true;
+    Expr taken;
+    try {
+      taken = GiftIndex(gift, operand, scope);
+    } finally {
+      countedItemGift = saved;
+    }
+    return BoxInner(taken.Type) != null ? UnboxTaken(taken).Code : taken.Code;
+  }
+
+  // ->k.field: the usage of a counted field leaves it, the field becomes null (spec 12.7)
+  string TakeFieldUsage(Node field, Scope scope) {
+    var target = CountedFieldTarget(field, scope);
+    if (target.IsConst) {
+      throw Error($"'{field.Text}' is const: its usage cannot be moved", field);
+    }
+    string slot = NewTemp();
+    string taken = NewTemp();
+    return $"({{ df_rc** {slot} = &({target.Code}); df_rc* {taken} = *{slot}; *{slot} = NULL; {taken}; }})";
   }
 
   // the usage of a counted variable leaves it: the variable becomes null
   string TakeUsage(VarInfo counted) {
+    if (!LibraryCode) {
+      pendingMoves.Add((counted, "given away with ->"));   // its usage left: a later use is a compile error (spec 12.7)
+    }
     string taken = NewTemp();
     return $"({{ df_rc* {taken} = {counted.CName}; {counted.CName} = NULL; {taken}; }})";
   }
 
   // an argument for a @T parameter: f(rc) adds a user for the call, f(->rc) gives the caller's usage, f(Dog()) and f(@plain) start a block
   string CountedArg(Node arg, string type, Scope scope, bool writable = false) {
+    if (IsCountedValueType(type)) {
+      return CountedCellValue(arg, scope, type, writable, arg);   // @i32 n: shares the cell, a value makes a new one (spec 12.7)
+    }
     if (arg.Kind == "Gift" && CountedRef(arg.Children[0], scope) is CountedRefInfo given) {
       if (!IsSubtype(given.Type, type)) {
         throw Error($"'{given.Name}' is a {given.Type}, not a {type}", arg);
       }
       CheckWritableSource(given, writable, arg);
-      if (given.Variable == null) {
-        throw NotSupported("Moving the usage out of a counted field (->k.field)", arg);
-      }
-      return TakeUsage(given.Variable);
+      return TakeSourceUsage(given, arg, scope);
     }
     return CountedValue(arg, scope, type, false, arg, writable);
   }
@@ -973,10 +1115,24 @@ public sealed partial class CodeGen {
       return -2;   // a weak reference goes only to a weak parameter
     }
     if (!IsCountedType(paramType)) {
+      if (CountedRef(arg, scope) is CountedRefInfo valueArg && IsCountedValueRef(valueArg)) {
+        return -1;   // a counted value read as a plain value
+      }
       bool countedArg = CountedRef(arg, scope) != null || arg.Kind == "CountedOf" || (arg.Kind == "Gift" && CountedRef(arg.Children[0], scope) != null);
       return countedArg ? -2 : -1;
     }
     string type = CountedBase(paramType);
+    if (IsCountedValueType(type)) {
+      var cellArg = arg.Kind is "Gift" or "CountedOf" ? arg.Children[0] : arg;
+      if (arg.Kind == "Null") {
+        return 50;
+      }
+      if (CountedRef(cellArg, scope) is CountedRefInfo cellRef) {
+        return BaseOf(cellRef.Type) == BaseOf(type) ? 0 : -2;
+      }
+      string given = ExprOf(cellArg, scope).Type;
+      return BaseOf(given) == BaseOf(type) ? 5 : IsNumeric(BaseOf(given)) && IsNumeric(BaseOf(type)) ? 20 : -2;
+    }
     int Fits(string given) => IsSubtype(given, type) ? 10 + ClassDistance(given, type) : -2;
     if (arg.Kind == "Null") {
       return 50;
@@ -999,6 +1155,9 @@ public sealed partial class CodeGen {
   // the code of the counting block a counted variable or field receives: a new object starts a block (1 user), another counted variable or
   // field adds a user, null holds nothing
   string CountedValue(Node value, Scope scope, string type, bool marked, Node at, bool writable = false) {
+    if (CountedPropertyUsage(value.Kind == "CountedOf" && value.Children.Count == 1 ? value.Children[0] : value, scope, type, writable, at) is string usage) {
+      return usage;   // @Dog b = k.boss, keep(@k.boss): the usage that R: gives (spec 11.1.4)
+    }
     if (value is { Kind: "CountedOf", Children.Count: 2 } timed) {
       // @Player() timeout 100: the default wait for the lock of a read/write object, in milliseconds (spec 12.7)
       if (!writable) {
@@ -1016,6 +1175,14 @@ public sealed partial class CodeGen {
     }
     if (value.Kind == "Null") {
       return "NULL";
+    }
+    if (value.Kind == "Gift" && CountedRef(value.Children[0], scope) is CountedRefInfo source) {
+      // ->a, ->k.field: the usage moves, the source is null afterwards (spec 12.7)
+      if (!IsSubtype(source.Type, type)) {
+        throw Error($"'{source.Name}' is a {source.Type}, not a {type}", at);
+      }
+      CheckWritableSource(source, writable, at);
+      return TakeSourceUsage(source, value, scope);
     }
     if (CountedRef(value, scope) is CountedRefInfo other) {
       if (!IsSubtype(other.Type, type)) {
@@ -1101,6 +1268,7 @@ public sealed partial class CodeGen {
 
   // x is done.: releases the usage early; x becomes null and the end of the scope (or of the holder, for a field) releases nothing
   void EmitDone(Node done, StringBuilder sb, Scope scope, string pad) {
+    CheckUnrestrictedWrite(done.Children[0], scope);   // field is done. (spec 1.6.2)
     var subject = done.Children[0];
     if (WeakRef(subject, scope) is CountedRefInfo weak) {
       // a weak reference lets its counting block go
@@ -1124,13 +1292,17 @@ public sealed partial class CodeGen {
     if (IsCountedType(type)) {
       type = CountedBase(type);   // var x = make()
     }
-    if (!IsClass(type)) {
-      throw NotSupported($"Counted values of type {type} (only objects are counted for now, spec 12.7)", s);
+    bool isValue = IsCountedValueType(type);
+    if (!IsClass(type) && !isValue) {
+      throw NotSupported($"Counted values of type {type} (spec 12.7)", s);
     }
     if (!frames.Peek().Hoisted.TryGetValue(s.Text!, out var variable) || !variable.IsCounted) {
       throw NotSupported("A counted variable in this place (only in blocks and function bodies for now)", s);
     }
-    string code = init == null ? "NULL" : CountedValue(init.Children[0], scope, type, init.Text == "marked", init, variable.IsWritable);
+    string code = isValue
+      ? init == null ? (IsNullable(type) ? "NULL" : NewCell(new Expr(ZeroValue(BaseOf(type)), BaseOf(type)), type, s))
+        : CountedCellValue(init.Children[0], scope, type, variable.IsWritable, init)   // @i32 n = 5, @i32 m = n (spec 12.7)
+      : init == null ? "NULL" : CountedValue(init.Children[0], scope, type, init.Text == "marked", init, variable.IsWritable);
     sb.Append($"{pad}{variable.CName} = {code};\n");
     scope.Vars[s.Text!] = variable;
     assign.Unassigned.Remove(variable);
@@ -1138,7 +1310,7 @@ public sealed partial class CodeGen {
 
   // a counted object cannot be borrowed (&, plain T) or held by a plain variable or field: it is used through a new usage (spec 12.7)
   void CheckNotBorrowOfCounted(Node value, Scope scope, string target, Node at) {
-    if (CountedRef(value, scope) is CountedRefInfo counted) {
+    if (CountedRef(value, scope) is CountedRefInfo counted && !IsCountedValueRef(counted)) {
       throw Error($"'{counted.Name}' is counted and cannot be borrowed: take another usage with @{counted.Type} {target} = ... (spec 12.7)", at);
     }
   }
@@ -1161,8 +1333,11 @@ public sealed partial class CodeGen {
       return null;
     }
     string block = NewTemp();
-    string objectCode = $"DF_RC_OBJ({CType(counted.Type)}, {block})";
     string field = member.Text == "usersCount" ? "users" : "weaks";
+    if (IsCountedValueRef(counted)) {
+      return new Expr($"({{ df_rc* {block} = {counted.Code}; {block} != NULL ? (uint64_t){block}->{field} : (uint64_t)0; }})", "u64");   // spec 12.7
+    }
+    string objectCode = $"DF_RC_OBJ({CType(counted.Type)}, {block})";
     return new Expr($"({{ df_rc* {block} = {counted.Code}; (void){NullChecked(objectCode, counted.Type)}; (uint64_t){block}->{field}; }})", "u64");
   }
 
@@ -1271,6 +1446,9 @@ public sealed partial class CodeGen {
   string WeakValue(Node value, Scope scope, string type, Node at, bool writable = false) {
     if (value.Kind == "Null") {
       return "NULL";
+    }
+    if (value.Kind == "CValue") {
+      return value.Text!;   // made by the compiler: the weak binding of a type check (spec 12.7)
     }
     if (value.Kind == "WeakOf") {
       var target = value.Children[0];
@@ -1383,7 +1561,7 @@ public sealed partial class CodeGen {
 
   List<FieldInfo> OwnedStringFields(ClassInfo cls) {
     return IntroducedTraits(cls).SelectMany(trait => trait.Fields).Concat(cls.Fields)
-      .Where(field => !field.IsStatic && field.Type == "string").ToList();
+      .Where(field => !field.IsStatic && field.Type == "string" && !field.IsCounted).ToList();
   }
 
   List<FieldInfo> OwnedObjectFields(ClassInfo cls) {
@@ -1423,7 +1601,7 @@ public sealed partial class CodeGen {
     foreach (var field in OwnedStringFields(cls)) {
       sb.Append($"  df_str_free(self->{field.CName});\n  self->{field.CName} = NULL;\n");
     }
-    foreach (var field in IntroducedTraits(cls).SelectMany(trait => trait.Fields).Concat(cls.Fields).Where(field => !field.IsStatic && field.Type == "string?")) {
+    foreach (var field in IntroducedTraits(cls).SelectMany(trait => trait.Fields).Concat(cls.Fields).Where(field => !field.IsStatic && field.Type == "string?" && !field.IsCounted)) {
       sb.Append($"  df_opt_str_drop(&self->{field.CName});\n");   // spec 7.1
     }
     EmitArrayFieldDrops(cls, sb);   // spec 6.8.1 (CodeGen.ArrOwnership.cs)

@@ -56,7 +56,7 @@ public sealed partial class CodeGen {
   static string OwnFlagOf(string cname) => "o_" + cname.Replace("(", "").Replace(")", "").Replace("*", "");
 
   static VarInfo StringVar(VarInfo variable) {
-    if (variable.Type == "string" && !variable.CName.StartsWith("(*")) {
+    if (variable.Type == "string" && !variable.IsCounted && !variable.CName.StartsWith("(*")) {
       variable.OwnFlag = OwnFlagOf(variable.CName);
     }
     return variable;
@@ -85,7 +85,8 @@ public sealed partial class CodeGen {
 
   // the value of an item of a collection (spec 4): its own copy of the string, in its smallest form
   string StrItemAs(Expr value, string elemType, string converted) =>
-    elemType == "string?" ? OptStrItem(value, converted)
+    IsFunType(elemType) ? FnOwned(value with { Code = converted })
+    : elemType == "string?" ? OptStrItem(value, converted)
     : elemType != "string" || IsStaticStr(converted) ? converted : $"df_str_item({converted}, {FreshCode(value, converted)})";
 
   // the value of a string? item, a field or a tuple item: a string? of its own (converted: the value converted to string?)
@@ -118,23 +119,25 @@ public sealed partial class CodeGen {
 
   // the value of an item or a tuple item of type string: a string of its own
   string StrOwnedAs(Expr value, string targetType, string converted) =>
-    targetType == "string?" ? OptStrItem(value, converted)
+    IsFunType(targetType) ? FnOwned(value with { Code = converted })
+    : targetType == "string?" ? OptStrItem(value, converted)
     : targetType != "string" || FreshCode(value, converted) == "true" ? converted : $"df_str_dup({converted})";
 
   // items that own a string: string and string? (spec 4, 7.1)
-  static bool IsStrItem(string elem) => elem is "string" or "string?";
+  static bool IsStrItem(string elem) => elem is "string" or "string?" || IsFunType(elem);   // a function value: a usage (spec 13.3.5)
 
   // the copy of an item that a new owner keeps
   static string StrItemDup(string elem, string item) =>
-    elem == "string" ? $"df_str_dup({item})" : elem == "string?" ? $"df_opt_str_dup({item})" : item;
+    elem == "string" ? $"df_str_dup({item})" : elem == "string?" ? $"df_opt_str_dup({item})" : IsFunType(elem) ? $"df_fn_retain({item})" : item;
 
   // the end of the string an item holds
   static string StrItemFree(string elem, string item) =>
-    elem == "string" ? $"df_str_free({item}); " : elem == "string?" ? $"df_str_free(({item}).val); " : "";
+    elem == "string" ? $"df_str_free({item}); " : elem == "string?" ? $"df_str_free(({item}).val); " : IsFunType(elem) ? $"df_fn_release({item}); " : "";
 
   // the item takes a value it owns; the string it held ends
   static string StrItemPut(string elem, string slot, string value) =>
-    elem == "string" ? $"df_str_put(&{slot}, {value}, true);" : elem == "string?" ? $"df_opt_str_set(&{slot}, {value});" : $"{slot} = {value};";
+    elem == "string" ? $"df_str_put(&{slot}, {value}, true);" : elem == "string?" ? $"df_opt_str_set(&{slot}, {value});"
+    : IsFunType(elem) ? $"df_fn_set(&{slot}, {value});" : $"{slot} = {value};";
 
   // the end of a string variable (its implicit atEnd)
   static Node StrDropNode(string name, Node at) {
@@ -147,7 +150,7 @@ public sealed partial class CodeGen {
       sb.Append($"{pad}df_fn_drop(&{held.CName});\n");   // spec 13.3.5
       return;
     }
-    if (scope.Find(s.Text!) is VarInfo { Type: "string?", IsParam: false } optional) {
+    if (scope.Find(s.Text!) is VarInfo { Type: "string?", IsParam: false, IsCounted: false } optional) {
       sb.Append($"{pad}df_opt_str_drop(&{optional.CName});\n");   // spec 7.1
       return;
     }
@@ -238,6 +241,10 @@ public sealed partial class CodeGen {
 
   // s.trim() alone: the string s takes the result, in place. False when the statement is not that.
   bool EmitInPlaceStatement(Node call, StringBuilder sb, Scope scope, string pad) {
+    if (InUnrestrictedMethod && call is { Kind: "Call" } && call.Children[0] is { Kind: "Member" } changing
+        && (StrChanging.Contains(changing.Text!) || changing.Text == "clear") && PlaceType(changing.Children[0], scope) == "string") {
+      CheckUnrestrictedWrite(ChangedRoot(call) ?? changing.Children[0], scope);   // label.append("x") on a field: a write (spec 1.6.2)
+    }
     if (StrInPlaceCall(call, scope) is string direct) {
       sb.Append(pad).Append(direct).Append(";\n");
       return true;
@@ -339,7 +346,7 @@ public sealed partial class CodeGen {
   }
 
   void EmitTmpRelease(StringBuilder sb, int from, string pad) {
-    if (fn != null && sb.Length > from && sb.ToString(from, sb.Length - from) is string code && (code.Contains("df_tmp(") || code.Contains("df_tmpo(") || code.Contains("df_tmpf("))) {
+    if (fn != null && sb.Length > from && sb.ToString(from, sb.Length - from) is string code && (code.Contains("df_tmp(") || code.Contains("df_tmpo(") || code.Contains("df_tmpf(") || code.Contains("df_fn_tmp("))) {
       fn.UsesTmp = true;
       sb.Append($"{pad}df_tmp_drop(df_tm);\n");
     }

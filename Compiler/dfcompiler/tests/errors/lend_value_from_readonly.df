@@ -1,0 +1,12 @@
+namespace lend_value_from_readonly
+alias Root as r
+class Board {
+  public i32 score
+  public string title = "board"
+  public fun &i32 scoreRef() { score }
+  public fun &string titleRef() { title }
+  public fun reset() { score = 0 }
+}
+fun f(Board board) {
+  &i32 s = board.scoreRef()
+}

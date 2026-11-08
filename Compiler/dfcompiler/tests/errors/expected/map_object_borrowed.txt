@@ -1,0 +1,1 @@
+map_object_borrowed.df(6): error: 'value' takes ownership of the object: write ->x

@@ -1,0 +1,5 @@
+namespace app
+class Box<T>(T value) { }
+Box<i32> a = Box<i32>(1)
+Box<i64> b = Box<i64>(2)
+Box<u8> c = Box<u8>(3)

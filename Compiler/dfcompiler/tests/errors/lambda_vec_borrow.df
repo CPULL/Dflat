@@ -1,0 +1,4 @@
+namespace lambda_vec_borrow
+var handlers = vec<fun(i32)>()
+i32 total = 0
+handlers.add((i32 n) { Root.Console.log(n + total) })

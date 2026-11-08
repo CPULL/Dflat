@@ -1,0 +1,2 @@
+class Dog { }
+fun i32 sum(@Dog items...) { 0 }

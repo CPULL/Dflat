@@ -1,0 +1,1 @@
+refcount_plain_from_field.df(6): error: 'k.boss' is counted: ->k.boss gives its usage only to a counted receiver (@Dog x = ->k.boss, a @T parameter); to take the object out of the counting use k.boss.removeRefCounting(), which gives it to the last user (spec 12.7)

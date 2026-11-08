@@ -1,0 +1,12 @@
+new boss Rex
+boss Rex
+users 2
+new boss Max
+users of max 2, b is still Rex
+visits 3 3
+Rex ends
+Max ends
+new boss Rex
+keep Rex, users 2
+Rex ends
+---- exit code 0 ----

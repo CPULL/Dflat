@@ -11,7 +11,7 @@ a result nobody keeps ends at once
   square ends
   after the statement
 a dead object
+  square
   square ends
   the owner is null: true
-  the borrow found the object dead: 1
 ---- exit code 0 ----

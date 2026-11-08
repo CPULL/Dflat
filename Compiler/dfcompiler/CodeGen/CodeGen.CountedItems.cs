@@ -32,14 +32,15 @@ public sealed partial class CodeGen {
 
   Node BoxTypeFor(Node owner, int index, Node counted, List<Node> boxes) {
     string? collection = owner.Kind == "Type" ? owner.Text : null;
+    if (owner.Kind == "GenericRef" && owner.Children[0] is { Kind: "Name" } generic) {
+      collection = generic.Text;   // vec<@Dog>(): the type arguments follow the name
+      index -= 1;
+    }
     if (collection is "map" or "bmap" or "hmap" && index == 0 || collection is "set" or "bset" or "hset") {
       throw Error("counted objects (@T) cannot be keys of a map or items of a set: a key must be stable (spec 6.2)", counted);
     }
-    if (collection is "map" or "bmap" or "hmap") {
-      throw NotSupported("Counted values of a map (map<K, @T>)", counted);
-    }
-    if (collection is not ("vec" or "list")) {
-      throw NotSupported(collection == "arr" ? "Counted items of an arr (arr<@T>)" : "Generics with a counted type argument (spec 12.7)", counted);
+    if (collection is not ("vec" or "list" or "arr" or "map" or "bmap" or "hmap")) {
+      throw NotSupported("Generics with a counted type argument (spec 12.7)", counted);
     }
     var inner = counted.Children[0];
     if (inner is not { Kind: "Type", Children.Count: 0 } || inner.Text == null) {
@@ -74,7 +75,12 @@ public sealed partial class CodeGen {
     if (rawBoxRead || BoxInner(item.Type) is not string inner) {
       return item;
     }
-    return new Expr($"DF_RC_OBJ({CType(inner)}, ({item.Code})->{BoxField(item.Type)})", inner);
+    string box = NewTemp();
+    if (IsCountedValueType(inner)) {
+      // a counted value item: the value of its cell; an empty slot reads as the zero value (spec 12.7)
+      return new Expr($"({{ {CType(item.Type)} {box} = {item.Code}; {CellRead($"({box} != NULL ? {box}->{BoxField(item.Type)} : NULL)", inner)}; }})", inner);
+    }
+    return new Expr($"({{ {CType(item.Type)} {box} = {item.Code}; {box} != NULL ? DF_RC_OBJ({CType(inner)}, {box}->{BoxField(item.Type)}) : NULL; }})", inner);
   }
 
   // a box handed out by the collection (replace, takeAt): its usage passes to the caller as a counted result, the empty box ends
@@ -90,6 +96,9 @@ public sealed partial class CodeGen {
 
   // the counting block of a value given to a member that only looks at it or shares it: a counted object or null
   string CountedBlockOf(Node arg, string box, Scope scope) {
+    if (arg is { Kind: "CountedOf", Children.Count: 1 }) {
+      arg = arg.Children[0];   // fill(@rex): the call marker of a counted value (spec 13.1)
+    }
     if (arg.Kind == "Null") {
       return "NULL";
     }
@@ -105,6 +114,9 @@ public sealed partial class CodeGen {
   // fill(value) of a vec<@T> or list<@T>, and fill(count, value) of a list<@T>: every item becomes a user of the same object, the usages the
   // items had are released; null when the collection does not hold counted objects
   Expr? CountedFill(Expr coll, List<Node> args, Scope scope, Node at) {
+    if (IsArr(coll.Type)) {
+      return CountedArrFill(coll, args, scope, at);
+    }
     bool isVec = IsVec(coll.Type);
     string box = isVec ? VecElem(coll.Type) : ListElem(coll.Type);
     if (BoxInner(box) == null) {
@@ -180,14 +192,19 @@ public sealed partial class CodeGen {
     } finally {
       rawBoxRead = saved;
     }
-    return BoxInner(item.Type) is string inner
-      ? new CountedRefInfo($"({item.Code})->{BoxField(item.Type)}", inner, $"{index.Children[0].Text ?? "c"}[...]", null, null, writableBoxes.Contains(item.Type)) : null;
+    if (BoxInner(item.Type) is not string inner) {
+      return null;
+    }
+    string box = NewTemp();
+    return new CountedRefInfo($"({{ {CType(item.Type)} {box} = {item.Code}; {box} != NULL ? {box}->{BoxField(item.Type)} : NULL; }})", inner,
+      $"{index.Children[0].Text ?? "c"}[...]", null, null, writableBoxes.Contains(item.Type));
   }
 
   // the members of a collection of counted objects that are built; the others would hand out or compare boxes (not built yet)
   static readonly HashSet<string> CountedItemsMembers = new() {
     "add", "insert", "removeAt", "clear", "truncate", "reserve", "shrinkToFit", "swap", "get_len", "get_capacity",
-    "has", "indexOf", "remove", "removeAll", "replace", "takeAt", "pop", "fill", "transformTo", "reverse"
+    "has", "indexOf", "remove", "removeAll", "replace", "takeAt", "pop", "fill", "transformTo", "reverse",
+    "sort", "sortUnstable", "resize", "fillAtCapacity", "getIterator"
   };
 
   void CheckCountedItemsMember(ClassInfo cls, string name, Node at) {
@@ -211,6 +228,13 @@ public sealed partial class CodeGen {
       return null;
     }
     string field = BoxField(l.Type);
+    if (IsCountedValueType(inner)) {
+      // counted values compare their values; an empty slot (no box) only equals another empty slot (spec 12.7)
+      return WithTemp(l, left => WithTemp(r, right => {
+        string same = EqualsCode(new Expr(CellRead($"{left}->{field}", inner), inner), new Expr(CellRead($"{right}->{field}", inner), inner), at);
+        return $"(({left} == NULL || {right} == NULL) ? {left} == {right} : {same})";
+      }));
+    }
     string Obj(string box) => $"({box} != NULL ? DF_RC_OBJ({CType(inner)}, {box}->{field}) : NULL)";
     return WithTemp(l, left => WithTemp(r, right => {
       string leftObj = NewTemp();
@@ -227,5 +251,79 @@ public sealed partial class CodeGen {
       return -1;
     }
     return CountedArgCost(arg, "@" + inner, scope);
+  }
+
+  // fill(value) of an arr<@T>: every slot gets a box of its own, a user of the same object; the boxes the slots had end
+  Expr? CountedArrFill(Expr array, List<Node> args, Scope scope, Node at) {
+    string box = ArrElem(array.Type);
+    if (BoxInner(box) == null) {
+      return null;
+    }
+    if (args.Count != 1) {
+      throw Error("fill takes one value: fill(value)", at);
+    }
+    string held = NewTemp();
+    string block = NewTemp();
+    string i = NewTemp();
+    string old = NewTemp();
+    string code = $"({{ {CType(array.Type)} {held} = {array.Code}; df_rc* {block} = {CountedBlockOf(args[0], box, scope)}; "
+      + $"for (df_uns {i} = 0; {i} < {held}.len; {i}++) {{ {CType(box)} {old} = {held}.p[{i}]; {held}.p[{i}] = f_{box}(df_rc_use({block})); "
+      + $"if ({old} != NULL) {{ df_drop((void*){old}); }} }} }})";
+    return new Expr(CheckRaise(code, "void"), "void");
+  }
+
+  // resize(n, value) and fillAtCapacity(value) of a vec<@T>: each new slot gets a box of its own, a user of the same object (spec 12.7);
+  // the boxes that leave end. null when the vec does not hold counted objects
+  Expr? CountedResize(Expr vec, string name, List<Node> args, Scope scope, Node at) {
+    string box = VecElem(vec.Type);
+    if (BoxInner(box) == null) {
+      return null;
+    }
+    int expected = name == "resize" ? 2 : 1;
+    if (args.Count != expected || args.Any(arg => arg.Kind == "Named")) {
+      throw Error(name == "resize" ? "resize takes the new length and a value: resize(n, value)" : "fillAtCapacity takes one value: fillAtCapacity(value)", at);
+    }
+    string items = VecField(vec.Type, "items");
+    string count = VecField(vec.Type, "count");
+    string held = NewTemp();
+    string block = NewTemp();
+    string i = NewTemp();
+    string old = NewTemp();
+    string fresh = $"f_{box}(df_rc_use({block}))";
+    string head = $"({{ {CType(vec.Type)} {held} = {NullChecked(vec.Code, vec.Type)}; {LockCheck(held, vec.Type)}df_rc* {block} = {CountedBlockOf(args[^1], box, scope)}; ";
+    if (name == "fillAtCapacity") {
+      string fill = $"for (df_uns {i} = 0; {i} < {held}->{items}.len; {i}++) {{ {CType(box)} {old} = {held}->{items}.p[{i}]; {held}->{items}.p[{i}] = {fresh}; "
+        + $"if ({old} != NULL) {{ df_drop((void*){old}); }} }} {held}->{count} = {held}->{items}.len; }})";
+      return new Expr(CheckRaise(head + fill, "void"), "void");
+    }
+    var wanted = ExprOf(args[0], scope, NativeUns);
+    string length = NewTemp();
+    var reserve = ObjectCall(new Expr(held, vec.Type), "reserve", new List<Node> { Synthetic("CValue", at, length).Add(Synthetic("Type", at, NativeUns)) }, scope, at)
+      ?? throw Error("no reserve", at);
+    string code = head + $"df_uns {length} = {Convert(wanted, NativeUns, args[0])}; "
+      + $"if ({length} > {held}->{count}) {{ {reserve.Code}; for (df_uns {i} = {held}->{count}; {i} < {length}; {i}++) {{ {held}->{items}.p[{i}] = {fresh}; }} }} "
+      + $"else {{ for (df_uns {i} = {length}; {i} < {held}->{count}; {i}++) {{ {CType(box)} {old} = {held}->{items}.p[{i}]; {held}->{items}.p[{i}] = NULL; "
+      + $"if ({old} != NULL) {{ df_drop((void*){old}); }} }} }} {held}->{count} = {length}; }})";
+    return new Expr(CheckRaise(code, "void"), "void");
+  }
+
+  // the result of a member of a collection of counted objects in the program's code: a tuple with a box (next() of an iterator) gives the
+  // object of the box, borrowed; the collection cannot change while an iterator is open (spec 6.4, 12.7)
+  Expr UnboxTupleResult(Expr result) {
+    if (LibraryCode || !IsTuple(result.Type) || !TupleElems(result.Type).Any(elem => BoxInner(elem.Type) != null)) {
+      return result;
+    }
+    var elems = TupleElems(result.Type);
+    string held = NewTemp();
+    var parts = new List<string>();
+    var types = new List<(string Type, string? Name)>();
+    for (int index = 0; index < elems.Count; index++) {
+      var item = new Expr($"{held}.e{index}", elems[index].Type);
+      var read = BoxInner(elems[index].Type) != null ? UnboxRead(item) : item;
+      parts.Add(read.Code);
+      types.Add((read.Type, elems[index].Name));
+    }
+    string tuple = MakeTuple(types);
+    return new Expr($"({{ {CType(result.Type)} {held} = {result.Code}; ({CType(tuple)}){{ {string.Join(", ", parts)} }}; }})", tuple);
   }
 }

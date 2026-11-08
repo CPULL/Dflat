@@ -1,0 +1,1 @@
+unrestricted_class_write.df(13): error: an unrestricted method does not change its object: it cannot write 'visits' or what it holds (spec 1.6.2)

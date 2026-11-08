@@ -1,0 +1,1 @@
+refcount_readonly_write.df(5): error: 'd' is a read-only counted object (@Dog): its fields are written through a &@Dog (spec 12.7)

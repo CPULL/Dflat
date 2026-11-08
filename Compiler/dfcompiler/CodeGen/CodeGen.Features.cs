@@ -117,6 +117,9 @@ public sealed partial class CodeGen {
       if (index < 0) {
         return (null, $"'{f.Name}' has no parameter '{arg.Text}'");
       }
+      if (f.Params[index].IsVariadic) {
+        return (null, $"the variadic parameter '{arg.Text}...' cannot be named in a call: give its items after the other arguments (spec 13.4)");
+      }
       if (slots[index] != null) {
         return (null, $"parameter '{arg.Text}' is given twice");
       }
@@ -232,6 +235,9 @@ public sealed partial class CodeGen {
         int paramIndex = Array.IndexOf(slots, argNode);
         string paramType = paramIndex >= 0 ? candidate.Params[paramIndex].Type : ArrElem(candidate.Params[^1].Type);
         int? cost = ArgCost(argNode, paramType, scope);
+        if (cost == null && paramIndex < 0 && LendsWholeVariadic(ExprOf(argNode, scope).Type, candidate.Params[^1].Type)) {
+          cost = 0;   // an arr, a vec or a view lent whole to T name... (spec 13.4)
+        }
         if (cost == null) {
           fits = false;
         } else {
@@ -249,6 +255,9 @@ public sealed partial class CodeGen {
         throw Error($"the items of this set are {DisplayName(MapKey(owner.Name))}, not {given}", at);
       }
       throw Error($"no '{candidates[0].Name}' matches these arguments", at);
+    }
+    if (applicable.Any(entry => !entry.Fun.Params.Any(param => param.IsVariadic))) {
+      applicable.RemoveAll(entry => entry.Fun.Params.Any(param => param.IsVariadic));   // the non-variadic overload wins (spec 13.4)
     }
     bool Dominates((FunSig Fun, int[] Costs) better, (FunSig Fun, int[] Costs) worse) {
       bool strictly = false;

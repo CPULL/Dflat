@@ -1,0 +1,326 @@
+// Cascade — falling color blocks for Dflat
+namespace cascade
+alias Root.Console as console
+
+const i32 WIDTH  = 12
+const i32 HEIGHT = 20
+const i32 CELL   = 2          // visual width of one block
+const r64 FRAME  = 0.08
+
+class Screen {
+  arr<char> cells = arr<char>[(uns)(WIDTH * CELL * (HEIGHT + 3))]
+  arr<console.Color> fronts = arr<console.Color>[(uns)(WIDTH * CELL * (HEIGHT + 3))]
+  arr<console.Color> backs  = arr<console.Color>[(uns)(WIDTH * CELL * (HEIGHT + 3))]
+
+  public fun clear() {
+    for i32 i in 0..(i32)cells.len {
+      cells[(uns)i] = ' '
+      fronts[(uns)i] = console.Color.White
+      backs[(uns)i]  = console.Color.Black
+    }
+  }
+
+  public fun put(i32 x, i32 y, char c, console.Color front, console.Color back) {
+    if x < 0 || x >= WIDTH * CELL || y < 0 || y >= HEIGHT + 3 then return
+    uns at = (uns)(y * WIDTH * CELL + x)
+    cells[at] = c
+    fronts[at] = front
+    backs[at]  = back
+  }
+
+  public fun text(i32 x, i32 y, string s, console.Color front, console.Color back) {
+    i32 col = x
+    for char c in s {
+      put(col, y, c, front, back)
+      col++
+    }
+  }
+
+  public fun show() {
+    for i32 y in 0..(HEIGHT + 3) {
+      console.moveCursor(0, y)
+      i32 x = 0
+      while x < WIDTH * CELL {
+        uns first = (uns)(y * WIDTH * CELL + x)
+        console.Color f = fronts[first]
+        console.Color b = backs[first]
+        string run = ""
+        while x < WIDTH * CELL {
+          uns at = (uns)(y * WIDTH * CELL + x)
+          if fronts[at] != f || backs[at] != b then break
+          run += cells[at]
+          x++
+        }
+        console.setColors(f, b)
+        console.print(run)
+      }
+    }
+  }
+}
+
+struct Piece {
+  i32 x = 4,
+  i32 y = 0,
+  i32 rot = 0,
+  i32 kind = 0,
+  console.Color color = console.Color.BrightCyan
+
+  public fun Piece(i32 k, console.Color c) {
+    kind = k
+    color = c
+    x = 4
+    y = 0
+    rot = 0
+  }
+
+  // relative cells for current rotation
+  unrestricted fun ->vec<(i32, i32)> cells() {
+    vec<(i32, i32)> result = vec<(i32, i32)>()
+    // simple tetromino-like shapes (just enough variety)
+    if kind == 0 {          // O
+      result.add((0,0)); result.add((1,0)); result.add((0,1)); result.add((1,1))
+    } else if kind == 1 {   // I
+      if rot % 2 == 0 {
+        result.add((0,0)); result.add((1,0)); result.add((2,0)); result.add((3,0))
+      } else {
+        result.add((1,0)); result.add((1,1)); result.add((1,2)); result.add((1,3))
+      }
+    } else if kind == 2 {   // T
+      result.add((0,0)); result.add((1,0)); result.add((2,0)); result.add((1,1))
+      if rot == 1 { result = vec<(i32,i32)>(); result.add((1,0)); result.add((0,1)); result.add((1,1)); result.add((1,2)) }
+      if rot == 2 { result = vec<(i32,i32)>(); result.add((1,0)); result.add((0,1)); result.add((1,1)); result.add((2,1)) }
+      if rot == 3 { result = vec<(i32,i32)>(); result.add((0,0)); result.add((0,1)); result.add((1,1)); result.add((0,2)) }
+    } else if kind == 3 {   // L
+      result.add((0,0)); result.add((0,1)); result.add((0,2)); result.add((1,2))
+      if rot == 1 { result = vec<(i32,i32)>(); result.add((0,0)); result.add((1,0)); result.add((2,0)); result.add((0,1)) }
+      if rot == 2 { result = vec<(i32,i32)>(); result.add((0,0)); result.add((1,0)); result.add((1,1)); result.add((1,2)) }
+      if rot == 3 { result = vec<(i32,i32)>(); result.add((2,0)); result.add((0,1)); result.add((1,1)); result.add((2,1)) }
+    } else {                // S / Z style
+      result.add((1,0)); result.add((2,0)); result.add((0,1)); result.add((1,1))
+      if rot % 2 == 1 {
+        result = vec<(i32,i32)>()
+        result.add((0,0)); result.add((0,1)); result.add((1,1)); result.add((1,2))
+      }
+    }
+    return result
+  }
+}
+
+class Game {
+  Screen screen = Screen()
+  arr<i32> grid = arr<i32>[(uns)(WIDTH * HEIGHT)]   // 0 = empty, 1..6 = color index
+  Piece next    = Piece(kind: 0, color: console.Color.BrightCyan)
+  Piece current = Piece(kind: 0, color: console.Color.BrightCyan)
+  public i32 score = 0
+  public i32 lines = 0
+  r64 dropTimer = 0.0
+  r64 dropInterval = 0.6
+  bool gameOver = false
+  i64 frame = 0
+
+  arr<console.Color> palette = [
+    console.Color.Black,
+    console.Color.BrightRed,
+    console.Color.BrightGreen,
+    console.Color.BrightYellow,
+    console.Color.BrightBlue,
+    console.Color.BrightMagenta,
+    console.Color.BrightCyan
+  ]
+
+  public fun Game() {
+    for i32 i in 0..(WIDTH * HEIGHT) { grid[(uns)i] = 0 }
+    spawn()
+  }
+
+  fun spawn() {
+    current = next
+    i32 k = (i32)Root.Random.int(0, 5)
+		console.Color c = palette[(uns)(Root.Random.int(1, 6))]
+		next = Piece(kind: k, color: c)
+    if collides(current) {
+      gameOver = true
+    }
+  }
+
+  fun bool collides(Piece p) {
+    for var cell in p.cells() {
+      i32 gx = p.x + cell.0
+      i32 gy = p.y + cell.1
+      if gx < 0 || gx >= WIDTH || gy >= HEIGHT then return true
+      if gy >= 0 && grid[(uns)(gy * WIDTH + gx)] != 0 then return true
+    }
+    return false
+  }
+
+  fun lock() {
+    for var cell in current.cells() {
+      i32 gx = current.x + cell.0
+      i32 gy = current.y + cell.1
+      if gy >= 0 && gy < HEIGHT && gx >= 0 && gx < WIDTH {
+        grid[(uns)(gy * WIDTH + gx)] = (i32)(current.color)   // simplistic
+      }
+    }
+    clearMatches()
+    spawn()
+  }
+
+  fun clearMatches() {
+    bool changed = true
+    while changed {
+      changed = false
+      // horizontal
+      for i32 y in 0..HEIGHT {
+        i32 run = 1
+        for i32 x in 1..WIDTH {
+          if grid[(uns)(y * WIDTH + x)] != 0 && grid[(uns)(y * WIDTH + x)] == grid[(uns)(y * WIDTH + x - 1)] {
+            run++
+          } else {
+            if run >= 3 {
+              for i32 k in (x - run)..x { grid[(uns)(y * WIDTH + k)] = 0 }
+              score += run * 10
+              lines += 1
+              changed = true
+            }
+            run = 1
+          }
+        }
+        if run >= 3 {
+          for i32 k in (WIDTH - run)..WIDTH { grid[(uns)(y * WIDTH + k)] = 0 }
+          score += run * 10
+          lines += 1
+          changed = true
+        }
+      }
+      // vertical (simplified)
+for i32 x in 0..WIDTH {
+        i32 run = 1
+        for i32 y in 1..HEIGHT {
+          if grid[(uns)(y * WIDTH + x)] != 0 && grid[(uns)(y * WIDTH + x)] == grid[(uns)((y-1) * WIDTH + x)] {
+            run++
+          } else {
+            if run >= 3 {
+              for i32 k in (y - run)..y { grid[(uns)(k * WIDTH + x)] = 0 }
+              score += run * 10
+              lines += 1
+              changed = true
+            }
+            run = 1
+          }
+        }
+      }
+      // gravity cascade
+      for i32 x in 0..WIDTH {
+        i32 write = HEIGHT - 1
+        for i32 y in (HEIGHT - 1)..=0 {
+          if grid[(uns)(y * WIDTH + x)] != 0 {
+            grid[(uns)(write * WIDTH + x)] = grid[(uns)(y * WIDTH + x)]
+            if write != y { grid[(uns)(y * WIDTH + x)] = 0 }
+            write--
+          }
+        }
+      }
+    }
+    dropInterval = Root.Math.max(0.12, 0.6 - (r64)lines * 0.015)
+  }
+
+  public fun keys() {
+    char? key = console.readKey()
+    while key != null {
+      char k = (key ?? ' ').toLower()
+      Piece test = current
+      if k == 'a' || k == console.KEY_LEFT {
+        test.x -= 1
+        if !collides(test) then current.x -= 1
+      } else if k == 'd' || k == console.KEY_RIGHT {
+        test.x += 1
+        if !collides(test) then current.x += 1
+      } else if k == 'w' || k == console.KEY_UP {
+        test.rot = (test.rot + 1) % 4
+        if !collides(test) then current.rot = test.rot
+      } else if k == 's' || k == console.KEY_DOWN {
+        test.y += 1
+        if !collides(test) { current.y += 1 } else { lock() }
+      } else if k == ' ' {
+        while true {
+          test.y += 1
+          if collides(test) {
+            current.y = test.y - 1
+            lock()
+            break
+          }
+        }
+      } else if k == 'q' || k == console.KEY_ESC {
+        gameOver = true
+      }
+      key = console.readKey()
+    }
+  }
+
+  public fun update(r64 dt) {
+    if gameOver then return
+    dropTimer += dt
+    if dropTimer >= dropInterval {
+      dropTimer = 0.0
+      Piece test = current
+      test.y += 1
+      if collides(test) {
+        lock()
+      } else {
+        current.y += 1
+      }
+    }
+  }
+
+  public fun draw() {
+    screen.clear()
+
+    // border + grid
+    for i32 y in 0..HEIGHT {
+      for i32 x in 0..WIDTH {
+        i32 v = grid[(uns)(y * WIDTH + x)]
+        console.Color col = (v == 0) ? { true: console.Color.Gray, false: palette[(uns)(v % 7)] }
+        char ch = (v == 0) ? { true: '.', false: '█' }
+        screen.put(x * CELL,     y + 1, ch, col, console.Color.Black)
+        screen.put(x * CELL + 1, y + 1, ch, col, console.Color.Black)
+      }
+    }
+
+    // current piece
+    if !gameOver {
+      for var cell in current.cells() {
+        i32 gx = current.x + cell.0
+        i32 gy = current.y + cell.1
+        if gy >= 0 {
+          screen.put(gx * CELL,     gy + 1, '█', current.color, console.Color.Black)
+          screen.put(gx * CELL + 1, gy + 1, '█', current.color, console.Color.Black)
+        }
+      }
+    }
+
+    // HUD
+    screen.text(0, 0, $"SCORE {score}   LINES {lines}   NEXT", console.Color.White, console.Color.Black)
+    // next piece preview (simple)
+    screen.text(0, HEIGHT + 2, gameOver ? { true: "GAME OVER - Q to quit", false: "A/D move  W rotate  S soft  SPACE hard  Q quit" },
+                gameOver ? { true: console.Color.BrightRed, false: console.Color.Gray }, console.Color.Black)
+
+    screen.show()
+  }
+
+  public fun bool running() { !gameOver }
+}
+
+fun int main() {
+  Game g = Game()
+  console.clear()
+  while g.running() {
+    g.keys()
+    g.update(FRAME)
+    g.draw()
+    Root.Time.sleep(50)
+  }
+  console.setColors(null, null)
+  console.clear()
+  console.log($"Final score: {g.score}   Lines: {g.lines}")
+  return 0
+}

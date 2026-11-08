@@ -39,6 +39,9 @@ public sealed partial class CodeGen {
         return full[library.Length..];   // also Root.ExecProcess.RunResult
       }
     }
+    if (full is "Root.Console.Color" or "Console.Color") {
+      return "ConsoleColor";   // Console.Color (stdlib 2)
+    }
     return full == "String.StringEncoding" ? "StringEncoding" : name;
   }
 
@@ -183,6 +186,9 @@ public sealed partial class CodeGen {
   }
 
   string CType(string type) {
+    if (IsValueLend(type)) {
+      return CType(type[1..]) + "*";   // a &T result of a value: the address of the place (spec 13.1.1)
+    }
     if (IsFunType(type)) {
       return "df_fn";   // a function value { code, ctx } (spec 13.3.5)
     }
@@ -269,6 +275,9 @@ public sealed partial class CodeGen {
 
   // value of a declared variable without initializer
   string ZeroValue(string type) {
+    if (IsValueLend(type)) {
+      return "NULL";
+    }
     if (IsFunType(type)) {
       return "((df_fn){0})";   // a function value starts as null (spec 13.3.2)
     }
@@ -704,6 +713,9 @@ public sealed partial class CodeGen {
       throw Error($"this call returns {TupleElems(e.Type).Count} values; assign them to as many targets", at);
     }
     if (IsFunType(e.Type)) {
+      if (LibraryCode || currentFun == null) {
+        return WithTemp(e, held => $"({held}.code == NULL ? df_str_lit(\"null\", 4) : {CString(CodePoints(FunDisplay(e.Type)))})");   // an item of a collection
+      }
       throw Error("a function value has no text", at);
     }
     if (e.Type == "string?") {
@@ -802,6 +814,9 @@ public sealed partial class CodeGen {
     }
     if (IsClass(l.Type)) {
       return ObjectEquals(l, r, at);   // equals, the operator ==, or identity (11.1.3)
+    }
+    if (IsFunType(l.Type) && IsFunType(r.Type) && (LibraryCode || currentFun == null)) {
+      return $"({{ df_fn a_ = {l.Code}; df_fn b_ = {r.Code}; a_.code == b_.code && a_.ctx == b_.ctx; }})";   // has, indexOf of the library
     }
     if (IsFunType(l.Type) || IsFunType(r.Type)) {
       // a function value is compared with null only (spec 13.3.2)

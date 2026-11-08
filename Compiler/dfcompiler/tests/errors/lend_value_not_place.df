@@ -1,0 +1,13 @@
+namespace lend_value_not_place
+alias Root as r
+class Board {
+  public i32 score
+  public string title = "board"
+  public fun &i32 scoreRef() { score }
+  public fun &string titleRef() { title }
+  public fun reset() { score = 0 }
+}
+fun f() {
+  &i32 n = 5
+}
+f()

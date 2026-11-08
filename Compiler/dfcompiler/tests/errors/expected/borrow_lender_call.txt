@@ -1,0 +1,1 @@
+borrow_lender_call.df(20): error: 'k' is lent to 'd' until its last use: until then only its unrestricted methods can be called, not 'retire' (spec 13.1.1)

@@ -1,0 +1,1 @@
+refcount_downcast_readonly.df(13): error: 'd' is a read-only counted object (@Dog): 'learn' needs a read/write one (mark it unrestricted, or use a &@Dog); 'learn' is defined at refcount_downcast_readonly.df(8) (spec 12.7)

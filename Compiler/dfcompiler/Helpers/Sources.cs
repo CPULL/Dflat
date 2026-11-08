@@ -25,6 +25,9 @@ static class SourceMap {
   // "file(line)" and "file(line,col)"
   public static string Where(int line) => $"{FileOf(line)}({RealLine(line)})";
 
+  // "name.df(line)", without the folder: a place named inside a message
+  public static string Short(int line) => $"{Path.GetFileName(FileOf(line))}({RealLine(line)})";
+
   public static string Where(int line, int col) => $"{FileOf(line)}({RealLine(line)},{col})";
 
   // a warning "(line): warning ..." of the lexer, the parser or the code generator, with its file

@@ -1,0 +1,22 @@
+namespace borrow_readonly_field
+alias Root as r
+class Dog(string name) {
+  public string name
+  public i32 hunger = 5
+  unrestricted fun bark() { r.Console.log($"{name}: woof") }
+  public fun eat(i32 amount) { hunger -= amount }
+}
+class Kennel {
+  Dog boss = Dog("Rex")
+  public fun Dog leader() { boss }
+  public fun &Dog leaderRw() { boss }
+  unrestricted fun greet() { boss.bark() }
+  public fun feed() { boss.eat(2) }
+  public fun retire() { boss = Dog("Max") }
+}
+fun f() {
+  Kennel k = Kennel()
+  Dog d = k.leader()
+  d.name = "x"
+}
+f()

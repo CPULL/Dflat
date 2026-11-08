@@ -1,0 +1,1 @@
+primary_given_borrowed.df(7): error: 'lent' only borrows its object: it cannot be moved

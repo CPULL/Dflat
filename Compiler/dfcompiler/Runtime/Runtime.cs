@@ -136,6 +136,7 @@ static const df_descriptor df_desc_UsageOfDestroyedObjectException = { 48, "Usag
 static const df_descriptor df_desc_ObjectNotClonableException = { 49, "ObjectNotClonableException", &df_desc_Exception, false };
 static const df_descriptor df_desc_WritingOnRefCountWithoutLockingException = { 50, "WritingOnRefCountWithoutLockingException", &df_desc_Exception, false };
 static const df_descriptor df_desc_UnassignedFunctionCallException = { 51, "UnassignedFunctionCallException", &df_desc_NullPointerException, false };
+static const df_descriptor df_desc_ModifiedObjectUsedAsKeyException = { 52, "ModifiedObjectUsedAsKeyException", &df_desc_Exception, false };
 
 /* The exception of a function is a local of that function (df_err in the generated code) and travels back to the caller as the second
    value it returns. The runtime functions written in C cannot return it that way: they leave it here, and the code generated around
@@ -1328,6 +1329,7 @@ static void* df_tmpo(void* o) {
 typedef struct df_lhead {
   int64_t rc;
   void (*end)(void*);
+  void* (*clone)(const void*);   /* f! (spec 13.3.3): a new context, with what the lambda owns cloned and one usage */
 } df_lhead;
 
 typedef struct {
@@ -1347,6 +1349,14 @@ static void df_fn_release(df_fn f) {
     f.ctx->end(f.ctx);
     free(f.ctx);
   }
+}
+
+/* f! (spec 13.3.3): the same code with a context of its own; a lambda without captures is the same value */
+static df_fn df_fn_clone(df_fn f) {
+  if (f.ctx) {
+    f.ctx = (df_lhead*)f.ctx->clone(f.ctx);
+  }
+  return f;
 }
 
 /* a variable takes a function value it owns a usage of; the old one is released */
@@ -1505,7 +1515,7 @@ static void df_drop(void* obj) {
 /* reference counting (spec 12.7, the Rust Rc model): a counted variable holds the counting block of its object; the counting system owns the
    object and each holder is a user. The last release ends the object; the block stays while weak references need it. A null variable holds
    no block (NULL) and no usage */
-typedef struct df_rc { df_uns users; df_uns weaks; void* obj; bool locked; int64_t timeout; } df_rc;
+typedef struct df_rc { df_uns users; df_uns weaks; void* obj; bool locked; int64_t timeout; uint8_t kind; } df_rc;   /* kind: 0 an object, 1 a value cell, 2 a string cell */
 
 static df_rc* df_rc_new(void* obj) {
   if (obj == NULL) {
@@ -1517,6 +1527,25 @@ static df_rc* df_rc_new(void* obj) {
   rc->obj = obj;
   rc->locked = false;
   rc->timeout = 0;
+  rc->kind = 0;
+  return rc;
+}
+
+/* a counted value (spec 12.7, @i32, &@i32): a cell on the heap with a copy of the value, shared by its users */
+static df_rc* df_rc_new_val(const void* value, size_t size) {
+  void* cell = df_alloc(size);
+  memcpy(cell, value, size);
+  df_rc* rc = df_rc_new(cell);
+  rc->kind = 1;
+  return rc;
+}
+
+/* a counted string (@string, &@string): the cell owns its string ('fresh' says whether it is already owned, otherwise a compact copy) */
+static df_rc* df_rc_new_str(df_string value, bool fresh) {
+  df_string* cell = (df_string*)df_alloc(sizeof(df_string));
+  *cell = fresh ? value : df_str_dup(value);
+  df_rc* rc = df_rc_new(cell);
+  rc->kind = 2;
   return rc;
 }
 
@@ -1534,14 +1563,31 @@ static void df_rc_release(df_rc* rc) {
     return;
   }
   void* obj = rc->obj;
+  uint8_t kind = rc->kind;
   rc->obj = NULL;
   if (rc->weaks == 0) {
     free(rc);
   }
-  df_drop(obj);
+  if (kind == 0) {
+    df_drop(obj);
+    return;
+  }
+  if (kind == 2) {
+    df_str_free(*(df_string*)obj);
+  }
+  free(obj);
 }
 
+/* the automatic lock of a copy out of a &@T value (spec 12.7): true when the cell can be read now (alive and not locked); with no
+   threads a busy lock fails at once, as in enforce */
+#define DF_RC_CAN_COPY(rc) ((rc) != NULL && (rc)->users > 0 && !(rc)->locked)
+
 #define DF_RC_OBJ(T, rc) ((T)((rc) != NULL ? (rc)->obj : NULL))
+
+/* a usage kept for one statement (a counted property read in an expression, spec 11.1.4): released with the temporaries of the statement */
+static void df_rc_release_tmp(void* rc) {
+  df_rc_release((df_rc*)rc);
+}
 
 /* the lock of a read/write counted object (spec 7.2.2, 12.7). @T() timeout ms sets the default wait of the object (0: tried once) */
 static df_rc* df_rc_timeout(df_rc* rc, int64_t ms) {
@@ -2073,6 +2119,190 @@ static void df_console_clear(void) {
   fputs("\x1b[H\x1b[2J", stdout);
   fflush(stdout);
 #endif
+}
+
+/* Console.readKey (stdlib 2): as Console.read, and the keys without a character it can name: the arrows give the arrow characters
+   (KEY_LEFT U+2190, KEY_UP U+2191, KEY_RIGHT U+2192, KEY_DOWN U+2193), Backspace '\b' (also the DEL that terminals send), Esc 0x1B,
+   Tab '\t', Enter '\n'; function keys and the others -1 (null). Not a terminal: the next character of the input, as read */
+static int64_t df_arrow_key(int code) {
+  switch (code) {
+    case 'A': return 0x2191;
+    case 'B': return 0x2193;
+    case 'C': return 0x2192;
+    case 'D': return 0x2190;
+    default: return -1;
+  }
+}
+
+static int64_t df_console_read_key(void) {
+  fflush(stdout);
+#ifdef _WIN32
+  if (_isatty(_fileno(stdin))) {
+    if (!_kbhit()) {
+      return -1;
+    }
+    wint_t key = _getwch();
+    if (key == 0 || key == 0xE0) {
+      switch (_getwch()) {     /* the second code of a key without a character */
+        case 72: return 0x2191;
+        case 80: return 0x2193;
+        case 75: return 0x2190;
+        case 77: return 0x2192;
+        default: return -1;
+      }
+    }
+    if (key >= 0xD800 && key <= 0xDBFF) {
+      wint_t low = _getwch();
+      return 0x10000 + (((int64_t)key - 0xD800) << 10) + ((int64_t)low - 0xDC00);
+    }
+    return key == '\r' ? '\n' : (int64_t)key;
+  }
+#else
+  if (isatty(STDIN_FILENO)) {
+    df_tty_enter_raw();
+    unsigned char first;
+    if (read(STDIN_FILENO, &first, 1) != 1) {
+      return -1;
+    }
+    if (first == 0x1B) {
+      /* an escape sequence arrives in one piece: ESC [ A ... or ESC O A ...; Esc alone is its character */
+      unsigned char next;
+      if (read(STDIN_FILENO, &next, 1) != 1) {
+        return 0x1B;
+      }
+      if (next == '[' || next == 'O') {
+        unsigned char part = 0;
+        int count = 0;
+        while (read(STDIN_FILENO, &part, 1) == 1) {
+          count++;
+          if (part >= 0x40 && part <= 0x7E) {
+            break;
+          }
+        }
+        return count == 1 ? df_arrow_key(part) : -1;   /* ESC [ 1 ; 5 A (with a modifier) and the others: null */
+      }
+      return -1;
+    }
+    if (first == 0x7F) {
+      return '\b';   /* Backspace sends DEL on most terminals */
+    }
+    if (first == '\r') {
+      return '\n';
+    }
+    if (first < 0x80) {
+      return first;
+    }
+    int extra = (first & 0xE0) == 0xC0 ? 1 : (first & 0xF0) == 0xE0 ? 2 : (first & 0xF8) == 0xF0 ? 3 : 0;
+    int64_t code = first & (0x3F >> extra);
+    for (int index = 0; index < extra; index++) {
+      unsigned char part;
+      if (read(STDIN_FILENO, &part, 1) != 1) {
+        return -1;
+      }
+      code = (code << 6) | (part & 0x3F);
+    }
+    return code;
+  }
+#endif
+  int first = getc(stdin);
+  if (first == EOF) {
+    return -1;
+  }
+  return (int64_t)df_decode_utf8(first, df_read_stdin_byte);
+}
+
+/* Console.moveCursor (stdlib 2): x is the column, y the row, (0, 0) the top-left corner of the window (as after clear); negative
+   values count as 0; nothing when the output is not a console */
+static void df_console_move_cursor(int32_t x, int32_t y) {
+  fflush(stdout);
+  if (x < 0) {
+    x = 0;
+  }
+  if (y < 0) {
+    y = 0;
+  }
+#ifdef _WIN32
+  HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+  CONSOLE_SCREEN_BUFFER_INFO info;
+  if (!GetConsoleScreenBufferInfo(out, &info)) {
+    return;   // not a console (redirected output)
+  }
+  COORD at = { (SHORT)(info.srWindow.Left + (x > 32000 ? 32000 : x)), (SHORT)(info.srWindow.Top + (y > 32000 ? 32000 : y)) };
+  SetConsoleCursorPosition(out, at);
+#else
+  if (!isatty(STDOUT_FILENO)) {
+    return;
+  }
+  printf("\x1b[%d;%dH", (int)y + 1, (int)x + 1);
+  fflush(stdout);
+#endif
+}
+
+/* Console.setColors (stdlib 2): the colours of the text and of the background from now on; 0-15 are Console.Color (the 8 ANSI colours,
+   then their bright versions), -1 the default colour of the terminal. Escape sequences (Windows: after switching the console to them, as
+   clear; an old console: SetConsoleTextAttribute); nothing when the output is not a console. The default colours come back when the
+   program ends */
+static bool df_colors_changed = false;
+#ifdef _WIN32
+static WORD df_colors_original = 0;
+static bool df_colors_legacy = false;
+static WORD df_colors_legacy_now = 0;
+#endif
+
+static void df_console_reset_colors(void) {
+  fflush(stdout);
+#ifdef _WIN32
+  if (df_colors_legacy) {
+    SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), df_colors_original);
+    return;
+  }
+#endif
+  fputs("\x1b[0m", stdout);
+  fflush(stdout);
+}
+
+static void df_console_set_colors(int fg, int bg) {
+  fflush(stdout);
+#ifdef _WIN32
+  HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+  DWORD mode;
+  if (!GetConsoleMode(out, &mode)) {
+    return;   // not a console (redirected output)
+  }
+  if (!df_colors_changed) {
+    CONSOLE_SCREEN_BUFFER_INFO info;
+    if (GetConsoleScreenBufferInfo(out, &info)) {
+      df_colors_original = info.wAttributes;
+      df_colors_legacy_now = info.wAttributes;
+    }
+    df_colors_legacy = !(mode & ENABLE_VIRTUAL_TERMINAL_PROCESSING) && !SetConsoleMode(out, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+    df_colors_changed = true;
+    atexit(df_console_reset_colors);
+  }
+  if (df_colors_legacy) {
+    /* the console attributes have blue in bit 0 and red in bit 2: the ANSI order has them the other way round */
+    #define DF_WIN_COLOR(c) ((WORD)(((c) & 2) | (((c) & 1) << 2) | (((c) & 4) >> 2) | ((c) & 8)))
+    WORD now = df_colors_legacy_now;
+    WORD front = fg < 0 ? (WORD)(df_colors_original & 0x0F) : DF_WIN_COLOR(fg);
+    WORD back = bg < 0 ? (WORD)(df_colors_original & 0xF0) : (WORD)(DF_WIN_COLOR(bg) << 4);
+    now = (WORD)((now & ~0xFF) | front | back);
+    df_colors_legacy_now = now;
+    SetConsoleTextAttribute(out, now);
+    return;
+  }
+#else
+  if (!isatty(STDOUT_FILENO)) {
+    return;
+  }
+  if (!df_colors_changed) {
+    df_colors_changed = true;
+    atexit(df_console_reset_colors);
+  }
+#endif
+  int front = fg < 0 ? 39 : fg < 8 ? 30 + fg : 90 + (fg - 8);
+  int back = bg < 0 ? 49 : bg < 8 ? 40 + bg : 100 + (bg - 8);
+  printf("\x1b[%d;%dm", front, back);
+  fflush(stdout);
 }
 
 /* Root.exit (stdlib 1): ends the program at once; the output is flushed, atEnd blocks and destructors do not run */

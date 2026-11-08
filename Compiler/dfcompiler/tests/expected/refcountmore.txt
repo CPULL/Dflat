@@ -1,0 +1,27 @@
+1 move out of a field
+take rex 1
+  end rex
+true
+max 1 true
+2 multiple assignment
+a b
+b a 1 1
+b 2 3
+3 counted in atEnd
+block
+atEnd has late
+  end late
+4 destructor fragment
+walker made
+walked users 2
+fragment sees walked and spare
+  end spare
+  end walked
+5 static counted field
+shared 2
+end
+  end max
+  end a
+  end b
+  end shared
+---- exit code 0 ----

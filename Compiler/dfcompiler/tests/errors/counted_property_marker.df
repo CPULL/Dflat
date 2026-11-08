@@ -1,0 +1,11 @@
+namespace counted_property_marker
+class Dog { }
+class Kennel {
+  public @Dog boss { R: { field } W: { field = value } }
+}
+fun f() {
+  Kennel k = Kennel()
+  Dog d = Dog()
+  k.boss = d
+}
+f()

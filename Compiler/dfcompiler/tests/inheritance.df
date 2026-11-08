@@ -6,7 +6,7 @@ public class Shape {
   public static i32 count = 0
   public static fun i32 Total() { count }
   unrestricted fun ->string Describe() { "I am a " + Kind() + " " + label }
-  public fun string Kind() { "shape" }
+  unrestricted fun string Kind() { "shape" }       // only reads: unrestricted (spec 1.6.2)
   unrestricted fun r64 Area() { 0.0 }
   public fun Touch() { count += 1 }
 }

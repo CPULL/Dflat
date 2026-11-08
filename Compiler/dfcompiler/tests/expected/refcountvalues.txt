@@ -1,0 +1,16 @@
+1 1, users 2
+after the write: ro 6
+show 7, users 3
+after bump: ro 17
+ro 17, rw 100, users 1 1
+18 4 2.5 true z -1
+write without the lock
+kept I am changing, users 1 1
+kept is still I am changing
+inside I am changing!
+I am changing!
+I am changing! / I am changing!
+plain I am changing!
+text new text, users 1
+shared users 2
+---- exit code 0 ----

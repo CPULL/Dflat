@@ -4,7 +4,7 @@ using dfparser;
 namespace dfcompiler;
 
 public static class Program {
-  public const string Version = "0.0.60alpha";
+  public const string Version = "0.0.78alpha";
 
   // the version of the specification this compiler was built for: the variable `version` of the preprocessor (spec 19.1)
   public const string LanguageVersion = "0.0.24";
@@ -49,6 +49,7 @@ public static class Program {
     public List<string> CSources { get; } = new();   // csource= of the project file: C files compiled with the program (temporary, spec 15.9)
     public string? VulkanSdk { get; set; }           // vulkan-sdk= and glfw= of the project file: the folders the gfx library needs
     public string? Glfw { get; set; }
+    public Dictionary<string, int> Limits { get; } = new();   // --max-vec-copies 32, max-copies=8 ...: the limits of the generated copies (spec 11.3.12)
   }
 
   sealed class UsageException : Exception {
@@ -161,6 +162,10 @@ public static class Program {
 
     // the native size of int and uns: --native-int, then native-int= of the project, then the size of the cpu
     int nativeInt = cli.NativeInt ?? project.NativeInt ?? cpuInfo.Bits;
+    var limits = new Dictionary<string, int>(project.Limits);   // the limits of the generated copies: the command line wins over the project
+    foreach (var (limitKey, limitValue) in cli.Limits) {
+      limits[limitKey] = limitValue;
+    }
     if (!BuiltNativeSizes.Contains(nativeInt)) {
       Console.Error.WriteLine($"error: a native int of {nativeInt} bits is not yet supported (use {string.Join(" or ", BuiltNativeSizes)})");
       return 2;
@@ -199,7 +204,7 @@ public static class Program {
           Console.Error.WriteLine(warning);
         }
       }
-      var (c, genWarnings) = CodeGen.Compile(tree, build == "release", nativeInt);
+      var (c, genWarnings) = CodeGen.Compile(tree, build == "release", nativeInt, limits);
       foreach (var warning in genWarnings) {
         Console.Error.WriteLine(SourceMap.Fix(warning));
       }
@@ -354,6 +359,10 @@ public static class Program {
           settings.Build = "release";
           break;
         default:
+          if (LimitKey(option) is string limit) {
+            settings.Limits[limit] = ParseLimit(Value(ref i, option), option);
+            break;
+          }
           if (args[i].StartsWith('-')) {
             throw new UsageException($"unknown option {args[i]}");
           }
@@ -362,6 +371,33 @@ public static class Program {
       }
     }
     return input;
+  }
+
+  // --max-<kind>-chain-depth, --max-<kind>-copies, --max-chain-depth, --max-copies: the key of CodeGen.Compile (bmap and bset are map and set)
+  static string? LimitKey(string option) {
+    if (!option.StartsWith("--max-")) {
+      return null;
+    }
+    string rest = option[6..];
+    foreach (string limit in new[] { "chain-depth", "copies" }) {
+      if (rest == limit) {
+        return limit;
+      }
+      if (rest.EndsWith("-" + limit)) {
+        string kind = rest[..^(limit.Length + 1)] switch { "bmap" => "map", "bset" => "set", var other => other };
+        if (kind is "vec" or "list" or "map" or "hmap" or "set" or "hset" or "customcollection") {
+          return kind + "-" + limit;
+        }
+      }
+    }
+    return null;
+  }
+
+  static int ParseLimit(string text, string option) {
+    if (!int.TryParse(text, out int limit) || limit < 1 || limit > 256) {
+      throw new UsageException($"{option} takes a number from 1 to 256, not '{text}'");
+    }
+    return limit;
   }
 
   static int ParseOptLevel(string text) {
@@ -459,6 +495,10 @@ public static class Program {
           case "version":
             throw new UsageException($"{key} cannot be used in a project file");
           default:
+            if (LimitKey("--" + key) is string limit) {
+              settings.Limits[limit] = ParseLimit(value, key);
+              break;
+            }
             throw new UsageException($"the option '{key}' is not built yet");
         }
       } catch (UsageException ex) {

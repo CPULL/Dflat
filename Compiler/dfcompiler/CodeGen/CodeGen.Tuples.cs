@@ -16,6 +16,9 @@ public sealed partial class CodeGen {
       }
     }
     var values = n.Children.Select((child, index) => ExprOf(child, scope, expectedElems?[index].Type)).ToList();
+    for (int index = 0; index < values.Count; index++) {
+      CheckNotBorrowingFunction(values[index].Type, n.Children[index], scope, "a tuple");
+    }
     List<(string Type, string? Name)> elems;
     if (expectedElems != null && values.Zip(expectedElems).All(pair => Assignable(pair.Second.Type, pair.First.Type))) {
       elems = expectedElems;
@@ -65,6 +68,11 @@ public sealed partial class CodeGen {
     for (int index = 0; index < elems.Count; index++) {
       string temp = NewTemp();
       temps.Add(temp);
+      if (IsCountedType(elems[index].Type)) {
+        bool writablePart = currentFun?.WritableCounted.Contains(index) == true;
+        sb.Append($"{pad}df_rc* {temp} = {CountedPartReturn(s.Children[index], scope, CountedBase(elems[index].Type), s.Children[index], writablePart)};\n");   // spec 12.7
+        continue;
+      }
       var value = ExprOf(s.Children[index], scope, elems[index].Type);
       if (elems[index].Type == "string") {
         value = StrReturned(value, s.Children[index], scope);
@@ -130,6 +138,48 @@ public sealed partial class CodeGen {
       string temp = NewTemp();
       sb.Append($"{pad}{CType(value.Type)} {temp} = {value.Code};\n");
       for (int index = 0; index < elems.Count; index++) {
+        if (IsCountedType(elems[index].Type)) {
+          // @Dog a, i32 n = pick(): the target takes the usage the function gave (spec 12.7)
+          if (targets[index].Kind == "Discard") {
+            sb.Append($"{pad}df_rc_release({temp}.e{index});\n");
+            resolved.Add(null);
+            continue;
+          }
+          if (CountedTarget(targets[index], scope) is not (string partType, bool partWritable)) {
+            throw Error($"this value is a counted {CountedBase(elems[index].Type)}: its target is a counted variable (@{CountedBase(elems[index].Type)} x) (spec 12.7)", targets[index]);
+          }
+          if (BaseOf(partType) != BaseOf(CountedBase(elems[index].Type)) && !IsSubtype(CountedBase(elems[index].Type), partType)) {
+            throw Error($"this value is a counted {CountedBase(elems[index].Type)}, not a {partType}", targets[index]);
+          }
+          bool writableResult = values[0] is { Kind: "Call" } rwCall && CalleesOf(rwCall) is { Count: > 0 } rwCallees && rwCallees.All(f => f.WritableCounted.Contains(index));
+          if (partWritable && !writableResult) {
+            throw Error($"this value is a read-only @{CountedBase(elems[index].Type)}: a read/write &@{partType} needs a &@T result (spec 12.7)", targets[index]);
+          }
+          if (!partWritable && writableResult && BaseOf(partType) == "string") {
+            // a @string target of a &@string result: a compact copy, the usage the function gave is released (spec 12.7)
+            string copyTemp = NewTemp();
+            var source = new CountedRefInfo($"{temp}.e{index}", CountedBase(elems[index].Type), "the result", null, null, true);
+            sb.Append($"{pad}df_rc* {copyTemp} = {CopyCell(source, partType)};\n{pad}df_rc_release({temp}.e{index});\n");
+            resolved.Add(new Expr(copyTemp, CountedUsageType));
+            continue;
+          }
+          resolved.Add(new Expr($"{temp}.e{index}", CountedUsageType));
+          continue;
+        }
+        if (CountedTarget(targets[index], scope) is (string newType, bool newWritable)) {
+          // @Dog a, i32 n = make() with fun ->Dog, i32 make(): the given object starts counting, as for @Dog x = make() (spec 12.7)
+          bool given = values[0] is { Kind: "Call" } call && CalleesOf(call) is { Count: > 0 } callees && callees.All(f => f.Gives.Contains(index));
+          string elem = elems[index].Type;
+          if (IsCountedValueType(newType)) {
+            resolved.Add(new Expr(NewCell(new Expr($"{temp}.e{index}", elem, true), newType, targets[index]), CountedUsageType));
+            continue;
+          }
+          if (!given || !IsClass(elem) || !IsSubtype(elem, newType)) {
+            throw Error($"a counted variable takes a counted value or an object the function gives (->{DisplayName(newType)}) (spec 12.7)", targets[index]);
+          }
+          resolved.Add(new Expr($"df_rc_new((void*)({temp}.e{index}))", CountedUsageType));
+          continue;
+        }
         resolved.Add(new Expr($"{temp}.e{index}", elems[index].Type, true));
       }
     } else {
@@ -137,6 +187,16 @@ public sealed partial class CodeGen {
         throw Error($"{targets.Count} targets but {values.Count} values", s);
       }
       for (int index = 0; index < values.Count; index++) {
+        if (CountedTarget(targets[index], scope) is (string countedType, bool countedWritable)) {
+          // @Dog a, @Dog b = x, y and a, b = b, a on counted variables: every usage is taken first (spec 12.7)
+          string usage = NewTemp();
+          string usageCode = IsCountedValueType(countedType)
+            ? CountedCellValue(values[index], scope, countedType, countedWritable, values[index])   // @i32 c, @string t = 5, "five"
+            : CountedValue(values[index], scope, countedType, false, values[index], countedWritable);
+          sb.Append($"{pad}df_rc* {usage} = {usageCode};\n");
+          resolved.Add(new Expr(usage, CountedUsageType));
+          continue;
+        }
         string? targetType = TargetType(targets[index], scope);
         var value = ExprOf(values[index], scope, targetType);
         if (IsMulti(value.Type)) {
@@ -167,7 +227,14 @@ public sealed partial class CodeGen {
 
     bool ownValues = GivesOwnMultiValues(s);   // the arrays are new: an owner that receives one ends its old array (spec 6.8.1)
     for (int index = 0; index < targets.Count; index++) {
+      CheckLentPartTarget(s, targets[index], index, resolved[index], scope);
       AssignTarget(targets[index], resolved[index], sb, scope, pad, ownValues);
+      if (targets[index].Kind == "Decl" && values.Count == 1 && values[0] is { Kind: "Call" } lendingCall && scope.Find(targets[index].Text!) is VarInfo lent
+          && IsClass(lent.Type) && !lent.Own && !LentPartGiven(lendingCall, index)) {
+        // the new variable borrows the object: read-only unless written &T, and what it comes from stays as it is until its last use (spec 12)
+        lent.ReadOnlyRef = !targets[index].Children.Any(child => child.Kind == "ReadWrite");
+        CheckLentTarget(targets[index], lendingCall, lent, scope);
+      }
     }
     stringFresh.Clear();
   }
@@ -193,6 +260,13 @@ public sealed partial class CodeGen {
 
   void AssignTarget(Node target, Expr? value, StringBuilder sb, Scope scope, string pad, bool ownValues = false) {
     if (target.Kind == "Discard" || value == null) {
+      return;
+    }
+    if (target.Kind != "Decl") {
+      CheckUnrestrictedWrite(target, scope);   // a, field = f() (spec 1.6.2)
+    }
+    if (value.Value.Type == CountedUsageType) {
+      AssignCountedTarget(target, value.Value.Code, sb, scope, pad);
       return;
     }
     if (PropertyTarget(target, scope) is var (propertyObj, property)) {
@@ -245,5 +319,79 @@ public sealed partial class CodeGen {
       return;
     }
     sb.Append($"{pad}{lvalue.Code} = {Convert(value.Value, lvalue.Type, target)};\n");
+  }
+
+  // the type of a usage taken for a counted target of a multiple assignment
+  const string CountedUsageType = "@usage";
+
+  // the part index of a call gives the object (->T): the target owns it
+  bool LentPartGiven(Node call, int index) => CalleesOf(call) is { Count: > 0 } callees && callees.All(f => f.Gives.Contains(index));
+
+  // &Dog dog as a target of several results: only for an object the function lends read/write (a &T result, or tryGet of a map, spec 6.6)
+  void CheckLentPartTarget(Node s, Node target, int index, Expr? value, Scope scope) {
+    if (target.Kind != "Decl" || !target.Children.Any(child => child.Kind == "ReadWrite") || IsCountedDecl(target)
+        || target.Children.Any(child => child.Kind == "Weak")) {
+      return;
+    }
+    string type = ResolveType(target.Children.First(child => TypeNodeKinds.Contains(child.Kind)));
+    if (!IsClass(type)) {
+      throw Error($"&{DisplayName(type)} {target.Text}: a read/write lend is for objects; a {DisplayName(type)} is a copy (spec 13.1.1)", target);
+    }
+    var values = s.Children[1].Children;
+    bool writableLend = values.Count == 1 && values[0] is { Kind: "Call" } call && CalleesOf(call) is { Count: > 0 } callees
+      && callees.All(f => f.Writes.Contains(index) || f.Name.EndsWith(".tryGet") && f.Class != null && (IsMap(f.Class.Name) || IsHmap(f.Class.Name)));
+    if (!writableLend) {
+      throw Error($"&{DisplayName(type)} {target.Text}: this value is lent read-only; write {DisplayName(type)} {target.Text} (spec 13.1.1)", target);
+    }
+  }
+
+  // one counted value of return a, b in a function with several results: as for the result of fun @T (a variable gives its usage, a field
+  // adds a user, any other value is counted as for a new counted variable)
+  string CountedPartReturn(Node value, Scope scope, string type, Node at, bool writable = false) {
+    if (IsCountedValueType(type)) {
+      return CountedValueReturn(value, scope, type, writable, at);
+    }
+    if (CountedRef(value.Kind == "CountedOf" && value.Children.Count == 1 && CountedRef(value.Children[0], scope) != null ? value.Children[0] : value, scope) is CountedRefInfo counted) {
+      if (!IsSubtype(counted.Type, type)) {
+        throw Error($"'{counted.Name}' is a {counted.Type}, not a {type}", at);
+      }
+      CheckWritableSource(counted, writable, at);   // a &@T result gives only read/write usages
+      return counted.Variable != null ? TakeUsage(counted.Variable) : $"df_rc_use({counted.Code})";
+    }
+    return CountedValue(value, scope, type, false, at, writable);
+  }
+
+  // a counted target of a multiple assignment: a @T declaration, a counted variable or a counted field; null for the others
+  (string Type, bool Writable)? CountedTarget(Node target, Scope scope) {
+    if (target.Kind == "Decl") {
+      if (!IsCountedDecl(target)) {
+        return null;
+      }
+      return (ResolveType(target.Children.First(child => TypeNodeKinds.Contains(child.Kind))), target.Children.Any(child => child.Kind == "ReadWrite"));
+    }
+    if (target.Kind is "Name" or "Member" && CountedRef(target, scope) is CountedRefInfo counted) {
+      return (counted.Type, IsWritableRef(counted));
+    }
+    return null;
+  }
+
+  // the target takes the usage; a counted variable or field releases the one it had
+  void AssignCountedTarget(Node target, string usage, StringBuilder sb, Scope scope, string pad) {
+    if (target.Kind == "Decl") {
+      if (!frames.Peek().Hoisted.TryGetValue(target.Text!, out var hoisted) || !hoisted.IsCounted) {
+        throw NotSupported("A counted variable in this place (only in blocks and function bodies for now)", target);
+      }
+      if (scope.Vars.ContainsKey(target.Text!)) {
+        throw Error($"'{target.Text}' is already declared in this scope", target);
+      }
+      sb.Append($"{pad}{hoisted.CName} = {usage};\n");
+      scope.Vars[target.Text!] = hoisted;
+      assign.Unassigned.Remove(hoisted);
+      return;
+    }
+    var counted = CountedRef(target, scope)!.Value;
+    string place = counted.Variable != null ? counted.Variable.CName : CountedFieldTarget(target, scope).Code;
+    string old = NewTemp();
+    sb.Append(pad).Append(CheckRaise($"({{ df_rc* {old} = {place}; {place} = {usage}; df_rc_release({old}); }})", "void")).Append(";\n");
   }
 }

@@ -102,7 +102,13 @@ public sealed partial class CodeGen {
 
   // the zero or null value of the type of an expression (ZeroLike, made by HoistEnforceExpr)
   Expr ZeroLike(Node node, Scope scope) {
-    string type = ExprOf(node.Children[0], scope).Type;
+    string type;
+    typingOnly = true;   // only the type is wanted: a &@string may be named outside its enforce here (spec 12.7)
+    try {
+      type = ExprOf(node.Children[0], scope).Type;
+    } finally {
+      typingOnly = false;
+    }
     if (type is "void" or "null") {
       throw Error("an enforce expression must give a value", node);
     }

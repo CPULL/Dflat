@@ -1,0 +1,1 @@
+fun sum(i32 items...) { items[0] = 3 }

@@ -75,7 +75,11 @@ public sealed partial class CodeGen {
         ?? Synthetic("Block", decl).Add(Synthetic("ExprStmt", decl).Add(Synthetic("Name", decl, "field")));
       var fun = Synthetic("Fun", decl, GetterName(name));
       AddVisibility(fun, getter, visibility);
-      fun.Add(Synthetic("Returns", decl).Add(CopyTree(typeNode))).Add(Synthetic("Params", decl)).Add(RawFields(block, name)).Add(Synthetic("AccessorFun", decl));
+      var returns = Synthetic("Returns", decl).Add(CopyTree(typeNode));
+      if (decl.Children.Any(child => child.Kind == "Counted")) {
+        returns.Text = decl.Children.Any(child => child.Kind == "ReadWrite") ? "counted-rw" : "counted";   // R: gives a usage (spec 11.1.4)
+      }
+      fun.Add(returns).Add(Synthetic("Params", decl)).Add(RawFields(block, name)).Add(Synthetic("AccessorFun", decl));
       methods.Add(fun);
     }
     if (canWrite) {
@@ -84,6 +88,12 @@ public sealed partial class CodeGen {
       var fun = Synthetic("Fun", decl, SetterName(name));
       AddVisibility(fun, setter, visibility);
       var value = Synthetic("Param", decl, "value").Add(CopyTree(typeNode));
+      if (decl.Children.Any(child => child.Kind == "Counted")) {
+        value.Add(Synthetic("Counted", decl));   // W: takes a usage (spec 11.1.4)
+        if (decl.Children.Any(child => child.Kind == "ReadWrite")) {
+          value.Add(Synthetic("ReadWrite", decl));
+        }
+      }
       fun.Add(Synthetic("Params", decl).Add(value)).Add(RawFields(block, name)).Add(Synthetic("AccessorFun", decl));
       methods.Add(fun);
     }
@@ -122,6 +132,9 @@ public sealed partial class CodeGen {
     if (field == null) {
       throw Error("'field' is used only inside the accessor blocks of a property", n);
     }
+    if (field.IsCounted) {
+      return CountedFieldRead(new Expr($"self->{field.CName}", field.Type), field, n);   // the object of a counted storage
+    }
     return new Expr($"self->{field.CName}", field.Type);
   }
 
@@ -141,13 +154,26 @@ public sealed partial class CodeGen {
     }
   }
 
+  // set by a counted receiver (@Dog b = k.boss, an @T argument): the next counted property read gives its usage instead of a temporary one
+  bool wantCountedUsage;
+
   Expr PropertyGet(Expr obj, FieldInfo property, Scope scope, Node at) {
     if (!property.CanRead) {
       throw Error($"'{property.Name}' cannot be read: it has no R:", at);
     }
     CheckAccessorVisible(obj, property, GetterName(property.Name), "R:", at);
-    return ObjectCall(obj, GetterName(property.Name), new List<Node>(), scope, at)
+    bool wantUsage = wantCountedUsage;
+    wantCountedUsage = false;
+    var got = ObjectCall(obj, GetterName(property.Name), new List<Node>(), scope, at)
       ?? throw Error($"internal error: no getter for '{property.Name}'", at);
+    if (!property.IsCounted || wantUsage || !IsCountedType(got.Type)) {
+      return got;
+    }
+    // k.boss.name: the usage R: gives lives for the statement (spec 11.1.4)
+    string usage = NewTemp();
+    string inner = CountedBase(got.Type);
+    string read = IsCountedValueType(inner) ? CellRead(usage, inner) : $"DF_RC_OBJ({CType(inner)}, {usage})";
+    return new Expr($"({{ df_rc* {usage} = {got.Code}; df_tmpf({usage}, df_rc_release_tmp); {read}; }})", inner);
   }
 
   // x (a property of this class) or o.x: the object and the property; null when the target is not a property

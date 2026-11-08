@@ -1,0 +1,1 @@
+weak_readonly_call.df(9): error: 'w' is a read-only counted object (@Dog): 'birthday' needs a read/write one (mark it unrestricted, or use a &@Dog); 'birthday' is defined at weak_readonly_call.df(4) (spec 12.7)

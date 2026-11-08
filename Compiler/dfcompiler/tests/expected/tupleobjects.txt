@@ -1,0 +1,14 @@
+A Rex Rex
+A ends
+replaced
+InBox
+Made
+Made ends
+end of f
+InBox ends
+InBox ends
+Rex ends
+Made ends
+Rex ends
+B ends
+---- exit code 0 ----

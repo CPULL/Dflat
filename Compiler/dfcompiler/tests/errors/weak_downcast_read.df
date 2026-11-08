@@ -1,0 +1,16 @@
+namespace weak_downcast_read
+trait Animal {
+  unrestricted fun i32 legs()
+}
+class Dog : Animal {
+  public i32 tricks
+  override fun i32 legs() { 4 }
+}
+fun f() {
+  @Animal a = @Dog()
+  %Animal w = %a
+  if w is Dog d {
+    i32 t = d.tricks
+  }
+}
+f()

@@ -1,0 +1,11 @@
+namespace map_tryget_locked
+class Dog(string name) {
+  public string name
+}
+fun f() {
+  map<string, Dog> dogs = ["rex": Dog("Rex")]
+  bool here, Dog dog = dogs.tryGet("rex")
+  dogs.removeAt("rex")
+  dog.name.len
+}
+f()

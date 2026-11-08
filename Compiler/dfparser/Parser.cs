@@ -998,10 +998,12 @@ public sealed class Parser {
   Node? TryParseDecl() {
     // %Texture2D texture: a weak reference (spec 12); the '%' touches the type
     CheckOldMarker();
-    bool readWrite = IsReadWriteMarker("@") || IsReadWriteMarker("%");   // &@Dog first, &%Dog watcher: read/write (spec 12.7)
-    bool weak = readWrite ? PeekAt(1).Is("%") : IsWeakMarker();
-    bool counted = readWrite ? PeekAt(1).Is("@") : IsCountedMarker();   // @Dog first: a counted object (spec 12.7)
-    bool startsType = weak || counted || Peek.Kind == TokenKind.Ident || IsOp("(") || IsOp("*") || IsOp("&") && PeekAt(1).Is("*") || IsKw("fun");
+    // &Dog dog: a read/write lend (a target of several results, bool here, &Dog dog = m.tryGet(k), spec 6.6, 13.1.1)
+    bool plainReadWrite = IsOp("&") && PeekAt(1).Kind == TokenKind.Ident;
+    bool readWrite = IsReadWriteMarker("@") || IsReadWriteMarker("%") || plainReadWrite;   // &@Dog first, &%Dog watcher: read/write (spec 12.7)
+    bool weak = readWrite && !plainReadWrite ? PeekAt(1).Is("%") : IsWeakMarker();
+    bool counted = readWrite && !plainReadWrite ? PeekAt(1).Is("@") : IsCountedMarker();   // @Dog first: a counted object (spec 12.7)
+    bool startsType = weak || counted || plainReadWrite || Peek.Kind == TokenKind.Ident || IsOp("(") || IsOp("*") || IsOp("&") && PeekAt(1).Is("*") || IsKw("fun");
     if (!startsType) {
       return null;
     }
@@ -1217,18 +1219,13 @@ public sealed class Parser {
       }
       CheckOldMarker();
       if (IsCountedMarker() || IsReadWriteMarker("@")) {
-        // fun @Dog make(), fun &@Dog make(): a counted result, read-only or read/write (spec 12.7)
+        // fun @Dog make(), fun &@Dog make(), fun @Dog, i32 pick(): a counted result, read-only or read/write (spec 12.7)
         bool readWrite = IsOp("&");
         Next();
         if (readWrite) {
           Next();
         }
-        if (rets.Children.Count > 0) {
-          throw Error("a counted result (@T) is the only result of its function");
-        }
-        rets.Text = readWrite ? "counted-rw" : "counted";
-      } else if (rets.Text is "counted" or "counted-rw") {
-        throw Error("a counted result (@T) is the only result of its function");
+        marks.Add((readWrite ? "r" : "c") + rets.Children.Count);
       }
       rets.Add(ParseType(false));
       if (!AcceptOp(",")) {
@@ -1241,7 +1238,9 @@ public sealed class Parser {
     }
     var name = IsOp("==") ? Next() : ExpectIdent();
     var node = new Node("Fun", name, name.Text);
-    if (marks.Count > 0) {
+    if (rets.Children.Count == 1 && marks is ["c0"] or ["r0"]) {
+      rets.Text = marks[0] == "r0" ? "counted-rw" : "counted";   // the only result is counted
+    } else if (marks.Count > 0) {
       rets.Text = "marks:" + string.Join(",", marks);
     }
     if (rets.Children.Count > 0) {

@@ -1,0 +1,1 @@
+lend_value_from_readonly.df(11): error: 'board' is a read-only reference: 'scoreRef' needs an owned or writable reference (mark it unrestricted, or take &board); 'scoreRef' is defined at lend_value_from_readonly.df(6)

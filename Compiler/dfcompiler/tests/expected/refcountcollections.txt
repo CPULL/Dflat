@@ -1,0 +1,29 @@
+1 arr<@Dog>
+rex bo 2
+  end bo
+true
+rex 3
+loop rex
+loop new
+loop max
+4
+2 sort
+new rex max
+a c rex
+3 resize, fillAtCapacity, fill
+5 rex 7
+2 4
+5
+4 iterator
+a true
+5 view
+c
+view a
+view c
+end
+  end new
+  end max
+  end a
+  end c
+  end rex
+---- exit code 0 ----

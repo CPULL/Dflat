@@ -1,0 +1,61 @@
+// Counted values and strings (spec 12.7): a new variable or parameter shares the cell, = on a &@T writes it (with the lock), = on a
+// read-only @T gives a new cell with a copy, a &@string is read only inside enforce and is always copied into a @string
+namespace refcountvalues
+alias Root as r
+
+fun show(@i32 n) { r.Console.log($"show {n}, users {n.usersCount}") }
+fun bump(&@i32 n) { enforce n { n += 10 } }
+fun showText(@string s) { r.Console.log($"text {s}, users {s.usersCount}") }
+
+fun numbers() {
+  &@i32 rw = 1
+  @i32 ro = rw                                   // the same cell
+  r.Console.log($"{rw} {ro}, users {rw.usersCount}")
+  enforce rw { rw = 6 }                          // writes the cell: ro sees it
+  r.Console.log($"after the write: ro {ro}")
+  enforce rw { rw++ }
+  show(@ro)
+  bump(&@rw)
+  r.Console.log($"after bump: ro {ro}")
+  ro = rw                                        // ro gets a new cell with a copy
+  enforce rw { rw = 100 }
+  r.Console.log($"ro {ro}, rw {rw}, users {rw.usersCount} {ro.usersCount}")
+  i32 plain = ro + 1
+  i32 x = 4
+  @i32 fromPlain = @x
+  @r64 real = 2.5
+  @bool flag = true
+  @char c = 'z'
+  @i32? maybe
+  r.Console.log($"{plain} {fromPlain} {real} {flag} {c} {maybe ?? -1}")
+  rw = 5                                         // no lock: raises
+  r.Console.log("not reached")
+}
+
+fun strings() {
+  &@string rwStr = "I am changing"
+  @string kept = rwStr                           // a compact copy, not shared
+  r.Console.log($"kept {kept}, users {rwStr.usersCount} {kept.usersCount}")
+  enforce rwStr { rwStr += "!" }
+  r.Console.log($"kept is still {kept}")
+  enforce rwStr { r.Console.log($"inside {rwStr}") }
+  r.Console.log(enforce rwStr lockfail { "cannot read" })
+  @string roStr
+  @string? nullStr
+  roStr = rwStr                                  // a copy with the automatic lock
+  nullStr = rwStr
+  r.Console.log($"{roStr} / {nullStr}")
+  string plain
+  enforce rwStr {
+    plain = rwStr
+    rwStr = "new text"
+  }
+  r.Console.log($"plain {plain}")
+  showText(@rwStr)                               // a copy for the parameter
+  @string shared = roStr                         // read-only: the cell is shared
+  r.Console.log($"shared users {roStr.usersCount}")
+}
+
+numbers()
+catch WritingOnRefCountWithoutLockingException { r.Console.log("write without the lock") }
+strings()

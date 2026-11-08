@@ -3,7 +3,7 @@ namespace refcount
 alias Root as r
 
 class Dog(string name) {
-  public fun bark() { r.Console.log($"{name}: woof") }
+  unrestricted fun bark() { r.Console.log($"{name}: woof") }
 } atEnd {
   r.Console.log($"{name} ends")
 }

@@ -1,0 +1,1 @@
+refcount_rwstring_read.df(5): error: 's' is a &@string: it is read only inside enforce s { } (or the expression form, enforce s lockfail { ... }), a write can move its text (spec 12.7)

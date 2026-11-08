@@ -1,0 +1,1 @@
+lambda_field_borrow.df(7): error: this function value borrows variables, so it cannot be kept in 'onClick', which may outlive them: a field keeps only lambdas that own their captures: capture with x! or ->x (spec 13.3.4)

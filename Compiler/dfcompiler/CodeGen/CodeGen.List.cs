@@ -53,6 +53,9 @@ public sealed partial class CodeGen {
     if (elem == "string?") {
       return $"df_opt_str_drop(&{slot}); ";   // spec 7.1
     }
+    if (IsFunType(elem)) {
+      return $"df_fn_drop(&{slot}); ";   // spec 13.3.5
+    }
     if (IsArr(elem)) {
       return $"{ArrDropHelper(elem)}({slot}); {slot} = {ZeroValue(elem)}; ";   // spec 6.8.1
     }
@@ -175,6 +178,9 @@ public sealed partial class CodeGen {
     }
     if (ListElem(cls.Name) == "string?") {
       sb.Append("    df_str_free(node->value.val);\n");   // spec 7.1
+    }
+    if (IsFunType(ListElem(cls.Name))) {
+      sb.Append("    df_fn_release(node->value);\n");   // spec 13.3.5
     }
     sb.Append("    free(node);\n    node = after;\n  }\n");
     sb.Append($"  self->{first} = NULL;\n  self->{VecField(cls.Name, "last")} = NULL;\n  self->{VecField(cls.Name, "count")} = 0;\n");
@@ -308,11 +314,6 @@ public sealed partial class CodeGen {
           + $"{DropListItem(elem, $"{node}->value")}free({node}); {removed}++; }} else {{ {before} = {node}; }} {node} = {after}; }} "
           + $"{l}->{count} -= {removed}; {removed}; }})";
         return new Expr(code, NativeUns);
-      }
-      case "node_clear": {
-        string node = NewTemp();
-        string reset = IsClass(elem) || IsStrItem(elem) || IsArr(elem) ? DropListItem(elem, $"{node}->value") : $"{node}->value = {ZeroValue(elem)}; ";
-        return new Expr(head + $"for ({nodeType}* {node} = {l}->{first}; {node} != NULL; {node} = {node}->next) {{ {reset}}} }})", "void");
       }
       case "node_fill": {
         string value = NewTemp();
@@ -601,7 +602,7 @@ public sealed partial class CodeGen {
     } else {
       sb.Append(ForEachSourceItem(sourceType, s, "0", SourceLength(sourceType, s), item => {
         string node = NewTemp();
-        string take = moving && (IsClass(elem) || elem == "string") ? $"{item} = NULL; " : moving && (IsArr(elem) || elem == "string?") ? $"{item} = {ZeroValue(elem)}; " : "";
+        string take = moving && (IsClass(elem) || elem == "string") ? $"{item} = NULL; " : moving && (IsArr(elem) || elem == "string?" || IsFunType(elem)) ? $"{item} = {ZeroValue(elem)}; " : "";
         string value = cloning ? CloneValue(item, elem, at) : IsStrItem(elem) && !moving ? StrItemDup(elem, item) : item;
         return NewListNode(list.Type, node, value) + take + AppendListNode(held, list.Type, node);
       }));

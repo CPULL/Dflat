@@ -166,11 +166,25 @@ public sealed partial class CodeGen {
     if (IsArr(type)) {
       return $"{ArrCloneHelper(type, at)}({source})";
     }
+    if (IsFunType(type)) {
+      return $"df_fn_clone({source})";   // a function value of its own (spec 13.3.3)
+    }
     if (StructHoldsObjects(type)) {
       return $"{StructCloneHelper(type)}({source})";   // a struct with its own strings and objects (spec 11.1.5.3)
     }
-    if (IsTuple(type) && TupleElems(type).Any(elem => elem.Type == "string" || IsClass(elem.Type) || IsArr(elem.Type) || IsTuple(elem.Type))) {
-      throw NotSupported("Cloning a tuple field that holds strings, objects or arrays", at);
+    if (IsCountedType(type)) {
+      return $"df_rc_use({source})";   // a counted part: one more user (spec 12.7)
+    }
+    if (IsTuple(type) && TupleElems(type).Any(elem => elem.Type is "string" or "string?" || IsArr(elem.Type) || IsTuple(elem.Type) || IsFunType(elem.Type)
+        || IsClass(elem.Type) || IsCountedType(elem.Type) || StructHoldsObjects(elem.Type))) {
+      // each item copied as it is copied anywhere else: strings, arrays, function values, the tuples inside (spec 12.6)
+      var elems = TupleElems(type);
+      string held = NewTemp();
+      var copies = new System.Text.StringBuilder();
+      for (int index = 0; index < elems.Count; index++) {
+        copies.Append($"{held}.e{index} = {CloneValue($"{held}.e{index}", elems[index].Type, at)}; ");
+      }
+      return $"({{ {CType(type)} {held} = {source}; {copies}{held}; }})";
     }
     return source;   // a native, a nullable native, a tuple of natives: a value
   }
@@ -187,5 +201,55 @@ public sealed partial class CodeGen {
       classCode.Append($"    for (df_uns i = 0; i < a.len; i++) {{\n      r.p[i] = {item};\n    }}\n  }}\n  return r;\n}}\n\n");
     }
     return name;
+  }
+
+  // c[a..b]!: a new collection of the same kind (arr, vec, list) with a copy of the items of the range; objects are cloned, as by ! (spec 12.6)
+  Expr CopyRange(Node index, Scope scope) {
+    var range = index.Children[1];
+    var obj = ExprOf(index.Children[0], scope);
+    string elem = IndexCollectionElem(obj.Type) ?? throw Error($"a range copy works on arr, vec and list, not on {obj.Type} (spec 6.5)", index);
+    cloneUsed = true;
+    string held = NewTemp();
+    string start = NewTemp();
+    string end = NewTemp();
+    string length = SourceLength(obj.Type, held);
+    string outside = $"{{ df_raise(&df_desc_IndexOutOfRangeException, {fn!.NameConst}); {RaiseJump} }}";
+    var sb = new System.Text.StringBuilder();
+    sb.Append($"({{ {CType(obj.Type)} {held} = {(IsArr(obj.Type) ? obj.Code : NullChecked(obj.Code, obj.Type))}; ");
+    sb.Append($"df_uns {start} = {(range.Children[0].Kind == "Open" ? "0" : IndexArgument(range.Children[0], scope))}; ");
+    if (range.Children[1].Kind == "Open") {
+      sb.Append($"df_uns {end} = {length}; ");
+    } else if (range.Text == "..=") {
+      sb.Append($"df_uns {end} = {IndexArgument(range.Children[1], scope)}; if ({end} == DF_UNS_MAX) {outside} {end} += 1; ");
+    } else {
+      sb.Append($"df_uns {end} = {IndexArgument(range.Children[1], scope)}; ");
+    }
+    sb.Append($"if ({start} > {end} || {end} > {length}) {outside} ");
+    bool owning = IsClass(elem) || IsArr(elem) || elem is "string" or "string?" || IsFunType(elem) || IsTuple(elem) || StructHoldsObjects(elem);
+    string Copy(string item) => owning ? CloneValue(item, elem, index) : item;
+    string result = NewTemp();
+    string amount = $"({end} - {start})";
+    if (IsArr(obj.Type)) {
+      string next = NewTemp();
+      sb.Append($"{CType(obj.Type)} {result} = {{ ({CType(elem)}*)df_calloc({amount} > 0 ? {amount} : 1, sizeof({CType(elem)})), {amount} }}; df_uns {next} = 0; ");
+      sb.Append(ForEachSourceItem(obj.Type, held, start, amount, item => $"{result}.p[{next}++] = {Copy(item)}; "));
+    } else {
+      var ctor = funs[obj.Type].First(f => f.Params.Count == 0);
+      sb.Append($"{CType(obj.Type)} {result} = {UserCallCode(ctor, $"{ctor.CName}()")}; ");
+      if (IsVec(obj.Type)) {
+        string wanted = NewTemp();
+        var reserve = ObjectCall(new Expr(result, obj.Type), "reserve", new List<Node> { Synthetic("CValue", index, wanted).Add(Synthetic("Type", index, NativeUns)) }, scope, index)
+          ?? throw Error("no reserve", index);
+        string items = VecField(obj.Type, "items");
+        string count = VecField(obj.Type, "count");
+        sb.Append($"df_uns {wanted} = {amount}; {reserve.Code}; ");
+        sb.Append(ForEachSourceItem(obj.Type, held, start, amount, item => $"{result}->{items}.p[{result}->{count}++] = {Copy(item)}; "));
+      } else {
+        string node = NewTemp();
+        sb.Append(ForEachSourceItem(obj.Type, held, start, amount, item => NewListNode(obj.Type, node, Copy(item)) + AppendListNode(result, obj.Type, node)));
+      }
+    }
+    sb.Append($"{result}; }})");
+    return new Expr(sb.ToString(), obj.Type, true);
   }
 }

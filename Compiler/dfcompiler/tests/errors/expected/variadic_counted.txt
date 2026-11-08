@@ -1,0 +1,1 @@
+variadic_counted.df(2,18): error: a counted parameter is @T name, with no other marker

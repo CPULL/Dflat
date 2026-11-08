@@ -3,14 +3,14 @@ alias Root as r
 
 trait Named {
   public string name = "unnamed"
-  public fun string Label()                          // must be implemented
+  unrestricted fun string Label()                    // must be implemented; only reads (spec 1.6.2)
   unrestricted fun ->string Hello() { "Hi " + Label() + " (" + name + ")" }
 }
 
 trait Shape : Named {
   public i32 sides
   Shape() { sides = 3 }
-  public fun r64 Area()
+  unrestricted fun r64 Area()                       // only reads (spec 1.6.2)
   unrestricted fun ->string Info() { Hello() + " area " + Area() + " sides " + sides }
 }
 
@@ -73,7 +73,7 @@ r.Console.log(describe(loud))
 r.Console.log(greet(loud))
 
 // properties through a trait-typed value
-Shape s = ci
+&Shape s = ci                    // a read/write borrow: its properties are written
 r.Console.log(s.sides)
 s.sides = 8
 r.Console.log(ci.sides)

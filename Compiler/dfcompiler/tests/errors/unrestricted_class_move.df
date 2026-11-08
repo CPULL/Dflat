@@ -1,0 +1,14 @@
+namespace unrestricted_class_move
+class Dog(string name) {
+  public string name
+  public i32 hunger = 5
+  unrestricted fun bark() { }
+  public fun eat(i32 n) { hunger -= n }
+}
+class Kennel {
+  Dog boss = Dog("Rex")
+  vec<Dog> dogs = []
+  i32 visits
+  string label = "k"
+  unrestricted fun ->Dog f() { ->boss }
+}

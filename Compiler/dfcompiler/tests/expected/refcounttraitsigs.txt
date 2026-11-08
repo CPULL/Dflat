@@ -1,0 +1,7 @@
+users 2
+Rex users 3
+n 2 a keeper of Rex
+child takes Rex, users 4
+score 2, users 3
+Rex ends
+---- exit code 0 ----

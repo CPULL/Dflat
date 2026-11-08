@@ -1,0 +1,11 @@
+namespace weak_readonly_call
+class Dog {
+  public i32 age
+  public fun birthday() { age++ }
+}
+fun f() {
+  @Dog d = Dog()
+  %Dog w = %d
+  enforce w { w.birthday() } else { }
+}
+f()

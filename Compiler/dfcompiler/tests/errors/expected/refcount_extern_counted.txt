@@ -1,0 +1,1 @@
+refcount_extern_counted.df(2): error: an extern function takes and gives plain values, not counted ones (@T): pass the value itself (spec 12.7, 15.9)

@@ -1,0 +1,1 @@
+lend_value_counted_unlocked.df(12): error: &string t: a lend from the &@Board 'shared' is valid only inside enforce shared { }, which holds its lock; write string t (spec 13.1.1)

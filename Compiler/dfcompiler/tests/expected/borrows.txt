@@ -1,0 +1,6 @@
+Rex: woof
+Rex: woof
+Rex
+4
+Max: woof
+---- exit code 0 ----

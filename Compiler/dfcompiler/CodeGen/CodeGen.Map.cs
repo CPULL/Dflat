@@ -136,8 +136,12 @@ public sealed partial class CodeGen {
 
   bool MapValueBuilt(string value) {
     string inner = BaseOf(value);
-    return IsInt(inner) || inner is "bool" or "char" or "r32" or "r64" or "date" or "time" or "clock" or "lapse" || IsEnum(inner) || value == "string";
+    return IsInt(inner) || inner is "bool" or "char" or "r32" or "r64" or "date" or "time" or "clock" or "lapse" || IsEnum(inner) || value == "string"
+      || IsMapObjectValue(value);
   }
+
+  // an object value of a map or an hmap: the map owns it (spec 6.6), it ends when it is replaced or removed or with the map
+  bool IsMapObjectValue(string value) => !IsNullable(value) && IsClass(value) && !IsArr(value);
 
   // map<K, V> or hmap<K, V> written as a type: the key and the value types this version builds (spec 6.2)
   void CheckMapArgs(List<string> args, Node at, bool hashed) {
@@ -153,7 +157,7 @@ public sealed partial class CodeGen {
         throw Error($"hmap keys of type {DisplayName(args[0])} are not built yet (this version: integers, bool, char, enums, reals, date, time, clock, lapse and string)", at);
       }
       if (!HmapValueBuilt(args[1])) {
-        throw Error($"hmap values of type {DisplayName(args[1])} are not built yet (this version: the native types and string)", at);
+        throw Error($"hmap values of type {DisplayName(args[1])} are not built yet (this version: the native types, string and objects)", at);
       }
       return;
     }
@@ -161,7 +165,7 @@ public sealed partial class CodeGen {
       throw Error($"map keys of type {DisplayName(args[0])} are not built yet (this version: integers, bool, char, enums, reals, date, time and string)", at);
     }
     if (!MapValueBuilt(args[1])) {
-      throw Error($"map values of type {DisplayName(args[1])} are not built yet (this version: the native types and string)", at);
+      throw Error($"map values of type {DisplayName(args[1])} are not built yet (this version: the native types, string and objects)", at);
     }
   }
 
@@ -270,13 +274,31 @@ public sealed partial class CodeGen {
 
   // a value that goes into the map: a string is its own copy, in its smallest form (spec 6.6)
   string MapValueItem(Node node, Scope scope, string valueType) {
+    if (BoxInner(valueType) != null) {
+      node = BoxCall(node, valueType);   // map<K, @T>: a literal or m[k] = x puts the value in a new box, which takes a usage (spec 12.7)
+    }
     var value = CheckedMapValue(node, scope, valueType);
+    if (IsMapObjectValue(valueType) && !LibraryCode && !value.Fresh && value.Type != "null") {
+      throw Error("the map owns its values: give it a new object, ->x to move one in, or x! for a copy (spec 6.6)", node);
+    }
     return StrItemAs(value, valueType, Convert(value, valueType, node));
   }
 
+  // a copy of a value for another map (add(other), clone): an object is cloned, a string is copied (spec 6.6, 12.6)
+  string MapValueCopy(Node node, Scope scope, string valueType) {
+    if (!IsMapObjectValue(valueType)) {
+      return MapValueItem(node, scope, valueType);
+    }
+    var value = CheckedMapValue(node, scope, valueType);
+    cloneUsed = true;
+    return CloneValue(Convert(value, valueType, node), valueType, node);
+  }
+
   // stores an item (already the map's own) in a value slot: the string it replaces is freed
-  static string StoreValue(string valueType, string slot, string item) =>
-    valueType == "string" ? $"df_bt_sval_put({slot}, {item}); " : $"*{slot} = {item}; ";
+  string StoreValue(string valueType, string slot, string item) =>
+    valueType == "string" ? $"df_bt_sval_put({slot}, {item}); "
+    : IsMapObjectValue(valueType) ? $"{{ void* old = (void*)*{slot}; *{slot} = {item}; if (old != NULL && old != (void*)*{slot}) {{ df_drop(old); }} }} "
+    : $"*{slot} = {item}; ";
 
   // the C expression of the value slot of a key held in key (a pointer to the value, or NULL when the key is missing)
   string MapFind(string held, string type, string key) {
@@ -322,6 +344,13 @@ public sealed partial class CodeGen {
     string goneKey = NewTemp();
     string done = NewTemp();
     bool dropValue = outPointer == "NULL" && valueType == "string";
+    if (outPointer == "NULL" && IsMapObjectValue(valueType)) {
+      // the removed object ends (spec 6.6)
+      string goneObject = NewTemp();
+      string removed = NewTemp();
+      return $"({{ {CType(valueType)} {goneObject} = NULL; bool {removed} = {MapRemove(held, type, key, "&" + goneObject)}; "
+        + $"if ({goneObject} != NULL) {{ df_drop((void*){goneObject}); }} {removed}; }})";
+    }
     string target = dropValue ? gone : outPointer;
     if (IsHmap(type)) {
       // the key slot of the entry comes out too: a string key the hmap owned is freed
@@ -377,9 +406,11 @@ public sealed partial class CodeGen {
     (!KeyHasPointer(type) ? ""
       : IsHmap(type) ? $"df_str_free({CursorKey(type, cursor)}); "
       : $"if (!{cursor}.on_null) {{ df_str_free((df_string)df_bt_cur_ptr(&{cursor})); }} ")
-    + (MapValue(type) == "string" ? $"df_bt_sval_clear({slot}); " : "");
+    + (MapValue(type) == "string" ? $"df_bt_sval_clear({slot}); "
+      : IsMapObjectValue(MapValue(type)) ? $"if (*{slot} != NULL) {{ void* o = (void*)*{slot}; *{slot} = NULL; df_drop(o); }} " : "");
 
-  bool MapOwnsStrings(string type) => KeyHasPointer(type) || MapValue(type) == "string";
+  // the entries own something to free: a string key, a string value, an object value
+  bool MapOwnsStrings(string type) => KeyHasPointer(type) || MapValue(type) == "string" || IsMapObjectValue(MapValue(type));
 
   // all the entries go: what they own is freed, then the nodes
   string MapClearCode(string held, string type) {
@@ -572,9 +603,23 @@ public sealed partial class CodeGen {
         return new Expr($"((df_uns){MapTree(map.Code, type)}->count)", NativeUns);
       case "tree_hasKey":
         return new Expr(head + MapKeyArg(args[0], scope, keyType, key) + $"{MapFind(m, type, key)} != NULL; }})", "bool");
-      case "tree_get":
+      case "tree_get": {
+        // tryGet: the value is lent (an object stays the map's own, spec 6.6)
+        string read = ReadSlot(type, slot);
         return new Expr(head + MapKeyArg(args[0], scope, keyType, key)
-          + $"{slotC}* {slot} = ({slotC}*){MapFind(m, type, key)}; {slot} != NULL ? {ReadSlot(type, slot)} : {ZeroValue(valueType)}; }})", valueType);
+          + $"{slotC}* {slot} = ({slotC}*){MapFind(m, type, key)}; {slot} != NULL ? {read} : {ZeroValue(valueType)}; }})", valueType);   // a lend
+      }
+      case "tree_setCopy": {
+        // add(other), clone: the value is copied in (an object is cloned)
+        string value = NewTemp();
+        return new Expr(head + MapKeyArg(args[0], scope, keyType, key) + $"{valueC} {value} = {MapValueCopy(args[1], scope, valueType)}; "
+          + MapSlot(m, type, key, slot, false) + StoreValue(valueType, slot, value) + "})", "void");
+      }
+      case "tree_none":
+        return new Expr(ZeroValue(valueType), valueType);   // the zero value (null for an object): nothing to own
+      case "tree_remove":
+        // removeAt: the entry goes and what it owns ends
+        return new Expr(head + MapKeyArg(args[0], scope, keyType, key) + $"(void){MapRemove(m, type, key, "NULL")}; }})", "void");
       case "tree_set": {
         // the class checked the counter of open iterators when the key is new
         string value = NewTemp();
@@ -590,7 +635,7 @@ public sealed partial class CodeGen {
             + $"df_string {taken} = df_bt_sval_take({buffer}); {taken}; }})", valueType, true);
         }
         return new Expr(head + MapKeyArg(args[0], scope, keyType, key) + $"{valueC} {taken} = {ZeroValue(valueType)}; (void){MapRemove(m, type, key, "&" + taken)}; {taken}; }})",
-          valueType);
+          valueType, IsMapObjectValue(valueType));
       }
       case "tree_hasValue": {
         string value = NewTemp();
@@ -629,7 +674,7 @@ public sealed partial class CodeGen {
             + $"df_uns {removed} = df_ht_sweep({tree}, {HmapShape(type)}); {release}{removed}; }})", NativeUns);
         }
         return new Expr(head + $"{valueC} {value} = {given}; df_uns {removed} = 0; "
-          + $"if ({tree}->has_null && {Same(nullSlot, value)}) {{ {(valueType == "string" ? $"df_bt_sval_clear({nullSlot}); " : "")}"
+          + $"if ({tree}->has_null && {Same(nullSlot, value)}) {{ {(valueType == "string" ? $"df_bt_sval_clear({nullSlot}); " : IsMapObjectValue(valueType) ? $"if (*{nullSlot} != NULL) {{ df_drop((void*)*{nullSlot}); *{nullSlot} = NULL; }} " : "")}"
           + $"df_bt_remove_null({tree}, {MapValueSize(type)}, NULL); {removed}++; }} "
           + ForEachEntry(m, type, (s, c) => $"if (!{c}.on_null && {Same(s, value)}) {{ {DropEntry(type, s, c)}df_bt_mark(&{c}); }} ")
           + $"{removed} += df_bt_sweep({tree}, {MapValueSize(type)}, {(KeyHasPointer(type) ? "true" : "false")}); {release}{removed}; }})", NativeUns);
@@ -703,6 +748,10 @@ public sealed partial class CodeGen {
     sb.Append($"{items} = ({ArrCType(elem)}){{ ({CType(elem)}*)df_calloc({count}, sizeof({CType(elem)})), {count} }}; df_uns {index} = 0; ");
     sb.Append(ForEachEntry(held, type, (slot, cursor) => {
       string item = keys ? CursorKey(type, cursor) : ReadSlot(type, slot);
+      if (!keys && IsMapObjectValue(elem)) {
+        cloneUsed = true;
+        return $"{items}.p[{index}++] = {CloneValue(item, elem, at)}; ";   // the vec owns clones of the objects (spec 6.6, 12.6)
+      }
       return $"{items}.p[{index}++] = {(elem == "string" ? $"df_str_dup({item})" : item)}; ";
     }));
     sb.Append($"{result}->{VecField(vecType, "count")} = {index}; {result}; }})");

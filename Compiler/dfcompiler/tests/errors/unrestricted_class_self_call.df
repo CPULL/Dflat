@@ -1,0 +1,15 @@
+namespace unrestricted_class_self_call
+class Dog(string name) {
+  public string name
+  public i32 hunger = 5
+  unrestricted fun bark() { }
+  public fun eat(i32 n) { hunger -= n }
+}
+class Kennel {
+  Dog boss = Dog("Rex")
+  vec<Dog> dogs = []
+  i32 visits
+  string label = "k"
+  public fun g() { }
+  unrestricted fun f() { g() }
+}

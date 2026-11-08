@@ -239,6 +239,9 @@ public sealed partial class CodeGen {
         return filled;
       }
     }
+    if (IsVec(receiver.Type) && name is "fillAtCapacity" or "resize" && CountedResize(receiver, name, args, scope, at) is Expr resized) {
+      return resized;   // spec 12.7
+    }
     if (IsVec(receiver.Type) && IsClass(VecElem(receiver.Type)) && name is "fillAtCapacity" or "resize" && args.Count > 0 && args[^1].Kind != "Null") {
       throw Error($"{name} puts the same object in many items: a class instance is not allowed, null is", at);
     }
@@ -321,6 +324,10 @@ public sealed partial class CodeGen {
     if (!declared.Contains("DayOfWeek")
         && Mentions(program, node => node.Text == "DayOfWeek" || (node.Kind == "Member" && node.Text == "dayOfWeek"))) {
       source.Append("enum DayOfWeek { Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday }\n");
+    }
+    // Console.Color (stdlib 2): the 16 colours of Console.setColors, in the order of the ANSI colours
+    if (!declared.Contains("ConsoleColor") && Mentions(program, node => node.Text == "setColors" || node.Kind is "Member" or "Type" && node.Text is "Color" or "Console.Color" or "Root.Console.Color")) {
+      source.Append("enum ConsoleColor { Black, Red, Green, Yellow, Blue, Magenta, Cyan, White, Gray, BrightRed, BrightGreen, BrightYellow, BrightBlue, BrightMagenta, BrightCyan, BrightWhite }\n");
     }
     if (!declared.Contains("SortDirection") && Mentions(program, node => node.Text == "SortDirection")) {
       source.Append("enum SortDirection { ASC, DESC }" + Environment.NewLine);

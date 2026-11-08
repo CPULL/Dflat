@@ -11,8 +11,8 @@ public class Dog(string name) {
 public class Kennel {
   public Dog boss = Dog("Boss")
   public arr<Dog> dogs = [Dog("a"), Dog("b")]
-  public fun Dog leader() { boss }                 // lends a field of this
-  public fun Dog at(uns i) { dogs[i] }             // lends an item of this
+  unrestricted fun Dog leader() { boss }           // lends a field of this (it does not change the kennel: unrestricted)
+  unrestricted fun Dog at(uns i) { dogs[i] }       // lends an item of this
   public fun ->Dog adopt() { Dog("Pup") }          // gives a new object
 }
 

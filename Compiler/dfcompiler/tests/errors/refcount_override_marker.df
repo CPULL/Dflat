@@ -1,0 +1,8 @@
+namespace refcount_override_marker
+class Dog { }
+trait Keeper {
+  public fun keep(@Dog d)
+}
+class Kennel : Keeper {
+  override fun keep(&@Dog d) { }
+}

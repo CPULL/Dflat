@@ -302,6 +302,7 @@ public sealed partial class CodeGen {
       locked.Add(name.Text!);
     }
     var unwrapped = new Scope(scope);
+    var heldNow = new List<string>();   // the locks this enforce holds while its block runs (a &@string is read there, spec 12.7)
     foreach (var name in names) {
       var variable = scope.Find(name.Text!);
       if (WeakRef(name, scope) is CountedRefInfo weak) {
@@ -314,19 +315,20 @@ public sealed partial class CodeGen {
         }
         continue;
       }
-      if (s.Text == "expr" && (variable == null || variable.Type == "string" || !(IsNullable(variable.Type) || variable.IsCounted || IsClass(variable.Type)))) {
+      if (s.Text == "expr" && (variable == null || variable.Type == "string" && !variable.IsCounted || !(IsNullable(variable.Type) || variable.IsCounted || IsClass(variable.Type)))) {
         continue;   // the expression form enforces only what can be checked: names of functions, types and plain values are skipped
       }
       if (variable == null) {
         throw Error($"unknown variable '{name.Text}'", name);
       }
-      if (IsNullable(variable.Type)) {
+      if (IsNullable(variable.Type) && !variable.IsCounted) {
         checks.Add((name.Text!, $"{variable.CName}.has", false));
         unwrapped.Vars[name.Text!] = new VarInfo(BaseOf(variable.Type), variable.CName + ".val", variable.IsConst);
       } else if (variable.IsCounted) {
         checks.Add((name.Text!, $"DF_RC_ALIVE({variable.CName})", false));   // a counted variable: its object is alive while it holds a usage
         if (variable.IsWritable) {
           AddLock(name, variable.CName);   // &@T: its lock (spec 7.2.2)
+          heldNow.Add(variable.CName);
         }
       } else if (IsClass(variable.Type) && !IsTraitType(variable.Type)) {
         checks.Add((name.Text!, $"({variable.CName} != NULL && !DF_IS_DEAD({variable.CName}))", false));   // objects are nullable (7.1)
@@ -396,10 +398,12 @@ public sealed partial class CodeGen {
     string releaseLocks = string.Join(" ", locks.Select(l => $"if ({l.Flag}) {{ df_rc_unlock({l.Held}); }}"));   // a failed check: the locks taken end
     sb.Append($"{pad}if ({(checks.Count == 0 ? "1" : string.Join(" && ", checks.Select(check => check.Condition)))}) {{\n");
     var before = assign.Clone();
+    var addedLocks = heldNow.Where(heldLocks.Add).ToList();
     try {
       EmitBlock(block, sb, unwrapped, indent + 1);
     } finally {
       enforceSource = savedSource;
+      heldLocks.ExceptWith(addedLocks);
     }
     var states = new List<AssignState> { assign };
     sb.Append(pad).Append('}');

@@ -1,0 +1,1 @@
+main.df(5): error: Generic Box defined in line 2 was used with more than 2 instances in the program (the limit is set by --max-copies)

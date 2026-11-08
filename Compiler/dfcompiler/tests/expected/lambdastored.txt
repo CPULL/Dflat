@@ -1,0 +1,21 @@
+2
+Button { label: ok, onClick: null, transform: i32(i32) }
+clicked 3
+6
+clicked 4
+clicked 5
+105
+counter 1
+counter 2
+counter 12
+counter 3
+counter 22
+rex barks
+rex barks
+clicked 7
+clicked 8
+108
+end
+  end rex
+  end rex
+---- exit code 0 ----

@@ -7,7 +7,7 @@ public class Counter(string name) {
   public i32 count = 0
   public fun add(i32 amount) { count += amount }
   unrestricted fun ->string shown() { $"{name} {count}" }
-  unrestricted fun touch() { count += 100 }   // it changes the object: the developer takes the responsibility
+  unrestricted fun i32 touch() { count + 100 }   // only reads: an unrestricted method cannot change its object (checked, spec 1.6.2)
   public static fun string kind() { "counter" }
 }
 

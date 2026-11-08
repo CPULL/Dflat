@@ -1,0 +1,1 @@
+move_counted_plain_use_after.df(10): error: 'd' was moved away with ->d: it cannot be used until it gets a new value (spec 12.4)

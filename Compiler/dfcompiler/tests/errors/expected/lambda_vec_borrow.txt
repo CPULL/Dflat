@@ -1,0 +1,1 @@
+lambda_vec_borrow.df(4): error: this function value borrows variables, so a collection cannot keep it: it may outlive them; capture with x! or ->x (spec 13.3.4)

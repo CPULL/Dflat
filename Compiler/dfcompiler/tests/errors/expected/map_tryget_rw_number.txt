@@ -1,0 +1,1 @@
+map_tryget_rw_number.df(4): error: &i32 n: a read/write lend is for objects; a i32 is a copy (spec 13.1.1)

@@ -1,0 +1,7 @@
+namespace tuple_object_notclonable
+notclonable class F { }
+fun f() {
+  (F f, i32 n) a = (F(), 1)
+  (F f, i32 n) b = a
+}
+f()

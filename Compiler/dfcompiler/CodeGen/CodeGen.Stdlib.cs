@@ -47,6 +47,8 @@ public sealed partial class CodeGen {
     Add("Root.Console.logError", Fixed("void", "df_console_log_error", "any"));
     Add("Root.Console.print", Fixed("void", "df_console_print", "any"));
     Add("Root.Console.read", Fixed("char?", "df_console_read"));
+    Add("Root.Console.readKey", Fixed("char?", "df_console_read_key"));
+    Add("Root.Console.moveCursor", Fixed("void", "df_console_move_cursor", "i32", "i32"));
     Add("Root.Console.readLine", Fixed("string", "df_console_get_input"));
     Add("Root.Console.clear", Fixed("void", "df_console_clear"));
 

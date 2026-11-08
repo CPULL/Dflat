@@ -1,0 +1,6 @@
+namespace refcount_value_result_plain
+fun @i32 five() { 5 }
+fun f() {
+  i32 plain = five()
+}
+f()

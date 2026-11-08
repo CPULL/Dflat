@@ -1,0 +1,18 @@
+// Console.readKey, the KEY_ constants and Console.moveCursor (stdlib 2). The test runs without a console: readKey reads the
+// input like read (null at its end) and moveCursor does nothing
+namespace consolekeys
+alias Root as r
+
+r.Console.log([u32]r.Console.KEY_LEFT)
+r.Console.log([u32]r.Console.KEY_UP)
+r.Console.log([u32]r.Console.KEY_RIGHT)
+r.Console.log([u32]r.Console.KEY_DOWN)
+r.Console.log($"{[u32]r.Console.KEY_ENTER} {[u32]r.Console.KEY_ESC} {[u32]r.Console.KEY_BACKSPACE} {[u32]r.Console.KEY_TAB}")
+r.Console.log(r.Console.KEY_LEFT)
+char? key = r.Console.readKey()
+r.Console.log(key == null)
+r.Console.log(key == r.Console.KEY_LEFT)
+i32 x = 3
+if key == r.Console.KEY_LEFT then x--
+r.Console.moveCursor(x, 2)
+r.Console.log(x)

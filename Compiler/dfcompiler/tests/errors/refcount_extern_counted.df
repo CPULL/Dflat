@@ -1,0 +1,2 @@
+namespace refcount_extern_counted
+extern fun i32 abs(@i32 n)

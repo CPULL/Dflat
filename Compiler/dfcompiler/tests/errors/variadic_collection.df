@@ -1,0 +1,1 @@
+fun i32 sum(vec<i32> items...) { 0 }

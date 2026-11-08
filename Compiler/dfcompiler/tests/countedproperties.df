@@ -1,0 +1,34 @@
+// Counted properties (spec 11.1.4): R: gives a usage, W: takes one (k.boss = @rex), a read in an expression takes a usage for the statement
+namespace countedproperties
+alias Root as r
+class Dog(string name) {
+  public string name
+} atEnd {
+  r.Console.log($"{name} ends")
+}
+class Kennel {
+  public @Dog boss {
+    R: { field }
+    W: { r.Console.log($"new boss {value.name}"); field = value }
+  } = Dog("Rex")
+  public @i32 visits { R: { field } W: { field = value } }
+}
+fun f() {
+  Kennel k = Kennel()
+  r.Console.log($"boss {k.boss.name}")
+  @Dog b = k.boss
+  r.Console.log($"users {b.usersCount}")
+  @Dog max = Dog("Max")
+  k.boss = @max
+  r.Console.log($"users of max {max.usersCount}, b is still {b.name}")
+  k.visits = 3
+  @i32 v = k.visits
+  r.Console.log($"visits {k.visits} {v}")
+}
+fun keep(@Dog d) { r.Console.log($"keep {d.name}, users {d.usersCount}") }
+fun g() {
+  Kennel k = Kennel()
+  keep(@k.boss)
+}
+f()
+g()

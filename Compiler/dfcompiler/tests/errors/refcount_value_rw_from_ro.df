@@ -1,0 +1,6 @@
+namespace refcount_value_rw_from_ro
+fun f() {
+  @i32 ro = 1
+  &@i32 rw = ro
+}
+f()

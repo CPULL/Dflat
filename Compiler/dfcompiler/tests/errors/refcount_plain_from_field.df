@@ -1,0 +1,7 @@
+namespace refcount_plain_from_field
+class Dog { }
+class Kennel { public @Dog boss }
+fun f(&Kennel k) {
+  Dog p
+  p = ->k.boss
+}

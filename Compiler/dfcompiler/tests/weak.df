@@ -55,8 +55,9 @@ copy is done.
 r.Console.log(h)
 
 // a weak field does not end with its holder
-@Context ctx2 = Context()
-ctx2.id = 8
+Context plain8 = Context()
+plain8.id = 8                                // set before it is counted: a @T is read-only (spec 12.7)
+@Context ctx2 = @plain8
 var h2 = Handle(%ctx2)
 h2 is atEnd.
 r.Console.log($"{ctx2.id}, weak references {ctx2.weakrefsCount}")

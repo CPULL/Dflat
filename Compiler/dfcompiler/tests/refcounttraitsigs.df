@@ -1,0 +1,45 @@
+// Counted parameters and results in trait functions and overrides (spec 12.7): dispatched like any other function
+namespace refcounttraitsigs
+alias Root as r
+class Dog(string name) {
+  public string name
+} atEnd {
+  r.Console.log($"{name} ends")
+}
+trait Keeper {
+  public fun keep(@Dog d)
+  public fun @Dog favourite()
+  public fun bump(&@i32 n)
+  public fun ->string describe(@Dog d) { $"a keeper of {d.name}" }
+}
+class Kennel : Keeper {
+  @Dog kept
+  override fun keep(@Dog d) { kept = d }
+  override fun @Dog favourite() { kept }
+  override fun bump(&@i32 n) { enforce n { n += 1 } }
+}
+class Base {
+  public fun @i32 score() { 1 }
+  public fun take(@Dog d) { r.Console.log($"base takes {d.name}") }
+}
+class Child : Base {
+  override fun @i32 score() { 2 }
+  override fun take(@Dog d) { r.Console.log($"child takes {d.name}, users {d.usersCount}") }
+}
+fun f() {
+  @Dog rex = Dog("Rex")
+  Kennel k = Kennel()
+  &Keeper keeper = k                       // a read/write borrow: keep changes the kennel
+  keeper.keep(@rex)
+  r.Console.log($"users {rex.usersCount}")
+  @Dog fav = keeper.favourite()
+  r.Console.log($"{fav.name} users {rex.usersCount}")
+  &@i32 n = 1
+  keeper.bump(&@n)
+  r.Console.log($"n {n} {keeper.describe(@rex)}")
+  Base b = Child()
+  @i32 s = b.score()
+  b.take(@rex)
+  r.Console.log($"score {s}, users {rex.usersCount}")
+}
+f()

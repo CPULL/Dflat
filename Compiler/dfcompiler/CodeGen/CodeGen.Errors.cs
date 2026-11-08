@@ -132,7 +132,8 @@ public sealed partial class CodeGen {
     ["UsageOfDestroyedObjectException"] = 48,  // spec 12.5: an adopted child whose parent ended
     ["ObjectNotClonableException"] = 49,       // spec 12.6: tryClone()
     ["WritingOnRefCountWithoutLockingException"] = 50,  // spec 12.7: a write to a &@T without its lock
-    ["UnassignedFunctionCallException"] = 51   // spec 13.3.2: a call of a null function value (a child of NullPointerException)
+    ["UnassignedFunctionCallException"] = 51,   // spec 13.3.2: a call of a null function value (a child of NullPointerException)
+    ["ModifiedObjectUsedAsKeyException"] = 52   // spec 11.2.1: the hash of a Keyable key changed (raised when Keyable is built)
   };
 
   readonly Stack<Frame> frames = new();
@@ -280,6 +281,14 @@ public sealed partial class CodeGen {
       if (IsCountedType(type)) {
         type = CountedBase(type);   // var x = make() with a counted result: a counted variable of the plain type (spec 12.7)
       }
+      if (decl.Children.Any(child => child.Kind == "ReadWrite") && !IsCountedDecl(decl) && !decl.Children.Any(child => child.Kind is "Weak" or "WeakInit")
+          && LendsAsAddress(type)) {
+        // &i32 s = f(): the variable is the place it lends, through a pointer (spec 13.1.1)
+        string pointer = $"l_{name}_{frame.Id}";
+        frame.Hoisted[name] = new VarInfo(type, $"(*{pointer})", false) { LendPointer = pointer, RefSlot = type == "string" };
+        typingScope.Vars[name] = frame.Hoisted[name];
+        return;
+      }
       if (bigStructDecls.Contains(decl)) {
         // a struct above 64 KB: the variable is the block on the heap (spec 11.1.5.5)
         frame.Hoisted[name] = new VarInfo(type, $"(*v_{name}_{frame.Id})", isConst) { HeapName = $"v_{name}_{frame.Id}" };
@@ -325,6 +334,10 @@ public sealed partial class CodeGen {
 
   void EmitHoists(Frame frame, StringBuilder sb, string pad) {
     foreach (var variable in frame.Hoisted.Values) {
+      if (variable.LendPointer is string lendPointer) {
+        sb.Append($"{pad}{CType(variable.Type)}* {lendPointer} = NULL;\n");   // &i32 s = f() (spec 13.1.1)
+        continue;
+      }
       if (variable.HeapName is string heap) {
         sb.Append($"{pad}{CType(variable.Type)}* {heap} = ({CType(variable.Type)}*)df_calloc(1, sizeof({CType(variable.Type)}));\n");   // spec 11.1.5.5
         continue;
@@ -360,6 +373,24 @@ public sealed partial class CodeGen {
   }
 
   void EmitFrameBody(Frame frame, StringBuilder sb, int indent) {
+    foreach (var (variable, to) in pendingMoves) {
+      movedVars.TryAdd(variable, to);   // a move in the statement that holds this body (if take(->d) { }) happened before it
+    }
+    pendingMoves.Clear();
+    var movesBefore = new Dictionary<VarInfo, string>(movedVars);
+    try {
+      EmitFrameStatements(frame, sb, indent);
+    } finally {
+      // the moves inside a branch, a loop or another body may not have happened: after it only the earlier ones count
+      movedVars.Clear();
+      foreach (var (variable, to) in movesBefore) {
+        movedVars[variable] = to;
+      }
+      pendingMoves.Clear();
+    }
+  }
+
+  void EmitFrameStatements(Frame frame, StringBuilder sb, int indent) {
     string pad = Pad(indent);
     frames.Push(frame);
     var scope = new Scope(frame.ParentScope);
@@ -584,7 +615,7 @@ public sealed partial class CodeGen {
     assign = assign.Clone();
     atEndDepth++;
 
-    var frame = PrepareFrame(block.Children, owner.AtEndScope!, FrameKind.AtEndBody);
+    var frame = PrepareFrame(LoopStatements(block.Children), owner.AtEndScope!, FrameKind.AtEndBody);   // its locals end with it
     frame.Owner = owner;
     frame.AtEndIndex = step;
     frame.ExceptionMode = exceptionMode;

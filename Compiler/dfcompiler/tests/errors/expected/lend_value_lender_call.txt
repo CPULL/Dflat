@@ -1,0 +1,1 @@
+lend_value_lender_call.df(13): error: 'board' is lent to 's' until its last use: until then only its unrestricted methods can be called, not 'reset' (spec 13.1.1)

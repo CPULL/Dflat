@@ -1,0 +1,1 @@
+variadic_two.df(2): error: a function has at most one variadic parameter (T name...) (spec 13.4)

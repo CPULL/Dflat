@@ -1,0 +1,1 @@
+main.df(4): error: Generic set (a library collection) was used with more than 2 instances in the program (the limit is set by --max-set-copies)

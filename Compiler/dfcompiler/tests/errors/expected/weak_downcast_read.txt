@@ -1,0 +1,1 @@
+weak_downcast_read.df(13): error: 'd' is a weak reference: use it through enforce d { } else { }

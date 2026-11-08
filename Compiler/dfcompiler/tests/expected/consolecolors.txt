@@ -1,0 +1,5 @@
+yellow on black
+BrightCyan
+Gray
+default
+---- exit code 0 ----

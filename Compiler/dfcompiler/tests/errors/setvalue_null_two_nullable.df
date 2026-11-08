@@ -1,0 +1,2 @@
+Generic Two { i16?, u8? }
+Two t = null

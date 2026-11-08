@@ -22,7 +22,7 @@ Specs13.4, Specs99: the position of a variadic parameter and passing an existing
 
 Specs6.7, 6.7.2, Specs99: the shape of `MapIterator` and its `next()` (the cursors of `map` and `hmap` are defined in Specs6.8.4.1 and 6.8.5.1; `SetIterator` is decided in Specs6.7.3).
 
-### 79. [DECIDED 2026-11-07, declared 0.0.78alpha; raised when Keyable is built] The name of the Keyable exception: ModifiedObjectUsedAsKeyException, ID 52 (Specs11.2.1, 15.3)
+### 79. [DECIDED 2026-11-07, declared 0.0.78alpha; Keyable built 0.0.88alpha] The name of the Keyable exception: ModifiedObjectUsedAsKeyException, ID 52 (Specs11.2.1, 15.3)
 
 Specs11.2.1, Specs99: the exception raised when the hash of a key changed. (Exception IDs are set at Specs0.1.0.)
 
@@ -38,7 +38,7 @@ Specs99: `clear()` on maps and sets empties them, while `clear()` on the index c
 
 - Bitfields (Specs3.1.1, 7.1): a call whose result is used gives a new value, a single call alone changes the variable; a chain alone changes nothing; the form alone is a compile error in a read-only place; `Flags?` nullable.
 - Properties (Specs11.1.4, 11.2): modifiers in any order, on the property or on one accessor; `readonly` with a `W:` block; `replace` replaces the whole property; a read through a trait type runs the class accessors. Replacing a trait property: built 0.0.82alpha.
-- Generics (Specs11.3.6, 11.3.8, 12.4): sets inside a class; a set as declared type argument holds set values (`arr<Num> a = [12, 12.0]`); a set is nullable when a member is; the `->` warning only when every reaching type is basic. Set values (11.3.6.1): stage 1 built 0.0.84alpha (native members up to 64 bits, enums, bitfields; variables, fields, results, arr / vec / list items, is, is ? { }, ==, `arr<Num>`, `Box<Num>`); not built: strings, objects, tuples, nullable and wide members (so the nullability of sets), hash, order, keys.
+- Generics (Specs11.3.6, 11.3.8, 12.4): sets inside a class; a set as declared type argument holds set values (`arr<Num> a = [12, 12.0]`); a set is nullable when a member is; the `->` warning only when every reaching type is basic. Set values (11.3.6.1): stage 1 built 0.0.84alpha (native members up to 64 bits, enums, bitfields; variables, fields, results, arr / vec / list items, is, is ? { }, ==, `arr<Num>`, `Box<Num>`); nullable members and the nullability of sets built 0.0.86alpha; hash and keys (exact members) built 0.0.87alpha; not built: string, object and tuple members, sort of set values.
 - Borrowed strings (Specs4): a field shares the string; a copy with a level 3 warning when the original ends first; collections store shrunk copies. Built 0.0.80alpha.
 - `enforce timeout 500 expr` (Specs7.2.6).
 - [DECIDED 2026-11-08, Specs0.0.28; the rename built 0.0.81alpha, trait properties built 0.0.82alpha] The keyword `override` is renamed `replace` everywhere; `override` is no longer reserved, no error for the old word. Trait properties (Specs11.2): one without accessor blocks is a simple field in the class (no `replace`); a class can replace a trait property (`field` is the trait's storage, the replacement has the final word); direct memory access unless some class replaces it, otherwise and in compiled libraries a call.
@@ -101,9 +101,19 @@ Decided (Specs12.7): `@T` read-only, `(@)T` read/write with a lock in the object
 - 75. Collections and threads: shared collections need locks or immutable views; nothing is specified (see the `Rc` / `Arc` split above).
 - Widening of the stuck buckets of `hmap` / `hset` (Specs6.8.5.1, Specs99).
 
-# Part 4 - Not built yet (compiler 0.0.44alpha)
+# Part 4 - Not built yet (compiler 0.0.44alpha; the section below is current at 0.0.88alpha)
 
 What the specification decides and the compiler does not build. The point numbers are the old collection points.
+
+### From the compiler notes (moved from Compiler/CompilerImplementation.txt, 2026-11-08, compiler 0.0.88alpha)
+
+- `Keyable` (Specs11.2.1, 6.2.2): keys are ordered by hash only (`Comparable<T>` / `compareTo` is not defined yet, see the open items, so the check after `compareTo` does not exist either). `hmap` / `hset` keys use `equals` only when the class replaces it; the default `equals` (content, 11.1.3) is not built, so without a replacement the hash decides. With the keys owned by the collection and read-only through it, the changed-hash check has no case that can fire it today. (Built 0.0.90alpha: `equals` in hmap keys, the check after `.hash`, the level 1 warning for collection fields; the set value keys of `map` / `set` use the inline 16-byte layout of 6.8.4.1.)
+- Set values (Specs11.3.6.1): members that are strings, objects or tuples (they need the ownership of structs with objects, which structs do not have in collections either).
+- Generic methods inside classes (`fun T same<T>(T x)` in a class) are not built and not defined by the specification; a set as the type of a parameter of a method is one of them.
+- Replacing a counted (`@T`) or weak (`%T`) property of a trait: traits do not have counted or weak properties yet.
+- Composite keys of `map`, `hmap`, `set`, `hset` not built yet: structs inside a struct key, tuples that hold objects or other tuples. (Built 0.0.92alpha: tuples of exact natives and strings, structs of exact natives; 0.0.93alpha: struct fields that are strings or objects of `Keyable` classes, the collection keeping a clone. A `map` / `set` orders the keys item by item, an object by its hash; an `hmap` compares an object with the `equals` of its class when it replaces it.)
+- Built 0.0.89alpha: static properties with accessor blocks, `??=` on a property (`_=` is the old weak syntax, gone), `m.add(->other)` / `s.add(->other)` / `m += ->other` (a true move since 0.0.91alpha: no copies, objects that cannot be cloned move too; a set also takes a vec or a list), the options `double-grow-limit` and `further-grow-factor`. An `enforce` expression inside a larger expression or as an argument already worked.
+- Namespaces: names qualified by their namespace and the `internal` visibility (a top-level name declared in two namespaces is an error that says so).
 
 ### Traits and iterators
 
@@ -129,7 +139,7 @@ What the specification decides and the compiler does not build. The point number
 
 - 20, 73. `arr` ownership (Specs6.8.1) is built since 2026-11-01 for local arrays (also `var x = [...]` and results of functions that return a new array), borrows to reading functions and to the standard library, `return a`, `->a` into a field, and array fields (a new array, a move, or a copy of plain items; the class frees them). Also built: a local assigned again with a new array, `->b` or null (the old block ends), `->a` into a `->arr<T>` parameter (it ends with the function unless moved on or returned), static array fields (they end with the program), arrays in collections (`arr`, `vec`, `list` of arrays: owned like fields, removed and replaced arrays end, `takeAt` / `replace` / `pop` hand them out) and in tuples (a typed local, field or static tuple owns a copy of its arrays). Also built: `var` tuples, and several return values (the arrays returned are the caller's own; `arr<T> x, i32 n = f()` owns x). Also built (2026-11-02): tuples inside tuples, arrays received into existing owners (`x, n = f()`), a local assigned a borrowed array (`a = b`, a run-time flag), views used at once (`a[x..y].len`, `for`, an index, a copy, a runtime read), tuple temporaries (`f().values.len`, `g(f())`) and results nobody keeps (`f()` alone). Not yet: map values that are arrays (object values are not built either); collections of tuples that hold arrays (a compile error); the array a local borrows from (`b` in `a = b`, `arr<T> c = b`) is not freed; a view kept in a variable stops its array from being freed; a local made a borrow by `a = b` cannot give its array away (`return a`, `->a`, `v.pop((&)a)`: it is then not freed); a new array given to a borrowing parameter (`f([Dog("a")])`) is not freed.
 - 23. The level 1 warning for an element read before it is filled (Specs6.8.1, 19.3): arrays start as zeros.
-- 28. The compiler parameters `double-grow-limit` and `further-grow-factor` (fixed at 4mb and 1.5) and the fixed-increment growth option for small targets (Specs6.8.2).
+- 28. The fixed-increment growth option for small targets (`double-grow-limit` and `further-grow-factor` are built, 0.0.89alpha) (Specs6.8.2).
 - 30. `arr` and `vec` sort with a stable merge sort (`sort`) and a heap sort (`sortUnstable`), not TimSort and pdqsort (Specs6.6); the class `compareTo` does not exist yet.
 
 ### map, hmap, set, hset

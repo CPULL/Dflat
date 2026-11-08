@@ -171,6 +171,23 @@ public sealed partial class CodeGen {
     if (counted != -1) {
       return counted < 0 ? null : counted;   // a counted parameter, or a counted argument (spec 12.7)
     }
+    if (IsTuple(paramType) && valueNode.Kind == "Tuple") {
+      // (1, 2) given to a (i32, i32) parameter: the literal takes the types of the parameter
+      try {
+        return ExprOf(valueNode, scope, paramType).Type == paramType ? 0 : null;
+      } catch (CompileException) {
+        return null;
+      }
+    }
+    if (IsSetValue(paramType)) {
+      // a value of the set, a member value (a literal by the rule of 11.3.6.1): it fits; anything else does not
+      try {
+        var given = ExprOf(valueNode, scope, paramType);
+        return given.Type == paramType || SetMembers(paramType).Contains(given.Type) ? 0 : null;
+      } catch (CompileException) {
+        return null;
+      }
+    }
     if (IsUntypedLiteral(valueNode)) {
       bool isInteger = (valueNode.Kind == "Neg" ? valueNode.Children[0] : valueNode).Kind == "Int";
       if (isInteger) {

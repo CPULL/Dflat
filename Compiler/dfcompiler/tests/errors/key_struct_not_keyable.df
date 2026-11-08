@@ -1,0 +1,10 @@
+class Plain(string name) {
+  public string name
+}
+
+struct Holder {
+  Plain p,
+  i32 n
+}
+
+map<Holder, i32> m = []

@@ -1,0 +1,1 @@
+key_borrowed.df(6): error: the collection owns its keys: give it a new object, or ->x to move one in (spec 6.6)

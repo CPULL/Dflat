@@ -1,0 +1,30 @@
+// hmap keys of a class that replaces equals (spec 6.8.5.1, 6.2): the same hash is not enough, equals decides; .hash of a Keyable object
+// runs the check of 11.2.1; a Keyable class with a collection field gets a level 1 warning
+alias Root as r
+
+class Tag(string name) : Keyable {
+  public string name
+  replace fun uns get_hash() { 7u }                 // every tag has the same hash
+  replace fun bool equals(T other) {
+    if T is Tag {
+      return name == other.name
+    }
+    return false
+  }
+}
+
+class Bag(string label) : Keyable {
+  public string label
+  vec<i32> items = []                              // warning L1: a collection field in a Keyable class
+}
+
+hmap<Tag, i32> counts = []
+counts[Tag("a")] = 1
+counts[Tag("b")] = 2                               // same hash, equals says different: two keys
+counts[Tag("a")] += 10
+r.Console.log($"{counts.len} {counts[Tag("a")]} {counts[Tag("b")]}")
+r.Console.log(counts.hasKey(Tag("c")))
+Tag t = Tag("x")
+r.Console.log(t.hash)
+Bag b = Bag("one")
+r.Console.log(b.label)

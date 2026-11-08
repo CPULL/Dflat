@@ -148,11 +148,13 @@ public sealed partial class CodeGen {
     var parts = new List<string>();
     if (elem != null) {
       parts.Add(elem);
-    } else if (IsMap(type)) {
-      parts.Add(MapKey(type));
-      parts.Add(MapValue(type));
-    } else if (IsSet(type)) {
-      parts.Add(MapKey(type));
+    } else if (IsMap(type) || IsSet(type)) {
+      if (!IsCompositeKey(MapKey(type))) {
+        parts.Add(MapKey(type));   // a struct key keeps a clone and ends it (CodeGen.CompositeKeys.cs)
+      }
+      if (IsMap(type)) {
+        parts.Add(MapValue(type));
+      }
     } else if (IsTuple(type) || IsMulti(type)) {
       parts.AddRange(TupleElems(type).Select(item => item.Type));
     }

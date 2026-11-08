@@ -81,6 +81,9 @@ public sealed partial class CodeGen {
 
   string HashCode(Expr e, Node at) {
     string type = e.Type;
+    if (IsSetValue(type)) {
+      return SetValueHash(e, at);   // tag $ the hash of the value (spec 11.3.6.1)
+    }
     if (type == "null") {
       return "DF_HASH_NULL";
     }
@@ -126,6 +129,14 @@ public sealed partial class CodeGen {
     if (IsArr(type)) {
       string name = HashConst(QualifiedTypeName(type));
       return SimpleCode.IsMatch(e.Code) ? name : $"((void)({e.Code}), {name})";
+    }
+    if (IsClass(type) && traits.ContainsKey("Keyable") && IsSubtype(type, "Keyable") && fn != null) {
+      // the check of 11.2.1 after get_hash(): an object that is a key and whose hash is not the stored one raises
+      ObjectKeyHelpers();
+      string held = NewTemp();
+      string hash = NewTemp();
+      return $"({{ void* {held} = (void*)({e.Code}); df_uns {hash} = df_hash_obj({held}); if ({held} != NULL && *df_key_field({held}, 0) > 0 && {hash} != *df_key_field({held}, 1)) "
+        + $"{{ df_raise(&df_desc_ModifiedObjectUsedAsKeyException, {fn.NameConst}); {RaiseJump} }} {hash}; }})";
     }
     if (IsClass(type)) {
       return $"df_hash_obj({e.Code})";

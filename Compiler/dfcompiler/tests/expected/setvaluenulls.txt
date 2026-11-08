@@ -1,0 +1,11 @@
+null
+true
+false
+true
+300
+true
+false
+2024-02-02T00:00:00.000Z
+true
+a date
+---- exit code 0 ----

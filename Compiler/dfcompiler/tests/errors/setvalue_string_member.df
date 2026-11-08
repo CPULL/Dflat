@@ -1,0 +1,2 @@
+Generic Texts { string, i32 }
+Texts t = "a"

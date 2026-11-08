@@ -1,0 +1,12 @@
+2
+admin
+true
+2 owner
+ann 30: owner
+bob 40: user
+1
+8
+1
+true
+1
+---- exit code 0 ----

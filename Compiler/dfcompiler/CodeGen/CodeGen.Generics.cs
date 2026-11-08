@@ -110,8 +110,11 @@ public sealed partial class CodeGen {
 
   // Compiles the tree. A generic class instance that the code needs and the attempt has not made (found while resolving
   // a type) is added to the seeds and the whole compilation starts again from a fresh copy of the tree.
-  public static (string C, IReadOnlyList<string> Warnings) Compile(Node tree, bool release = false, int nativeBits = 64, IReadOnlyDictionary<string, int>? copyLimits = null) {
+  public static (string C, IReadOnlyList<string> Warnings) Compile(Node tree, bool release = false, int nativeBits = 64, IReadOnlyDictionary<string, int>? copyLimits = null,
+      long doubleGrowLimit = 4 * 1024 * 1024, int growExtraThousandths = 500) {
     ReleaseBuild = release;
+    VecDoubleGrowLimit = doubleGrowLimit;   // double-grow-limit and further-grow-factor (spec 6.8.2)
+    VecGrowExtra = growExtraThousandths;
     limits = copyLimits ?? new Dictionary<string, int>();
     NativeInt = nativeBits >= 64 ? "i64" : "i32";
     NativeUns = nativeBits >= 64 ? "u64" : "u32";
@@ -779,13 +782,11 @@ public sealed partial class CodeGen {
     bool sawDefault = false;
     var seen = new HashSet<string>();
     foreach (var arm in n.Children.Skip(1)) {
-      bool matches = false;
       foreach (var label in arm.Children[0].Children) {
         if (label.Kind == "Default") {
           if (sawDefault) {
             throw Error("a type switch can have only one 'default'", label);
           }
-          matches = true;
           if (chosen == null) {
             chosen = arm;
           }

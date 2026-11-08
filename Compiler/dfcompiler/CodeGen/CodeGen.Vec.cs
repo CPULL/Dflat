@@ -218,7 +218,8 @@ public class vec<T> : IndexCollection<T> {
     return ->iterator
   }
 
-  // the growth policy (spec 6.8.2): 16 items first, then the capacity doubles until the block reaches VEC_DOUBLE_LIMIT bytes, then it grows by half.
+  // the growth policy (spec 6.8.2): 16 items first, then the capacity doubles until the block reaches VEC_DOUBLE_LIMIT bytes, then it grows by
+  // VEC_GROW_EXTRA thousandths (further-grow-factor).
   // The .sizeof of an arr is its header plus the block, so the block is what an empty arr does not have
   fun grow(uns needed) {
     uns newCapacity = 16
@@ -227,7 +228,7 @@ public class vec<T> : IndexCollection<T> {
       if items.sizeof - empty.sizeof < VEC_DOUBLE_LIMIT {
         newCapacity = items.len * 2
       } else {
-        newCapacity = items.len + items.len / 2
+        newCapacity = items.len + items.len * VEC_GROW_EXTRA / 1000
       }
     }
     if newCapacity < needed {
@@ -521,13 +522,13 @@ public class map<K, V> : MapCollection<K, V> {
   }
 
   // adds the pair, or replaces the value of an existing key: false when it replaced (spec 6.6)
-  public fun bool add(K key, ->V value) {
+  public fun bool add(->K key, ->V value) {
     if this.tree_hasKey(key) {
-      this.tree_set(key, ->value)
+      this.tree_set(->key, ->value)
       return false
     }
     checkUnlocked()
-    this.tree_set(key, ->value)
+    this.tree_set(->key, ->value)
     return true
   }
 
@@ -665,12 +666,12 @@ public class set<T> : SetCollection<T> {
   }
 
   // true when the item is new; an item already there is left as it is (spec 6.6)
-  public fun bool add(T item) {
+  public fun bool add(->T item) {
     if this.tree_has(item) {
       return false
     }
     checkUnlocked()
-    this.tree_add(item)
+    this.tree_add(->item)
     return true
   }
 
@@ -1127,8 +1128,10 @@ public class set<T> : SetCollection<T> {
   // the ones that reorder the items cannot run while the vec has open iterators (spec 6.4); fill(value) and swap can
   static readonly HashSet<string> VecChangingMembers = new() { "reverse", "sort", "sortUnstable" };
 
-  // the block size up to which a vec doubles its capacity; above it the capacity grows by half (spec 6.8.2, double-grow-limit, a fixed value for now)
-  const long VecDoubleGrowLimit = 4 * 1024 * 1024;
+  // the block size up to which a vec doubles its capacity (double-grow-limit, default 4mb), and what it adds above it, in thousandths of the
+  // capacity (further-grow-factor 1.5: 500) (spec 6.8.2, Compiler_Options.md)
+  static long VecDoubleGrowLimit = 4 * 1024 * 1024;
+  static int VecGrowExtra = 500;
 
   // room for at least needed items (the C of grow in VecPrelude: 16 items first, double up to VecDoubleGrowLimit bytes, then by half, at least what is
   // needed); the new slots are zero
@@ -1139,7 +1142,7 @@ public class set<T> : SetCollection<T> {
     string capacity = NewTemp();
     string bigger = NewTemp();
     return $"df_uns {want} = {needed}; if ({want} > (df_uns)SIZE_MAX / sizeof({elemType})) {{ df_out_of_memory(); }} if ({want} > {items}.len) {{ df_uns {capacity} = {items}.len == 0 ? 16 "
-      + $": {items}.len * sizeof({elemType}) < {VecDoubleGrowLimit} ? {items}.len * 2 : {items}.len + {items}.len / 2; if ({capacity} < {want}) {{ {capacity} = {want}; }} "
+      + $": {items}.len * sizeof({elemType}) < {VecDoubleGrowLimit} ? {items}.len * 2 : {items}.len + {items}.len * {VecGrowExtra} / 1000; if ({capacity} < {want}) {{ {capacity} = {want}; }} "
       + $"{elemType}* {bigger} = ({elemType}*)df_calloc({capacity}, sizeof({elemType})); if ({held}->{VecField(type, "count")} > 0) {{ memcpy({bigger}, {items}.p, {held}->{VecField(type, "count")} * sizeof({elemType})); }} "
       + $"free({items}.p); {items}.p = {bigger}; {items}.len = {capacity}; }} ";
   }

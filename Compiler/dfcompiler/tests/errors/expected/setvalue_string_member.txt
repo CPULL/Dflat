@@ -1,0 +1,1 @@
+setvalue_string_member.df(2): error: feature not supported: Set values with a string member (built: numbers up to 64 bits, bool, char, enums, bitfields, their nullable forms, date, time, clock, lapse, addr; strings, objects and tuples come later)

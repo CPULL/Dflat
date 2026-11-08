@@ -1,0 +1,72 @@
+// m.add(->other) and s.add(->other) (spec 6.6): the entries move without copies, other ends; when a key is already there the new value wins
+// and the key that came with it ends
+alias Root as r
+
+notclonable class Dog(string name) {
+  public string name
+} atEnd {
+  r.Console.log("  end " + name)
+}
+
+class Tag(string name) : Keyable {
+  public string name
+} atEnd {
+  r.Console.log("  end tag " + name)
+}
+
+fun strings() {
+  map<string, string> a = ["x": "one", "y": "two"]
+  map<string, string> b = ["y": "TWO", "z": "three"]
+  a.add(->b)
+  r.Console.log($"  {a} {b == null}")
+  hmap<string, string> ha = ["k": "v"]
+  hmap<string, string> hb = ["k": "w", "j": "u"]
+  ha += ->hb
+  r.Console.log($"  {ha.len} {ha["k"]} {ha["j"]} {hb == null}")
+}
+
+fun objects() {
+  map<string, Dog> kennel = []
+  kennel.add("rex", Dog("rex"))
+  map<string, Dog> more = []
+  more.add("max", Dog("max"))
+  more.add("rex", Dog("rex2"))                    // the same key: rex2 wins, rex ends
+  kennel.add(->more)                              // Dog is notclonable: a move needs no clone
+  r.Console.log($"  {kennel.len} {kennel["rex"].name} {kennel["max"].name}")
+  r.Console.log("  end of objects")
+}
+
+fun keys() {
+  hmap<Tag, i32> tags = []
+  tags[Tag("a")] = 1
+  hmap<Tag, i32> other = []
+  other[Tag("a")] = 10                            // the same key: the value 10 wins, the moved tag ends
+  other[Tag("b")] = 2
+  tags.add(->other)
+  r.Console.log($"  {tags.len} {tags[Tag("a")]} {tags[Tag("b")]}")
+  r.Console.log("  end of keys")
+}
+
+fun sets() {
+  set<string> s = ["a"]
+  hset<string> h = ["b", "a"]
+  s.add(->h)
+  r.Console.log($"  {s} {h == null}")
+  set<Tag> st = []
+  vec<Tag> v = [Tag("v1"), Tag("v2")]
+  st.add(->v)
+  list<Tag> l = [Tag("l1"), Tag("v1")]            // v1 is already there: the one from the list ends
+  st.add(->l)
+  r.Console.log($"  {st.len} {v == null} {l == null}")
+  r.Console.log("  end of sets")
+}
+
+r.Console.log("strings")
+strings()
+r.Console.log("objects")
+objects()
+r.Console.log("keys")
+keys()
+r.Console.log("sets")
+sets()
+r.Console.log("done")

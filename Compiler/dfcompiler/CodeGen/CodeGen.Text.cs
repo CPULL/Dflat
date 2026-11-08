@@ -223,12 +223,93 @@ public sealed partial class CodeGen {
       || (traits.ContainsKey(first) && scope.Find("this") != null);
   }
 
+  // m.add(->other) and s.add(->other) (spec 6.6): the entries of other move into the collection and other ends (its variable becomes null).
+  // Nothing is copied: a string or object key and a string or object value go as they are; when the key is already there the new value
+  // wins and the key that came with it ends. A set also takes the items of a vec or a list moved into it
+  Expr MovingAdd(Expr receiver, Node gift, Scope scope, Node at) {
+    var moved = ExprOf(gift, scope);
+    string type = receiver.Type;
+    string sourceType = moved.Type;
+    bool fromEntries = IsMap(type) ? sourceType == type : IsSet(sourceType) && MapKey(sourceType) == MapKey(type);
+    bool fromItems = IsSet(type) && (IsVec(sourceType) && VecElem(sourceType) == MapKey(type) || IsList(sourceType) && ListElem(sourceType) == MapKey(type));
+    if (!fromEntries && !fromItems) {
+      throw Error(IsMap(type)
+        ? $"{DisplayName(type)} takes the entries of another {DisplayName(type)} with ->, not of a {DisplayName(sourceType)} (spec 6.6)"
+        : $"{DisplayName(type)} takes with -> a set, an hset, a vec or a list of {DisplayName(MapKey(type))}, not a {DisplayName(sourceType)} (spec 6.6)", gift);
+    }
+    NeedMapChunk(type);
+    string held = NewTemp();
+    string source = NewTemp();
+    string keyType = MapKey(type);
+    var sb = new System.Text.StringBuilder($"({{ {CType(type)} {held} = {NullChecked(receiver.Code, type)}; {CType(sourceType)} {source} = {NullChecked(moved.Code, sourceType)}; ");
+    sb.Append($"if ((void*){source} == (void*){held}) {{ df_raise(&df_desc_ModifyingProtectedSourceException, {fn!.NameConst}); {RaiseJump} }} ");
+    sb.Append(LockCheck(held, type));
+    string key = NewTemp();
+    string slot = NewTemp();
+    if (fromEntries) {
+      string cursor = NewTemp();
+      string sourceSlot = NewTemp();
+      sb.Append($"{EntryLoop(source, sourceType, cursor)} {{ {CType(keyType)} {key} = {CursorKey(sourceType, cursor)}; ");
+      string store = "";
+      if (IsMap(type)) {
+        string valueType = MapValue(type);
+        string value = NewTemp();
+        sb.Append($"{SlotC(sourceType)}* {sourceSlot} = {CursorValue(source, sourceType, cursor)}; ");
+        if (valueType == "string") {
+          sb.Append($"df_string {value} = df_bt_sval_take({sourceSlot}); ");
+        } else if (IsClass(valueType)) {
+          sb.Append($"{CType(valueType)} {value} = *{sourceSlot}; *{sourceSlot} = NULL; ");
+        } else {
+          sb.Append($"{CType(valueType)} {value} = *{sourceSlot}; ");
+        }
+        store = StoreValue(valueType, slot, value);
+      }
+      sb.Append(GivenKeySlot(held, type, key, slot, at)).Append(store).Append(IsMap(type) ? "" : $"(void){slot}; ").Append("} ");
+      // the source keeps nothing: only its nodes go
+      sb.Append(IsHmap(sourceType) ? $"df_ht_clear({MapTree(source, sourceType)}); " : $"df_bt_clear({MapTree(source, sourceType)}, {(KeyHasPointer(sourceType) ? "true" : "false")}); ");
+    } else {
+      string elem = MapKey(type);
+      string zero = IsClass(elem) || elem == "string" ? "NULL" : ZeroValue(elem);
+      sb.Append(ForEachSourceItem(sourceType, source, "0", SourceLength(sourceType, source), item =>
+        $"{{ {CType(elem)} {key} = {item}; {item} = {zero}; {GivenKeySlot(held, type, key, slot, at)}(void){slot}; }} "));
+    }
+    sb.Append($"df_drop((void*){source}); }})");
+    return new Expr(sb.ToString(), "void");
+  }
+
+  // the value slot of a key the collection takes as it is (MovingAdd): a string or an object becomes the collection's own, and when the key
+  // is already there the one given ends; the other keys are values and are copied
+  string GivenKeySlot(string held, string type, string key, string slot, Node at) {
+    string keyType = MapKey(type);
+    if (IsObjectKey(keyType)) {
+      lastKeyGiven = true;
+      lastKeyNode = at;
+      return ObjectKeySlot(held, type, key, slot, false);
+    }
+    if (keyType != "string") {
+      return MapSlot(held, type, key, slot, false);
+    }
+    string valueC = SlotC(type);
+    string tree = MapTree(held, type);
+    string added = NewTemp();
+    if (IsHmap(type)) {
+      string words = NewTemp();
+      return $"{HmapKeySlot(type, key, words)}{valueC}* {slot} = ({valueC}*)df_ht_find({tree}, {words}, {HmapShape(type)}); "
+        + $"if ({slot} == NULL) {{ bool {added}; {slot} = ({valueC}*)df_ht_put({tree}, {words}, {HmapShape(type)}, &{added}); }} else {{ df_str_free({key}); }} ";
+    }
+    return $"{valueC}* {slot} = ({valueC}*){MapFindRaw(held, type, key)}; if ({slot} == NULL) {{ bool {added}; "
+      + $"{slot} = ({valueC}*)df_bt_put({tree}, {SortKey(keyType, key)}, {KeyPointer(type, key)}, {MapShape(type)}, &{added}); }} else {{ df_str_free({key}); }} ";
+  }
+
   Expr? TryReceiverCall(Expr receiver, string name, List<Node> args, Scope scope, Node at) {
     if (FunctionalMembers.Contains(name) && IndexCollectionElem(receiver.Type) != null && at.Line < LibraryLine) {
       return FunctionalCall(receiver, name, args, null, scope, at);   // filter, map, reduce (spec 6.6)
     }
     if (IsBitfield(receiver.Type)) {
       return BitfieldMethod(receiver, name, args, scope, at);
+    }
+    if ((IsMap(receiver.Type) || IsSet(receiver.Type)) && name == "add" && args.Count == 1 && args[0].Kind == "Gift" && at.Line < LibraryLine) {
+      return MovingAdd(receiver, args[0], scope, at);   // m.add(->other), s.add(->other) (spec 6.6)
     }
     if (IsArr(receiver.Type)) {
       return ArrayMethod(receiver, name, args, scope, at);
@@ -347,6 +428,9 @@ public sealed partial class CodeGen {
     if (!declared.Contains("SortDirection") && Mentions(program, node => node.Text == "SortDirection")) {
       source.Append("enum SortDirection { ASC, DESC }" + Environment.NewLine);
     }
+    if (!declared.Contains("Keyable") && Mentions(program, node => node.Text == "Keyable")) {
+      source.Append("trait Keyable {\n  uns keyUses\n  uns keyHash\n}\n");   // spec 11.2.1: the entries that hold the object as a key, the stored hash
+    }
     if (!declared.Contains("SilentException") && Mentions(program, node => node.Text == "SilentException")) {
       source.Append("trait SilentException { }\n");
     }
@@ -392,7 +476,8 @@ public sealed partial class CodeGen {
       // its lines are numbered from LibraryLine so that no warning of this code is shown (Warn) and the errors can be told apart
       // UNS_NONE is the largest uns of the target ("not found"); VEC_DOUBLE_LIMIT is the block size up to which a vec doubles (spec 6.8.2)
       string prelude = (VecPrelude + HmapPrelude).Replace("UNS_NONE", NativeUns == "u32" ? "4294967295" : "18446744073709551615")
-        .Replace("VEC_DOUBLE_LIMIT", VecDoubleGrowLimit.ToString());
+        .Replace("VEC_DOUBLE_LIMIT", VecDoubleGrowLimit.ToString())
+        .Replace("VEC_GROW_EXTRA", VecGrowExtra.ToString());
       var vecLibrary = new Parser(new Lexer(prelude, LibraryLine).Tokenize()).ParseProgram();
       program.Children.InsertRange(0, vecLibrary.Children);
       vecPrelude = true;

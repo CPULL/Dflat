@@ -1,1 +1,1 @@
-struct_map_key.df(3): error: map keys of type Pair are not built yet (this version: integers, bool, char, enums, reals, date, time and string)
+struct_map_key.df(4): error: hmap keys of type Pair are not built yet (this version: integers, bool, char, enums, reals, date, time, clock, lapse, string, tuples of them and strings, structs of exact natives, strings and Keyable objects, sets of exact natives, Keyable classes)

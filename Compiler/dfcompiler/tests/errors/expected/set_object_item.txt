@@ -1,1 +1,1 @@
-set_object_item.df(2): error: set items of type Dog are not built yet (this version: integers, bool, char, enums, reals, date, time and string)
+set_object_item.df(2): error: Dog is not Keyable: a class used as a key implements the trait Keyable (spec 6.2, 11.2.1)

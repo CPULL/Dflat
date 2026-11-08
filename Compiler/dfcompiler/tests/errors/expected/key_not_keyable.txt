@@ -1,0 +1,1 @@
+key_not_keyable.df(4): error: Dog is not Keyable: a class used as a key implements the trait Keyable (spec 6.2, 11.2.1)

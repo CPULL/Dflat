@@ -21,7 +21,11 @@ public static class RuntimeMap {
 #define DF_BT_DEPTH 48
 #define DF_BT_MAX_BRANCH 15
 
-typedef int (*df_bt_cmp)(const void*, const void*);
+/* the second word of a key slot (spec 6.8.4.1): a pointer to the key (a string, an object), or the sort key of the value of a multi-type key;
+   64 bits on every target */
+typedef uint64_t df_bt_kw;
+
+typedef int (*df_bt_cmp)(df_bt_kw, df_bt_kw);
 
 typedef struct {
   size_t vs;          /* the size of a value */
@@ -83,8 +87,8 @@ static inline uint64_t* df_bt_lk(const void* leaf) {
   return (uint64_t*)((uint8_t*)leaf + sizeof(df_bt_leaf));
 }
 
-static inline void** df_bt_lp(const void* leaf) {
-  return (void**)(df_bt_lk(leaf) + DF_BT_LEAF_N);
+static inline df_bt_kw* df_bt_lp(const void* leaf) {
+  return (df_bt_kw*)(df_bt_lk(leaf) + DF_BT_LEAF_N);
 }
 
 static inline uint8_t* df_bt_lv(const void* leaf, const df_bt_shape* s) {
@@ -100,16 +104,16 @@ static inline uint64_t* df_bt_bk(const void* branch) {
   return (uint64_t*)((uint8_t*)branch + 8);
 }
 
-static inline void** df_bt_bp(const void* branch, const df_bt_shape* s) {
-  return (void**)(df_bt_bk(branch) + s->bn);
+static inline df_bt_kw* df_bt_bp(const void* branch, const df_bt_shape* s) {
+  return (df_bt_kw*)(df_bt_bk(branch) + s->bn);
 }
 
 static inline void** df_bt_kids(const void* branch, const df_bt_shape* s) {
-  return s->kp ? df_bt_bp(branch, s) + s->bn : (void**)(df_bt_bk(branch) + s->bn);
+  return s->kp ? (void**)(df_bt_bp(branch, s) + s->bn) : (void**)(df_bt_bk(branch) + s->bn);
 }
 
 /* the order of two keys: the sort keys, then the pointers when they are equal */
-static inline int df_bt_kcmp(const df_bt_shape* s, uint64_t a, const void* ap, uint64_t b, const void* bp) {
+static inline int df_bt_kcmp(const df_bt_shape* s, uint64_t a, df_bt_kw ap, uint64_t b, df_bt_kw bp) {
   if (a != b) {
     return a < b ? -1 : 1;
   }
@@ -146,9 +150,9 @@ static uint64_t df_bt_key_str(df_string text) {
   return key;
 }
 
-static int df_bt_cmp_str(const void* a, const void* b) {
-  df_sv x = df_view((df_string)a);
-  df_sv y = df_view((df_string)b);
+static int df_bt_cmp_str(df_bt_kw a, df_bt_kw b) {
+  df_sv x = df_view((df_string)(uintptr_t)a);
+  df_sv y = df_view((df_string)(uintptr_t)b);
   uint64_t n = x.len < y.len ? x.len : y.len;
   int c = n ? memcmp(x.p, y.p, n) : 0;
   if (c != 0) {
@@ -217,7 +221,7 @@ static df_string df_bt_sval_take(uint8_t* slot) {
 }
 
 static void* df_bt_new_leaf(const df_bt_shape* s) {
-  size_t size = sizeof(df_bt_leaf) + DF_BT_LEAF_N * (sizeof(uint64_t) + (s->kp ? sizeof(void*) : 0) + s->vs);
+  size_t size = sizeof(df_bt_leaf) + DF_BT_LEAF_N * (sizeof(uint64_t) + (s->kp ? sizeof(df_bt_kw) : 0) + s->vs);
   df_bt_leaf* leaf = (df_bt_leaf*)df_alloc(size);
   memset(leaf, 0, size);
   leaf->head[0] = DF_BT_LEAF_MARK | (s->kp ? DF_BT_PTR_MARK : 0);
@@ -225,7 +229,7 @@ static void* df_bt_new_leaf(const df_bt_shape* s) {
 }
 
 static size_t df_bt_branch_size(const df_bt_shape* s) {
-  return 8 + s->bn * (sizeof(uint64_t) + (s->kp ? sizeof(void*) : 0) + sizeof(void*));
+  return 8 + s->bn * (sizeof(uint64_t) + (s->kp ? sizeof(df_bt_kw) : 0) + sizeof(void*));
 }
 
 static void* df_bt_new_branch(const df_bt_shape* s) {
@@ -242,7 +246,7 @@ static void df_bt_lmove(void* dst, unsigned di, const void* src, unsigned si, un
   }
   memmove(df_bt_lk(dst) + di, df_bt_lk(src) + si, count * sizeof(uint64_t));
   if (s->kp) {
-    memmove(df_bt_lp(dst) + di, df_bt_lp(src) + si, count * sizeof(void*));
+    memmove(df_bt_lp(dst) + di, df_bt_lp(src) + si, count * sizeof(df_bt_kw));
   }
   memmove(df_bt_val(dst, di, s), df_bt_val(src, si, s), count * s->vs);
 }
@@ -254,28 +258,28 @@ static void df_bt_bmove(void* dst, unsigned di, const void* src, unsigned si, un
   }
   memmove(df_bt_bk(dst) + di, df_bt_bk(src) + si, count * sizeof(uint64_t));
   if (s->kp) {
-    memmove(df_bt_bp(dst, s) + di, df_bt_bp(src, s) + si, count * sizeof(void*));
+    memmove(df_bt_bp(dst, s) + di, df_bt_bp(src, s) + si, count * sizeof(df_bt_kw));
   }
   memmove(df_bt_kids(dst, s) + di, df_bt_kids(src, s) + si, count * sizeof(void*));
 }
 
-static inline void df_bt_setsep(void* branch, unsigned i, uint64_t key, void* ptr, const df_bt_shape* s) {
+static inline void df_bt_setsep(void* branch, unsigned i, uint64_t key, df_bt_kw ptr, const df_bt_shape* s) {
   df_bt_bk(branch)[i] = key;
   if (s->kp) {
     df_bt_bp(branch, s)[i] = ptr;
   }
 }
 
-static inline void* df_bt_lptr(const void* leaf, unsigned i, const df_bt_shape* s) {
-  return s->kp ? df_bt_lp(leaf)[i] : NULL;
+static inline df_bt_kw df_bt_lptr(const void* leaf, unsigned i, const df_bt_shape* s) {
+  return s->kp ? df_bt_lp(leaf)[i] : 0;
 }
 
-static inline void* df_bt_bptr(const void* branch, unsigned i, const df_bt_shape* s) {
-  return s->kp ? df_bt_bp(branch, s)[i] : NULL;
+static inline df_bt_kw df_bt_bptr(const void* branch, unsigned i, const df_bt_shape* s) {
+  return s->kp ? df_bt_bp(branch, s)[i] : 0;
 }
 
 /* the position of a key in a leaf, or where it would go */
-static unsigned df_bt_leaf_pos(const void* leaf, uint64_t key, const void* ptr, const df_bt_shape* s, bool* found) {
+static unsigned df_bt_leaf_pos(const void* leaf, uint64_t key, df_bt_kw ptr, const df_bt_shape* s, bool* found) {
   unsigned lo = 0, hi = df_bt_n(leaf);
   const uint64_t* keys = df_bt_lk(leaf);
   while (lo < hi) {
@@ -291,7 +295,7 @@ static unsigned df_bt_leaf_pos(const void* leaf, uint64_t key, const void* ptr, 
 }
 
 /* the child of a branch that holds a key: the last one whose separator is not above it (the first separator is not read) */
-static unsigned df_bt_child(const void* branch, uint64_t key, const void* ptr, const df_bt_shape* s) {
+static unsigned df_bt_child(const void* branch, uint64_t key, df_bt_kw ptr, const df_bt_shape* s) {
   unsigned lo = 1, hi = df_bt_n(branch);
   const uint64_t* seps = df_bt_bk(branch);
   while (lo < hi) {
@@ -305,7 +309,7 @@ static unsigned df_bt_child(const void* branch, uint64_t key, const void* ptr, c
   return lo - 1;
 }
 
-static void* df_bt_descend(const df_bt* t, uint64_t key, const void* ptr, const df_bt_shape* s, df_bt_path* path) {
+static void* df_bt_descend(const df_bt* t, uint64_t key, df_bt_kw ptr, const df_bt_shape* s, df_bt_path* path) {
   void* node = t->root;
   path->depth = 0;
   for (uint32_t level = 0; level < t->height; level++) {
@@ -319,7 +323,7 @@ static void* df_bt_descend(const df_bt* t, uint64_t key, const void* ptr, const 
 }
 
 /* the value of a key, or NULL */
-static void* df_bt_find(const df_bt* t, uint64_t key, const void* ptr, size_t vs, bool kp, df_bt_cmp cmp) {
+static void* df_bt_find(const df_bt* t, uint64_t key, df_bt_kw ptr, size_t vs, bool kp, df_bt_cmp cmp) {
   if (t->root == NULL) {
     return NULL;
   }
@@ -334,7 +338,7 @@ static void* df_bt_find(const df_bt* t, uint64_t key, const void* ptr, size_t vs
 }
 
 /* a zeroed entry for a key at position at of a leaf that has room */
-static void df_bt_leaf_open(void* leaf, unsigned at, uint64_t key, void* ptr, const df_bt_shape* s) {
+static void df_bt_leaf_open(void* leaf, unsigned at, uint64_t key, df_bt_kw ptr, const df_bt_shape* s) {
   unsigned n = df_bt_n(leaf);
   df_bt_lmove(leaf, at + 1, leaf, at, n - at, s);
   df_bt_lk(leaf)[at] = key;
@@ -346,7 +350,7 @@ static void df_bt_leaf_open(void* leaf, unsigned at, uint64_t key, void* ptr, co
 }
 
 /* after a split: the new right node and its smallest key go into the parent; the full branches up the path split too */
-static void df_bt_insert_up(df_bt* t, df_bt_path* path, uint64_t sep, void* sepPtr, void* right, const df_bt_shape* s) {
+static void df_bt_insert_up(df_bt* t, df_bt_path* path, uint64_t sep, df_bt_kw sepPtr, void* right, const df_bt_shape* s) {
   while (path->depth > 0) {
     path->depth--;
     void* branch = path->node[path->depth];
@@ -361,7 +365,7 @@ static void df_bt_insert_up(df_bt* t, df_bt_path* path, uint64_t sep, void* sepP
     }
     /* the full branch and the new child, in order, in a scratch branch with one more place */
     uint64_t seps[DF_BT_MAX_BRANCH + 1];
-    void* ptrs[DF_BT_MAX_BRANCH + 1];
+    df_bt_kw ptrs[DF_BT_MAX_BRANCH + 1];
     void* kids[DF_BT_MAX_BRANCH + 1];
     for (unsigned i = 0, j = 0; i <= n; i++) {
       if (i == at) {
@@ -400,7 +404,7 @@ static void df_bt_insert_up(df_bt* t, df_bt_path* path, uint64_t sep, void* sepP
 }
 
 /* the value of a key: the existing one, or a new zeroed one (*added is then true; the tree keeps ptr as the key) */
-static void* df_bt_put(df_bt* t, uint64_t key, void* ptr, size_t vs, bool kp, df_bt_cmp cmp, bool* added) {
+static void* df_bt_put(df_bt* t, uint64_t key, df_bt_kw ptr, size_t vs, bool kp, df_bt_cmp cmp, bool* added) {
   df_bt_shape s = df_bt_shape_of(vs, kp, cmp);
   *added = false;
   if (t->root == NULL) {
@@ -466,7 +470,7 @@ static void* df_bt_put(df_bt* t, uint64_t key, void* ptr, size_t vs, bool kp, df
 }
 
 /* the smallest key below child index of the branch at path level d changed: its separator follows, and up the path while it is the first child */
-static void df_bt_new_min(df_bt_path* path, unsigned d, unsigned index, uint64_t key, void* ptr, const df_bt_shape* s) {
+static void df_bt_new_min(df_bt_path* path, unsigned d, unsigned index, uint64_t key, df_bt_kw ptr, const df_bt_shape* s) {
   for (;;) {
     df_bt_setsep(path->node[d], index, key, ptr, s);
     if (index > 0 || d == 0) {
@@ -508,7 +512,7 @@ static void df_bt_leaf_share(void* a, void* b, const df_bt_shape* s) {
 }
 
 /* the same for two neighbour branches; (*sep, *sepPtr) is the smallest key below b, its separator in the parent, and follows the change */
-static void df_bt_branch_share(void* a, void* b, uint64_t* sep, void** sepPtr, const df_bt_shape* s) {
+static void df_bt_branch_share(void* a, void* b, uint64_t* sep, df_bt_kw* sepPtr, const df_bt_shape* s) {
   unsigned na = df_bt_n(a), nb = df_bt_n(b);
   unsigned keep = (na + nb) / 2;
   if (na > keep) {
@@ -603,7 +607,7 @@ static void df_bt_rebalance(df_bt* t, df_bt_path* path, void* node, const df_bt_
       }
     } else {
       uint64_t sep = df_bt_bk(parent)[left + 1];
-      void* sepPtr = df_bt_bptr(parent, left + 1, s);
+      df_bt_kw sepPtr = df_bt_bptr(parent, left + 1, s);
       df_bt_branch_share(a, b, &sep, &sepPtr, s);
       df_bt_setsep(parent, left + 1, sep, sepPtr, s);
     }
@@ -612,7 +616,7 @@ static void df_bt_rebalance(df_bt* t, df_bt_path* path, void* node, const df_bt_
 }
 
 /* removes a key; its value is copied to out and its key pointer to outKey when they are not NULL; false when the key is not there */
-static bool df_bt_remove(df_bt* t, uint64_t key, const void* ptr, size_t vs, bool kp, df_bt_cmp cmp, void* out, void** outKey) {
+static bool df_bt_remove(df_bt* t, uint64_t key, df_bt_kw ptr, size_t vs, bool kp, df_bt_cmp cmp, void* out, df_bt_kw* outKey) {
   if (t->root == NULL) {
     return false;
   }
@@ -674,7 +678,7 @@ static bool df_bt_remove_null(df_bt* t, size_t vs, void* out) {
 
 static uint64_t df_bt_node_bytes(const void* node, uint32_t height, const df_bt_shape* s) {
   if (height == 0) {
-    return sizeof(df_bt_leaf) + DF_BT_LEAF_N * (sizeof(uint64_t) + (s->kp ? sizeof(void*) : 0) + s->vs);
+    return sizeof(df_bt_leaf) + DF_BT_LEAF_N * (sizeof(uint64_t) + (s->kp ? sizeof(df_bt_kw) : 0) + s->vs);
   }
   uint64_t bytes = df_bt_branch_size(s);
   for (unsigned i = 0; i < df_bt_n(node); i++) {
@@ -740,7 +744,7 @@ static inline uint64_t df_bt_cur_key(const df_bt_cur* cur) {
   return df_bt_lk(cur->leaf)[cur->at];
 }
 
-static inline void* df_bt_cur_ptr(const df_bt_cur* cur) {
+static inline df_bt_kw df_bt_cur_ptr(const df_bt_cur* cur) {
   return df_bt_lp(cur->leaf)[cur->at];
 }
 
@@ -805,7 +809,7 @@ static df_uns df_bt_sweep(df_bt* t, size_t vs, bool kp) {
   }
   void** level = (void**)df_alloc(leaves * sizeof(void*));
   uint64_t* mins = (uint64_t*)df_alloc(leaves * sizeof(uint64_t));
-  void** minPtrs = (void**)df_alloc(leaves * sizeof(void*));
+  df_bt_kw* minPtrs = (df_bt_kw*)df_alloc(leaves * sizeof(df_bt_kw));
   df_uns count = 0;
   for (df_bt_leaf* leaf = first; leaf != NULL; leaf = leaf->next) {
     level[count] = leaf;

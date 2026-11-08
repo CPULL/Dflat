@@ -1,0 +1,27 @@
+strings
+  [x: one, y: TWO, z: three] true
+  2 w u true
+objects
+  end rex
+  2 rex2 max
+  end of objects
+  end max
+  end rex2
+keys
+  end tag a
+  2 10 2
+  end tag b
+  end tag a
+  end of keys
+  end tag a
+  end tag b
+sets
+  [a, b] true
+  end tag v1
+  3 true true
+  end of sets
+  end tag l1
+  end tag v2
+  end tag v1
+done
+---- exit code 0 ----

@@ -14,23 +14,35 @@ public sealed partial class CodeGen {
     "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "r32", "r64", "bool", "char"
   };
 
+  // the natives that are nullable by default (spec 7.1): their own null, in 64 bits
+  static readonly HashSet<string> SetValueNullableNatives = new() { "date", "time", "clock", "lapse", "addr" };
+
+  // a member that can hold null: T? of a native, or a native nullable by default
+  static bool IsNullableMember(string type) => type.EndsWith('?') || SetValueNullableNatives.Contains(type);
+
   // a set used as the type of a value (a set name is never the type of a value otherwise)
   bool IsSetValue(string type) => IsSetName(type);
 
   // the members of the set, in the order of the set: the position is the tag
   List<string> SetValueMembers(string set, Node at) {
     var members = SetMembers(set);
-    foreach (string member in members.Where(member => !SetValueNatives.Contains(member) && !IsEnumType(member))) {
-      throw NotSupported($"Set values with a {DisplayName(member)} member (built: numbers up to 64 bits, bool, char, enums and bitfields; strings, objects, tuples, nullable and wide members come later)", at);
+    foreach (string member in members.Where(member => !IsStage1Member(member))) {
+      throw NotSupported($"Set values with a {DisplayName(member)} member (built: numbers up to 64 bits, bool, char, enums, bitfields, their nullable forms, date, time, clock, lapse, addr; strings, objects and tuples come later)", at);
     }
     return members;
   }
 
   bool IsEnumType(string type) => enums.ContainsKey(type);
 
+  // numbers up to 64 bits, bool, char, enums, bitfields, their nullable forms, date, time, clock, lapse, addr
+  bool IsStage1Member(string type) {
+    string plain = type.EndsWith('?') ? type[..^1] : type;
+    return SetValueNatives.Contains(plain) || IsEnumType(plain) || SetValueNullableNatives.Contains(type);
+  }
+
   string SetValueCType() {
     if (definedTypes.Add("df_setv")) {
-      typeDefs.Append("typedef struct {\n  uint64_t bits;\n  uint32_t tag;\n} df_setv;\n\n");   // spec 11.3.6.1
+      typeDefs.Append("typedef struct {\n  uint64_t bits[2];\n  uint32_t tag;\n} df_setv;\n\n");   // spec 11.3.6.1: up to 16 bytes inline (an i64? is 16)
     }
     return "df_setv";
   }
@@ -46,14 +58,14 @@ public sealed partial class CodeGen {
     }
     string held = NewTemp();
     string result = NewTemp();
-    return new Expr($"({{ {CType(value.Type)} {held} = {value.Code}; {SetValueCType()} {result} = {{ 0, {tag}u }}; memcpy(&{result}.bits, &{held}, sizeof {held}); {result}; }})", set);
+    return new Expr($"({{ {CType(value.Type)} {held} = {value.Code}; {SetValueCType()} {result} = {{ {{ 0, 0 }}, {tag}u }}; memcpy({result}.bits, &{held}, sizeof {held}); {result}; }})", set);
   }
 
   // the value of a member read from a set value whose tag is that member
   string UnwrapSetValue(string code, string member) {
     string held = NewTemp();
     string result = NewTemp();
-    return $"({{ {SetValueCType()} {held} = {code}; {CType(member)} {result}; memcpy(&{result}, &{held}.bits, sizeof {result}); {result}; }})";
+    return $"({{ {SetValueCType()} {held} = {code}; {CType(member)} {result}; memcpy(&{result}, {held}.bits, sizeof {result}); {result}; }})";
   }
 
   // Nums k = 5: a literal takes its default type when the set lists it, otherwise the only member of the same kind (spec 11.3.6.1)
@@ -72,12 +84,18 @@ public sealed partial class CodeGen {
     if (members.Contains(natural.Type)) {
       return WrapSetValue(natural, set, n);
     }
+    if (members.Contains(natural.Type + "?") && !members.Any(member => member == natural.Type)) {
+      return WrapSetValue(new Expr(Convert(natural, natural.Type + "?", n), natural.Type + "?"), set, n);   // i64 5 into an i64? member
+    }
     bool suffixed = literal.Kind == "Int" && !literal.Text!.StartsWith("0x") && !literal.Text.StartsWith("0b") && char.IsLetter(literal.Text[^1])
       || literal.Kind == "Real" && char.IsLetter(literal.Text![^1]);
     if (suffixed) {
       throw Error($"{DisplayName(natural.Type)} is not a member of the set {DisplayName(set)} (spec 11.3.6.1)", n);
     }
-    var sameKind = members.Where(member => literal.Kind == "Real" ? IsRealMember(member) : member != "bool" && member != "char" && !IsRealMember(member) && !IsEnumType(member)).ToList();
+    var sameKind = members.Where(member => {
+      string plain = member.EndsWith('?') ? member[..^1] : member;
+      return literal.Kind == "Real" ? IsRealMember(plain) : SetValueNatives.Contains(plain) && plain is not ("bool" or "char") && !IsRealMember(plain);
+    }).ToList();
     if (sameKind.Count != 1) {
       throw Error(sameKind.Count == 0
         ? $"no member of the set {DisplayName(set)} takes this literal (spec 11.3.6.1)"
@@ -87,12 +105,33 @@ public sealed partial class CodeGen {
     return WrapSetValue(ExprOf(n, scope, sameKind[0]), set, n);
   }
 
+  // the member a literal written for a set takes (11.3.6.1), as a text for the duplicate keys of a map literal
+  string? SetLiteralMember(Node n, Scope scope, string set) {
+    var literal = n.Kind == "Neg" && n.Children.Count == 1 ? n.Children[0] : n;
+    if (literal.Kind is not ("Int" or "Real")) {
+      return null;
+    }
+    var natural = ExprOf(n, scope);
+    var members = SetValueMembers(set, n);
+    return members.Contains(natural.Type) ? natural.Type : "default";
+  }
+
   // k1 == k2: the same tag and the same value (a real compares as a real: 0.0 and -0.0 are equal)
   string SetValueEquals(Expr l, Expr r, Node at) {
     if (l.Type == "null" || r.Type == "null") {
-      // the generic null of a value never assigned is not the null of a member: with no nullable member, never equal (spec 11.3.6.1)
+      // k == null: the null of the member it holds; the generic null of a value never assigned is not one (spec 11.3.6.1)
       var value = l.Type == "null" ? r : l;
-      return $"({{ (void)({value.Code}); false; }})";
+      var nullable = SetValueMembers(value.Type, at).Select((member, index) => (member, index)).Where(pair => IsNullableMember(pair.member)).ToList();
+      if (nullable.Count == 0) {
+        return $"({{ (void)({value.Code}); false; }})";
+      }
+      string subject = NewTemp();
+      var test = new StringBuilder($"({{ {SetValueCType()} {subject} = {value.Code}; bool isnull_{subject} = false; switch ({subject}.tag) {{ ");
+      foreach (var (member, index) in nullable) {
+        test.Append($"case {index + 1}u: isnull_{subject} = {EqualsCode(new Expr(UnwrapSetValue(subject, member), member), new Expr("0", "null"), at)}; break; ");
+      }
+      test.Append($"default: break; }} isnull_{subject}; }})");
+      return test.ToString();
     }
     if (l.Type != r.Type) {
       throw Error($"a value of the set {DisplayName(l.Type)} is compared only with another one of the same set (spec 11.3.6.1)", at);
@@ -102,11 +141,10 @@ public sealed partial class CodeGen {
     string b = NewTemp();
     var sb = new StringBuilder($"({{ {SetValueCType()} {a} = {l.Code}; {SetValueCType()} {b} = {r.Code}; bool eq_{a} = {a}.tag == {b}.tag; if (eq_{a}) {{ switch ({a}.tag) {{ ");
     for (int index = 0; index < members.Count; index++) {
-      if (IsRealMember(members[index])) {
-        sb.Append($"case {index + 1}u: eq_{a} = {UnwrapSetValue(a, members[index])} == {UnwrapSetValue(b, members[index])}; break; ");
-      }
+      string member = members[index];
+      sb.Append($"case {index + 1}u: eq_{a} = {EqualsCode(new Expr(UnwrapSetValue(a, member), member), new Expr(UnwrapSetValue(b, member), member), at)}; break; ");
     }
-    sb.Append($"default: eq_{a} = {a}.bits == {b}.bits; break; }} }} eq_{a}; }})");
+    sb.Append($"default: break; }} }} eq_{a}; }})");   // two values never assigned (tag 0) are equal
     return sb.ToString();
   }
 

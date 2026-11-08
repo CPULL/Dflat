@@ -1,0 +1,11 @@
+struct Cell {
+  i32 x,
+  i32 y
+}
+
+struct Area {
+  Cell corner,
+  string name
+}
+
+map<Area, i32> m = []

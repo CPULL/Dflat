@@ -4,7 +4,7 @@ using dfparser;
 namespace dfcompiler;
 
 public static class Program {
-  public const string Version = "0.0.85alpha";
+  public const string Version = "0.0.93alpha";
 
   // the version of the specification this compiler was built for: the variable `version` of the preprocessor (spec 19.1)
   public const string LanguageVersion = "0.0.24";
@@ -49,7 +49,9 @@ public static class Program {
     public List<string> CSources { get; } = new();   // csource= of the project file: C files compiled with the program (temporary, spec 15.9)
     public string? VulkanSdk { get; set; }           // vulkan-sdk= and glfw= of the project file: the folders the gfx library needs
     public string? Glfw { get; set; }
-    public Dictionary<string, int> Limits { get; } = new();   // --max-vec-copies 32, max-copies=8 ...: the limits of the generated copies (spec 11.3.12)
+    public Dictionary<string, int> Limits { get; } = new();
+    public long? DoubleGrowLimit { get; set; }   // --double-grow-limit 8mb (spec 6.8.2)
+    public int? GrowExtra { get; set; }          // --further-grow-factor 1.25: what the capacity adds, in thousandths (250)   // --max-vec-copies 32, max-copies=8 ...: the limits of the generated copies (spec 11.3.12)
   }
 
   sealed class UsageException : Exception {
@@ -204,7 +206,7 @@ public static class Program {
           Console.Error.WriteLine(warning);
         }
       }
-      var (c, genWarnings) = CodeGen.Compile(tree, build == "release", nativeInt, limits);
+      var (c, genWarnings) = CodeGen.Compile(tree, build == "release", nativeInt, limits, cli.DoubleGrowLimit ?? project.DoubleGrowLimit ?? 4 * 1024 * 1024, cli.GrowExtra ?? project.GrowExtra ?? 500);
       foreach (var warning in genWarnings) {
         Console.Error.WriteLine(SourceMap.Fix(warning));
       }
@@ -358,6 +360,12 @@ public static class Program {
         case "--release":
           settings.Build = "release";
           break;
+        case "--double-grow-limit":
+          settings.DoubleGrowLimit = ParseGrowLimit(Value(ref i, option), option);
+          break;
+        case "--further-grow-factor":
+          settings.GrowExtra = ParseGrowFactor(Value(ref i, option), option);
+          break;
         default:
           if (LimitKey(option) is string limit) {
             settings.Limits[limit] = ParseLimit(Value(ref i, option), option);
@@ -391,6 +399,25 @@ public static class Program {
       }
     }
     return null;
+  }
+
+  // a size in bytes, or with kb, mb, gb (1024 based): 4mb, 512kb, 1048576; from 1kb to 1gb
+  static long ParseGrowLimit(string text, string option) {
+    string lower = text.Trim().ToLowerInvariant();
+    long unit = lower.EndsWith("gb") ? 1L << 30 : lower.EndsWith("mb") ? 1L << 20 : lower.EndsWith("kb") ? 1L << 10 : 1;
+    string digits = unit == 1 ? lower : lower[..^2];
+    if (!long.TryParse(digits, out long amount) || amount <= 0 || amount * unit < 1024 || amount * unit > (1L << 30)) {
+      throw new UsageException($"{option} takes a size from 1kb to 1gb (bytes, or with kb, mb, gb), not '{text}'");
+    }
+    return amount * unit;
+  }
+
+  // a factor above 1 and at most 2 (1.5 is the default): the capacity adds (factor - 1) of itself, kept in thousandths
+  static int ParseGrowFactor(string text, string option) {
+    if (!double.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double factor) || factor <= 1.0 || factor > 2.0) {
+      throw new UsageException($"{option} takes a factor above 1 and at most 2 (as 1.5), not '{text}'");
+    }
+    return Math.Max(1, (int)Math.Round((factor - 1.0) * 1000));
   }
 
   static int ParseLimit(string text, string option) {
@@ -494,6 +521,12 @@ public static class Program {
           case "run":
           case "version":
             throw new UsageException($"{key} cannot be used in a project file");
+          case "double-grow-limit":
+            settings.DoubleGrowLimit = ParseGrowLimit(value, key);
+            break;
+          case "further-grow-factor":
+            settings.GrowExtra = ParseGrowFactor(value, key);
+            break;
           default:
             if (LimitKey("--" + key) is string limit) {
               settings.Limits[limit] = ParseLimit(value, key);

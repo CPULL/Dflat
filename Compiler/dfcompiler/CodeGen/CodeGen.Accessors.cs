@@ -110,9 +110,6 @@ public sealed partial class CodeGen {
   List<Node> PropertyMethods(Node decl, Node accessors, Node program, Node owner) {
     string name = decl.Text!;
     var mods = decl.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ') ?? Array.Empty<string>();
-    if (mods.Contains("static")) {
-      throw NotSupported("Static properties with accessor blocks", decl);
-    }
     if (mods.Contains("const")) {
       throw Error("a const field has no accessor blocks", decl);
     }
@@ -159,7 +156,7 @@ public sealed partial class CodeGen {
       var block = getter?.Children.First(child => child.Kind == "Block")
         ?? Synthetic("Block", decl).Add(Synthetic("ExprStmt", decl).Add(Synthetic("Name", decl, "field")));
       var fun = Synthetic("Fun", decl, GetterName(name));
-      AddVisibility(fun, getter, visibility, isOverride);
+      AddVisibility(fun, getter, visibility, isOverride, mods.Contains("static"));
       var returns = Synthetic("Returns", decl).Add(CopyTree(typeNode));
       if (decl.Children.Any(child => child.Kind == "Counted")) {
         returns.Text = decl.Children.Any(child => child.Kind == "ReadWrite") ? "counted-rw" : "counted";   // R: gives a usage (spec 11.1.4)
@@ -171,7 +168,7 @@ public sealed partial class CodeGen {
       var block = setter?.Children.First(child => child.Kind == "Block")
         ?? Synthetic("Block", decl).Add(Synthetic("Assign", decl, "=").Add(Synthetic("Name", decl, "field")).Add(Synthetic("Name", decl, "value")));
       var fun = Synthetic("Fun", decl, SetterName(name));
-      AddVisibility(fun, setter, readonlyWriter && setter?.Children.Any(child => child.Kind == "Mods") != true ? "private" : visibility, isOverride);
+      AddVisibility(fun, setter, readonlyWriter && setter?.Children.Any(child => child.Kind == "Mods") != true ? "private" : visibility, isOverride, mods.Contains("static"));
       var value = Synthetic("Param", decl, "value").Add(CopyTree(typeNode));
       if (decl.Children.Any(child => child.Kind == "Counted")) {
         value.Add(Synthetic("Counted", decl));   // W: takes a usage (spec 11.1.4)
@@ -186,9 +183,12 @@ public sealed partial class CodeGen {
   }
 
   // the visibility of the accessor (written before R: or W:), else the one of the property
-  static void AddVisibility(Node fun, Node? accessor, string visibility, bool isOverride = false) {
+  static void AddVisibility(Node fun, Node? accessor, string visibility, bool isOverride = false, bool isStatic = false) {
     string? own = accessor?.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text;
     string words = isOverride ? "replace" : own ?? visibility;   // a replacement takes the visibility of the parent's accessor
+    if (isStatic) {
+      words += " static";   // the accessors of a static property are static functions (spec 11.1.2)
+    }
     words = words.Trim();
     if (words.Length > 0) {
       fun.Add(Synthetic("Mods", fun, words));
@@ -218,6 +218,9 @@ public sealed partial class CodeGen {
     if (field == null) {
       throw Error("'field' is used only inside the accessor blocks of a property", n);
     }
+    if (field.IsStatic) {
+      return new Expr(field.CName, field.Type);   // the storage of a static property
+    }
     if (field.IsCounted) {
       return CountedFieldRead(new Expr($"self->{field.CName}", field.Type), field, n);   // the object of a counted storage
     }
@@ -232,7 +235,7 @@ public sealed partial class CodeGen {
     if (field == null) {
       throw Error("'field' is used only inside the accessor blocks of a property", n);
     }
-    string place = currentClass!.IsTrait ? TraitFieldCode("self", field) : $"self->{field.CName}";   // a replaced trait property (spec 11.2)
+    string place = field.IsStatic ? field.CName : currentClass!.IsTrait ? TraitFieldCode("self", field) : $"self->{field.CName}";   // a static storage, a replaced trait property (spec 11.2)
     return new LValueInfo(place, field.Type, false, null, true, field.IsWeak);
   }
 
@@ -254,7 +257,8 @@ public sealed partial class CodeGen {
     CheckAccessorVisible(obj, property, GetterName(property.Name), "R:", at);
     bool wantUsage = wantCountedUsage;
     wantCountedUsage = false;
-    var got = ObjectCall(obj, GetterName(property.Name), new List<Node>(), scope, at)
+    var got = (obj.Code == "" ? MethodCall(ObjInfo(obj.Type), GetterName(property.Name), null, false, new List<Node>(), scope, at)
+        : ObjectCall(obj, GetterName(property.Name), new List<Node>(), scope, at))
       ?? throw Error($"internal error: no getter for '{property.Name}'", at);
     if (!property.IsCounted || wantUsage || !IsCountedType(got.Type)) {
       return got;
@@ -268,6 +272,14 @@ public sealed partial class CodeGen {
 
   // x (a property of this class) or o.x: the object and the property; null when the target is not a property
   (Expr Obj, FieldInfo Property)? PropertyTarget(Node target, Scope scope) {
+    // a static property: count inside its class, C.count outside (the class is the receiver, its code is empty)
+    if (target.Kind == "Name" && scope.Find(target.Text!) == null && currentClass != null && FindField(currentClass, target.Text!) is { HasAccessors: true, IsStatic: true } ownStatic) {
+      return (new Expr("", ownStatic.Owner.Name), ownStatic);
+    }
+    if (target.Kind == "Member" && target.Children.Count == 1 && target.Children[0] is { Kind: "Name" } owner && scope.Find(owner.Text!) == null
+        && classes.TryGetValue(owner.Text!, out var ownerClass) && FindField(ownerClass, target.Text!) is { HasAccessors: true, IsStatic: true } staticProperty) {
+      return (new Expr("", ownerClass.Name), staticProperty);
+    }
     if (target.Kind == "Name" && scope.Find(target.Text!) == null && currentClass != null && scope.Find("this") != null
         && FindField(currentClass, target.Text!) is { HasAccessors: true } own) {
       return (new Expr("self", currentClass.Name), own);
@@ -295,8 +307,13 @@ public sealed partial class CodeGen {
   // target op value through the setter (op= reads the property through the getter first)
   string PropertyAssign(Node s, Node targetNode, Expr obj, FieldInfo property, Scope scope) {
     string op = s.Text!;
-    if (op is "_=" or "??=") {
+    if (op == "_=") {
       throw NotSupported($"{op} on a property with accessor blocks", s);
+    }
+    if (op == "??=") {
+      CheckReceiverReadTwice(targetNode, s);
+      var current = PropertyGet(obj, property, scope, s);
+      return $"({{ if ({EqualsCode(current, new Expr("0", "null"), s)}) {{ {PropertySet(obj, property, s.Children[1], scope, s).Code}; }} }})";
     }
     if (op != "=") {
       CheckReceiverReadTwice(targetNode, s);
@@ -310,7 +327,8 @@ public sealed partial class CodeGen {
       throw Error($"'{property.Name}' cannot be assigned: it has no W:", at);
     }
     CheckAccessorVisible(obj, property, SetterName(property.Name), "W:", at);
-    return ObjectCall(obj, SetterName(property.Name), new List<Node> { value }, scope, at)
+    return (obj.Code == "" ? MethodCall(ObjInfo(obj.Type), SetterName(property.Name), null, false, new List<Node> { value }, scope, at)
+        : ObjectCall(obj, SetterName(property.Name), new List<Node> { value }, scope, at))
       ?? throw Error($"internal error: no setter for '{property.Name}'", at);
   }
 

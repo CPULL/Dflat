@@ -1,0 +1,4 @@
+namespace growoptions
+vec<u8> v = []
+for i32 i in 0..2000 { v.add(1b) }
+Root.Console.log(v.capacity)

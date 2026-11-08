@@ -1,0 +1,18 @@
+true
+false
+false
+4
+big five
+int five
+true
+i32 -3: int minus three
+i32 5: int five
+u64 5: big five
+u8 5: small five
+false
+11 20 30 3
+false
+2
+true
+false
+---- exit code 0 ----

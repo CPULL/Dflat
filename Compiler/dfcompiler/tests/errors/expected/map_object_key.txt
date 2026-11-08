@@ -1,1 +1,1 @@
-map_object_key.df(4): error: map keys of type Dog are not built yet (this version: integers, bool, char, enums, reals, date, time and string)
+map_object_key.df(4): error: Dog is not Keyable: a class used as a key implements the trait Keyable (spec 6.2, 11.2.1)

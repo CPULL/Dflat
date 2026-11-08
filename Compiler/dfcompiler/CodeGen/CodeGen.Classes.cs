@@ -1394,6 +1394,9 @@ public sealed partial class CodeGen {
     if (field.IsCounted && !raw) {
       return CountedFieldRead(BareField(name, scope, at, true)!.Value, field, at);   // the object of the counting block (spec 12.7)
     }
+    if (field.IsStatic && field.HasAccessors && !raw) {
+      return PropertyGet(new Expr("", field.Owner.Name), field, scope, at);   // a static property by its bare name (spec 11.1.4, 11.1.2)
+    }
     if (field.IsStatic) {
       return new Expr(field.CName, field.Type);
     }
@@ -1432,10 +1435,13 @@ public sealed partial class CodeGen {
     return field.IsCounted && !raw ? CountedFieldRead(stored, field, at) : stored;
   }
 
-  Expr StaticField(ClassInfo cls, string name, Node at) {
+  Expr StaticField(ClassInfo cls, string name, Node at, Scope? scope = null) {
     var field = FindField(cls, name) ?? throw Error($"{cls.Name} has no member '{name}'", at);
     if (!field.IsStatic) {
       throw Error($"'{name}' is an instance field: it needs an object", at);
+    }
+    if (field.HasAccessors) {
+      return PropertyGet(new Expr("", cls.Name), field, scope ?? new Scope(null), at);   // C.count through its R: (spec 11.1.4)
     }
     CheckAccess(field.Visibility, field.Owner, name, at);
     if (field.IsCounted) {
@@ -1749,6 +1755,10 @@ public sealed partial class CodeGen {
       return param.IsGift ? StrOwnedAs(value, "string", converted) : StrRead(new Expr(converted, "string", FreshCode(value, converted) == "true" && !IsStaticStr(converted)));
     }
     if (IsClass(param.Type)) {
+      if (param.IsGift && !value.Fresh && value.Type != "null" && LibraryCode) {
+        cloneUsed = true;
+        return CloneValue(Convert(value, param.Type, arg), param.Type, arg);   // the copying paths of the library (s.add(other)): a clone goes in
+      }
       if (param.IsGift && !value.Fresh && value.Type != "null") {
         throw Error($"'{param.Name}' takes ownership of the object: write ->x", arg);
       }

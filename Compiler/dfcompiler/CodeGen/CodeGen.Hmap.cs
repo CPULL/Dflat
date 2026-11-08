@@ -35,13 +35,13 @@ public class hmap<K, V> : MapCollection<K, V> {
   }
 
   // adds the pair, or replaces the value of an existing key: false when it replaced (spec 6.6)
-  public fun bool add(K key, ->V value) {
+  public fun bool add(->K key, ->V value) {
     if this.tree_hasKey(key) {
-      this.tree_set(key, ->value)
+      this.tree_set(->key, ->value)
       return false
     }
     checkUnlocked()
-    this.tree_set(key, ->value)
+    this.tree_set(->key, ->value)
     return true
   }
 
@@ -195,12 +195,12 @@ public class hset<T> : SetCollection<T> {
   }
 
   // true when the item is new; an item already there is left as it is (spec 6.6)
-  public fun bool add(T item) {
+  public fun bool add(->T item) {
     if this.tree_has(item) {
       return false
     }
     checkUnlocked()
-    this.tree_add(item)
+    this.tree_add(->item)
     return true
   }
 
@@ -462,6 +462,15 @@ public class hset<T> : SetCollection<T> {
 
   // the key types an hmap takes in this version: the natives and strings (steps 1 and 2 of the hmap plan)
   bool HmapKeyBuilt(string key) {
+    if (IsCompositeKey(key)) {
+      return true;   // a tuple or a struct (CodeGen.CompositeKeys.cs)
+    }
+    if (IsObjectKey(key)) {
+      return true;   // a Keyable class (CheckKeyable)
+    }
+    if (IsSetValue(key)) {
+      return SetValueKeyBuilt(key);   // spec 11.3.6.1, 6.8.5.1
+    }
     string inner = BaseOf(key);
     if (IsNullable(key) && IsTimeType(inner)) {
       return false;
@@ -492,7 +501,7 @@ public class hset<T> : SetCollection<T> {
   // a nullable key that has no spare bit in a uint64_t: its slot holds two of them
   bool HmapWideNullKey(string keyType) => IsNullable(keyType) && HmapKeyValueType(keyType).Bits == 64;
 
-  int HmapKeyWords(string type) => HmapWideNullKey(MapKey(type)) ? 2 : 1;
+  int HmapKeyWords(string type) => IsSetValue(MapKey(type)) || IsObjectKey(MapKey(type)) || IsCompositeKey(MapKey(type)) || HmapWideNullKey(MapKey(type)) ? 2 : 1;
 
   // the bits of a key value (not null) as a uint64_t: an unsigned of its width, a real by its normalized bits
   string HmapKeyBits(string keyType, string value) {
@@ -520,6 +529,17 @@ public class hset<T> : SetCollection<T> {
   // the statements that declare the key slot slot (an array of uint64_t) of the key held in the C variable key
   string HmapKeySlot(string type, string key, string slot) {
     string keyType = MapKey(type);
+    if (IsCompositeKey(keyType)) {
+      // the full hash (a tuple: $ over its components; a struct: as the tuple of its fields) and the key itself
+      return $"uint64_t {slot}[2] = {{ (uint64_t){HashCode(new Expr(key, keyType), null!)}, (uint64_t)(uintptr_t)&({key}) }}; ";
+    }
+    if (IsObjectKey(keyType)) {
+      return $"uint64_t {slot}[2] = {{ (uint64_t)df_hash_obj((void*)({key})), (uint64_t)(uintptr_t)({key}) }}; ";   // the hash and the object
+    }
+    if (IsSetValue(keyType)) {
+      string name = SetCName(keyType);
+      return $"uint64_t {slot}[2] = {{ df_setv_tag_{name}({key}), df_setv_bits_{name}({key}) }}; ";   // the tag and the value bits (spec 6.8.5.1)
+    }
     if (keyType == "string") {
       return HmapStringKeySlot($"(uint64_t)df_hash_str({key})", key, slot);
     }
@@ -539,6 +559,15 @@ public class hset<T> : SetCollection<T> {
   // the key held in a key slot (a pointer to its uint64_t); a string key is the hmap's own string (a borrow)
   string HmapKeyFromSlot(string type, string slotPointer) {
     string keyType = MapKey(type);
+    if (IsCompositeKey(keyType)) {
+      return $"(*({CType(keyType)}*)(uintptr_t)((const uint64_t*){slotPointer})[1])";
+    }
+    if (IsObjectKey(keyType)) {
+      return $"(({CType(keyType)})(uintptr_t)((const uint64_t*){slotPointer})[1])";
+    }
+    if (IsSetValue(keyType)) {
+      return $"df_setv_slot_{SetCName(keyType)}((const uint64_t*){slotPointer})";
+    }
     if (keyType == "string") {
       return $"(((const df_ht_skey*){slotPointer})->k.s)";
     }
@@ -573,6 +602,21 @@ public class hset<T> : SetCollection<T> {
       string keyType = MapKey(type);
       if (keyType == "string") {
         arrayCode.Append($"static const df_ht_shape {shape} = {{ sizeof(df_ht_skey), {MapValueSize(type)}, df_ht_skey_hash, df_ht_skey_eq, true }};\n\n");
+        return "&" + shape;
+      }
+      if (IsSetValue(keyType)) {
+        arrayCode.Append($"static const df_ht_shape {shape} = {{ 16, {MapValueSize(type)}, df_hk_setv_{SetCName(keyType)}, NULL, false }};\n\n");
+        return "&" + shape;
+      }
+      if (IsCompositeKey(keyType)) {
+        string helpers = CompositeKeyEquality(keyType);
+        arrayCode.Append($"static const df_ht_shape {shape} = {{ 16, {MapValueSize(type)}, df_tk_hash_{helpers}, df_tk_eq_{helpers}, false }};\n\n");
+        return "&" + shape;
+      }
+      if (IsObjectKey(keyType)) {
+        ObjectKeyHelpers();
+        string equality = ObjectKeyEquality(keyType);   // may write its prototype first
+        arrayCode.Append($"static const df_ht_shape {shape} = {{ 16, {MapValueSize(type)}, df_hk_obj, {equality}, false }};\n\n");
         return "&" + shape;
       }
       string hash;

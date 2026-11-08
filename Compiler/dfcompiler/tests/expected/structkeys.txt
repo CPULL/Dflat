@@ -1,0 +1,15 @@
+3
+  a 1 A1
+  a 2 a2
+  b 1 b1
+b1 false
+2
+2 15 false
+1
+2 11 2 false
+2
+  a 1
+  a 2
+1
+z9 3
+---- exit code 0 ----

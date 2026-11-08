@@ -1,0 +1,4 @@
+; double-grow-limit and further-grow-factor (spec 6.8.2): doubling up to 1kb, then +25%
+source=main.df
+double-grow-limit=1kb
+further-grow-factor=1.25

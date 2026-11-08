@@ -24,10 +24,19 @@ public sealed partial class CodeGen {
       throw Error($"a collection cannot be an item of a set (spec 6.2): {DisplayName(args[0])}", at);
     }
     if (hashed && !HmapKeyBuilt(args[0])) {
-      throw Error($"hset items of type {DisplayName(args[0])} are not built yet (this version: integers, bool, char, enums, reals, date, time, clock, lapse and string)", at);
+      throw Error($"hset items of type {DisplayName(args[0])} are not built yet (this version: integers, bool, char, enums, reals, date, time, clock, lapse, string, tuples of them and strings, structs of exact natives, strings and Keyable objects, sets of exact natives, Keyable classes)", at);
     }
     if (!hashed && !MapKeyBuilt(args[0])) {
-      throw Error($"set items of type {DisplayName(args[0])} are not built yet (this version: integers, bool, char, enums, reals, date, time and string)", at);
+      throw Error($"set items of type {DisplayName(args[0])} are not built yet (this version: integers, bool, char, enums, reals, date, time, string, tuples of them and strings, structs of exact natives, strings and Keyable objects, sets of exact natives, Keyable classes)", at);
+    }
+    if (IsSetValue(args[0])) {
+      SetKeyHelpers(args[0], at);   // the C helpers of set value keys (CodeGen.SetValueKeys.cs)
+    }
+    if (IsObjectKey(args[0])) {
+      CheckKeyable(args[0], at);   // spec 6.2, 11.2.1
+    }
+    if (IsCompositeKey(args[0])) {
+      CompositeKeyHelpers(args[0]);
     }
   }
 
@@ -100,7 +109,7 @@ public sealed partial class CodeGen {
     foreach (var item in literal.Children) {
       string key = NewTemp();
       string slot = NewTemp();
-      sb.Append("{ ").Append(MapKeyArg(item, scope, MapKey(type), key, true)).Append(MapSlot(held, type, key, slot, false)).Append($"(void){slot}; }} ");
+      sb.Append("{ ").Append(MapKeyArg(item, scope, MapKey(type), key, true, taking: true)).Append(MapSlot(held, type, key, slot, false)).Append($"(void){slot}; }} ");
     }
     sb.Append($"{held}; }})");
     return new Expr(sb.ToString(), type, true);
@@ -143,7 +152,7 @@ public sealed partial class CodeGen {
       case "tree_add": {
         // the class checked that the item is new and the counter of open iterators; a string item is the set's own copy (MapSlot)
         string slot = NewTemp();
-        return new Expr(head + MapKeyArg(args[0], scope, itemType, key, true) + MapSlot(s, type, key, slot, false) + $"(void){slot}; }})", "void");
+        return new Expr(head + MapKeyArg(args[0], scope, itemType, key, true, taking: true) + MapSlot(s, type, key, slot, false) + $"(void){slot}; }})", "void");
       }
       case "tree_remove":
         return new Expr(head + MapKeyArg(args[0], scope, itemType, key, true) + $"{MapRemove(s, type, key, "NULL")}; }})", "bool");
@@ -151,6 +160,18 @@ public sealed partial class CodeGen {
         // the item leaves the set and goes to the caller: a string is the set's own copy, given away instead of freed
         string done = NewTemp();
         string zero = ZeroValue(itemType);
+        if (IsObjectKey(itemType)) {
+          // ->s[item]: the object the set owned goes to the caller (spec 6.6)
+          string gone = NewTemp();
+          string arg = head + MapKeyArg(args[0], scope, itemType, key, true) + KeyCheckCode(itemType, key);
+          if (IsHmap(type)) {
+            string words = NewTemp();
+            return new Expr(arg + $"{HmapKeySlot(type, key, words)}uint64_t {gone}[2] = {{ 0, 0 }}; "
+              + $"bool {done} = df_ht_remove({tree}, {words}, {HmapShape(type)}, NULL, {gone}); {done} ? ({CType(itemType)})(uintptr_t){gone}[1] : {zero}; }})", itemType, true);
+          }
+          return new Expr(arg + $"df_bt_kw {gone} = 0; bool {done} = {key} != NULL && df_bt_remove({tree}, {SortKey(itemType, key)}, {KeyPointer(type, key)}, {MapShape(type)}, NULL, &{gone}); "
+            + $"{done} ? ({CType(itemType)})(uintptr_t){gone} : {zero}; }})", itemType, true);
+        }
         if (itemType == "string") {
           string gone = NewTemp();
           string arg = head + MapKeyArg(args[0], scope, itemType, key, true);
@@ -159,8 +180,8 @@ public sealed partial class CodeGen {
             return new Expr(arg + $"{HmapKeySlot(type, key, words)}df_ht_skey {gone} = {{ 0 }}; "
               + $"bool {done} = df_ht_remove({tree}, {words}, {HmapShape(type)}, NULL, &{gone}); {done} ? {gone}.k.s : {zero}; }})", itemType, true);
           }
-          return new Expr(arg + $"void* {gone} = NULL; bool {done} = df_bt_remove({tree}, {SortKey(itemType, key)}, {KeyPointer(type, key)}, {MapShape(type)}, NULL, &{gone}); "
-            + $"{done} ? (df_string){gone} : {zero}; }})", itemType, true);
+          return new Expr(arg + $"df_bt_kw {gone} = 0; bool {done} = df_bt_remove({tree}, {SortKey(itemType, key)}, {KeyPointer(type, key)}, {MapShape(type)}, NULL, &{gone}); "
+            + $"{done} ? (df_string)(uintptr_t){gone} : {zero}; }})", itemType, true);
         }
         return new Expr(head + MapKeyArg(args[0], scope, itemType, key, true) + $"bool {done} = {MapRemove(s, type, key, "NULL")}; {done} ? {key} : {zero}; }})",
           itemType);

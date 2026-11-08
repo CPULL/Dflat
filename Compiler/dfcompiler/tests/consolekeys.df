@@ -10,6 +10,7 @@ r.Console.log([u32]r.Console.KEY_DOWN)
 r.Console.log($"{[u32]r.Console.KEY_ENTER} {[u32]r.Console.KEY_ESC} {[u32]r.Console.KEY_BACKSPACE} {[u32]r.Console.KEY_TAB}")
 r.Console.log(r.Console.KEY_LEFT)
 char? key = r.Console.readKey()
+if key == '\u{FEFF}' then key = r.Console.readKey()    // the test runner may start the input with a byte order mark
 r.Console.log(key == null)
 r.Console.log(key == r.Console.KEY_LEFT)
 i32 x = 3

@@ -279,7 +279,7 @@ public sealed partial class CodeGen {
   // value of a declared variable without initializer
   string ZeroValue(string type) {
     if (IsSetValue(type)) {
-      return $"(({SetValueCType()}){{ 0, 0u }})";   // the zero of the first member
+      return $"(({SetValueCType()}){{ {{ 0, 0 }}, 0u }})";   // the generic null of a value never assigned (spec 11.3.6.1)
     }
     if (IsValueLend(type)) {
       return "NULL";
@@ -526,7 +526,13 @@ public sealed partial class CodeGen {
       throw Error($"a value of the set {DisplayName(e.Type)} is read with if k is T x {{ }} or k is ? {{ }} (spec 11.3.6.1)", at);
     }
     if (IsSetValue(to) && e.Type == "null") {
-      throw Error($"the set {DisplayName(to)} has no nullable member: its values are never null (spec 11.3.6.1)", at);
+      var nullableMembers = SetValueMembers(to, at).Where(IsNullableMember).ToList();
+      if (nullableMembers.Count == 1) {
+        return WrapSetValue(new Expr(Convert(e, nullableMembers[0], at), nullableMembers[0]), to, at).Code;   // the null of its nullable member
+      }
+      throw Error(nullableMembers.Count == 0
+        ? $"the set {DisplayName(to)} has no nullable member: its values are never null (spec 11.3.6.1)"
+        : $"the set {DisplayName(to)} has more than one nullable member ({string.Join(", ", nullableMembers.Select(DisplayName))}): write which one, as in ({DisplayName(nullableMembers[0])})null (spec 11.3.6.1)", at);
     }
     if (IsSetValue(to)) {
       return WrapSetValue(e, to, at).Code;   // Nums k = count (spec 11.3.6.1)

@@ -1,0 +1,1 @@
+setvalue_null_two_nullable.df(2): error: the set Two has more than one nullable member (i16?, u8?): write which one, as in (i16?)null (spec 11.3.6.1)

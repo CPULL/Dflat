@@ -1,0 +1,6 @@
+class Dog(string name) : Keyable {
+  public string name
+}
+map<Dog, i32> m = []
+Dog rex = Dog("rex")
+m[rex] = 1

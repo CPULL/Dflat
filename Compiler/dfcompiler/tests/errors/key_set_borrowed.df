@@ -1,0 +1,6 @@
+class Dog(string name) : Keyable {
+  public string name
+}
+set<Dog> s = []
+Dog rex = Dog("rex")
+s.add(rex)

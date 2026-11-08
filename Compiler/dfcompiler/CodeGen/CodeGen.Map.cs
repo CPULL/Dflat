@@ -127,6 +127,15 @@ public sealed partial class CodeGen {
 
   // the types a map takes in this version: the natives whose sort key is exact, and strings (spec 6.8.4.1)
   bool MapKeyBuilt(string key) {
+    if (IsCompositeKey(key)) {
+      return true;   // a tuple or a struct (CodeGen.CompositeKeys.cs)
+    }
+    if (IsObjectKey(key)) {
+      return true;   // a Keyable class (CheckKeyable)
+    }
+    if (IsSetValue(key)) {
+      return SetValueKeyBuilt(key);   // spec 11.3.6.1, 6.8.4.1
+    }
     string inner = BaseOf(key);
     if (IsNullable(key) && inner is "date" or "time") {
       return false;
@@ -154,7 +163,16 @@ public sealed partial class CodeGen {
     }
     if (hashed) {
       if (!HmapKeyBuilt(args[0])) {
-        throw Error($"hmap keys of type {DisplayName(args[0])} are not built yet (this version: integers, bool, char, enums, reals, date, time, clock, lapse and string)", at);
+        throw Error($"hmap keys of type {DisplayName(args[0])} are not built yet (this version: integers, bool, char, enums, reals, date, time, clock, lapse, string, tuples of them and strings, structs of exact natives, strings and Keyable objects, sets of exact natives, Keyable classes)", at);
+      }
+      if (IsSetValue(args[0])) {
+        SetKeyHelpers(args[0], at);
+      }
+      if (IsObjectKey(args[0])) {
+        CheckKeyable(args[0], at);   // spec 6.2, 11.2.1
+      }
+      if (IsCompositeKey(args[0])) {
+        CompositeKeyHelpers(args[0]);
       }
       if (!HmapValueBuilt(args[1])) {
         throw Error($"hmap values of type {DisplayName(args[1])} are not built yet (this version: the native types, string and objects)", at);
@@ -162,7 +180,16 @@ public sealed partial class CodeGen {
       return;
     }
     if (!MapKeyBuilt(args[0])) {
-      throw Error($"map keys of type {DisplayName(args[0])} are not built yet (this version: integers, bool, char, enums, reals, date, time and string)", at);
+      throw Error($"map keys of type {DisplayName(args[0])} are not built yet (this version: integers, bool, char, enums, reals, date, time, string, tuples of them and strings, structs of exact natives, strings and Keyable objects, sets of exact natives, Keyable classes)", at);
+    }
+    if (IsSetValue(args[0])) {
+      SetKeyHelpers(args[0], at);
+    }
+    if (IsObjectKey(args[0])) {
+      CheckKeyable(args[0], at);   // spec 6.2, 11.2.1
+    }
+    if (IsCompositeKey(args[0])) {
+      CompositeKeyHelpers(args[0]);
     }
     if (!MapValueBuilt(args[1])) {
       throw Error($"map values of type {DisplayName(args[1])} are not built yet (this version: the native types, string and objects)", at);
@@ -187,15 +214,40 @@ public sealed partial class CodeGen {
   const string MapBorrowMark = "/*df_map_borrow*/";
 
   // a string key keeps a pointer next to its sort key (spec 6.8.4.1)
-  bool KeyHasPointer(string type) => MapKey(type) == "string";
+  bool KeyHasPointer(string type) => MapKey(type) == "string" || !IsHmap(type) && (IsSetValue(MapKey(type)) || IsObjectKey(MapKey(type)) || IsCompositeKey(MapKey(type)));
+
+  // an object key of a map or a set (B-tree): the pointer is the object, which the map owns (CodeGen.ObjectKeys.cs)
+  bool ObjKeyOf(string type) => !IsHmap(type) && IsObjectKey(MapKey(type));
+
+  // an object key of an hmap or an hset: a slot of two words, the hash and the object
+  bool HObjKeyOf(string type) => IsHmap(type) && IsObjectKey(MapKey(type));
+
+  // a set value key of a map: the tag as the sort key and the sort key of the value in the key word, inline (spec 6.8.4.1, CodeGen.SetValueKeys.cs)
+  bool SetKeyOf(string type) => !IsHmap(type) && IsSetValue(MapKey(type));
+
+  // the map's own copy of a key that has a pointer (a declaration), and the C that frees it
+  string KeyCopyCode(string type, string key, string owned) => TKeyOf(type)
+    ? $"{CType(MapKey(type))}* {owned} = df_tk_box_{SanitizeName(MapKey(type))}({key}); "
+    : $"df_string {owned} = df_str_dup({key}); ";
+
+  string KeyFreeCode(string type, string pointer) => TKeyOf(type) || HTKeyOf(type) ? $"df_tk_free_{SanitizeName(MapKey(type))}((df_bt_kw)({pointer})); "
+    : ObjKeyOf(type) || HObjKeyOf(type) ? $"df_drop((void*)(uintptr_t)({pointer})); "
+    : SetKeyOf(type) ? "" : $"df_str_free((df_string)(uintptr_t)({pointer})); ";
 
   // the shape of the tree, passed to the calls of the runtime: the value size, whether the keys have a pointer, how two key pointers compare
-  string MapShape(string type) => $"{MapValueSize(type)}, {(KeyHasPointer(type) ? "true, df_bt_cmp_str" : "false, NULL")}";
+  string MapShape(string type) => $"{MapValueSize(type)}, {(TKeyOf(type) ? $"true, df_tk_cmp_{SanitizeName(MapKey(type))}" : ObjKeyOf(type) ? "true, df_bt_cmp_same" : SetKeyOf(type) ? "true, df_bt_cmp_word" : KeyHasPointer(type) ? "true, df_bt_cmp_str" : "false, NULL")}";
 
-  string KeyPointer(string type, string key) => KeyHasPointer(type) ? $"(void*){key}" : "NULL";
+  string KeyPointer(string type, string key) => TKeyOf(type) ? $"(df_bt_kw)(uintptr_t)&({key})"
+    : SetKeyOf(type) ? $"df_setv_sk_{SetCName(MapKey(type))}({key})" : KeyHasPointer(type) ? $"(df_bt_kw)(uintptr_t)({key})" : "0";
 
   // the C test that a key held in a C variable is null, or null when the key type has no null of its own (a null string is "", spec 7.1)
   string? KeyIsNull(string keyType, string key) {
+    if (IsObjectKey(keyType)) {
+      return $"({key} == NULL)";
+    }
+    if (IsSetValue(keyType)) {
+      return $"({key}.tag == 0u)";   // the generic null of a value never assigned (spec 11.3.6.1)
+    }
     if (IsNullable(keyType)) {
       return $"!{key}.has";
     }
@@ -208,6 +260,15 @@ public sealed partial class CodeGen {
 
   // the sort key of a key that is not null: a uint64_t in the order of the key type (spec 6.8.4.1)
   string SortKey(string keyType, string key) {
+    if (IsCompositeKey(keyType)) {
+      return CompositeSortKey(keyType, key);   // the first component (spec 6.8.4.1)
+    }
+    if (IsObjectKey(keyType)) {
+      return $"((uint64_t)df_hash_obj((void*)({key})))";   // the default order of classes: the hash (spec 6.2.2)
+    }
+    if (IsSetValue(keyType)) {
+      return $"df_setv_tag_{SetCName(keyType)}({key})";   // the tag first (spec 6.2.2, 11.3.6.1); the value on a tie, through the pointer
+    }
     string inner = BaseOf(keyType);
     string value = IsNullable(keyType) ? $"{key}.val" : key;
     if (enums.TryGetValue(inner, out var info)) {
@@ -243,9 +304,19 @@ public sealed partial class CodeGen {
   string NullKeyValue(string keyType) => IsNullable(keyType) ? $"(({CType(keyType)}){{ false }})" : keyType is "date" or "time" ? NullCode(keyType) : ZeroValue(keyType);
 
   // the key of a map operation, converted to the key type, in a C variable; a string is only read here (the map keeps its own copy when it adds it)
-  string MapKeyArg(Node node, Scope scope, string keyType, string variable, bool ofSet = false) {
+  string MapKeyArg(Node node, Scope scope, string keyType, string variable, bool ofSet = false, bool taking = false) {
     var key = ExprOf(node, scope, keyType);
-    if (!Assignable(keyType, key.Type) && key.Type != keyType) {
+    if (IsObjectKey(keyType)) {
+      lastKeyGiven = key.Fresh || node.Kind == "Gift";
+      lastKeyNode = node;
+      if (!taking && key.Fresh) {
+        key = TempObject(key);   // m[Person("a")]: the key of a lookup ends with the statement
+      }
+    }
+    if (IsCompositeKey(keyType) && key.Type == keyType) {
+      key = TempStruct(key);   // m[Named("a", 1)]: a new struct ends with the statement, the collection keeps a clone (df_tk_box_)
+    }
+    if (!Assignable(keyType, key.Type) && key.Type != keyType && !(IsSetValue(keyType) && SetMembers(keyType).Contains(key.Type))) {
       throw Error(ofSet ? $"the items of this set are {DisplayName(keyType)}, not {DisplayName(key.Type)}"
         : $"the key of this map is {DisplayName(keyType)}, not {DisplayName(key.Type)}", node);
     }
@@ -302,6 +373,13 @@ public sealed partial class CodeGen {
 
   // the C expression of the value slot of a key held in key (a pointer to the value, or NULL when the key is missing)
   string MapFind(string held, string type, string key) {
+    if (IsObjectKey(MapKey(type))) {
+      return $"({{ {KeyCheckCode(MapKey(type), key)}{MapFindRaw(held, type, key)}; }})";   // every use of an object key runs the check (spec 11.2.1)
+    }
+    return MapFindRaw(held, type, key);
+  }
+
+  string MapFindRaw(string held, string type, string key) {
     string tree = MapTree(held, type);
     if (IsHmap(type)) {
       string words = NewTemp();
@@ -314,6 +392,9 @@ public sealed partial class CodeGen {
   // the statements that give slot (a declared pointer variable) the value slot of key, added (zeroed) when the key is missing: then the map takes its own
   // copy of a string key, and the counter of open iterators is checked first when check is true (spec 6.4)
   string MapSlot(string held, string type, string key, string slot, bool check) {
+    if (IsObjectKey(MapKey(type))) {
+      return ObjectKeySlot(held, type, key, slot, check);
+    }
     string valueC = SlotC(type);
     string tree = MapTree(held, type);
     string added = NewTemp();
@@ -321,8 +402,9 @@ public sealed partial class CodeGen {
     if (IsHmap(type)) {
       string words = NewTemp();
       // a new string key: the hmap keeps its own copy, with the hash already computed
-      string ownedWords = KeyHasPointer(type) ? NewTemp() : words;
-      string keyCopy = KeyHasPointer(type) ? $"df_string {owned} = df_str_dup({key}); {HmapStringKeySlot($"{words}[0].h", owned, ownedWords)}" : "";
+      string ownedWords = KeyHasPointer(type) || HTKeyOf(type) ? NewTemp() : words;
+      string keyCopy = KeyHasPointer(type) ? $"df_string {owned} = df_str_dup({key}); {HmapStringKeySlot($"{words}[0].h", owned, ownedWords)}"
+        : HTKeyOf(type) ? $"{CType(MapKey(type))}* {owned} = df_tk_box_{SanitizeName(MapKey(type))}({key}); uint64_t {ownedWords}[2] = {{ {words}[0], (uint64_t)(uintptr_t){owned} }}; " : "";
       return $"{HmapKeySlot(type, key, words)}{valueC}* {slot} = ({valueC}*)df_ht_find({tree}, {words}, {HmapShape(type)}); if ({slot} == NULL) {{ "
         + $"{(check ? LockCheck(held, type) : "")}bool {added}; {keyCopy}{slot} = ({valueC}*)df_ht_put({tree}, {ownedWords}, {HmapShape(type)}, &{added}); }} ";
     }
@@ -330,14 +412,23 @@ public sealed partial class CodeGen {
     if (KeyIsNull(MapKey(type), key) is string isNull) {
       sb += $"if ({isNull}) {{ {slot} = ({valueC}*)df_bt_put_null({tree}, {MapValueSize(type)}, &{added}); }} else ";
     }
-    string copy = KeyHasPointer(type) ? $"df_string {owned} = df_str_dup({key}); " : "";
-    string ownedKey = KeyHasPointer(type) ? owned : key;
-    sb += $"{{ {copy}{slot} = ({valueC}*)df_bt_put({tree}, {SortKey(MapKey(type), ownedKey)}, {KeyPointer(type, ownedKey)}, {MapShape(type)}, &{added}); }} }} ";
+    string copy = KeyHasPointer(type) && !SetKeyOf(type) ? KeyCopyCode(type, key, owned) : "";   // a string or a composite key: the map's own copy
+    string ownedKey = TKeyOf(type) ? $"(*{owned})" : KeyHasPointer(type) && !SetKeyOf(type) ? owned : key;
+    string ownedPointer = TKeyOf(type) ? $"(df_bt_kw)(uintptr_t){owned}" : KeyPointer(type, ownedKey);
+    sb += $"{{ {copy}{slot} = ({valueC}*)df_bt_put({tree}, {SortKey(MapKey(type), ownedKey)}, {ownedPointer}, {MapShape(type)}, &{added}); }} }} ";
     return sb;
   }
 
   // removes key: its value goes to outPointer (or NULL: then a string value is freed); the key the map owned is freed; a C bool
   string MapRemove(string held, string type, string key, string outPointer) {
+    if (IsObjectKey(MapKey(type)) && !removingChecked) {
+      removingChecked = true;
+      try {
+        return $"({{ {KeyCheckCode(MapKey(type), key)}{MapRemove(held, type, key, outPointer)}; }})";   // the check of a use (spec 11.2.1)
+      } finally {
+        removingChecked = false;
+      }
+    }
     string tree = MapTree(held, type);
     string valueType = MapValue(type);
     string gone = NewTemp();
@@ -356,16 +447,17 @@ public sealed partial class CodeGen {
       // the key slot of the entry comes out too: a string key the hmap owned is freed
       string words = NewTemp();
       string head = $"({{ {HmapKeySlot(type, key, words)}{(dropValue ? $"uint8_t {gone}[DF_BT_SVAL] = {{ 0 }}; " : "")}"
-        + (KeyHasPointer(type) ? $"df_ht_skey {goneKey} = {{ 0 }}; " : "");
-      string body = $"bool {done} = df_ht_remove({tree}, {words}, {HmapShape(type)}, {target}, {(KeyHasPointer(type) ? "&" + goneKey : "NULL")}); "
-        + (KeyHasPointer(type) ? $"df_str_free({goneKey}.k.s); " : "") + (dropValue ? $"df_bt_sval_clear({gone}); " : "");
+        + (KeyHasPointer(type) ? $"df_ht_skey {goneKey} = {{ 0 }}; " : HObjKeyOf(type) || HTKeyOf(type) ? $"uint64_t {goneKey}[2] = {{ 0, 0 }}; " : "");
+      string body = $"bool {done} = df_ht_remove({tree}, {words}, {HmapShape(type)}, {target}, {(KeyHasPointer(type) || HObjKeyOf(type) || HTKeyOf(type) ? (KeyHasPointer(type) ? "&" : "") + goneKey : "NULL")}); "
+        + (KeyHasPointer(type) ? $"df_str_free({goneKey}.k.s); " : HObjKeyOf(type) ? $"if ({done}) {{ df_drop((void*)(uintptr_t){goneKey}[1]); }} "
+          : HTKeyOf(type) ? $"if ({done}) {{ {KeyFreeCode(type, goneKey + "[1]")}}} " : "") + (dropValue ? $"df_bt_sval_clear({gone}); " : "");
       return head + body + $"{done}; }})";
     }
-    string sb = $"({{ {(dropValue ? $"uint8_t {gone}[DF_BT_SVAL] = {{ 0 }}; " : "")}void* {goneKey} = NULL; bool {done} = ";
+    string sb = $"({{ {(dropValue ? $"uint8_t {gone}[DF_BT_SVAL] = {{ 0 }}; " : "")}df_bt_kw {goneKey} = 0; bool {done} = ";
     string remove = $"df_bt_remove({tree}, {SortKey(MapKey(type), key)}, {KeyPointer(type, key)}, {MapShape(type)}, {target}, &{goneKey})";
     sb += KeyIsNull(MapKey(type), key) is string isNull ? $"({isNull} ? df_bt_remove_null({tree}, {MapValueSize(type)}, {target}) : {remove}); " : $"{remove}; ";
     if (KeyHasPointer(type)) {
-      sb += $"df_str_free((df_string){goneKey}); ";
+      sb += $"if ({goneKey} != 0) {{ {KeyFreeCode(type, goneKey)}}} ";
     }
     if (dropValue) {
       sb += $"df_bt_sval_clear({gone}); ";
@@ -376,8 +468,14 @@ public sealed partial class CodeGen {
   // the key under a cursor (for a string key: the map's own string)
   string CursorKey(string type, string cursor) => IsHmap(type)
     ? HmapKeyFromSlot(type, $"df_ht_cur_key(&{cursor}, {HmapShape(type)})")
+    : TKeyOf(type)
+    ? $"(*({CType(MapKey(type))}*)(uintptr_t)df_bt_cur_ptr(&{cursor}))"
+    : ObjKeyOf(type)
+    ? $"({cursor}.on_null ? NULL : (({CType(MapKey(type))})(uintptr_t)df_bt_cur_ptr(&{cursor})))"
+    : SetKeyOf(type)
+    ? $"({cursor}.on_null ? {NullKeyValue(MapKey(type))} : df_setv_unkey_{SetCName(MapKey(type))}(df_bt_cur_key(&{cursor}), df_bt_cur_ptr(&{cursor})))"
     : KeyHasPointer(type)
-    ? $"((df_string)df_bt_cur_ptr(&{cursor}))"
+    ? $"((df_string)(uintptr_t)df_bt_cur_ptr(&{cursor}))"
     : $"({cursor}.on_null ? {NullKeyValue(MapKey(type))} : {FromSortKey(MapKey(type), $"df_bt_cur_key(&{cursor})")})";
 
   string CursorValue(string held, string type, string cursor) => IsHmap(type)
@@ -403,14 +501,16 @@ public sealed partial class CodeGen {
 
   // frees what an entry owns: its key string and its value string
   string DropEntry(string type, string slot, string cursor) =>
-    (!KeyHasPointer(type) ? ""
+    (HTKeyOf(type) ? KeyFreeCode(type, $"((const uint64_t*)df_ht_cur_key(&{cursor}, {HmapShape(type)}))[1]")
+      : HObjKeyOf(type) ? $"{{ void* ko = (void*){CursorKey(type, cursor)}; if (ko != NULL) {{ df_drop(ko); }} }} "
+      : !KeyHasPointer(type) ? ""
       : IsHmap(type) ? $"df_str_free({CursorKey(type, cursor)}); "
-      : $"if (!{cursor}.on_null) {{ df_str_free((df_string)df_bt_cur_ptr(&{cursor})); }} ")
+      : $"if (!{cursor}.on_null) {{ {KeyFreeCode(type, $"df_bt_cur_ptr(&{cursor})")}}} ")
     + (MapValue(type) == "string" ? $"df_bt_sval_clear({slot}); "
       : IsMapObjectValue(MapValue(type)) ? $"if (*{slot} != NULL) {{ void* o = (void*)*{slot}; *{slot} = NULL; df_drop(o); }} " : "");
 
   // the entries own something to free: a string key, a string value, an object value
-  bool MapOwnsStrings(string type) => KeyHasPointer(type) || MapValue(type) == "string" || IsMapObjectValue(MapValue(type));
+  bool MapOwnsStrings(string type) => KeyHasPointer(type) && !SetKeyOf(type) || HObjKeyOf(type) || HTKeyOf(type) || MapValue(type) == "string" || IsMapObjectValue(MapValue(type));
 
   // all the entries go: what they own is freed, then the nodes
   string MapClearCode(string held, string type) {
@@ -448,7 +548,7 @@ public sealed partial class CodeGen {
     string held = NewTemp();
     string key = NewTemp();
     string slot = NewTemp();
-    string head = $"({{ {CType(type)} {held} = {NullChecked(obj.Code, type)}; {MapKeyArg(target.Children[1], scope, MapKey(type), key)}";
+    string head = $"({{ {CType(type)} {held} = {NullChecked(obj.Code, type)}; {MapKeyArg(target.Children[1], scope, MapKey(type), key, taking: true)}";
     if (op == "=") {
       // the value first: it may read the map
       string item = NewTemp();
@@ -511,8 +611,11 @@ public sealed partial class CodeGen {
   Expr MapLiteral(Node literal, Scope scope, string type) {
     NeedMapChunk(type);
     var seen = new Dictionary<string, Node>();
+    bool setKeys = IsSetValue(MapKey(type));
     foreach (var entry in literal.Children) {
-      if (ConstantKeyText(entry.Children[0]) is string text && !seen.TryAdd(text, entry)) {
+      // a set key: the same value of two members is two keys (5b and 5ul), so the member is part of the text (spec 11.3.6.1)
+      string? member = setKeys && ConstantKeyText(entry.Children[0]) != null ? ExprOf(entry.Children[0], scope, MapKey(type)) is var keyExpr ? SetLiteralMember(entry.Children[0], scope, MapKey(type)) : null : null;
+      if (ConstantKeyText(entry.Children[0]) is string text && !seen.TryAdd(member + text, entry)) {
         throw Error("the same key is written twice in this map literal", entry);
       }
     }
@@ -525,7 +628,7 @@ public sealed partial class CodeGen {
       string key = NewTemp();
       string item = NewTemp();
       string slot = NewTemp();
-      sb.Append("{ ").Append(MapKeyArg(entry.Children[0], scope, keyType, key))
+      sb.Append("{ ").Append(MapKeyArg(entry.Children[0], scope, keyType, key, taking: true))
         .Append($"{CType(valueType)} {item} = {MapValueItem(entry.Children[1], scope, valueType)}; ")
         .Append(MapSlot(held, type, key, slot, false)).Append(StoreValue(valueType, slot, item)).Append("} ");
     }
@@ -612,7 +715,7 @@ public sealed partial class CodeGen {
       case "tree_setCopy": {
         // add(other), clone: the value is copied in (an object is cloned)
         string value = NewTemp();
-        return new Expr(head + MapKeyArg(args[0], scope, keyType, key) + $"{valueC} {value} = {MapValueCopy(args[1], scope, valueType)}; "
+        return new Expr(head + MapKeyArg(args[0], scope, keyType, key, taking: true) + $"{valueC} {value} = {MapValueCopy(args[1], scope, valueType)}; "
           + MapSlot(m, type, key, slot, false) + StoreValue(valueType, slot, value) + "})", "void");
       }
       case "tree_none":
@@ -623,7 +726,7 @@ public sealed partial class CodeGen {
       case "tree_set": {
         // the class checked the counter of open iterators when the key is new
         string value = NewTemp();
-        return new Expr(head + MapKeyArg(args[0], scope, keyType, key) + $"{valueC} {value} = {MapValueItem(args[1], scope, valueType)}; "
+        return new Expr(head + MapKeyArg(args[0], scope, keyType, key, taking: true) + $"{valueC} {value} = {MapValueItem(args[1], scope, valueType)}; "
           + MapSlot(m, type, key, slot, false) + StoreValue(valueType, slot, value) + "})", "void");
       }
       case "tree_take": {

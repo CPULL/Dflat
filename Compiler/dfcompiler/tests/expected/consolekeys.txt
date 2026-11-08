@@ -4,7 +4,7 @@
 8595
 10 27 8 9
 ←
-false
+true
 false
 3
 ---- exit code 0 ----

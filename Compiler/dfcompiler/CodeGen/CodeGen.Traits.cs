@@ -171,6 +171,9 @@ public sealed partial class CodeGen {
             Init = init?.Children[0],
             IsReadOnly = ModsOf(member).Contains("readonly")   // a simple field: the trait and its classes write it, the others read it (spec 11.2)
           };
+          if (trait.Name == "Keyable" && member.Text is "keyUses" or "keyHash") {
+            traitField.Hidden = true;   // the counter and the stored hash of Keyable: not in the hash, a clone or the text of the object (spec 11.2.1)
+          }
           if (member.Children.FirstOrDefault(child => child.Kind == "Property") is Node replacedProperty) {
             traitField.HasAccessors = true;   // a class replaces it: read and written through get_ and set_ (spec 11.2)
             traitField.CanRead = replacedProperty.Text!.Contains('r');

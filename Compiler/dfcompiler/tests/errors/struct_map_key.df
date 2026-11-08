@@ -1,3 +1,4 @@
 namespace struct_map_key
-struct Pair { i16 low, i16 high }
-map<Pair, i32> m = []
+struct Low { i16 v }
+struct Pair { Low low, i16 high }
+hmap<Pair, i32> m = []

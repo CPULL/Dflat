@@ -48,6 +48,43 @@ public sealed partial class CodeGen {
     return StrRead(new Expr(code, "string", fresh));
   }
 
+  // k.label = a, with a local that owns its string (spec 4): the field takes the same string, and a goes on as a borrower of it, so a change
+  // through a is seen through k.label and the text lives on with the field when a ends (level 3 warning). Until the last use of a, k
+  // and the field are locked as for a borrow (12). Null when the field takes a copy: a value that is not such a local, a field reached
+  // through an item or a call, or an object that may end before a (declared in an inner scope)
+  string? SharedFieldString(LValueInfo target, Node targetNode, Node statement, Scope scope) {
+    var source = statement.Children[1];
+    if (LibraryCode || !target.IsField || source.Kind != "Name" || scope.Find(source.Text!) is not VarInfo { OwnFlag: string flag } local
+        || local.ReadOnlyString || local.IsParam || local.RefSlot || LendPath(targetNode) is not string path) {
+      return null;
+    }
+    string root = path.Split('.')[0];
+    if (scope.Find(root) != null && ScopeDepth(root, scope) < ScopeDepth(source.Text!, scope)) {
+      return null;   // the object is declared in an inner scope: it can end before a
+    }
+    if (local.IsLocal) {
+      Warn($"'{path}' shares the string of '{source.Text}': when '{source.Text}' ends, the field keeps the text as its own (spec 4)", statement, 3);
+    }
+    if (followingStatements.TryGetValue(statement, out var after)) {
+      LockLenders(Synthetic("Decl", statement, source.Text), after, new List<string> { path }, false, true, scope);
+    }
+    // a C string is copied into a regular string (spec 4.4.6): a stays its owner
+    string share = NewTemp();
+    return $"({{ bool {share} = {flag} && !df_is_cstr((const uint8_t*)df_str_res({local.CName})); df_str_put(&{target.Code}, {local.CName}, {share}); "
+      + $"if ({share}) {{ {flag} = false; }} }})";
+  }
+
+  // how many scopes up from here the name is declared (0 here); a name not found is the farthest
+  static int ScopeDepth(string name, Scope scope) {
+    int depth = 0;
+    for (var s = scope; s != null; s = s.Parent, depth++) {
+      if (s.Vars.ContainsKey(name)) {
+        return depth;
+      }
+    }
+    return int.MaxValue;
+  }
+
   // the value for a place that always owns its string (a field, an item, a tuple item, a returned value)
   static string StrOwned(Expr e, string code) =>
     e.Fresh || IsStaticStr(code) ? code : $"df_str_dup({code})";

@@ -4,5 +4,5 @@ class Base {
   public fun &@Dog get() { @Dog() }
 }
 class Child : Base {
-  override fun @Dog get() { Dog() }
+  replace fun @Dog get() { Dog() }
 }

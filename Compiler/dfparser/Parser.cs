@@ -16,7 +16,7 @@ public sealed class Parser {
   };
 
   static readonly HashSet<string> Modifiers = new() {
-    "public", "internal", "private", "const", "override", "static", "asparent", "unrestricted"
+    "public", "internal", "private", "const", "static", "asparent", "unrestricted"
   };
 
   // Rust-style precedence, lowest first. "..", "??" and "? { }" sit below these.
@@ -294,8 +294,10 @@ public sealed class Parser {
 
   List<Token> ParseModifiers() {
     var mods = new List<Token>();
-    // readonly is a modifier only before a declaration and extern only before fun, so they are not reserved words (spec 11.1.4, 15.9)
+    // readonly and replace are modifiers only before a declaration and extern only before fun, so they are not reserved words
+    // (spec 11.1, 11.1.4, 15.9): c.replace(i, v) is still a call
     while (Peek.Kind == TokenKind.Keyword && Modifiers.Contains(Peek.Text)
+           || Peek.Kind == TokenKind.Ident && Peek.Text == "replace" && (PeekAt(1).Kind is TokenKind.Ident or TokenKind.Keyword || PeekAt(1).Is("%") || PeekAt(1).Is("@") || PeekAt(1).Is("&"))
            || Peek.Kind == TokenKind.Ident && Peek.Text is "readonly" or "readwrite" or "writeonly" && (PeekAt(1).Kind is TokenKind.Ident or TokenKind.Keyword || PeekAt(1).Is("%"))
            || Peek.Kind == TokenKind.Ident && Peek.Text == "extern" && PeekAt(1).Kind == TokenKind.Keyword && PeekAt(1).Text == "fun"
            || Peek.Kind == TokenKind.Ident && Peek.Text == "notclonable" && PeekAt(1).Kind == TokenKind.Keyword && PeekAt(1).Text == "class") {   // spec 11.1, 12.6
@@ -2212,8 +2214,17 @@ public sealed class Parser {
         if (t.Text == "enforce") {
           // enforce <expression> clauses (spec 7.2.6): lowered to the statement form by the compiler
           Next();
+          Node? sharedTimeout = null;
+          if (Peek.Kind == TokenKind.Ident && Peek.Text == "timeout" && PeekAt(1).Kind is TokenKind.Int or TokenKind.Ident) {
+            // enforce timeout 500 player.health(): one wait for every lock of the expression (spec 7.2.6)
+            var word = Next();
+            sharedTimeout = new Node("Timeout", word, "shared").Add(ParseUnary());
+          }
           var enforced = new Node("EnforceExpr", t).Add(ParseExpr());
           ParseEnforceClauses(enforced);
+          if (sharedTimeout != null) {
+            enforced.Add(sharedTimeout);
+          }
           return enforced;
         }
         if (t.Text is "true" or "false") {

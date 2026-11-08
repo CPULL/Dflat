@@ -30,7 +30,7 @@ public sealed partial class CodeGen {
     foreach (var group in all.Where(f => f.Class != null && !f.IsStatic && IsClass(f.Ret) && !f.IsAbstract).GroupBy(f => f.Root)) {
       var values = group.Select(f => f.ReturnsOwned).Distinct().ToList();
       if (values.Count > 1) {
-        throw Error($"'{group.Key.Name}' and the functions that override it do not return objects the same way (some move, some borrow)", group.First().Node);
+        throw Error($"'{group.Key.Name}' and the functions that replace it do not return objects the same way (some move, some borrow)", group.First().Node);
       }
     }
     var abstractAnswers = new Dictionary<FunSig, bool>();
@@ -623,7 +623,9 @@ public sealed partial class CodeGen {
       return StructGift(operand, value, scope, n);   // spec 11.1.5.3
     }
     if (!IsClass(value.Type)) {
-      Warn("-> on a basic value is ignored: it is a copy", n, 1);
+      if (GiftWarningApplies()) {
+        Warn("-> on a basic value is ignored: it is a copy", n, 1);
+      }
       return new Expr(value.Code, value.Type);
     }
     var target = LValue(operand, scope);

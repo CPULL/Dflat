@@ -1,0 +1,1 @@
+class_set_private.df(4): error: the set 'Shop.Money' is private to Shop: declare it public or internal to use it outside the class

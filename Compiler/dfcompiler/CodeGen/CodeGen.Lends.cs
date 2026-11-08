@@ -10,7 +10,7 @@ public sealed partial class CodeGen {
 
   void RecordFollowingStatements(List<Node> statements) {
     for (int index = 0; index < statements.Count; index++) {
-      if (statements[index].Kind == "Decl") {
+      if (statements[index].Kind is "Decl" or "Assign") {
         followingStatements[statements[index]] = statements.Skip(index + 1).ToList();
       }
       if (statements[index].Kind == "MultiAssign") {

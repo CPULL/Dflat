@@ -1,0 +1,33 @@
+// properties (spec 11.1.4, 11.2): modifiers in any order; readonly with a W: block (the class writes, outside reads);
+// replace replaces the whole property (an accessor not written takes its default); reads through a parent type dispatch
+alias Root as r
+
+class Gauge {
+  readonly public i32 low = 1
+  static public readonly i32 limit = 9
+  public readonly i32 size { W: { field = value * 2 } } = 3
+  public fun grow() { size = 10 }
+}
+
+class Base {
+  public i32 level { R: { field } W: { field = value * 10 } }
+  public fun i32 twice() { level * 2 }
+}
+class Child : Base {
+  replace public i32 level { R: { field + 1 } }
+}
+
+
+Gauge g = Gauge()
+r.Console.log($"{g.low} {Gauge.limit} {g.size}")      // 1 9 6
+g.grow()
+r.Console.log(g.size)                                  // 20
+Base plain = Base()
+plain.level = 2
+r.Console.log(plain.level)                             // 20
+Child c = Child()
+c.level = 2
+r.Console.log(c.level)                                 // 3: the default W: of the replace, then its R:
+r.Console.log(c.twice())                               // 6: the parent's code reads the replace
+fun i32 levelOf(Base b) { b.level }
+r.Console.log(levelOf(c))                              // 3

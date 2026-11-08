@@ -99,7 +99,7 @@ public class Sensor {
   unrestricted fun i64 read(i64 v) { v }
 }
 public class Noisy : Sensor {
-  override fun i64 read(i64 v) {
+  replace fun i64 read(i64 v) {
     if v > 5 then throw Notice("noisy")
     return v
   }
@@ -120,7 +120,7 @@ trait Probe {
   unrestricted fun i64 level(i64 v)
 }
 public class Deep : Probe {
-  override fun i64 level(i64 v) {
+  replace fun i64 level(i64 v) {
     if v < 0 then throw Warning("below zero")
     return v * 2
   }

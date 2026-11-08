@@ -1,0 +1,37 @@
+// replacing a trait property (spec 11.2): a property without accessor blocks is a simple field in every class; a class can replace it
+// (field is the storage of the trait); once replaced, the code of the trait and the reads through the trait type call the accessors of
+// the class of the object; a property no class replaces stays a direct memory access
+alias Root as r
+trait Shape {
+  public i32 sides
+  public i32 other
+  Shape() { sides = 3 }
+  unrestricted fun i32 doubled() { sides * 2 }
+}
+class Square : Shape {
+  replace public i32 sides { R: { field + 1 } }
+}
+class Tri : Shape { }
+fun i32 sidesOf(Shape s) { s.sides }
+
+trait Sized {
+  public readonly u32 count
+}
+class Bag : Sized {
+  public fun fill() { count = 7 }
+}
+fun u32 countOf(Sized s) { s.count }
+
+Square q = Square()
+Tri t = Tri()
+r.Console.log($"{q.sides} {t.sides}")              // 4 3: the R: of Square, the plain field of Tri
+r.Console.log($"{sidesOf(q)} {sidesOf(t)}")        // 4 3: through the trait type
+r.Console.log($"{q.doubled()} {t.doubled()}")      // 8 6: the code of the trait reads the replacement
+q.sides = 10                                       // the default W: of the replacement
+t.sides = 5
+r.Console.log($"{q.sides} {t.sides}")              // 11 5
+q.other = 2
+r.Console.log(q.other)
+Bag b = Bag()
+b.fill()
+r.Console.log($"{b.count} {countOf(b)}")           // 7 7

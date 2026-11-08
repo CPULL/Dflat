@@ -1,1 +1,1 @@
-refcount_override_marker.df(7): error: an override keeps the markers of the function it answers: 'd' is @Dog there (spec 12.7)
+refcount_override_marker.df(7): error: a replacement keeps the markers of the function it answers: 'd' is @Dog there (spec 12.7)

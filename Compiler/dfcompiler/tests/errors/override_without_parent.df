@@ -1,1 +1,1 @@
-class Box { override fun i32 size() { 1 } }
+class Box { replace fun i32 size() { 1 } }

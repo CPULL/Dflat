@@ -9,7 +9,7 @@ trait Named {
 }
 
 public class Dog(string label) : Named {
-  override fun string Name() { label }
+  replace fun string Name() { label }
 }
 
 fun Item smaller<Item : Numeric>(Item first, Item second) {

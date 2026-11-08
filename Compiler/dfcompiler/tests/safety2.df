@@ -7,10 +7,10 @@ public class Shape {
   unrestricted fun i64 area(i64 k) { k }                  // the base does not fail ...
 }
 public class Square : Shape {
-  override fun i64 area(i64 k) { 100 / k }          // ... this one can: the whole slot returns its exception
+  replace fun i64 area(i64 k) { 100 / k }          // ... this one can: the whole slot returns its exception
 }
 public class Flat : Shape {
-  override fun i64 area(i64 k) { 0 }
+  replace fun i64 area(i64 k) { 0 }
 }
 
 fun ->string describe(Shape s, i64 k) {
@@ -26,10 +26,10 @@ trait Measure {
   unrestricted fun i64 size(i64 k)
 }
 public class Wide : Measure {
-  override fun i64 size(i64 k) { k * 2 }
+  replace fun i64 size(i64 k) { k * 2 }
 }
 public class Thin : Measure {
-  override fun i64 size(i64 k) { 60 / k }
+  replace fun i64 size(i64 k) { 60 / k }
 }
 fun ->string measure(Measure m, i64 k) {
   return "size " + m.size(k)

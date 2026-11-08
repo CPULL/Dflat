@@ -8,7 +8,7 @@ trait Sequence {
 
 public class Countdown(u32 start) : Sequence with (Item is u32) {
   u32 left = start
-  override fun u32? Next() {
+  replace fun u32? Next() {
     if left == 0 {
       return null
     }
@@ -19,7 +19,7 @@ public class Countdown(u32 start) : Sequence with (Item is u32) {
 
 public class Evens : Sequence with (Item is i64) {
   i64 current = 0
-  override fun i64? Next() {
+  replace fun i64? Next() {
     current += 2
     if current > 6 {
       return null

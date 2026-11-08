@@ -72,7 +72,7 @@ trait Logged {
 public class NegativeWork : Exception { }
 
 public class Worker : Logged {
-  override fun i32 work(i32 n) {
+  replace fun i32 work(i32 n) {
     if n < 0 {
       throw NegativeWork("negative")
     }
@@ -82,7 +82,7 @@ public class Worker : Logged {
 
 // a call of the parent implementation does not run the blocks again
 public class Lazy : Worker {
-  override fun i32 work(i32 n) { parent.work(n) + 1 }
+  replace fun i32 work(i32 n) { parent.work(n) + 1 }
 }
 
 fun ->string attempt(&Worker job, i32 n) {
@@ -102,16 +102,16 @@ r.Console.log(lazy.work(5))
 public class Bag : IndexCollection<i32> {
   public arr<i32> items = [10, 20, 30]
 
-  override fun uns get_len() { items.len }
-  override fun bool has(i32 value) { items.has(value) }
-  override fun clear() { items.clear() }
+  replace fun uns get_len() { items.len }
+  replace fun bool has(i32 value) { items.has(value) }
+  replace fun clear() { items.clear() }
 
-  override fun ->IndexIterator<i32> getIterator() {
+  replace fun ->IndexIterator<i32> getIterator() {
     BagIterator iterator = BagIterator(this)
     return ->iterator
   }
 
-  override fun releaseIterator() {
+  replace fun releaseIterator() {
     r.Console.log("released")
   }
 
@@ -125,7 +125,7 @@ public class Bag : IndexCollection<i32> {
 public class BagIterator(Bag collection as parent) : IndexIterator<i32> {
   uns cursor = 0
 
-  override fun (i32 value, bool isValid) next() {
+  replace fun (i32 value, bool isValid) next() {
     i32 none = 0
     if cursor >= collection.len {
       return (none, false)

@@ -13,7 +13,7 @@ class Named(string name, ->Point where) {
 
 class Tagged {
   public i32 id = 5
-  override fun uns get_hash() {
+  replace fun uns get_hash() {
     return 1000 + (uns)id
   }
 }

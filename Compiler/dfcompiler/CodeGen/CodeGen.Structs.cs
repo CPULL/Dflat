@@ -424,7 +424,7 @@ public sealed partial class CodeGen {
         var (visibility, _, isStatic, _, isOverride) = ReadMods(member);
         var mods = member.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ') ?? Array.Empty<string>();
         if (isOverride) {
-          throw Error("a struct has no inheritance: 'override' does not apply (spec 11.1.5)", member);
+          throw Error("a struct has no inheritance: 'replace' does not apply (spec 11.1.5)", member);
         }
         if (mods.Contains("asparent") || mods.Contains("extern")) {
           throw Error($"'{(mods.Contains("asparent") ? "asparent" : "extern")}' does not apply to the method of a struct (spec 11.1.5.2)", member);

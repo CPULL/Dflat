@@ -2376,3 +2376,55 @@ STEP 5 OF THE DECIDED ITEMS (2026-11-07, spec 0.0.26, compiler 0.0.78alpha)
   IndexCollection, MapCollection or SetCollection takes the customcollection pair; the rest and the generic functions take the
   global pair. The messages name the option.
 - Tests variadic (extended), clearrules, errors/variadic_*, projects/errors/limit_copies, limit_vec_copies, limit_custom.
+
+SPEC 0.0.27 STEPS 1-4 (2026-11-08, compiler 0.0.79alpha)
+- Bitfields: BitfieldInPlace (CodeGen.Text.cs) turns f.set(x) written alone into the assignment f = f.set(x), so const, unrestricted
+  and the other read-only places give the errors of an assignment; a plain parameter (not a & one) is an error of its own. The receiver
+  must be a value (IsValueReceiver: r.Console.clear() is not a bitfield call). The nullable bitfield error is removed from ResolveType.
+- enforce timeout: the parser keeps a Timeout node (Text "shared") after the clauses of EnforceExpr; EnforceStatementOf gives it to every
+  variable; the lock code of Nulls.cs uses it, the "has no lock" error skips it, and an expression with no lock at all is an error.
+- Properties: PropertyMethods keeps the W: of a readonly property (private unless the W: has its own visibility) and keeps the reader.
+  override: ParentPropertyAccess walks the Bases of the class nodes for the property (accessor blocks or the Property node already made);
+  the override has the parent's access, its accessors are marked override (the parent's visibility), and no field is declared
+  (Classes.cs breaks out of the Decl case), so field in the accessors is the parent's storage.
+- Sets in classes: HoistClassSets (before RegisterGenerics) moves a GenericSet of a class body to the program as Class.Name, renames the
+  bare type name inside the class, drops its Mods node, and refuses a use outside the class of a set that is not public or internal.
+- -> warning: FunSig.TemplateParams on the copies of generic functions; GiftWarningApplies is false in a generic copy unless every type
+  parameter is constrained by a set of basic members (the class copies use their template's params).
+- Not built: overriding a property of a trait (traits have no accessor blocks or readonly properties yet); a set as the type of a
+  method parameter (also with a top-level set); set values (11.3.6.1), on which the nullability rule of 11.3.8 depends.
+- Tests bitfieldinplace, enforcetimeout, propertyrules, classsets; errors bitfield_inplace_const, bitfield_inplace_param,
+  enforce_timeout_no_lock, property_readonly_writer_outside, property_override_plain_field, property_override_adds_writer,
+  property_override_start_value, class_set_private. Removed (rules changed in 0.0.27): errors/bitfield_nullable,
+  errors/property_readonly_setter.
+
+SHARED FIELD STRINGS (2026-11-08, spec 0.0.27 4, compiler 0.0.80alpha)
+- AssignCode: k.label = a goes to SharedFieldString (CodeGen.Strings.cs) when the target is a field reached by a path (LendPath) and a is
+  a local with an own flag (not a parameter, a read-only string or a & slot). The C: share = flag && not a C string; df_str_put(&field,
+  a, share); if share, a's flag becomes false, so a is a borrower and the text ends with the field. A C string (4.4.6) is copied.
+- The object must not end before a: a root variable declared in an inner scope (ScopeDepth) gives a copy. RecordFollowingStatements
+  also records Assign statements; LockLenders(a, the statements after, [k.label]) refuses assigning, ending, moving or & of k / k.label
+  and its non-unrestricted methods until the last use of a.
+- Level 3 warning only for function locals (top-level strings end with the program).
+- Tests sharedstrings (DF_STR_TRACE: 1 alive at exit, the baseline), errors/string_shared_field_replaced.
+
+OVERRIDE RENAMED REPLACE (2026-11-08, spec 0.0.28 11.1, compiler 0.0.81alpha)
+- Lexer: override removed from the keywords. Parser: replace is read as a modifier only when a declaration follows (an identifier, a
+  keyword, %, @ or &), like readonly; anything else (c.replace(i, v), replace(x)) stays a name.
+- CodeGen: ReadMods and PropertyMethods look for "replace"; the accessors of a replacing property get the Mods "replace"; the messages
+  say replace / replacement; the library code inside the compiler uses replace fun (41 places).
+- Tests: the keyword renamed in 40 test files (81 places) and sample.df; 8 error messages updated; new test replacekeyword (override as a
+  variable name, list.replace still a call). The test file names keep the word override.
+
+REPLACED TRAIT PROPERTIES (2026-11-08, spec 0.0.28 11.2, compiler 0.0.82alpha)
+- LowerAccessors starts with GiveReplacedTraitPropertiesAccessors: for each replace property of a class whose nearest declaration
+  (InheritedProperty, breadth first over the Bases of classes and traits) is a plain trait property, the trait gets the default
+  get_ / set_ (PropertyMethods with an empty Accessors node) and the Property node. RegisterTraitMembers then marks that field
+  HasAccessors, so every read and write goes through the trait method (dispatch); the other trait fields keep their offsets access.
+- In the trait accessors, field (RawFieldExpr, RawFieldLValue) is reached with TraitFieldCode (the offsets table). ParentPropertyAccess
+  uses InheritedProperty, so a replacement checks the access of a trait property as of a parent class property.
+- Trait methods get IsAccessor from AccessorFun; CheckUnrestrictedCall lets getters through (a read of a property is a read).
+- readonly on a trait property is accepted: IsReadOnly, and CheckReadOnlyWrite uses IsSubtype, so the classes of the trait write it.
+- Not built: replacing a counted or weak trait property (NotSupported); a trait whose property is replaced in a compiled library (no
+  libraries yet: the decision is "always a call").
+- Tests traitreplace, errors/trait_replace_adds_writer, errors/trait_readonly_outside.

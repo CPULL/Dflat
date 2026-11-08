@@ -62,7 +62,7 @@ trait IndexCollection<Item> : Collection<Item> {
 public class vecIterator<T>(vec<T> collection as parent) : IndexIterator<T> {
   uns cursor = 0
 
-  override fun (T value, bool isValid) next() {
+  replace fun (T value, bool isValid) next() {
     T none
     if cursor >= collection.len {
       return (none, false)
@@ -82,7 +82,7 @@ public class listIterator<T>(list<T> collection as parent) : IndexIterator<T> {
   u64 node              // the current node: a pointer to a node in the C (CodeGen.List.cs)
   bool started = false
 
-  override fun (T value, bool isValid) next() {
+  replace fun (T value, bool isValid) next() {
     T none
     if !this.node_more() {
       return (none, false)
@@ -183,7 +183,7 @@ public class arrView<T>(arr<T> items, uns start, uns count) {
 public class arrIterator<T>(arr<T> items) : IndexIterator<T> {
   uns cursor = 0
 
-  override fun (T value, bool isValid) next() {
+  replace fun (T value, bool isValid) next() {
     T none
     if cursor >= items.len {
       return (none, false)
@@ -198,9 +198,9 @@ public class vec<T> : IndexCollection<T> {
   arr<T> items = arr<T>[0]
   uns count = 0
 
-  override fun uns get_len() { count }
+  replace fun uns get_len() { count }
 
-  override fun bool has(T value) {
+  replace fun bool has(T value) {
     uns i = 0
     while i < count {
       if items[i] == value {
@@ -213,7 +213,7 @@ public class vec<T> : IndexCollection<T> {
   public fun uns get_capacity() { items.len }
 
   // the counter of open iterators comes from the executeAfter of IndexCollection
-  override fun IndexIterator<T> getIterator() {
+  replace fun IndexIterator<T> getIterator() {
     vecIterator<T> iterator = vecIterator<T>(this)
     return ->iterator
   }
@@ -319,7 +319,7 @@ public class vec<T> : IndexCollection<T> {
   }
 
   // every item gets its default value and the size is kept (spec 6.6): the objects held end
-  override fun clear() {
+  replace fun clear() {
     T none
     uns i = 0
     while i < count {
@@ -391,7 +391,7 @@ public class list<T> : IndexCollection<T> {
   u64 last            // the last node, only to add at the end
   uns count = 0
 
-  override fun uns get_len() { count }
+  replace fun uns get_len() { count }
 
   public fun add(->T value) {
     checkUnlocked()
@@ -422,7 +422,7 @@ public class list<T> : IndexCollection<T> {
     return this.node_indexOf(value)
   }
 
-  override fun bool has(T value) {
+  replace fun bool has(T value) {
     return this.node_indexOf(value) != UNS_NONE
   }
 
@@ -441,7 +441,7 @@ public class list<T> : IndexCollection<T> {
   }
 
   // all the items go, as truncate(0) (spec 6.6): the size changes, so not while the list is iterated
-  override fun clear() {
+  replace fun clear() {
     checkUnlocked()
     this.node_truncate(0)
   }
@@ -480,7 +480,7 @@ public class list<T> : IndexCollection<T> {
   }
 
   // the counter of open iterators comes from the executeAfter of IndexCollection
-  override fun IndexIterator<T> getIterator() {
+  replace fun IndexIterator<T> getIterator() {
     listIterator<T> iterator = listIterator<T>(this)
     return ->iterator
   }
@@ -503,7 +503,7 @@ trait SetCollection<Item> : Collection<Item> {
 public class map<K, V> : MapCollection<K, V> {
   u64 tree              // the tree: a df_bt in the C (CodeGen.Map.cs)
 
-  override fun uns get_len() { this.tree_len() }
+  replace fun uns get_len() { this.tree_len() }
 
   // the clone (spec 12.6): a new map<K, V> with the entries copied (the same as add(this) into an empty one)
   public fun map<K, V> clone() {
@@ -512,7 +512,7 @@ public class map<K, V> : MapCollection<K, V> {
     return ->copy
   }
 
-  override fun bool has(V value) {
+  replace fun bool has(V value) {
     return this.tree_hasValue(value)
   }
 
@@ -584,7 +584,7 @@ public class map<K, V> : MapCollection<K, V> {
   }
 
   // all the entries go (spec 6.6): the size changes, so not while the map is iterated
-  override fun clear() {
+  replace fun clear() {
     checkUnlocked()
     this.tree_clear()
   }
@@ -651,7 +651,7 @@ public class mapValues<K, V>(map<K, V> collection as parent) {
 public class set<T> : SetCollection<T> {
   u64 tree              // the tree: a df_bt in the C, values of 0 bytes
 
-  override fun uns get_len() { this.tree_len() }
+  replace fun uns get_len() { this.tree_len() }
 
   // the clone (spec 12.6): a new set<T> with the entries copied (the same as add(this) into an empty one)
   public fun set<T> clone() {
@@ -660,7 +660,7 @@ public class set<T> : SetCollection<T> {
     return ->copy
   }
 
-  override fun bool has(T item) {
+  replace fun bool has(T item) {
     return this.tree_has(item)
   }
 
@@ -883,7 +883,7 @@ public class set<T> : SetCollection<T> {
     return this.tree_take(item)
   }
 
-  override fun clear() {
+  replace fun clear() {
     checkUnlocked()
     this.tree_clear()
   }
@@ -1040,7 +1040,9 @@ public class set<T> : SetCollection<T> {
       return ArrGiftIndex(obj, isVec, operand, scope, gift);   // the array leaves the slot, the slot is empty (spec 6.8.1)
     }
     if (!IsClass(elem) && !IsStrItem(elem)) {
-      Warn("-> on a basic value is ignored: it is a copy", gift, 1);
+      if (GiftWarningApplies()) {
+        Warn("-> on a basic value is ignored: it is a copy", gift, 1);
+      }
       return IndexExpr(operand, scope);
     }
     var index = ExprOf(operand.Children[1], scope, "u64");

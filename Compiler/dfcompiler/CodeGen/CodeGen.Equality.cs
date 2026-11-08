@@ -30,7 +30,7 @@ public sealed partial class CodeGen {
       throw Error("equals cannot be static", member);
     }
     if (!isOverride) {
-      throw Error("equals is defined by Root.Class: write 'override'", member);
+      throw Error("equals is defined by Root.Class: write 'replace'", member);
     }
     var returns = member.Children.FirstOrDefault(child => child.Kind == "Returns");
     if (returns is not { Children.Count: 1 } || returns.Children[0] is not { Kind: "Type", Text: "bool" }) {

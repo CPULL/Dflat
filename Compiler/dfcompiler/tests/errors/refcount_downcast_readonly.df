@@ -4,7 +4,7 @@ trait Animal {
 }
 class Dog : Animal {
   public i32 tricks
-  override fun i32 legs() { 4 }
+  replace fun i32 legs() { 4 }
   public fun learn() { tricks++ }
 }
 fun f() {

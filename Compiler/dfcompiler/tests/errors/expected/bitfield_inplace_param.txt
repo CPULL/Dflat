@@ -1,0 +1,1 @@
+bitfield_inplace_param.df(3): error: 'f' is a plain parameter: it is read-only, so set() alone cannot change it; use the result, or take &Flags f (spec 3.1.1)

@@ -285,6 +285,21 @@ public sealed partial class CodeGen {
     ("StreamSeekOrigin", "enum StreamSeekOrigin { Begin, CurrentPosition, End }")
   };
 
+  // f.set(Flags.Two) written alone: f = f.set(Flags.Two), so a read-only place is the error of an assignment (spec 3.1.1). A chain written
+  // alone (f.set(A).clear(B)) changes nothing: its receiver is a call, not a place
+  Node? BitfieldInPlace(Node call, Scope scope) {
+    if (call is not { Kind: "Call" } || call.Children[0] is not { Kind: "Member", Text: "set" or "clear" or "toggle" or "setAs" } member
+        || member.Children[0].Kind is not ("Name" or "Member" or "Index") || !IsValueReceiver(member.Children[0], scope)
+        || !IsBitfield(ExprOf(member.Children[0], scope).Type)) {
+      return null;
+    }
+    var place = member.Children[0];
+    if (place.Kind == "Name" && scope.Find(place.Text!) is { IsParam: true, RefSlot: false } param && !param.Own && !param.CName.StartsWith("(*")) {
+      throw Error($"'{place.Text}' is a plain parameter: it is read-only, so {member.Text}() alone cannot change it; use the result, or take &{DisplayName(param.Type)} {place.Text} (spec 3.1.1)", call);
+    }
+    return Synthetic("Assign", call, "=").Add(place).Add(call);
+  }
+
   // set, clear, setAs, toggle, isSet, isAnySet (spec 3.1.1). The ones that change a value return the new value.
   Expr? BitfieldMethod(Expr receiver, string name, List<Node> args, Scope scope, Node at) {
     int expectedArgs = name switch {

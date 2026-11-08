@@ -66,6 +66,7 @@ sealed class FunSig {
   public int GroupSize { get; set; }   // on a root: how many functions override it
   public int InstanceDepth { get; set; }      // a copy of a generic function: how deep the chain of copies is
   public string InstanceChain { get; set; } = "";
+  internal List<TypeParam>? TemplateParams { get; set; }   // a copy of a generic function: the type parameters of its template (spec 12.4)
   public string? LambdaCtx { get; set; }      // a lambda (spec 13.3.5): the C struct of its context, the hidden first parameter df_ctx
   public List<(string Name, VarInfo Var)> LambdaVars { get; } = new();   // its captures, as the body sees them
 }
@@ -806,6 +807,10 @@ public sealed partial class CodeGen {
         if (s.Children[0].Kind == "Done") {
           EmitDone(s.Children[0], sb, scope, pad);
           return;
+        }
+        if (BitfieldInPlace(s.Children[0], scope) is Node bitfieldAssign) {
+          sb.Append(pad).Append(AssignCode(bitfieldAssign, scope)).Append(";\n");
+          return;   // f.set(Flags.Two) alone changes f (spec 3.1.1)
         }
         if (s.Children[0].Kind == "Call" && EmitInPlaceStatement(s.Children[0], sb, scope, pad)) {
           return;   // s.trim() alone changes s (spec 4.1)
@@ -1568,6 +1573,9 @@ public sealed partial class CodeGen {
       }
       string value = Convert(assigned, target.Type, s);
       MarkAssigned(target.Variable);
+      if (target.Type == "string" && SharedFieldString(target, targetNode, s, scope) is string shared) {
+        return shared;   // k.label = a: the field takes the string of a (spec 4)
+      }
       if (target.Type == "string") {
         return StrAssign(target, FreshCode(assigned, value), value);
       }

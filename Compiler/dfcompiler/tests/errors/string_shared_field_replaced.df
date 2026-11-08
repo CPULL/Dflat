@@ -1,0 +1,9 @@
+class Kennel {
+  public string label
+}
+fun fill(&Kennel k) {
+  string a = "box " + 1.toStr()
+  k.label = a
+  k.label = "other"
+  a += "!"
+}

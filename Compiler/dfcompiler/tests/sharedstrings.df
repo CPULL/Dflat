@@ -1,0 +1,53 @@
+// a field shares the string it is given (spec 4): k.label = a is the same string, a change through a is seen through the field, and when
+// a ends the field keeps the text (level 3 warning). A borrowed string (a parameter), or an object of an inner scope, gets a copy.
+alias Root as r
+
+class Kennel {
+  public string label
+  public string other
+}
+
+fun fill(&Kennel k, i32 n) {
+  string t = "box " + n.toStr()
+  k.label = t                      // shared: t ends with the function, k.label keeps the text
+  t += "!"
+}
+
+fun copyParam(&Kennel k, string s) {
+  k.other = s                      // s is borrowed: the field takes a copy
+}
+
+fun rebind(&Kennel k) {
+  string a = "first " + 1.toStr()
+  k.label = a
+  r.Console.log(k.label)
+  a = "second " + 2.toStr()        // a gets a new string; the field keeps the first
+  r.Console.log($"{a} / {k.label}")
+}
+
+fun inner(&Kennel k) {
+  string a = "outer " + 3.toStr()
+  {
+    Kennel local = Kennel()
+    local.label = a                // local ends first: it takes a copy
+    a += "?"
+    r.Console.log(local.label)
+  }
+  r.Console.log(a)
+}
+
+Kennel k = Kennel()
+string a = "top " + 0.toStr()
+k.label = a
+a += " changed"
+r.Console.log(k.label)             // top 0 changed
+fill(&k, 5)
+r.Console.log(k.label)             // box 5!
+string given = "given " + 9.toStr()
+copyParam(&k, given)
+given += "!"
+r.Console.log(k.other)             // given 9
+rebind(&k)
+inner(&k)
+k.label = "literal"
+r.Console.log(k.label)

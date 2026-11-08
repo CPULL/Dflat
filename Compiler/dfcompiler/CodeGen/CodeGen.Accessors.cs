@@ -14,6 +14,7 @@ public sealed partial class CodeGen {
   static string SetterName(string property) => "set_" + property.Replace(".", "__");
 
   void LowerAccessors(Node program) {
+    GiveReplacedTraitPropertiesAccessors(program);
     foreach (var type in program.Children.Where(statement => statement.Kind is "Class" or "Trait")) {
       var body = type.Children.FirstOrDefault(child => child.Kind == "Block");
       if (body == null) {
@@ -28,14 +29,85 @@ public sealed partial class CodeGen {
         if (type.Kind == "Trait") {
           throw NotSupported("Accessor blocks in traits", accessors);
         }
-        var methods = PropertyMethods(decl, accessors);
+        var methods = PropertyMethods(decl, accessors, program, type);
         body.Children.InsertRange(i + 1, methods);
         i += methods.Count;
       }
     }
   }
 
-  List<Node> PropertyMethods(Node decl, Node accessors) {
+  // the classes and traits a class or a trait lists in its header (its parent class and its traits), from the program
+  static IEnumerable<Node> BaseNodes(Node program, Node type) =>
+    (type.Children.FirstOrDefault(child => child.Kind == "Bases")?.Children ?? new List<Node>())
+      .Select(baseType => program.Children.FirstOrDefault(statement => statement.Kind is "Class" or "Trait" && statement.Text == baseType.Text))
+      .Where(found => found != null)!;
+
+  // the declaration of a property in the classes and traits above a type, the nearest first
+  static (Node Owner, Node Decl)? InheritedProperty(Node program, Node type, string name) {
+    var seen = new HashSet<Node> { type };
+    var queue = new Queue<Node>(BaseNodes(program, type));
+    while (queue.Count > 0) {
+      var current = queue.Dequeue();
+      if (!seen.Add(current)) {
+        continue;
+      }
+      var decl = current.Children.FirstOrDefault(child => child.Kind == "Block")?.Children.FirstOrDefault(member => member.Kind == "Decl" && member.Text == name);
+      if (decl != null) {
+        return (current, decl);
+      }
+      foreach (var next in BaseNodes(program, current)) {
+        queue.Enqueue(next);
+      }
+    }
+    return null;
+  }
+
+  // replace public i32 sides { R: ... } on a property of a trait (spec 11.2): the trait property gets default accessors (get_ and set_ on
+  // its storage), so the code of the trait, the values of the trait type and the other classes reach it through a call and the class that
+  // replaces it answers. A trait property that no class replaces stays a plain field: a direct memory access.
+  void GiveReplacedTraitPropertiesAccessors(Node program) {
+    var done = new HashSet<Node>();
+    foreach (var cls in program.Children.Where(statement => statement.Kind == "Class").ToList()) {
+      var body = cls.Children.FirstOrDefault(child => child.Kind == "Block");
+      foreach (var decl in body?.Children.Where(member => member.Kind == "Decl" && member.Children.Any(child => child.Kind == "Accessors")).ToList() ?? new List<Node>()) {
+        var mods = decl.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ') ?? Array.Empty<string>();
+        if (!mods.Contains("replace") || InheritedProperty(program, cls, decl.Text!) is not var (owner, traitDecl) || owner.Kind != "Trait"
+            || traitDecl.Children.Any(child => child.Kind is "Accessors" or "Property") || !done.Add(traitDecl)) {
+          continue;
+        }
+        if (IsCountedDecl(traitDecl) || traitDecl.Children.Any(child => child.Kind == "Weak")) {
+          throw NotSupported("Replacing a counted or weak property of a trait", decl);
+        }
+        var traitBody = owner.Children.First(child => child.Kind == "Block");
+        var methods = PropertyMethods(traitDecl, Synthetic("Accessors", traitDecl), program, owner);
+        traitBody.Children.InsertRange(traitBody.Children.IndexOf(traitDecl) + 1, methods);
+      }
+    }
+  }
+
+  // override public i32 level { R: { field + 1 } }: the property of a parent class, replaced whole (spec 11.1.4). The access is the one of
+  // the parent's property; an accessor the override does not write takes its default, not the parent's code. Null: no such property.
+  static (bool CanRead, bool CanWrite)? ParentPropertyAccess(Node program, Node type, string name) {
+    // the parent classes and the traits, nearest first; a replaced trait property already has its accessors (GiveReplacedTraitPropertiesAccessors)
+    if (InheritedProperty(program, type, name) is not var (_, decl)) {
+      return null;
+    }
+    if (decl.Children.FirstOrDefault(child => child.Kind == "Property") is Node done) {
+      return (done.Text!.Contains('r'), done.Text!.Contains('w'));
+    }
+    var mods = decl.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ') ?? Array.Empty<string>();
+    if (decl.Children.FirstOrDefault(child => child.Kind == "Accessors") is Node blocks) {
+      bool getter = blocks.Children.Any(child => child.Kind == "Getter");
+      bool setter = blocks.Children.Any(child => child.Kind == "Setter");
+      bool none = !getter && !setter;
+      bool reads = !mods.Contains("writeonly") && (none || getter || mods.Contains("readwrite") || mods.Contains("readonly"));
+      bool writes = mods.Contains("readonly") ? setter : none || setter || mods.Contains("readwrite");
+      return (reads, writes);
+    }
+    return null;   // a plain field of a class: read and written directly, nothing to replace
+  }
+
+  List<Node> PropertyMethods(Node decl, Node accessors, Node program, Node owner) {
     string name = decl.Text!;
     var mods = decl.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ') ?? Array.Empty<string>();
     if (mods.Contains("static")) {
@@ -52,11 +124,24 @@ public sealed partial class CodeGen {
     bool none = getter == null && setter == null;
     bool canRead = none || getter != null || mods.Contains("readwrite");
     bool canWrite = none || setter != null || mods.Contains("readwrite");
+    bool readonlyWriter = false;
     if (mods.Contains("readonly")) {
-      if (setter != null) {
-        throw Error($"'{name}' is readonly: it has no W:", setter);
+      // readonly with a W: block: read from outside, written by the class itself (spec 11.1.4)
+      readonlyWriter = setter != null;
+      canWrite = setter != null;
+      canRead = true;
+    }
+    bool isOverride = mods.Contains("replace");
+    if (isOverride) {
+      if (decl.Children.Any(child => child.Kind is "Init")) {
+        throw Error($"the replacement of '{name}' has no start value: the storage is the parent's", decl);
       }
-      canWrite = false;
+      var parentAccess = ParentPropertyAccess(program, owner, name)
+        ?? throw Error($"'replace' on '{name}': no parent class has a property '{name}' with accessor blocks (spec 11.1.4)", decl);
+      if (getter != null && !parentAccess.CanRead || setter != null && !parentAccess.CanWrite) {
+        throw Error($"the replacement of '{name}' cannot add {(getter != null && !parentAccess.CanRead ? "an R: block" : "a W: block")}: the parent's property has none", decl);
+      }
+      (canRead, canWrite) = parentAccess;   // the whole property: the accessors not written take their defaults
     }
     if (mods.Contains("writeonly")) {
       if (getter != null) {
@@ -74,7 +159,7 @@ public sealed partial class CodeGen {
       var block = getter?.Children.First(child => child.Kind == "Block")
         ?? Synthetic("Block", decl).Add(Synthetic("ExprStmt", decl).Add(Synthetic("Name", decl, "field")));
       var fun = Synthetic("Fun", decl, GetterName(name));
-      AddVisibility(fun, getter, visibility);
+      AddVisibility(fun, getter, visibility, isOverride);
       var returns = Synthetic("Returns", decl).Add(CopyTree(typeNode));
       if (decl.Children.Any(child => child.Kind == "Counted")) {
         returns.Text = decl.Children.Any(child => child.Kind == "ReadWrite") ? "counted-rw" : "counted";   // R: gives a usage (spec 11.1.4)
@@ -86,7 +171,7 @@ public sealed partial class CodeGen {
       var block = setter?.Children.First(child => child.Kind == "Block")
         ?? Synthetic("Block", decl).Add(Synthetic("Assign", decl, "=").Add(Synthetic("Name", decl, "field")).Add(Synthetic("Name", decl, "value")));
       var fun = Synthetic("Fun", decl, SetterName(name));
-      AddVisibility(fun, setter, visibility);
+      AddVisibility(fun, setter, readonlyWriter && setter?.Children.Any(child => child.Kind == "Mods") != true ? "private" : visibility, isOverride);
       var value = Synthetic("Param", decl, "value").Add(CopyTree(typeNode));
       if (decl.Children.Any(child => child.Kind == "Counted")) {
         value.Add(Synthetic("Counted", decl));   // W: takes a usage (spec 11.1.4)
@@ -101,9 +186,10 @@ public sealed partial class CodeGen {
   }
 
   // the visibility of the accessor (written before R: or W:), else the one of the property
-  static void AddVisibility(Node fun, Node? accessor, string visibility) {
+  static void AddVisibility(Node fun, Node? accessor, string visibility, bool isOverride = false) {
     string? own = accessor?.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text;
-    string words = own ?? visibility;
+    string words = isOverride ? "replace" : own ?? visibility;   // a replacement takes the visibility of the parent's accessor
+    words = words.Trim();
     if (words.Length > 0) {
       fun.Add(Synthetic("Mods", fun, words));
     }
@@ -135,6 +221,9 @@ public sealed partial class CodeGen {
     if (field.IsCounted) {
       return CountedFieldRead(new Expr($"self->{field.CName}", field.Type), field, n);   // the object of a counted storage
     }
+    if (currentClass!.IsTrait) {
+      return new Expr(TraitFieldCode("self", field), field.Type);   // the default accessors of a replaced trait property (spec 11.2)
+    }
     return new Expr($"self->{field.CName}", field.Type);
   }
 
@@ -143,7 +232,8 @@ public sealed partial class CodeGen {
     if (field == null) {
       throw Error("'field' is used only inside the accessor blocks of a property", n);
     }
-    return new LValueInfo($"self->{field.CName}", field.Type, false, null, true, field.IsWeak);
+    string place = currentClass!.IsTrait ? TraitFieldCode("self", field) : $"self->{field.CName}";   // a replaced trait property (spec 11.2)
+    return new LValueInfo(place, field.Type, false, null, true, field.IsWeak);
   }
 
   // an accessor with its own visibility (private W:): said with the name of the property, not of its method

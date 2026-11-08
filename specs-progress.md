@@ -1,4 +1,4 @@
-# Specs progress (Specs0.0.26, compiler 0.0.64alpha, 2026/11/07)
+# Specs progress (Specs0.0.28, compiler 0.0.80alpha, 2026/11/08)
 
 What is left of the design work and what the compiler does not build yet. It replaces `To_discuss_for_collections.txt` and `ownership-management.md`; everything decided there is in the specification (Specs<section> is a section of dflat-spec.md). The point numbers of the collections are kept from the old file.
 
@@ -33,6 +33,16 @@ Specs99: `clear()` on maps and sets empties them, while `clear()` on the index c
 ### Pending check
 
 - The values of `"null".hash` and `"".hash` in Specs6.2.1: the C runtime, the compiler and a Python port agree (64 and 32 bits); a check against the reference code of rapidhash is still to do (running it was blocked).
+
+### [DECIDED 2026-11-08, Specs0.0.27, built 0.0.79alpha except where noted] The spec-99 items settled on 2026-11-08
+
+- Bitfields (Specs3.1.1, 7.1): a call whose result is used gives a new value, a single call alone changes the variable; a chain alone changes nothing; the form alone is a compile error in a read-only place; `Flags?` nullable.
+- Properties (Specs11.1.4, 11.2): modifiers in any order, on the property or on one accessor; `readonly` with a `W:` block; `replace` replaces the whole property; a read through a trait type runs the class accessors. Replacing a trait property: built 0.0.82alpha.
+- Generics (Specs11.3.6, 11.3.8, 12.4): sets inside a class; a set as declared type argument holds set values (`arr<Num> a = [12, 12.0]`); a set is nullable when a member is; the `->` warning only when every reaching type is basic. Not built: set values (11.3.6.1) and with them `arr<Num>` and the nullability of sets.
+- Borrowed strings (Specs4): a field shares the string; a copy with a level 3 warning when the original ends first; collections store shrunk copies. Built 0.0.80alpha.
+- `enforce timeout 500 expr` (Specs7.2.6).
+- [DECIDED 2026-11-08, Specs0.0.28; the rename built 0.0.81alpha, trait properties built 0.0.82alpha] The keyword `override` is renamed `replace` everywhere; `override` is no longer reserved, no error for the old word. Trait properties (Specs11.2): one without accessor blocks is a simple field in the class (no `replace`); a class can replace a trait property (`field` is the trait's storage, the replacement has the final word); direct memory access unless some class replaces it, otherwise and in compiled libraries a call.
+- Standard messages keep "Exception" (Specs15.3); panic exit codes stay -1000 until 0.1.0.
 
 # Part 2 - Ownership and reference counting
 

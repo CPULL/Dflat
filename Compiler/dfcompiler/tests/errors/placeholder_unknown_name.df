@@ -6,5 +6,5 @@ trait Sequence {
 }
 
 public class Broken : Sequence with (Other is i32) {
-  override fun i32? Next() { 1 }
+  replace fun i32? Next() { 1 }
 }

@@ -1,0 +1,1 @@
+enforce_timeout_no_lock.df(3): error: this enforce takes no lock: timeout is for the &@T and &%T variables of the expression (spec 7.2.6)

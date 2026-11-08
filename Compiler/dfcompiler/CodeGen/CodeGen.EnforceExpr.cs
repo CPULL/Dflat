@@ -122,9 +122,14 @@ public sealed partial class CodeGen {
     var expression = enforceExpr.Children[0];
     var enforce = Synthetic("Enforce", enforceExpr, "expr");
     var seen = new HashSet<string>();
+    var sharedTimeout = enforceExpr.Children.Skip(1).FirstOrDefault(child => child.Kind == "Timeout");
     foreach (var name in VariablesOf(expression)) {
       if (seen.Add(name.Text!)) {
-        enforce.Add(Synthetic("Name", name, name.Text));
+        var enforced = Synthetic("Name", name, name.Text);
+        if (sharedTimeout != null) {
+          enforced.Add(sharedTimeout);   // the wait of every lock of the expression; the variables with no lock ignore it (spec 7.2.6)
+        }
+        enforce.Add(enforced);
       }
     }
     if (enforce.Children.Count == 0) {
@@ -132,6 +137,9 @@ public sealed partial class CodeGen {
     }
     enforce.Add(Synthetic("Block", enforceExpr).Add(AssignTo(target, expression)));
     foreach (var clause in enforceExpr.Children.Skip(1)) {
+      if (clause.Kind == "Timeout") {
+        continue;
+      }
       if (clause.Kind == "AtEnd") {
         enforce.Add(clause);
         continue;

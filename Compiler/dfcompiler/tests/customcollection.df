@@ -4,17 +4,17 @@
 alias Root as r
 
 public class Evens(uns limit) : IndexCollection<u64> {
-  override fun uns get_len() { limit }
-  override fun bool has(u64 value) { value % 2 == 0 && value < limit * 2 }
-  override fun clear() { }
-  override fun ->IndexIterator<u64> getIterator() {
+  replace fun uns get_len() { limit }
+  replace fun bool has(u64 value) { value % 2 == 0 && value < limit * 2 }
+  replace fun clear() { }
+  replace fun ->IndexIterator<u64> getIterator() {
     return EvenIterator(limit)
   }
 }
 public class EvenIterator(u64 limit) : IndexIterator<u64> {
   u64 cursor = 0   // the cursor belongs to the iterator, not to the trait
 
-  override fun (u64 value, bool isValid) next() {
+  replace fun (u64 value, bool isValid) next() {
     if cursor >= limit {
       return (0, false)
     }

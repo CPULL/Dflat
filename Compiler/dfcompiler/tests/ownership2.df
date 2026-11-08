@@ -18,12 +18,12 @@ trait Shape {
   unrestricted fun string Name()
 }
 public class Square : Shape {
-  override fun string Name() { "square" }
+  replace fun string Name() { "square" }
 } atEnd {
   r.Console.log("  square ends")
 }
 public class Circle : Shape {
-  override fun string Name() { "circle" }
+  replace fun string Name() { "circle" }
 } atEnd {
   r.Console.log("  circle ends")
 }

@@ -1,0 +1,3 @@
+class Box(i32 v) { public i32 v }
+Box b = Box(3)
+i32 x = enforce timeout 100 b.v default { 0 }

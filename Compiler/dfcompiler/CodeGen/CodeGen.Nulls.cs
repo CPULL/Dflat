@@ -340,8 +340,11 @@ public sealed partial class CodeGen {
         throw Error($"'{name.Text}' is {variable.Type}, which is never null", name);
       }
     }
-    foreach (var name in names.Where(name => name.Children.Any(child => child.Kind == "Timeout") && !locked.Contains(name.Text!))) {
+    foreach (var name in names.Where(name => name.Children.Any(child => child.Kind == "Timeout" && child.Text != "shared") && !locked.Contains(name.Text!))) {
       throw Error($"'{name.Text}' has no lock: timeout is for the &@T and &%T variables of the enforce (spec 7.2.1)", name);
+    }
+    if (names.Any(name => name.Children.Any(child => child is { Kind: "Timeout", Text: "shared" })) && locked.Count == 0) {
+      throw Error("this enforce takes no lock: timeout is for the &@T and &%T variables of the expression (spec 7.2.6)", names[0]);
     }
     if (locks.Count > 0) {
       // the locks end at the very end, after the atEnd clauses and default, on every way out (7.2.5)

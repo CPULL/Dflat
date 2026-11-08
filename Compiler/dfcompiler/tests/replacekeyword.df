@@ -1,0 +1,13 @@
+// replace (spec 11.1): the modifier that replaces a function or a property of a parent class or a trait; override is a plain name
+alias Root as r
+class Animal {
+  unrestricted fun string sound() { "..." }
+}
+class Dog : Animal {
+  replace fun string sound() { "woof" }
+}
+fun string speak(Animal a) { a.sound() }
+i32 override = 3
+list<i32> l = [1, 2, 3]
+i32 old = l.replace(0, 9)
+r.Console.log($"{speak(Dog())} {override} {old} {l}")

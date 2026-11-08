@@ -147,7 +147,7 @@ public sealed partial class CodeGen {
     var mods = member.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ') ?? Array.Empty<string>();
     Vis visibility = mods.Contains("public") || mods.Contains("unrestricted") ? Vis.Public : mods.Contains("internal") ? Vis.Internal : Vis.Private;
     bool explicitVisibility = mods.Contains("public") || mods.Contains("internal") || mods.Contains("private") || mods.Contains("unrestricted") || mods.Contains("asparent");
-    return (visibility, explicitVisibility, mods.Contains("static"), mods.Contains("const"), mods.Contains("override"));
+    return (visibility, explicitVisibility, mods.Contains("static"), mods.Contains("const"), mods.Contains("replace"));
   }
 
   void RegisterClasses() {
@@ -376,7 +376,10 @@ public sealed partial class CodeGen {
         case "Decl": {
           var (visibility, _, isStatic, isConst, isOverride) = ReadMods(member);
           if (isOverride) {
-            throw Error("'override' applies to functions", member);
+            if (!member.Children.Any(child => child.Kind == "Property")) {
+              throw Error("'replace' applies to functions and to properties with accessor blocks", member);
+            }
+            break;   // override i32 level { R: ... }: its accessors override the parent's; the storage stays the parent's (spec 11.1.4)
           }
           if (ModsOf(member).Any(mod => mod is "asparent" or "unrestricted")) {
             throw Error("'asparent' and 'unrestricted' apply to functions", member);
@@ -485,11 +488,11 @@ public sealed partial class CodeGen {
       if (was.IsWritable != now.IsWritable) {
         string marker = IsWeakType(was.Type) ? "%" : "@";
         string wanted = (was.IsWritable ? "&" : "") + marker;
-        throw Error($"an override keeps the markers of the function it answers: '{now.Name}' is {wanted}{was.Type.TrimStart('@', '_')} there (spec 12.7)", at);
+        throw Error($"a replacement keeps the markers of the function it answers: '{now.Name}' is {wanted}{was.Type.TrimStart('@', '_')} there (spec 12.7)", at);
       }
     }
     if (original.RetWritable != f.RetWritable) {
-      throw Error($"an override keeps the markers of the function it answers: it returns {(original.RetWritable ? "&" : "")}{original.Ret} (spec 12.7)", at);
+      throw Error($"a replacement keeps the markers of the function it answers: it returns {(original.RetWritable ? "&" : "")}{original.Ret} (spec 12.7)", at);
     }
   }
 
@@ -597,7 +600,7 @@ public sealed partial class CodeGen {
       if (member.Children.FirstOrDefault(child => child.Kind is "ExecuteBefore" or "ExecuteAfter") is Node hook) {
         throw Error($"'{(hook.Kind == "ExecuteBefore" ? "executeBefore" : "executeAfter")}' goes on a function of a trait", hook);
       }
-      // override fun m() answering a trait method with executeBefore / executeAfter: the class implements __impl_m, the trait keeps m (spec 11.2)
+      // replace fun m() answering a trait method with executeBefore / executeAfter: the class implements __impl_m, the trait keeps m (spec 11.2)
       if (isOverride && AllTraits(cls).Any(trait => trait.Hooked.Contains(member.Text!))) {
         member.Text = ImplPrefix + member.Text;
       }
@@ -605,7 +608,7 @@ public sealed partial class CodeGen {
         throw Error($"'{member.Text}' is already a field of {cls.Name}", member);
       }
       if (isOverride && explicitVisibility) {
-        throw Error("an overriding function takes the visibility of the original: write none on it", member);
+        throw Error("a replacing function takes the visibility of the original: write none on it", member);
       }
       var f = RegisterFun(member, null, cls)!;
       f.Class = cls;
@@ -652,7 +655,7 @@ public sealed partial class CodeGen {
         }
         if (ofTrait != null) {
           if (!isOverride) {
-            throw Error($"'{member.Text}' already exists in the trait {ofTrait.Class!.Name}: write 'override'", member);
+            throw Error($"'{member.Text}' already exists in the trait {ofTrait.Class!.Name}: write 'replace'", member);
           }
           if (ofTrait.Ret != f.Ret) {
             throw Error($"it returns {ofTrait.Ret}, like the trait function it answers", member);
@@ -664,13 +667,13 @@ public sealed partial class CodeGen {
         } else if (member.Text == "get_hash" && f.Params.Count == 0) {
           // get_hash() is offered by Root.Class (spec 6.2.1, 11.1.3): the first override in a class chain
           if (!isOverride) {
-            throw Error("get_hash is defined by Root.Class: write 'override'", member);
+            throw Error("get_hash is defined by Root.Class: write 'replace'", member);
           }
           if (f.Ret != NativeUns) {
             throw Error("get_hash returns uns", member);
           }
         } else if (isOverride) {
-          throw Error($"'{member.Text}' overrides nothing: no function with this signature in a parent class or trait", member);
+          throw Error($"'{member.Text}' replaces nothing: no function with this signature in a parent class or trait", member);
         }
         f.Slot = cls.Vtable.Count;
         cls.Vtable.Add(f);
@@ -680,10 +683,10 @@ public sealed partial class CodeGen {
         throw Error($"'{member.Text}' hides the static function of {above.Class!.Name}", member);
       }
       if (!isOverride) {
-        throw Error($"'{member.Text}' already exists in {above.Class!.Name}: write 'override'", member);
+        throw Error($"'{member.Text}' already exists in {above.Class!.Name}: write 'replace'", member);
       }
       if (above.Ret != f.Ret) {
-        throw Error($"an override returns {above.Ret}, like the function it overrides", member);
+        throw Error($"a replacement returns {above.Ret}, like the function it replaces", member);
       }
       CheckOverrideMarkers(above, f, member);
       f.Slot = above.Slot;
@@ -1366,7 +1369,7 @@ public sealed partial class CodeGen {
 
   // readonly (spec 11.1.4): the class (and its subclasses, as for private) writes the field, everyone else only reads it
   void CheckReadOnlyWrite(FieldInfo field, Node at) {
-    if (field.IsReadOnly && !(currentClass != null && (currentClass == field.Owner || IsSubclass(currentClass.Name, field.Owner.Name)))) {
+    if (field.IsReadOnly && !(currentClass != null && (currentClass == field.Owner || IsSubtype(currentClass.Name, field.Owner.Name)))) {
       throw Error($"'{field.Name}' is readonly: only {field.Owner.Name} can change it", at);
     }
   }

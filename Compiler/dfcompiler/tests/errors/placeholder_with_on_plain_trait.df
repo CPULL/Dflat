@@ -10,5 +10,5 @@ trait Plain {
 }
 
 public class Broken : Plain with (Item is i32) {
-  override fun i32 Get() { 1 }
+  replace fun i32 Get() { 1 }
 }

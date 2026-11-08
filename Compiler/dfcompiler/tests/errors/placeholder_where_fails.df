@@ -6,7 +6,7 @@ trait Sequence {
 }
 
 public class Names : Sequence with (Item is string) {
-  override fun string Next() { "x" }
+  replace fun string Next() { "x" }
 }
 
 fun r64 sum<Source : Sequence>(Source items) where Source.Item : Numeric {

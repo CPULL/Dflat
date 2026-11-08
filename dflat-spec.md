@@ -1,7 +1,7 @@
 # Dflat Language
 A new language D♭ that is the same as C# but easier to write and faster to execute
 
-**Version** 0.0.26  2026/11/07 by CPU
+**Version** 0.0.28  2026/11/08 by CPU
 
 ## D♭ — Dflat Language Specification (draft)
 
@@ -115,7 +115,7 @@ It is important to note that 2 special cases are used to decide who is allowed t
 
 - The visibility keyword goes before `static`, `fun` or the field type. Only one visibility keyword can be used on a member.
 - `asparent` is not public. It can change the parent, because only the object itself and its own children can call it.
-- An overriding function takes the visibility of the original: none is written on it (11.1.2).
+- A replacing function takes the visibility of the original: none is written on it (11.1.2).
 - A subclass sees everything when the source of the parent is available, public only for compiled libraries (11.1.2).
 - Constructors have a visibility; a private constructor can be called only by the class body (11.1.1).
 - A visibility keyword before `R` or `W` sets the visibility of that accessor; the property visibility applies to the other one (11.1.4).
@@ -140,7 +140,7 @@ It is important to note that 2 special cases are used to decide who is allowed t
 These are the default types available with the language. In some restricted architectures they may have limitations or being not available.
 
 All types support `.toStr()` to be converted to `string`.
-For classes, if not overridden, the default is: class name and the values of the first 3 fields, one level only. `Px { a: Py{}, b: 3, c: BTree{}, … }`
+For classes, if not replaced, the default is: class name and the values of the first 3 fields, one level only. `Px { a: Py{}, b: 3, c: BTree{}, … }`
 
 ## 2.1 Numbers
 
@@ -293,7 +293,9 @@ bitfield32 Flags { CanRead: 0, CanWrite: 1, CanSeek: 2, IsNetwork: 3 }
 | `bool isSet(flags)` | True if all the flags are set |
 | `bool isAnySet(flags)` | True if at least one of the flags is set |
 
-These methods return the value and do not change the original bitfield variable.
+- A call whose result is used gives a new value and does not change the variable: `Flags n = f.set(Flags.One)`, `foo(f.set(Flags.One))`. A single call written alone as a statement changes the variable in place: `f.set(Flags.Two)`. This is the rule of the strings and the sets.
+- A chain written alone (`f.set(Flags.One).clear(Flags.Two)`) changes nothing: every call works on the value of the previous one. It is not an error and gives no warning.
+- In a read-only place (a `const`, a plain parameter, `this` in an `unrestricted` method, 1.6.2) the value form is valid and the form written alone is a compile error: with `const Flags f`, `foo(f.set(Flags.Bar))` is valid and `f.clear(Flags.Bar)` is a compile error.
 
 
 - `~value` (bitwise not, 2.5) flips only the defined bits. Casting an integer to a bitfield masks off every bit that is not defined, so a bitfield never holds undefined bits: `[Flags]~[u32]value` is the same as `~value`.
@@ -302,9 +304,10 @@ These methods return the value and do not change the original bitfield variable.
 Flags flag = Flags.None
 Flags updatedFlags = flag.set(Flags.CanRead).clear(Flags.CanSeek).toggle(Flags.IsNetwork)
 Flags both = flag.set(Flags.CanRead | Flags.CanWrite)
+flag.set(Flags.CanSeek)            // alone: flag changes
 ```
 
-- Not decided: whether `set`, `clear`, `setAs` and `toggle` modify the value in place or return a new value (the chained example assumes they return a value); nullability of bitfields (7.1).
+- A bitfield is not nullable; `Flags?` is a nullable bitfield (7.1).
 
 ## 3.2 Tuples
 `(string name, i32 age, string address, dec salary)`
@@ -432,6 +435,7 @@ string t = str.trim()        // a new string, str unchanged
 - `text[pos]` reads the character at position `pos` (characters, not bytes); `text[pos] = c` writes it in place.
 - Every type has `toStr()` to convert it to a `string`.
 - Ownership: a string follows the rules of the objects (12). `b = a` is the same string (a borrow), `->a` moves it, `a!` copies it. A change made through `b` (`b += "x"`) is seen through `a`.
+- A field takes the same string too: `k.label = a` shares the text of `a`. To store a copy, write `k.label = a!` or `k.label = a.shrink()`. When the original string ends first (a local whose scope ends while the field lives on), the field gets its own copy of the text, with a level 3 warning at the assignment. Until the last use of `a`, the object and the field are locked as for a borrow (12): they cannot be assigned, ended, moved or passed as `&`. A borrowed string (a parameter), a C string (4.4.6) or an object declared in an inner scope (it can end before `a`) takes a copy. A collection never shares: it stores a shrunk copy of the string (6.1).
 - Assigning to a string variable (`a = "other"`, `a = b.trim()`) rebinds the variable, it does not change the string: the old string is dropped by its owner, and a borrow of it that is still alive is a compile error.
 - The owner frees the string at the end of its scope; a borrower never frees it.
 - `==` compares the content: the same string (same pointer, a moved string included, 4.4.2) is `true`, a different length in bytes is `false`, otherwise the bytes are compared. `<` `>` `<=` `>=` compare the bytes (6.2).
@@ -692,7 +696,7 @@ Applies to the keys of `map` / `hmap` and to the items of `set` / `hset`.
 
 ### 6.2.1 Hash
 
-- `.hash` is a property of every type, of size `uns` (2.1). The hash of the native types cannot be overridden. No hash depends on a memory address: the same content always gives the same hash, also between runs. A saved map stores its keys and values, never the hashes or the table.
+- `.hash` is a property of every type, of size `uns` (2.1). The hash of the native types cannot be replaced. No hash depends on a memory address: the same content always gives the same hash, also between runs. A saved map stores its keys and values, never the hashes or the table.
 - `$` is the ordered hash combine: `h = (rotl(h, 5) ^ part) * K`, with `K = 0x517cc1b727220a95` for a 64-bit `uns` and `0x9e3779b9` for a 32-bit one (FxHash). Unlike a xor, the result depends on the order and `(x, x)` does not give 0. Collisions are accepted: the goal is that the same content always gives the same hash.
 - How the hash is calculated:
   - A native value whose size is at most `uns` uses its own value as the hash, widened with zeros: a signed value is not sign-extended (an `i32` of -1 gives `0x00000000FFFFFFFF` with a 64-bit `uns`), so no value has a bit set above its width.
@@ -702,20 +706,20 @@ Applies to the keys of `map` / `hmap` and to the items of `set` / `hset`.
   - Tuples: `$` over the hashes of the components, in order: `h` starts as the hash of the first component, then `h = h $ next`. A tuple of one component has the hash of that component. The names of the fields are not part of it.
   - Null: a fixed constant, the same for all types, `"null".hash`: `0x2AA52E3F0BF438BD` with a 64-bit `uns`, `0x21511682` with a 32-bit one. It has a bit set above the width of every type that `uns` holds with spare bits (`x8?`, `x16?`, `bool?`, and `x32?` with a 64-bit `uns`), so no real value can equal it; `x8?`, `x16?` and `bool?` always take at least 4 bytes, so with a 32-bit `uns` the 32-bit constant serves them. A full-width nullable native (`x64?` and `uns?` with a 64-bit `uns`, `x32?` with a 32-bit one) has no spare bit: in a hash table its key slot holds two `uns`, the null constant as tag and 0 (6.8.5.1). On microarchitectures `null.hash` is 0 and the clash with 0 is accepted.
   - Classes (the default hash, based on the content): `"ns.Class".hash $ hash of field 1 $ hash of field 2 $ ...`
-    - Every class that does not override `get_hash()` gets its own generated default, with its own fully qualified name and all its fields, the inherited ones included: for `B : A`, the default of `B` starts from `"ns.B".hash`. A class that inherits an override uses that code as it is: if `A` overrides `get_hash()` and `B` does not, a `B` hashes with the code of `A`. All classes have a namespace (`Root.` classes included).
+    - Every class that does not replace `get_hash()` gets its own generated default, with its own fully qualified name and all its fields, the inherited ones included: for `B : A`, the default of `B` starts from `"ns.B".hash`. A class that inherits a replacement uses that code as it is: if `A` replaces `get_hash()` and `B` does not, a `B` hashes with the code of `A`. All classes have a namespace (`Root.` classes included).
     - The fields are combined in the order they are stored in memory.
-    - A stable field gives its own hash. A field is stable when it is a native, an owned object (an owned child included) whose members are all stable, or an owned object whose class overrides `get_hash()` (its `get_hash()` gives the hash, whatever its members are).
+    - A stable field gives its own hash. A field is stable when it is a native, an owned object (an owned child included) whose members are all stable, or an owned object whose class replaces `get_hash()` (its `get_hash()` gives the hash, whatever its members are).
     - An unstable field gives the hash of its fully qualified type name followed by the field name, with no separator: `"list<my.ns.Something>b".hash`, `"arr<i32>c".hash`, `"Root.IO.Filef".hash`. Collections, iterators, views, every sub-collection class and every reference field (an object that is not owned) are unstable: only owned objects are followed, so a cycle of references cannot make the hash recurse forever.
     - A null field gives the null constant.
     - The names of the fields are part of the hash of a class, not of the hash of a tuple.
-  - A collection (the default ones and the custom ones that do not override `get_hash()`) hashes as the hash of its type name only: `"vec<i32>".hash`. All its fields would be unstable, so this is the value the class rule gives, without depending on how the collection is built. The content is never hashed.
+  - A collection (the default ones and the custom ones that do not replace `get_hash()`) hashes as the hash of its type name only: `"vec<i32>".hash`. All its fields would be unstable, so this is the value the class rule gives, without depending on how the collection is built. The content is never hashed.
 - The hash of a type is the hash of its fully qualified name: `"i32".hash`, `"my.fully.namespace.Class".hash`.
   - Built-in types (natives and the default collections) are written without namespace; all classes have a namespace (`Root.` included).
   - Generic arguments go inside `<>`, separated by `,` with no spaces, each written by the same rule: `"list<my.ns.Something>"`.
   - Structs: their qualified name only (not the implementation).
   - Tuples: `(tuple,` followed by the types of the components separated by `,`, then `)`, with no field names, nested tuples included: `(i32, string, (uns, Obj))` is `"(tuple,i32,string,(tuple,uns,full.ns.Obj))".hash`.
   - Nullable types: the name followed by `?`: `"i64?".hash`.
-- `Root.Class` offers `get_hash()` and `equals(any?)` (11.1.3). A class can override `get_hash()`, `equals` and `compareTo`; no warning is given for any of them. `.hash` on an object always calls `get_hash()` through the virtual dispatch: the override of the dynamic class runs, also through a variable of a parent type. `==` on class objects calls `equals` only when the class overrides it (known at compile time), and compares identity otherwise.
+- `Root.Class` offers `get_hash()` and `equals(any?)` (11.1.3). A class can replace `get_hash()`, `equals` and `compareTo`; no warning is given for any of them. `.hash` on an object always calls `get_hash()` through the virtual dispatch: the replacement of the dynamic class runs, also through a variable of a parent type. `==` on class objects calls `equals` only when the class replaces it (known at compile time), and compares identity otherwise.
 - Identity of a key in `hmap` and `hset`: the hash chooses where to look; two keys are the same when the hashes match and `equals` agrees. For the natives up to `uns` the hash is the value, so a match of the hash is enough. Two different keys with the same hash are both kept; the same key replaces the value (`add` returns `false`). There is no collision exception.
 
 ### 6.2.2 Order
@@ -931,7 +935,7 @@ Every collection implements the trait `Collection` and one of its three sub-trai
 - Rule: whatever is shared by the collections stays in the trait (in `Collection` when all seven have it, like `.len`); whatever is specific to one collection is defined by that collection class. Every collection is in a trait.
 - `arr` is a class (6.1) that implements `IndexCollection`; the code generated for it is direct.
 - `Collection<Item>` has: the read-only `len` property (the number of items, `uns`), `has(v)`, `->c[k]` and `clear()`. `.sizeof` exists on every type (`Root.Class`, see the table below). The meaning of each member is in 6.6.
-- `Collection<Item>` has no `getIterator()`: each sub-trait declares its own, typed (an override that returns a subtype of the declared return type is not allowed):
+- `Collection<Item>` has no `getIterator()`: each sub-trait declares its own, typed (a replacement that returns a subtype of the declared return type is not allowed):
 
 ```
 trait IndexCollection<Item> : Collection<Item> {
@@ -992,8 +996,8 @@ asparent fun releaseIterator() // In the Collection definition
 
 class ListIterator<Item>(list<Item> collection as parent) : IndexIterator<Item> {
   Node<Item> cursor = collection.first
-  override fun (Item value, bool isValid) next() { ... }
-  override fun (&Item value, bool isValid) writableNext() { ... }
+  replace fun (Item value, bool isValid) next() { ... }
+  replace fun (&Item value, bool isValid) writableNext() { ... }
   } atEnd {
   collection.releaseIterator()
 }
@@ -1325,8 +1329,8 @@ Sketch:
 ```
 class MyIterator<Item>(MyCollection<Item> collection as parent) : IndexIterator<Item> {
   uns cursor = 0
-  override fun (Item value, bool isValid) next() { ... }
-  override fun (&Item value, bool isValid) writableNext() { ... }
+  replace fun (Item value, bool isValid) next() { ... }
+  replace fun (&Item value, bool isValid) writableNext() { ... }
 } atEnd {
   parent.releaseIterator()
 }
@@ -1342,7 +1346,7 @@ trait MapIterator<Key, Value> : Iterator {
 
 - `for x in c` on a custom collection asks `getIterator()` once and calls `next()` until `isValid` is `false`. For the collections of the compiler no iterator object is built: the `for` is a direct loop in C.
 - While the iterator exists the collection cannot change its size (6.4). The counter and its checks come from the trait `Collection` through `executeAfter` blocks (11.2), so a custom collection gets them without writing them.
-- Open point for classes: whether the default collections (`vec`, `list`, `map`, `hmap`, `set`, `hset`) can be subclassed, and how the overridden methods are dispatched. `arr` cannot be subclassed.
+- Open point for classes: whether the default collections (`vec`, `list`, `map`, `hmap`, `set`, `hset`) can be subclassed, and how the replaced methods are dispatched. `arr` cannot be subclassed.
 - The indexer `c[k]` of a custom collection is given by the methods `read_pos` and `set_pos` of its trait (6.7).
 - `+=` and `-=` call the public members (`add`, `remove`, `removeAt`, 6.6), so a custom map or set gets them from its members.
 - For a later version: how a custom class receives the literals, subclassing of the default collections, and lists of pointers and references (with the pointers work).
@@ -1356,7 +1360,7 @@ trait MapIterator<Key, Value> : Iterator {
 ## 7.1 Nulls
 - `date`, `time`, `clock` and `lapse` are already nullable and a variable of these types without a value starts as null. A `clock` prints as its number, a `lapse` as its number in its own unit, and null as `null`.
 
-- Basic native types (integers, reals, `dec`, `bool`, `char`, enums) are not nullable by default: nullable only as `type?`.
+- Basic native types (integers, reals, `dec`, `bool`, `char`, enums, bitfields) are not nullable by default: nullable only as `type?`.
 - Other native types (`string`, `date`, `time`, `clock`, `lapse`, `addr`), pointers and all objects (classes, collections) are nullable by default; `type?` on them is a compile error.
 - Strings: for a `string`, `""` and null are the same.
 - `string?` is a string where null is not `""` (null `!=` `""`), mostly for C interop (`string? name = string(p)`, 4.4.6):
@@ -1600,12 +1604,14 @@ i32 res = enforce f.test()
   default { -1 }                                     // anything else
 
 i32 r = enforce account.whatever() lockfail { -1 } default { 0 }
+i32 hp = enforce timeout 500 player.health() lockfail { -1 }   // waits up to 500 ms for every lock
 ```
+
+- `timeout <ms>` written right after `enforce` sets the wait for every lock the expression takes. Without it each object waits its own default (`@Player() timeout 100`, 7.2.2).
 
 ### 7.2.7 Under discussion
 
 - The order of the locks across threads (with multithreading).
-- `timeout` in the expression form (7.2.6).
 
 ---
 
@@ -1893,7 +1899,7 @@ i32 sign = value ? { ..=-1: -1, 0: 0, 1..: 1 }
 ```
 public class Circle(r64 radius) : Shape {
   public Circle() : Circle(1.0), Named("circle")
-  override fun r64 Area() { r.Math.PI * radius * radius }
+  replace fun r64 Area() { r.Math.PI * radius * radius }
 }
 ```
 
@@ -1950,11 +1956,11 @@ public class Foo(i32 a) {
 Foo foo = Foo.create(5)
 ```
 
-- `override` mandatory; `parent.Method()` reaches the overridden version. An overriding function takes the visibility of the original: none is written on it.
+- `replace` is mandatory to replace a method or a property of a parent class or of a trait; `parent.Method()` reaches the replaced version. A replacing function takes the visibility of the original: none is written on it. `override` is not a reserved word.
 - Visibility: private by default, `public`, `internal` (namespace + sub-namespaces). A subclass sees everything when the parent's source is available, public only for compiled libraries (at its own risk). No `sealed` (private constructors give the same effect, 11.1.1).
 - Static members: `static` goes after the visibility and before `fun` or the field type. Functions and properties; accessed as `ClassName.name`.
 - A static function has no `this` and cannot touch instance fields; it can call the private constructors of its class.
-- Static members are inherited by subclasses (`Child.create()`). A static function cannot be overridden, and declaring one with the same signature in a subclass is a compile error.
+- Static members are inherited by subclasses (`Child.create()`). A static function cannot be replaced, and declaring one with the same signature in a subclass is a compile error.
 - A generic class has one copy of its static members per type instance (`Stack<i32>` and `Stack<string>`).
 - Static properties: an initializer is allowed, without one they hold the zero value. They are initialized at program start in declaration order (a compiler option allows lazy initialization on first use). An initializer that reads a static property of another class is evaluated on demand; a cycle is a compile error.
 - `static const` declares a class constant (UPPER_SNAKE_CASE, 1.1); a plain `static` property is mutable.
@@ -1963,7 +1969,7 @@ Foo foo = Foo.create(5)
 ## 11.1.3 Equality
 
 ```
-override fun bool equals(T other) {
+replace fun bool equals(T other) {
   if T is i32 then return value == other
   if T is string then return value == i32.parse(other)
   return false
@@ -1973,18 +1979,18 @@ override fun bool equals(T other) {
 - `==` on class objects resolves in this order: `equals` if defined; otherwise an operator `==` overload; otherwise identity (same object).
 - `!=` is always the negation of what `==` resolves to and cannot be overloaded.
 - Defining both `equals` and an operator `==` is a level 2 warning (the overload is dead code).
-- The identity of a key in a hash collection: two keys are the same when the hashes match and `equals` agrees (6.2.1). A class that overrides `equals` should keep equal objects with the same hash, otherwise equal keys can be stored twice. No warning is given for an override of `get_hash()`, `equals` or `compareTo`.
+- The identity of a key in a hash collection: two keys are the same when the hashes match and `equals` agrees (6.2.1). A class that replaces `equals` should keep equal objects with the same hash, otherwise equal keys can be stored twice. No warning is given for a replacement of `get_hash()`, `equals` or `compareTo`.
 - `bool equals(T other)` is a generic function: `T` is implicit and is the type of the argument; inside a generated instance `other` has type `T`. This allows comparing with other types, and each type decides which ones it supports.
 - `T is type` checks the generic type at compile time (the branch that does not match is not emitted); `other is type` checks the value at runtime (11.1). Both can be used in the same function.
 - A more generic type can match before a more specific one, so the order of the checks matters. A branch that can never run because an earlier check always matches is a level 3 warning.
 - Every path of `equals` must return a value, otherwise it is a compile error. The upward-check warning (level 2) does not fire in generic code when a check is true for one `T` only.
 - Null is handled by the compiler before `equals` is called: the function never receives a null argument.
 - `Root.Class` offers `get_hash()` to implement the `.hash` of the object (6.2.1) and `equals(any?)`. Ordering is given by the trait `Comparable<T>` (11.2.1).
-- The default `equals` (overridable) is consistent with the default hash: equal objects have the same hash.
+- The default `equals` (replaceable) is consistent with the default hash: equal objects have the same hash.
   1. The classes must be exactly the same.
   2. The native fields are compared first, the cheap ones (integers, dates, ...) before strings and composite fields; the comparison stops at the first difference.
   3. Owned objects are compared recursively with the same default `equals`. Ownership cannot form a cycle, so the recursion ends.
-  4. Collections, iterators, views, every sub-collection class and every reference field (an object that is not owned): equal only if it is the same object (the same address); the content is never compared. Both null: equal; one null: different. Two objects that refer to different but equal objects are not equal by default; a class that needs it overrides `equals`.
+  4. Collections, iterators, views, every sub-collection class and every reference field (an object that is not owned): equal only if it is the same object (the same address); the content is never compared. Both null: equal; one null: different. Two objects that refer to different but equal objects are not equal by default; a class that needs it replaces `equals`.
   - A clone is not necessarily equal to the original (a collection field of the clone is another object).
   - `has`, `indexOf` and `remove(v)` use `equals`; they do not involve the identity of keys.
 
@@ -1999,12 +2005,15 @@ public i32 level { R: { field } private W: { field = 0 } }    // private writer
 ```
 
 - Access: a property is read/write by default. The access `readonly`, `readwrite` or `writeonly` is written when the body is not defined and must be provided by the class (trait members, 11.2). When blocks are written they say what is allowed. Reading a property that cannot be read, or writing one that cannot be written, is a compile error.
+- Modifiers (the visibility, `static`, `readonly`, `readwrite`, `writeonly`) can be written in any order: `public static readonly i32 count` is the same as `readonly static public i32 count`. Written on the property they apply to both accessors; written before `R:` or `W:` they apply to that accessor only.
+- `readonly` with a `W:` block is valid: the class itself can still call the `W:` (`public readonly i32 size { W: { field = value * 2 } }` is read from outside and written only by the class), as in the shorthand below.
 - In a class, `readonly` on a field without accessor blocks is a shorthand for a public reader and a private writer: `public readonly i32 width` is the same as `public i32 width { R: { field } private W: { field = value } }`. The class can still assign it; from outside it can only be read. In a trait, `readonly` keeps the meaning above.
 - Accessor blocks: `R: { ... }` calculates and returns the value (as in any function, the last expression is the result); `W: { ... }` runs when the property is assigned and gets the new value in `value`. A block that is not written gets its default: `R` is `{ field }` and `W` is `{ field = value }`.
 - `field` is the stored value of the property and `value` the incoming value of `W`. Both exist only inside the accessor blocks. Outside the accessors the name of the property always goes through them, so there is no recursion.
 - The storage exists only when an accessor uses `field` (the default accessors do). A purely computed property takes no memory.
 - A start value is written after the property (`= 3`) and is allowed in classes only, never in traits. It goes through the `W` code when one is defined (in the second example `field` starts at 2 and `R` returns 3).
 - Visibility: a visibility keyword before `R` or `W` sets the visibility of that accessor; the visibility of the property applies to the other one.
+- `replace` replaces the whole property, never a single accessor: the accessors that the replacement does not write take their defaults (`{ field }`, `{ field = value }`), not the code of the parent.
 - An exception that is not caught inside an accessor is a `Panic` (15.5): accessors have no error part.
 - Primary constructor parameters (11.1.1) become fields with the default accessibility rules. They can be redeclared in the body of the class or trait when they need something more specific.
 - Static properties work in the same way, but their accessors can use only static functions and other static fields or properties (11.1.2).
@@ -2174,22 +2183,34 @@ trait Shape : Named { public fun r64 Area() }
 - Single parent class (listed first in the header); any number of traits; base of everything: `Root.Class` (implicit, never written, 11.1).
 - Traits are implemented only in the class header; a trait cannot be added to an existing type (built-in or library) from outside its declaration.
 - Traits: properties, methods with or without body, constructor when they have properties; one parent trait; a supertrait inherited twice exists once.
-- A property in a trait declares how it is accessed (read only, read/write or write only, 11.1.4). It can have a default implementation (`R` and `W` blocks); when it has none the class must implement it, otherwise it is a compile error. A class can use the implementation of the trait or override it with `override`, giving the code for everything; a conflict is a compile error and a part not specified falls to the default implementation. A property that is read only in the trait stays read only in the class.
+- A property in a trait declares how it is accessed (read only, read/write or write only, 11.1.4). A property without accessor blocks (`public i32 sides`, `readonly u32 count`) is a simple field in the class too: the class has nothing to implement and writes no `replace`. A property with accessor blocks gives its implementation to the class.
+- A class can replace a trait property with `replace`, which replaces the whole property (11.1.4) and provides the accessors; `field` in them is the storage of the trait. The replacement has the final word: if it breaks the code of the trait, that is the responsibility of the developer. A property that is read only in the trait stays read only in the class.
+
+```
+trait Shape {
+  public i32 sides                                  // a simple field in every class of Shape
+}
+class Square : Shape {
+  replace public i32 sides { R: { field + 1 } }     // the accessors of Square; field is the storage of Shape
+}
+```
+
 - A trait has no start values (`= 3`). Its constructor can set values; the `W` code is used when one is defined.
-- How a property is read or written through a value of a trait type (`any Shape`) is left to the implementation of the compiler.
+- A property read or written through a value of a trait type (`any Shape`) runs the accessors of the class of the object, the replacements included, as a method call does.
+- Speed: a trait property that no class of the program replaces is a direct memory access everywhere, in the code of the trait and through a trait type. Once a class replaces it, those reads and writes call the accessors of the class of the object. A compiled library, and every case where the compiler cannot see all the classes, always calls.
 - Same public member in two traits: the qualified name is needed only for the clash, `TraitA.member` (inside the class), `px.TraitA.member` (outside). The unqualified name is a compile error that asks for the qualified name. Private members never clash: the compiler aliases them (`TraitA.member`, `TraitB.member`) without anything written, because only the code of their own trait sees them.
-- Visibility in a trait: the rules of 1.6.1, as in classes. A member without a visibility keyword is private; a public member is written `public`. A private member is seen only by the code of its trait (methods, accessors, constructor, `executeBefore` and `executeAfter` blocks), not by the class that implements the trait. A method without a body that the class implements keeps the visibility of the trait: the implementation is written with `override` and no keyword.
+- Visibility in a trait: the rules of 1.6.1, as in classes. A member without a visibility keyword is private; a public member is written `public`. A private member is seen only by the code of its trait (methods, accessors, constructor, `executeBefore` and `executeAfter` blocks), not by the class that implements the trait. A method without a body that the class implements keeps the visibility of the trait: the implementation is written with `replace` and no keyword.
 - Sub-traits: a sub-trait reads every member of its parent traits, the private ones included, read-only, and can call all their methods, the private ones included. To change a private field of the parent it calls a method of the parent. This is not `asparent`, which opens a member to the child objects (12.5).
 - Initialization: a public trait field must be initialized in every constructor of the class that implements the trait, directly or through the trait constructor; otherwise it is a compile error (`class ABC must initialize member "field" from trait MyTrait`). A private trait field is initialized only by the trait (its constructor); when the trait does not set it, it keeps its zero value (null for objects).
 - Diamond: a supertrait inherited twice exists once, with its fields. It is a compile error when two traits give different default implementations of the same member of the shared supertrait, or call the constructor of the shared supertrait with different arguments.
 - Trait-typed values: the compiler chooses static or dynamic dispatch; force with `specific Shape` (one type, known at compile time) / `any Shape` (any implementing type, dispatched at runtime). `list<any Shape>` holds mixed shapes.
-- `executeAfter`: a trait method can carry a block `executeAfter { }`. The class must implement the method; the block runs after the implementation of the class and cannot be overridden or removed by the class.
+- `executeAfter`: a trait method can carry a block `executeAfter { }`. The class must implement the method; the block runs after the implementation of the class and cannot be replaced or removed by the class.
   - `executeAfter` is one contextual keyword, written like `atEnd`; it is a keyword only right after the signature of a trait method.
   - The block runs only when the implementation succeeds (if `getIterator()` fails, the counter of 6.4 is not incremented). This is the difference with the `atEnd` of a function (14.2), which runs on every exit, exceptions included.
   - The block reads the return value as `<method>.result` (for example `getIterator.result`), read-only: it cannot change it.
   - The blocks are chained: every trait of the hierarchy that defines an `executeAfter` for the method runs its block, like `atEnd`: from the most specific trait to the root (`IndexCollection`, then `Collection`), once per call. A call to the parent implementation inside the class does not start the chain again.
-  - A method with a default body and a block is written `fun f() { default body } executeAfter { ... }`. The class can override the default body; the block still runs.
-- `executeBefore`: a trait method can carry a block `executeBefore { }`, with the same rules as `executeAfter`, except that it runs before the implementation of the class. The class can override the method, but the code of the trait always runs first. When the block raises an exception, the implementation does not run. Both blocks can be on the same method (`executeBefore` first). The order of a chain of `executeBefore` blocks is decided when it is needed.
+  - A method with a default body and a block is written `fun f() { default body } executeAfter { ... }`. The class can replace the default body; the block still runs.
+- `executeBefore`: a trait method can carry a block `executeBefore { }`, with the same rules as `executeAfter`, except that it runs before the implementation of the class. The class can replace the method, but the code of the trait always runs first. When the block raises an exception, the implementation does not run. Both blocks can be on the same method (`executeBefore` first). The order of a chain of `executeBefore` blocks is decided when it is needed.
 - The trait `Collection` uses `executeAfter` to provide the counter of open iterators and views and its checks (6.4), so every collection gets them, the custom ones included. The counter is a private field of `Collection`; `IndexCollection` (a sub-trait, so it reads the counter but cannot write it) increments it through the private method `acquireIterator()`. `releaseIterator()` is `asparent`: only the children of the collection (iterators and views) can call it, even through a read-only reference, and it is called only by their default `atEnd`; its default body is empty, so a class writes it only when it needs more, and the `executeAfter` takes the counter back in every case; a release with the counter at zero raises `InvalidIteratorReleaseException` (not silent, 15.3). `checkUnlocked()` raises `ModifyingIteratedCollectionException` while the counter is above zero: a collection that can change its size must not change it while it is iterated, and the trait methods that change the size will call it from an `executeBefore` (6.4).
 
 ```
@@ -2230,7 +2251,7 @@ trait IndexCollection<Item> : Collection<Item> {
   - A class declares it explicitly; it is never implied by the use of the class as a key type, so it cannot be derived by mistake. A class without `Keyable` used as a key type is a compile error that names the trait.
   - It is inherited like any other trait, with no opt-out for a subclass. A custom trait can extend it, as long as the logic of `Keyable` is kept.
   - The counter and the stored hash are one per object, shared by every collection that holds it.
-  - Two `executeAfter` blocks (11.2), on `get_hash()` and on `compareTo`, so the check runs after every override and cannot be removed. Both start from the counter: at 0 nothing is done (the object is not a key, its hash can be anything); when it goes from 0 to 1 the hash is computed and stored; above 0 the hash (`get_hash.result`, or recomputed through `get_hash()` in the block of `compareTo`) is compared with the stored one, and an exception is raised when they differ.
+  - Two `executeAfter` blocks (11.2), on `get_hash()` and on `compareTo`, so the check runs after every replacement and cannot be removed. Both start from the counter: at 0 nothing is done (the object is not a key, its hash can be anything); when it goes from 0 to 1 the hash is computed and stored; above 0 the hash (`get_hash.result`, or recomputed through `get_hash()` in the block of `compareTo`) is compared with the stored one, and an exception is raised when they differ.
   - The check runs only for `Keyable` objects: value-type keys (natives, strings, tuples of them) are never hashed again.
   - Each use of a key by a collection runs the check. A key that is already in the collection keeps the counter as it is; a new key is checked first and, if the check passes, it is added and the counter is incremented. The counter counts entries, not uses. Reading a missing key (`m[x]`) runs the check too, without incrementing, so a problem shows up as early as possible.
   - The stored hash is never cleared: at 0 it is overwritten at the next step from 0 to 1. Example: `Person p`, `m[p] = true`, remove `p` (counter 0), `p.age++`, `m[p] = true` (valid: technically a new key), `p.age++`, `m.tryGet(p)` raises the exception.
@@ -2359,10 +2380,10 @@ fun r64 average(Numeric first, Numeric second) { ... }
 ```
 
 - `Generic Name { types }` is a named set of types, computed at compile time. The members are built-in types, classes, traits or other sets. The name starts with an uppercase letter.
-- A set is declared at namespace level. Its visibility follows the other declarations: private by default, `public` or `internal` to expose it. Sets declared inside a class: open item (99).
+- A set is declared at namespace level. Its visibility follows the other declarations: private by default, `public` or `internal` to expose it. A set can also be declared inside a class, as any other type (`Shop.Payment` from outside, with the visibility of the declaration).
 - A class member means the class and all its subclasses (the code is checked with what the class guarantees). A trait member means every type implementing it.
 - A set is used as a constraint (`<Item : Numeric>`): every use of `Item` in one call is the same type. It can also be written directly as the type of a parameter (`Numeric first, Numeric second`): each argument is independent. Only the combinations that are actually called are generated.
-- As a constraint or as the type of a parameter, a set exists only at compile time: it names alternatives. `Box<Num>(x)` is a constructor call whose argument selects the member (11.3.9); `var b = Box<Num>(5.5)` is a `Box<r64>`. A set can also be the type of a value (11.3.6.1).
+- As a constraint or as the type of a parameter, a set exists only at compile time: it names alternatives. `Box<Num>(x)` is a constructor call whose argument selects the member (11.3.9); `var b = Box<Num>(5.5)` is a `Box<r64>`. A set can also be the type of a value (11.3.6.1). When the target is declared with the set as type argument (`Box<Num> b = Box<Num>(5)`, `arr<Num> a = [12, 12.0]`), the set is the type argument: the copy holds set values (tag and value), so members of different types can be mixed. Without a declared target the argument selects the member, which runs faster.
 - Operators and members are checked only where they are used, against every type that can reach the use. With `Generic Mixed { uns, char, string }`, the expression `first < second` in `fun Compare(Mixed first, Mixed second)` needs `<` between all combinations of the members.
 - The body of a generic class or function that receives a set is compiled once per member (or per combination); a branch that does not apply to the member is not compiled (11.3.7).
 
@@ -2439,7 +2460,7 @@ obj is ? {
 
 ### 11.3.8 Null in generic code
 
-- A set that contains a type that can be null forces the generic code to handle null: numbers with `?` (`i16?`), `date`, `time` and objects (classes).
+- A set follows the nullability of its members: a set that contains a type that can be null (numbers with `?` such as `i16?`, `date`, `time`, `clock`, `lapse`, `addr`, pointers, `string?`, objects) is nullable and forces the generic code to handle null; a set with no nullable member is not nullable.
 - `string` does not count: a null `string` always falls back to the empty string (7.1).
 - `T?` is not allowed in generic code. Nullable alternatives are listed in the set (`NullableSmallNums` in 11.3.6).
 
@@ -2465,7 +2486,7 @@ The value on the right is evaluated first. If it converts implicitly (section 6)
 
 ### 11.3.10 Classes inside generics
 
-- A `Box<Animal>` holds `Dog` and `Cat` objects as `Animal`: only the `Animal` members are visible, an `override` still runs the `Dog` version, and `v is Dog d` (11.1) gets the `Dog` back.
+- A `Box<Animal>` holds `Dog` and `Cat` objects as `Animal`: only the `Animal` members are visible, a `replace` still runs the `Dog` version, and `v is Dog d` (11.1) gets the `Dog` back.
 - A `Box<Dog>` is converted to `Box<Animal>` automatically, with the Rust model: the conversion moves the box and the original can no longer be used, so no one sees one box as two types.
 - The same holds for the collections: an owned `vec<Dog>` moves into a `vec<Animal>` (`vec<Animal> animals = ->dogs`); the items keep their class.
 - A read-only borrow converts too: a `vec<Dog>` (or a `Box<Dog>`) can be passed as a `vec<Animal>` parameter, because through it the items are only read. A writable borrow `&vec<Animal>` of a `vec<Dog>` is a compile error: it could put a `Cat` into it.
@@ -2542,7 +2563,7 @@ Rust model, Dflat syntax.
 | `&a` | a writable lend: `f(&a)`, `for &Task t in tasks` (13.1) |
 | `->a` | ownership moves: `Item b = ->a`, `f(->a)`, `list.add(->a)` |
 | `a!` | copy: a shortcut for `a.clone()` (12.6) |
-| `.clone()` | method: a deep copy that follows the kind of each field (12.6); overridable |
+| `.clone()` | method: a deep copy that follows the kind of each field (12.6); replaceable |
 | `.tryClone()` | method: like `.clone()`, raises `ObjectNotClonableException` when the object cannot be cloned (12.6) |
 | `@T name` | a reference counted object, read-only (Rust `Rc<T>`, 12.7) |
 | `&@T name` | a reference counted object, read/write, with a lock (12.7) |
@@ -2655,7 +2676,7 @@ function(->a.c)                    // a.c is null afterwards, a stays usable
 
 - `->a.c` moves a field out of an object (also chains such as `->a.c.d`). The field holds null afterwards and the object stays usable; its class `atEnd` sees the field as null. Using a variable after `->` raises `UsageOfDestroyedObjectException`, or is a compile error when the compiler can detect it: a move in the same block before the use (`take(->d)` then `d.name`), also `->rc` of a counted variable and `@plain`. A move inside a branch, a loop or another block is not certain after it. A new value (`d = Dog()`) makes the variable usable again, and `d == null` / `d != null` are allowed (the variable reads as null).
 - The owner of `a`, or a writable borrow `&A a`, can move a field out; a read-only borrow cannot (compile error).
-- `->` on a variable or field of a basic type is ignored and behaves like a plain copy; it is a level 1 warning (`i32 a; call(->a)` is the same as `call(a)`).
+- `->` on a variable or field of a basic type is ignored and behaves like a plain copy; it is a level 1 warning (`i32 a; call(->a)` is the same as `call(a)`). In generic code the warning fires only when every type that can reach the `->` is basic (`Generic W { i32, u64 }` warns; `Generic N { i32, MyObj }` does not).
 - Moving out of a stored field or property: a value is copied; an object is passed with its ownership and the field becomes null. If the property is computed (its `R` returns a new object that is not stored), `->` gives away that new object, which needs no owner here; the property value is nullified in every case (11.1.4). Collections: `->c[k]` (6.6).
 - Moving an object into a collection that owns its items needs `->` when the object already exists (`list[3] = ->task`, `list.add(->task)`, `insert`, `swap`); the plain form with an existing object is a compile error. An object created in the same statement needs no marker. Basic values are copied and need no marker (6.1); a string is always copied and the copy is shrunk (4).
 - Finalizer: `f is atEnd.` is a statement only, never an expression. The final dot is mandatory, and only a line break or `;` may follow it (`f is atEnd.close()` is a compile error).
@@ -2691,7 +2712,7 @@ any Shape s2 = shape.tryClone()               // a trait type needs tryClone
 public notclonable class File { }
 ```
 
-- `a!` is a shortcut for `a.clone()`. Every class is clonable by default; a class changes the behavior by overriding `clone()`, and an override can do anything.
+- `a!` is a shortcut for `a.clone()`. Every class is clonable by default; a class changes the behavior by replacing `clone()`, and a replacement can do anything.
 - The default `clone()` builds a new object and fills each field by its kind:
 
 | Field | In the clone |
@@ -3278,7 +3299,7 @@ class Exception {
 
 ### 15.3 Standard exceptions
 
-`Root.Exception` is the base; the standard ones are subclasses in `Root`.
+`Root.Exception` is the base; the standard ones are subclasses in `Root`. The default message of a standard exception is its name with the words separated, the word "Exception" included (`IndexOutOfRangeException` gives "Index Out Of Range Exception").
 
 | ID | Exception | Silent fallback |
 |---|---|---|
@@ -3366,7 +3387,7 @@ fun i64 useWithoutCatch(i64 a) {
 
 - `Panic(code)`: critical exit, not an exception; not catchable, no cleanup, exits with `code`.
 - Every panic prints `Panic <code>` on stdout and exits with `code`. An unhandled exception first prints its `message` on its own line.
-- Unhandled exception at the top level, unhandled error inside a catch body, an exception that is not silent leaving an `atEnd` block (15.7.6), an exception not caught inside a property accessor (11.1.4), an index outside a collection in a Release build (6.1), a change of the size of a collection with open iterators or views in a Release build (6.4), out of memory in a Release build (6.1), double free: exit with -1000 for now. Every panic case will get its own code later.
+- Unhandled exception at the top level, unhandled error inside a catch body, an exception that is not silent leaving an `atEnd` block (15.7.6), an exception not caught inside a property accessor (11.1.4), an index outside a collection in a Release build (6.1), a change of the size of a collection with open iterators or views in a Release build (6.4), out of memory in a Release build (6.1), double free: exit with -1000 for now. Every panic case may get its own code, not before 0.1.0.
 
 ### 15.6 Targets without exceptions
 
@@ -3685,30 +3706,17 @@ Level 1 = most important, level 3 = least.
 
 - Locale details
 - Date formatting week rules
-- Panic exit codes (all -1000 for now)
-- Whether standard messages keep the word "Exception"
-- Class destructor that throws (15.x)
-- Binding in generic checks (`T is i32`: type of `other` inside the branch)
-- Generics: `Generic` sets declared inside a class (for now namespace level only)
-- Generics: a variable declared with a set as type argument (`Box<Num> b`) and the type it takes
-- Generics: `where` on class and trait headers
-- Generics: whether `clock`, `lapse`, `addr` and pointers (nullable by default, 7.1) count as real nullables in a set, like `date`, `time` and objects (11.3.8)
-- Generics: whether the level 1 warning of `->` on a basic type (12.4) fires inside generic code
+- Panic exit codes (all -1000 for now; not before 0.1.0)
 - Generics: minimal intermediate form exported by compiled libraries for public generics (11.3.14), after 0.1.0
 - Stdlib: strings, files, time, collections extras (queue/stack)
-- Bitfields: whether `set`, `clear`, `setAs` and `toggle` modify the value in place or return a new value; nullability of bitfields (3.1.1, 7.1)
 - Collections: the members of `MapIterator` (the three sub-traits of `Iterator` are decided, 6.7; the index and set iterators are defined, 6.7.1, 6.7.3)
 - Collections: how a custom class receives literals (`[...]`, `[k: v]`) (`c[k]` is decided, 6.7; `+=` and `-=` call the members, 6.6)
 - Collections: views are read-only; revisit with tasks (6.5), the full Rust borrow model stays an option
 - Collections: shared C helpers against one copy per type (code size, 11.3.12); the B-tree (6.8.4.1) and the hash table (6.8.5.1) are decided
 - Collections: widening of the stuck buckets of `hmap` / `hset` (6.8.5.1)
-- Collections: the lifetime of a borrow of an item taken outside a `for` loop (`&c[k]`), which an insert or a delete can move
 - Collections: the other non-silent exceptions of the collection operations, to be formalized during the implementation (out of memory is decided, 6.1, 15.3)
-- Strings: borrowed strings in the advanced cases (who releases them, lifetimes across fields and collections)
-- Ownership: when a local borrow ends (last use or end of scope)
 - Reference counting: the order of the locks, waiting and deadlocks with threads; nested locking of the same `&@T`
 - Reference counting: generics with counted type arguments (`Stack<@Dog>`), after 0.1.0; the `Rc` / `Arc` split, with threads
-- Properties: position of `readonly` / `readwrite` / `writeonly` next to `public` and `static`, and their use together with a body (11.1.4); `override` of a property with only one half; access to a property through a trait-typed value (`any`), left to the compiler
 - DateTime library: import path, timezone database, parsing for `CalendarDate` / `ZonedDateTime`
 - Import paths of the standard library parts (`import stdrnd`)
 - Pointers: automatic bound for `*` on `arr` / `vec` / `list`; bound methods on unbounded pointers
@@ -3717,7 +3725,6 @@ Level 1 = most important, level 3 = least.
 - Function pointers (objects); C function tables (COM vtables, Vulkan dispatch tables)
 - C interop: calling conventions, callbacks, returned arrays, UTF-16 strings, `string?` as map keys and values and set items (7.1), ownership across the boundary, unions, bit flags, varargs (the minimal extern fun is in 15.9)
 - Deferred: async/await, locks/atomics, tasks, SIMD, EF syntax, Vulkan, shaders
-- `&T` results of values (13.1.1), counted properties (11.1.4), the checks of `unrestricted` (1.6.2), read-only borrowing locals: decided, not built
 - Borrow locks: borrows across functions and loops are not checked yet (method calls: 13.1.1)
 - Pointers: the exact way to convert `*T` to `&*T` in unsafe code, the syntax of the `unsafe` block and what it allows, handling of null pointers in safe code, which cases the compiler can prove valid, pointer equality, `.hash` and `toStr()`, and pointers in generics
 
@@ -4345,3 +4352,20 @@ Level 1 = most important, level 3 = least.
 - 99 Removed: variadic parameters, the name of the `Keyable` exception, the names of the limits
 - 12.4 Use after a move: a compile error when the move is certain (same block, before the use); a branch or a loop does not count; `x == null` is allowed
 - 12.7 `list<&@T>` of values: = and the compound operators on an item write its shared cell; static counted values; 13.1.1 `&@T` among several results; extern functions refuse counted parameters and results
+
+## Changes in 0.0.27
+
+- 3.1.1 Bitfield methods: a call whose result is used gives a new value, a single call written alone changes the variable in place; a chain written alone changes nothing (no error, no warning); in a read-only place the form written alone is a compile error; `Flags?` is a nullable bitfield (7.1)
+- 4 A field shares the string it is given (`k.label = a`); `a!` or `a.shrink()` stores a copy; when the original ends first the field gets its own copy, with a level 3 warning; collections store shrunk copies (6.1)
+- 7.2.6 `enforce timeout 500 expr`: one timeout for every lock of the expression form
+- 11.1.4 Property modifiers in any order, on the property (both accessors) or before one accessor; `readonly` with a `W:` block (the class can still write); `override` replaces the whole property
+- 11.2 A property read through a trait type runs the accessors of the class of the object
+- 11.3.6 Sets declared inside a class; a set as declared type argument holds set values (`arr<Num> a = [12, 12.0]`); 11.3.8 a set is nullable when one of its members is
+- 12.4 The level 1 warning of `->` on a basic type fires in generic code only when every type that can reach it is basic
+- 15.3 The default messages keep the word "Exception"; 15.5 panic exit codes stay -1000 until 0.1.0
+- 99 Removed: the decided items (bitfields, properties, generics, borrowed strings, standard messages, class destructor that throws, `enforce` timeout) and the items already built (borrows of items, the end of a local borrow, `&T` results, counted properties, `unrestricted` checks)
+
+## Changes in 0.0.28
+
+- The keyword `override` is renamed `replace` everywhere (methods and properties, from a parent class or a trait); `override` is no longer a reserved word (11.1, 11.1.4, 11.2 and the examples)
+- 11.2 A trait property without accessor blocks is a simple field in the class (nothing to implement, no `replace`); a class can replace a trait property (`field` is the storage of the trait, the replacement has the final word); a property no class replaces is a direct memory access, otherwise (and in compiled libraries) a call

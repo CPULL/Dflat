@@ -45,7 +45,7 @@ class Animal {
 }
 class Cat : Animal {
   public i32 lives = 9
-  override fun speak() { r.Console.log($"meow {lives}") }
+  replace fun speak() { r.Console.log($"meow {lives}") }
 }
 
 fun dynamicClone() {

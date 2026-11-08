@@ -1,2 +1,0 @@
-bitfield32 F { A: 0 }
-F? x

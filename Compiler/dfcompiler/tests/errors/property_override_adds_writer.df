@@ -1,0 +1,6 @@
+class Base {
+  public readonly i32 level { R: { field } }
+}
+class Child : Base {
+  replace public i32 level { W: { field = value } }
+}

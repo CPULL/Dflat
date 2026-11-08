@@ -12,7 +12,7 @@ trait Named {
 }
 
 public class Shape : Named {
-  override fun string Name() { "shape" }
+  replace fun string Name() { "shape" }
 }
 
 public class Circle : Shape {

@@ -1,1 +1,1 @@
-override_without_parent.df(1): error: 'size' overrides nothing: no function with this signature in a parent class or trait
+override_without_parent.df(1): error: 'size' replaces nothing: no function with this signature in a parent class or trait

@@ -1,0 +1,4 @@
+class Shop {
+  Generic Money { i32, r64 }
+}
+fun r64 twice(Shop.Money m) { (r64)m }

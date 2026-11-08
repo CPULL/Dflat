@@ -7,19 +7,19 @@ trait Container<Item> {
 }
 
 public class Names : Container<string> {
-  override fun string Get(u64 index) { "name" }
-  override fun u64 Size() { 1 }
+  replace fun string Get(u64 index) { "name" }
+  replace fun u64 Size() { 1 }
 }
 
 public class Numbers : Container<i32> {
-  override fun i32 Get(u64 index) { (i32)index * 10 }
-  override fun u64 Size() { 3 }
+  replace fun i32 Get(u64 index) { (i32)index * 10 }
+  replace fun u64 Size() { 3 }
 }
 
 public class Wrapper<Item>(Item held) : Container<Item> {
   public Item held
-  override fun Item Get(u64 index) { held }
-  override fun u64 Size() { 1 }
+  replace fun Item Get(u64 index) { held }
+  replace fun u64 Size() { 1 }
 }
 
 fun string first(Container<string> source) { source.Get(0) }

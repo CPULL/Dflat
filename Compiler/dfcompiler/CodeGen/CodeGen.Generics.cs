@@ -159,11 +159,61 @@ public sealed partial class CodeGen {
     return ps != null && ps.Children.Any(p => p.Children.Count > 0 && p.Children[0] is { Kind: "Type", Children.Count: 0 } type && IsSetName(type.Text!));
   }
 
+  // a set declared inside a class (spec 11.3.6) is a type of the class: it becomes the set Class.Name of the program, and the bare name
+  // inside the class refers to it. A set that is not public or internal is used only inside its class
+  void HoistClassSets(Node program) {
+    foreach (var type in program.Children.Where(child => child.Kind is "Class" or "Trait").ToList()) {
+      var body = type.Children.FirstOrDefault(child => child.Kind == "Block");
+      var sets = body?.Children.Where(child => child.Kind == "GenericSet").ToList() ?? new List<Node>();
+      foreach (var set in sets) {
+        string local = set.Text!;
+        string qualified = type.Text + "." + local;
+        body!.Children.Remove(set);
+        set.Text = qualified;
+        program.Children.Insert(program.Children.IndexOf(type), set);
+        RenameType(type, local, qualified);
+        var modsNode = set.Children.FirstOrDefault(child => child.Kind == "Mods");
+        var mods = modsNode?.Text?.Split(' ') ?? Array.Empty<string>();
+        if (modsNode != null) {
+          set.Children.Remove(modsNode);   // the members of the set are its only children
+        }
+        if (!mods.Contains("public") && !mods.Contains("internal") && FindTypeUse(program, type, qualified) is Node outside) {
+          throw Error($"the set '{qualified}' is private to {type.Text}: declare it public or internal to use it outside the class", outside);
+        }
+      }
+    }
+  }
+
+  static void RenameType(Node node, string from, string to) {
+    if (node is { Kind: "Type", Children.Count: 0 } && node.Text == from) {
+      node.Text = to;
+    }
+    foreach (var child in node.Children) {
+      RenameType(child, from, to);
+    }
+  }
+
+  static Node? FindTypeUse(Node node, Node skip, string name) {
+    if (node == skip) {
+      return null;
+    }
+    if (node is { Kind: "Type" } && node.Text == name) {
+      return node;
+    }
+    foreach (var child in node.Children) {
+      if (FindTypeUse(child, skip, name) is Node found) {
+        return found;
+      }
+    }
+    return null;
+  }
+
   // Generic sets and generic classes are registered before the classes are declared
   void RegisterGenerics(Node program) {
+    HoistClassSets(program);
     foreach (var statement in program.Children.Where(child => child.Kind == "GenericSet")) {
       string name = statement.Text!;
-      if (!char.IsUpper(name[0])) {
+      if (!char.IsUpper(name[(name.LastIndexOf('.') + 1)])) {
         throw Error($"the name of a set starts with an uppercase letter: '{name}'", statement);
       }
       if (PredefinedSets.ContainsKey(name)) {
@@ -515,6 +565,18 @@ public sealed partial class CodeGen {
     return null;
   }
 
+  // the level 1 warning of -> on a basic value (12.4) inside a copy of a generic: only when every type its type parameters can take is
+  // basic (Generic W { i32, u64 }); a parameter that can be an object (Generic N { i32, MyObj }, a trait, no constraint) needs the ->
+  bool GiftWarningApplies() {
+    var templateParams = currentFun?.TemplateParams
+      ?? (currentClass != null && classInstanceArgs.TryGetValue(currentClass.Name, out var instance) ? instance.Template.Params : null);
+    return templateParams == null || templateParams.All(OnlyBasicTypes);
+  }
+
+  bool OnlyBasicTypes(TypeParam param) =>
+    param.Constraints.Any(constraint => constraint is { Kind: "Type", Children.Count: 0 } && IsSetName(constraint.Text!)
+      && SetMembers(constraint.Text!).All(member => !IsClass(member) && !IsTraitType(member) && member != "string" && !IsArr(member) && !StructHoldsObjects(member)));
+
   // ---------------------------------------------------------------- generic classes
 
   // Stack<i32> as a type: the name of the copy of the class; a copy that does not exist yet makes the attempt start again
@@ -768,6 +830,7 @@ public sealed partial class CodeGen {
     generic.Copies++;
     sig.InstanceDepth = depth;
     sig.InstanceChain = depth == 1 ? mangled : chain;
+    sig.TemplateParams = generic.Params;
     // the copy is made while other code is being compiled: it is checked for exceptions and ownership on its own
     failingFuns.Add(sig);
     Classify(sig, new Dictionary<FunSig, int>());

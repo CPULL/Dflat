@@ -1,0 +1,9 @@
+top 0 changed
+box 5!
+given 9
+first 1
+second 2 / first 1
+outer 3
+outer 3?
+literal
+---- exit code 0 ----

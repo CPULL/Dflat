@@ -8,7 +8,7 @@ trait Named {
 }
 
 public class Dog(string label) : Named {
-  override fun string Name() { label }
+  replace fun string Name() { label }
 }
 
 fun r64 toReal(Convertible item) {

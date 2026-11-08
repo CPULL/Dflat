@@ -17,7 +17,7 @@ public sealed partial class CodeGen {
 public class hmap<K, V> : MapCollection<K, V> {
   u64 tree              // the table: a df_ht in the C (CodeGen.Hmap.cs)
 
-  override fun uns get_len() { this.tree_len() }
+  replace fun uns get_len() { this.tree_len() }
 
   // the clone (spec 12.6): a new hmap<K, V> with the entries copied (the same as add(this) into an empty one)
   public fun hmap<K, V> clone() {
@@ -26,7 +26,7 @@ public class hmap<K, V> : MapCollection<K, V> {
     return ->copy
   }
 
-  override fun bool has(V value) {
+  replace fun bool has(V value) {
     return this.tree_hasValue(value)
   }
 
@@ -98,7 +98,7 @@ public class hmap<K, V> : MapCollection<K, V> {
   }
 
   // all the entries go (spec 6.6): the size changes, so not while the map is iterated
-  override fun clear() {
+  replace fun clear() {
     checkUnlocked()
     this.tree_clear()
   }
@@ -181,7 +181,7 @@ public class hmapValues<K, V>(hmap<K, V> collection as parent) {
 public class hset<T> : SetCollection<T> {
   u64 tree              // the table: a df_ht in the C, values of 0 bytes
 
-  override fun uns get_len() { this.tree_len() }
+  replace fun uns get_len() { this.tree_len() }
 
   // the clone (spec 12.6): a new hset<T> with the entries copied (the same as add(this) into an empty one)
   public fun hset<T> clone() {
@@ -190,7 +190,7 @@ public class hset<T> : SetCollection<T> {
     return ->copy
   }
 
-  override fun bool has(T item) {
+  replace fun bool has(T item) {
     return this.tree_has(item)
   }
 
@@ -413,7 +413,7 @@ public class hset<T> : SetCollection<T> {
     return this.tree_take(item)
   }
 
-  override fun clear() {
+  replace fun clear() {
     checkUnlocked()
     this.tree_clear()
   }

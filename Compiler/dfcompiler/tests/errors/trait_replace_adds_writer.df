@@ -1,0 +1,6 @@
+trait Sized {
+  public readonly u32 count
+}
+class Bag : Sized {
+  replace public u32 count { W: { field = value } }
+}

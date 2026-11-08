@@ -6,7 +6,7 @@ trait Named {
 }
 
 public class Dog(string label) : Named {
-  override fun string Name() { label }
+  replace fun string Name() { label }
 }
 
 public class Holder<Item, Count>(->Item first) where Item : Named, Count : Integers {

@@ -357,9 +357,6 @@ public sealed partial class CodeGen {
         if (IsNullable(inner)) {
           throw Error($"'{inner}' is already nullable", n);
         }
-        if (IsBitfield(inner)) {
-          throw Error("a bitfield cannot be nullable (not decided yet, spec 3.1.1)", n);
-        }
         return inner + "?";
       }
       case "TupleType": {

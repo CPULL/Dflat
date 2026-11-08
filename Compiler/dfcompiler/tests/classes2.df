@@ -59,7 +59,7 @@ public class Base {
   unrestricted fun i32 Run(i32 n) { 10 / n }
 }
 public class Derived : Base {
-  override fun i32 Run(i32 n) { 20 / n }
+  replace fun i32 Run(i32 n) { 20 / n }
 }
 
 fun i32 tryDivider(i32 by) {

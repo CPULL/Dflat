@@ -143,10 +143,7 @@ public sealed partial class CodeGen {
         case "Decl": {
           var (visibility, _, isStatic, isConst, isOverride) = ReadMods(member);
           if (isStatic || isConst || isOverride) {
-            throw Error("a trait property cannot be static, const or override", member);
-          }
-          if (ModsOf(member).Contains("readonly")) {
-            throw NotSupported("readonly in traits (a property the class must provide, read only)", member);
+            throw Error("a trait property cannot be static, const or replace", member);
           }
           if (ModsOf(member).Any(mod => mod is "asparent" or "unrestricted")) {
             throw Error("'asparent' and 'unrestricted' apply to functions", member);
@@ -169,10 +166,17 @@ public sealed partial class CodeGen {
             throw Error($"the property '{member.Text}' is already declared in {trait.Name} or its parent trait", member);
           }
           // private (no keyword, spec 1.6.1): only the code of the trait and, read-only, its sub-traits (spec 11.2)
-          trait.Fields.Add(new FieldInfo(member.Text!, ResolveType(typeNode), trait, member) {
+          var traitField = new FieldInfo(member.Text!, ResolveType(typeNode), trait, member) {
             Visibility = visibility,
-            Init = init?.Children[0]
-          });
+            Init = init?.Children[0],
+            IsReadOnly = ModsOf(member).Contains("readonly")   // a simple field: the trait and its classes write it, the others read it (spec 11.2)
+          };
+          if (member.Children.FirstOrDefault(child => child.Kind == "Property") is Node replacedProperty) {
+            traitField.HasAccessors = true;   // a class replaces it: read and written through get_ and set_ (spec 11.2)
+            traitField.CanRead = replacedProperty.Text!.Contains('r');
+            traitField.CanWrite = replacedProperty.Text!.Contains('w');
+          }
+          trait.Fields.Add(traitField);
           break;
         }
         case "Constructor": {
@@ -209,7 +213,7 @@ public sealed partial class CodeGen {
         throw Error("a trait function cannot be static", member);
       }
       if (isOverride) {
-        throw NotSupported("A trait that overrides a function of its parent trait", member);
+        throw NotSupported("A trait that replaces a function of its parent trait", member);
       }
       if (member.Text == "==") {
         throw NotSupported("The equality operator (fun bool ==(V o))", member);
@@ -224,6 +228,7 @@ public sealed partial class CodeGen {
       var f = RegisterFun(member, null, trait)!;
       f.Class = trait;
       f.IsAbstract = member.Children.Any(child => child.Kind == "NoBody");
+      f.IsAccessor = member.Children.Any(child => child.Kind == "AccessorFun");   // the default accessors of a replaced property (spec 11.2)
       f.Visibility = visibility;   // private (no keyword, spec 1.6.1): only the trait, its sub-traits and the class that implements it
       f.IsAsParent = mods.Contains("asparent");
       f.IsUnrestricted = mods.Contains("unrestricted");
@@ -246,7 +251,7 @@ public sealed partial class CodeGen {
   //   __impl_m(params): what the class implements (its body is the default body of m, if any); private
   //   m(params) { B; var __result = __impl_m(params); A; return __result }: the default of the trait, the only m there is
   // so B and A run on every call of m, cannot be overridden, and A runs only when the implementation succeeded. The class writes
-  // 'override fun m', which RegisterMethods turns into __impl_m. Returns the node of __impl_m.
+  // 'replace fun m', which RegisterMethods turns into __impl_m. Returns the node of __impl_m.
   Node SplitExecuteBlocks(ClassInfo trait, Node member) {
     string name = member.Text!;
     if (member.Children.Any(child => child.Kind == "GenericParams")) {

@@ -1,0 +1,1 @@
+property_override_plain_field.df(5): error: 'replace' on 'level': no parent class has a property 'level' with accessor blocks (spec 11.1.4)

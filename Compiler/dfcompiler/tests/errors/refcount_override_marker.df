@@ -4,5 +4,5 @@ trait Keeper {
   public fun keep(@Dog d)
 }
 class Kennel : Keeper {
-  override fun keep(&@Dog d) { }
+  replace fun keep(&@Dog d) { }
 }

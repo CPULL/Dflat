@@ -49,6 +49,9 @@ public sealed partial class CodeGen {
     if (!InUnrestrictedMethod || chosen.IsStatic || chosen.IsUnrestricted || ParentReceiver(receiverCode) != null) {
       return;
     }
+    if (chosen.IsAccessor && name.StartsWith("get_")) {
+      return;   // reading a property (its R:) is a read (spec 1.6.2, 11.1.4)
+    }
     if (!(receiverCode == "self" || receiverCode.Contains("self->") || receiverCode.Contains("(self)"))) {
       return;
     }

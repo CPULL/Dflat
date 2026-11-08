@@ -1,0 +1,5 @@
+class A {
+  public readonly i32 size { W: { field = value } }
+}
+A a = A()
+a.size = 4

@@ -1,0 +1,1 @@
+bitfield_inplace_const.df(3): error: 'fixed' is const

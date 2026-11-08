@@ -1,0 +1,6 @@
+class Base {
+  public i32 level
+}
+class Child : Base {
+  replace public i32 level { R: { field + 1 } }
+}

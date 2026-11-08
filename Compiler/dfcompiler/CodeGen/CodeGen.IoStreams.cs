@@ -72,23 +72,23 @@ public class FileStream(string path, Root.IO.StreamReadWriteAccessMode readMode,
     return count
   }
 
-  override fun Root.IO.StreamReadWriteAccessMode get_readMode() { readMode }
-  override fun Root.IO.StreamReadWriteAccessMode get_writeMode() { writeMode }
-  override fun Root.IO.StreamOpenMode get_openMode() { openMode }
-  override fun bool get_canRead() { handle != 0 && readMode != Root.IO.StreamReadWriteAccessMode.None }
-  override fun bool get_canWrite() { handle != 0 && writeMode != Root.IO.StreamReadWriteAccessMode.None }
-  override fun bool get_canSeek() { handle != 0 }
-  override fun bool get_hasLength() { handle != 0 }
-  override fun u64 get_position() {
+  replace fun Root.IO.StreamReadWriteAccessMode get_readMode() { readMode }
+  replace fun Root.IO.StreamReadWriteAccessMode get_writeMode() { writeMode }
+  replace fun Root.IO.StreamOpenMode get_openMode() { openMode }
+  replace fun bool get_canRead() { handle != 0 && readMode != Root.IO.StreamReadWriteAccessMode.None }
+  replace fun bool get_canWrite() { handle != 0 && writeMode != Root.IO.StreamReadWriteAccessMode.None }
+  replace fun bool get_canSeek() { handle != 0 }
+  replace fun bool get_hasLength() { handle != 0 }
+  replace fun u64 get_position() {
     requireOpen()
     return Root.IO.Native.StreamPosition(handle)
   }
-  override fun u64 get_length() {
+  replace fun u64 get_length() {
     requireOpen()
     return Root.IO.Native.StreamLength(handle)
   }
 
-  override fun u64? read(arr<u8> buffer, u64 start = 0, u64 length = 18446744073709551615ul, u64 readAtLeast = 0) {
+  replace fun u64? read(arr<u8> buffer, u64 start = 0, u64 length = 18446744073709551615ul, u64 readAtLeast = 0) {
     requireOpen()
     if readMode == Root.IO.StreamReadWriteAccessMode.None then throw StreamModeNotAllowedException("The read mode is None")
     u64 count = span(buffer.len, start, length, readAtLeast)
@@ -97,7 +97,7 @@ public class FileStream(string path, Root.IO.StreamReadWriteAccessMode readMode,
     if got < 0 then return null
     return (u64)got
   }
-  override fun u64 write(arr<u8> buffer, u64 start = 0, u64 length = 18446744073709551615ul, u64 writeAtLeast = 0) {
+  replace fun u64 write(arr<u8> buffer, u64 start = 0, u64 length = 18446744073709551615ul, u64 writeAtLeast = 0) {
     requireOpen()
     if writeMode == Root.IO.StreamReadWriteAccessMode.None then throw StreamModeNotAllowedException("The write mode is None")
     u64 count = span(buffer.len, start, length, writeAtLeast)
@@ -105,7 +105,7 @@ public class FileStream(string path, Root.IO.StreamReadWriteAccessMode readMode,
     File.check(path)
     return (u64)put
   }
-  override fun u8? readByte() {
+  replace fun u8? readByte() {
     requireOpen()
     if readMode == Root.IO.StreamReadWriteAccessMode.None then throw StreamModeNotAllowedException("The read mode is None")
     i32 value = Root.IO.Native.StreamReadByte(handle)
@@ -113,26 +113,26 @@ public class FileStream(string path, Root.IO.StreamReadWriteAccessMode readMode,
     if value < 0 then return null
     return (u8)value
   }
-  override fun bool writeByte(u8 value) {
+  replace fun bool writeByte(u8 value) {
     requireOpen()
     if writeMode == Root.IO.StreamReadWriteAccessMode.None then throw StreamModeNotAllowedException("The write mode is None")
     bool written = Root.IO.Native.StreamWriteByte(handle, value)
     File.check(path)
     return written
   }
-  override fun u64 seek(i64 position, Root.IO.StreamSeekOrigin origin) {
+  replace fun u64 seek(i64 position, Root.IO.StreamSeekOrigin origin) {
     requireOpen()
     u64 moved = Root.IO.Native.StreamSeek(handle, position, (i32)origin)
     u64 silent = File.check(path)
     if silent == 32 then throw SeekBeforeBeginException("Seek before the start of the stream")
     return moved
   }
-  override fun flush(bool forcePhysical = false) {
+  replace fun flush(bool forcePhysical = false) {
     requireOpen()
     Root.IO.Native.StreamFlush(handle, forcePhysical)
     File.check(path)
   }
-  override fun close() {
+  replace fun close() {
     if handle == 0 then return
     u64 closing = handle
     handle = 0

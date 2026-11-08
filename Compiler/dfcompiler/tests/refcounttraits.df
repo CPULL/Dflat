@@ -9,14 +9,14 @@ trait Animal {
 class Dog(string name) : Animal {
   public string name
   public i32 tricks
-  override fun string sound() { "woof" }
+  replace fun string sound() { "woof" }
   public fun learn() { tricks++ }
 } atEnd {
   r.Console.log($"{name} ends")
 }
 
 class Cat : Animal {
-  override fun string sound() { "meow" }
+  replace fun string sound() { "meow" }
 } atEnd {
   r.Console.log("cat ends")
 }

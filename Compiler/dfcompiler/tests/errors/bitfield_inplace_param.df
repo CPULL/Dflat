@@ -1,0 +1,4 @@
+bitfield8 Flags { One: 0 }
+fun touch(Flags f) {
+  f.set(Flags.One)
+}

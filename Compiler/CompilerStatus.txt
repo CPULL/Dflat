@@ -1,4 +1,4 @@
-Compiler version 0.0.78 alpha for version 0.0.24 of the specs 2026/11/07
+Compiler version 0.0.82 alpha for version 0.0.28 of the specs 2026/11/08
 
 Changes from the previous version -----------------------
 - tuple items by index (spec 3.2): t[1], t[SECOND] (a const), t[Slot.Second] (an enum value), read and assigned (t[0] = v, t[2] += x); nested (pairs[2][1]); a variable index or one out of range is a compile error (was "feature not supported: Collections")
@@ -55,6 +55,13 @@ Changes from the previous version -----------------------
 - ModifiedObjectUsedAsKeyException (52) declared (spec 15.3); nothing raises it until Keyable is built
 - variadic parameters (spec 13.4): at most one, no default, never named in a call, no @ % & markers, T not a collection; an arr, a vec or a view of one given alone is lent whole (a vec is locked during the call), a list is an error that points to transformTo<arr>(), items and a collection cannot be mixed; objects are lent, not moved; a non-variadic overload wins
 - limits of the generated copies (spec 11.3.12, Compiler_Options.md): --max-<vec|list|map|hmap|set|hset>-chain-depth / -copies (default 16 / 64; bmap and bset are aliases), --max-customcollection-chain-depth / -copies (16 / 16), --max-chain-depth / --max-copies (16 / 16), 1 to 256; the same keys without -- in .dsprj; arr has no limit
+- bitfields (spec 3.1.1): f.set(Flags.Two) written alone changes f (a chain alone changes nothing); the form alone is an error on a const or a plain parameter; Flags? is a nullable bitfield
+- enforce timeout 500 expr (spec 7.2.6): one wait for every lock of the expression form
+- properties (spec 11.1.4): readonly with a W: block (read from outside, written by the class); override of a parent class property replaces it whole (an accessor not written takes its default), reads through the parent type dispatch
+- a Generic set declared inside a class (spec 11.3.6), Class.Name from outside (public or internal); the -> warning in generic code only when every type of the type parameters is basic (spec 12.4)
+- a field shares the string it is given (spec 4): k.label = a with a local that owns its string; a change through a is seen through the field, the field keeps the text when a ends (level 3 warning in functions), k is locked until the last use of a; a parameter, a C string or an object of an inner scope still takes a copy
+- the keyword override is now replace (spec 11.1, 0.0.28): replace fun, replace public i32 level { ... }; override is a plain name; replace is a modifier only before a declaration, so c.replace(i, v) still works
+- a class can replace a trait property (spec 11.2): replace public i32 sides { R: { field + 1 } }; the code of the trait and the reads through the trait type then call the accessors of the class of the object, a trait property no class replaces stays a direct memory access; readonly trait properties (a simple field: the trait and its classes write it)
 
 Done -----------------------
 

@@ -1,0 +1,1 @@
+property_readonly_writer_outside.df(5): error: 'size' cannot be assigned here: its W: is private

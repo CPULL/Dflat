@@ -8,7 +8,7 @@ public class Plain(i32 id) {
 // equals with several types of the right side
 public class Number {
   public i32 value = 0
-  override fun bool equals(T other) {
+  replace fun bool equals(T other) {
     if T is int then return value == other
     if T is string then return value == (i32)other.len
     if T is Number {
@@ -22,7 +22,7 @@ public class Number {
 public class Child : Number {
 }
 public class Odd : Number {
-  override fun bool equals(T other) {
+  replace fun bool equals(T other) {
     if T is Number then return true
     return false
   }

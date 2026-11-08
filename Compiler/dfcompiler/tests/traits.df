@@ -16,16 +16,16 @@ trait Shape : Named {
 
 public class Square : Shape {
   public r64 side = 2.0
-  override fun string Label() { "square" }
-  override fun r64 Area() { side * side }
+  replace fun string Label() { "square" }
+  replace fun r64 Area() { side * side }
   public fun SetName(string n) { name = n }
 }
 
 public class Circle : Shape {
   public r64 radius = 1.0
-  override fun string Label() { "circle" }
-  override fun r64 Area() { 3.0 * radius * radius }
-  override fun string Hello() { "Hello from the circle" }
+  replace fun string Label() { "circle" }
+  replace fun r64 Area() { 3.0 * radius * radius }
+  replace fun string Hello() { "Hello from the circle" }
 }
 
 public class Base {
@@ -37,7 +37,7 @@ public class Derived : Base, Named {
 }
 
 public class Loud : Square {
-  override fun string Label() { "LOUD" }
+  replace fun string Label() { "LOUD" }
 }
 
 // values of a trait type: dynamic dispatch

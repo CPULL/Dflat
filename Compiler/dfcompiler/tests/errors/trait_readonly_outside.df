@@ -1,0 +1,6 @@
+trait Sized {
+  public readonly u32 count
+}
+class Bag : Sized { }
+Bag b = Bag()
+b.count = 3

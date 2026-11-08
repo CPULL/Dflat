@@ -1,0 +1,3 @@
+bitfield8 Flags { One: 0 }
+const Flags fixed = Flags.One
+fixed.clear(Flags.One)

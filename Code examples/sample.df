@@ -87,11 +87,11 @@ trait Shape : Named {
 public class Circle(r64 radius) : root.Class, Shape {
   public Circle() : Circle(1.0), Named("circle")
 
-  public override fun r64 Area() {
+  public replace fun r64 Area() {
     return r.Math.PI * radius * radius
   }
 
-  public override fun string Label() { "circle" }
+  public replace fun string Label() { "circle" }
 }
 
 public class Px(i32 a, i32 b) {

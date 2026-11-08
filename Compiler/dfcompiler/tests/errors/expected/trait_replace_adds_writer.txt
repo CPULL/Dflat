@@ -1,0 +1,1 @@
+trait_replace_adds_writer.df(5): error: the replacement of 'count' cannot add a W: block: the parent's property has none

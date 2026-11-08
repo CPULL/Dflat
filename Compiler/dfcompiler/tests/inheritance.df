@@ -1,4 +1,4 @@
-// Classes, phase 2: single inheritance, override, parent., virtual calls, is, upcasts, inherited statics
+// Classes, phase 2: single inheritance, replace, parent., virtual calls, is, upcasts, inherited statics
 alias Root as r
 
 public class Shape {
@@ -13,20 +13,20 @@ public class Shape {
 
 public class Circle : Shape {
   public r64 radius = 2.0
-  override fun string Kind() { "circle" }
-  override fun r64 Area() { 3.0 * radius * radius }
+  replace fun string Kind() { "circle" }
+  replace fun r64 Area() { 3.0 * radius * radius }
   public fun r64 Radius() { radius }
 }
 
 public class Ring(r64 hole) : Circle {
   i32 depth = 2
-  override fun ->string Kind() { "ring/" + parent.Kind() }
+  replace fun ->string Kind() { "ring/" + parent.Kind() }
   public fun i32 Depth() { depth }
 }
 
 public class Square : Shape {
   public r64 side = 2.0
-  override fun r64 Area() { side * side }
+  replace fun r64 Area() { side * side }
 }
 
 // virtual calls through the parent type

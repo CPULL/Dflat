@@ -1,0 +1,13 @@
+One / None
+Two
+One
+Three
+Three
+lent: Three, still Three
+Two
+[None, One]
+One | Two
+null
+One
+true
+---- exit code 0 ----

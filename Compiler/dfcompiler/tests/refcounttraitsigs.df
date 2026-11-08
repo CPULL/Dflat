@@ -14,17 +14,17 @@ trait Keeper {
 }
 class Kennel : Keeper {
   @Dog kept
-  override fun keep(@Dog d) { kept = d }
-  override fun @Dog favourite() { kept }
-  override fun bump(&@i32 n) { enforce n { n += 1 } }
+  replace fun keep(@Dog d) { kept = d }
+  replace fun @Dog favourite() { kept }
+  replace fun bump(&@i32 n) { enforce n { n += 1 } }
 }
 class Base {
   public fun @i32 score() { 1 }
   public fun take(@Dog d) { r.Console.log($"base takes {d.name}") }
 }
 class Child : Base {
-  override fun @i32 score() { 2 }
-  override fun take(@Dog d) { r.Console.log($"child takes {d.name}, users {d.usersCount}") }
+  replace fun @i32 score() { 2 }
+  replace fun take(@Dog d) { r.Console.log($"child takes {d.name}, users {d.usersCount}") }
 }
 fun f() {
   @Dog rex = Dog("Rex")

@@ -488,6 +488,9 @@ public sealed partial class CodeGen {
         p.Children[0] = p.Children[0].Children[0];
       }
       string paramType = ResolveType(p.Children[0]);
+      if (IsSetValue(paramType) && cls != null && !classInstanceArgs.ContainsKey(cls.Name) && funNode.Line < LibraryLine && p.Children[0] is { Kind: "Type" } setNode && setNode.Text == paramType) {
+        throw NotSupported("A set as the type of a parameter of a method (one copy per type: a generic method, spec 11.3.6)", p);
+      }
       bool variadic = p.Kind == "VariadicParam";
       if (variadic) {
         CheckVariadicParam(p, paramType);   // spec 13.4
@@ -1449,6 +1452,11 @@ public sealed partial class CodeGen {
       if (variable.IsWeak && !countedFieldWrite) {
         throw Error($"'{target.Text}' is a weak reference: use it through enforce {target.Text} {{ }} else {{ }} (spec 12.7)", target);
       }
+      if (variable is { IsParam: true, Own: false, IsWeak: false } && !variable.CName.StartsWith("(*") && !LibraryCode
+          && !IsClass(variable.Type) && !IsArr(variable.Type) && variable.Type is not ("string" or "string?") && !IsStruct(variable.Type)) {
+        // a plain parameter of a value lends it read-only, also numbers, bool, char, enums, bitfields (spec 13.1)
+        throw Error($"'{target.Text}' is a plain parameter: it is read-only (spec 13.1); copy it into a local ({DisplayName(variable.Type)} v = {target.Text}) or take &{DisplayName(variable.Type)} {target.Text}", target);
+      }
       return new LValueInfo(variable.CName, variable.Type, variable.IsConst, variable);
     }
     if (target.Kind == "Call" && ExprOf(target, scope) is { } lentPlace && lentPlace.Code.StartsWith("(*")
@@ -1604,6 +1612,12 @@ public sealed partial class CodeGen {
 
   // a string says whether it is new (CodeGen.Strings.cs)
   Expr ExprOf(Node n, Scope scope, string? expected = null) {
+    if (expected != null && IsSetValue(expected) && SetValueLiteral(n, scope, expected) is Expr setLiteral) {
+      return setLiteral;   // Nums k = 5 (spec 11.3.6.1)
+    }
+    if (expected != null && n.Kind == "Call" && classInstanceArgs.TryGetValue(expected, out var declaredInstance) && declaredInstance.Args.Any(IsSetValue)) {
+      declaredSetTarget = expected;   // Box<Num> b = Box<Num>(5): the copy keeps the set (spec 11.3.6)
+    }
     var e = ExprOfNode(n, scope, expected);
     e = EnforceSourceCall(n, e);
     if (IsFunType(e.Type) && n.Kind == "Call") {
@@ -2167,6 +2181,9 @@ public sealed partial class CodeGen {
   }
 
   Expr Combine(string op, Expr l, Expr r, Node at) {
+    if ((IsSetValue(l.Type) || IsSetValue(r.Type)) && op is not ("==" or "!=")) {
+      throw Error($"no operator works directly on a value of a set: read it with if k is T x {{ }} or k is ? {{ }} (spec 11.3.6.1)", at);
+    }
     // string building
     if (op == "+" && (l.Type is "string" or "char" || r.Type is "string" or "char")) {
       return new Expr($"df_str_concat({StrReadOf(l, at)}, {StrReadOf(r, at)})", "string", true);

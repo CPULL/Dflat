@@ -186,6 +186,9 @@ public sealed partial class CodeGen {
   }
 
   string CType(string type) {
+    if (IsSetValue(type)) {
+      return SetValueCType();   // spec 11.3.6.1
+    }
     if (IsValueLend(type)) {
       return CType(type[1..]) + "*";   // a &T result of a value: the address of the place (spec 13.1.1)
     }
@@ -275,6 +278,9 @@ public sealed partial class CodeGen {
 
   // value of a declared variable without initializer
   string ZeroValue(string type) {
+    if (IsSetValue(type)) {
+      return $"(({SetValueCType()}){{ 0, 0u }})";   // the zero of the first member
+    }
     if (IsValueLend(type)) {
       return "NULL";
     }
@@ -426,7 +432,7 @@ public sealed partial class CodeGen {
           return ClassInstanceName(genericClass, TypeArgsOf(n.Children, genericClass.Params), n);
         }
         if (IsSetName(t)) {
-          throw Error($"'{t}' is a set: it names alternatives at compile time and is not a type of values; use it as a constraint or as the type of a parameter (11.3.6)", n);
+          return t;   // a set as the type of a value: a closed union (spec 11.3.6.1)
         }
         if (n.Children.Count > 0) {
           throw Error($"'{t}' is not generic", n);
@@ -515,6 +521,15 @@ public sealed partial class CodeGen {
   string Convert(Expr e, string to, Node at) {
     if (e.Type == to) {
       return e.Code;
+    }
+    if (IsSetValue(e.Type) && !LibraryCode) {
+      throw Error($"a value of the set {DisplayName(e.Type)} is read with if k is T x {{ }} or k is ? {{ }} (spec 11.3.6.1)", at);
+    }
+    if (IsSetValue(to) && e.Type == "null") {
+      throw Error($"the set {DisplayName(to)} has no nullable member: its values are never null (spec 11.3.6.1)", at);
+    }
+    if (IsSetValue(to)) {
+      return WrapSetValue(e, to, at).Code;   // Nums k = count (spec 11.3.6.1)
     }
     if (IsStruct(e.Type) && (IsTuple(to) || IsMulti(to))) {
       return StructToTupleCode(e, to, at);   // a struct converts to a tuple (spec 11.1.5.8)
@@ -686,6 +701,9 @@ public sealed partial class CodeGen {
   }
 
   string StrOf(Expr e, Node at) {
+    if (IsSetValue(e.Type)) {
+      return SetValueStr(e, at);
+    }
     if (IsStruct(e.Type)) {
       return $"{StructPrinter(structs[e.Type])}({TempStruct(e).Code})";   // Vec3 { x: 1, y: 2, z: 3 } (spec 11.1.5.9)
     }
@@ -791,6 +809,9 @@ public sealed partial class CodeGen {
 
   // C bool expression for l == r. Null equals only null.
   string EqualsCode(Expr l, Expr r, Node at) {
+    if (IsSetValue(l.Type) || IsSetValue(r.Type)) {
+      return SetValueEquals(l, r, at);   // spec 11.3.6.1
+    }
     if (IsStruct(l.Type) || IsStruct(r.Type)) {
       return StructEquals(l, r, at);   // field by field (spec 11.1.5.9)
     }

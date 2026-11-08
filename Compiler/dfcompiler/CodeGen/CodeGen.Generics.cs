@@ -626,6 +626,9 @@ public sealed partial class CodeGen {
     return args;
   }
 
+  // set by ExprOf for a constructor call whose declared target has a set as type argument (Box<Num> b = Box<Num>(5))
+  string? declaredSetTarget;
+
   // Stack<i32> written in an expression (a constructor call or a static member): the copy of the class.
   // Box<Num>(x): a set as type argument is replaced by the member the argument of the constructor selects (11.3.9)
   string? GenericRefClass(Node reference, List<Node>? constructorArgs = null, Scope? scope = null) {
@@ -633,6 +636,14 @@ public sealed partial class CodeGen {
       return null;
     }
     var written = reference.Children.Skip(1).ToList();
+    if (HasSetArg(reference) && declaredSetTarget is string declared) {
+      declaredSetTarget = null;
+      string kept = ClassInstanceName(generic, TypeArgsOf(written, generic.Params), reference);
+      if (kept == declared) {
+        return kept;   // the target is declared with the set: the copy holds set values (spec 11.3.6)
+      }
+    }
+    declaredSetTarget = null;
     if (HasSetArg(reference)) {
       if (constructorArgs == null || scope == null) {
         throw Error($"a set as a type argument needs a constructor call that gives the value, as in {generic.Name}<Set>(value) (11.3.9)", reference);
@@ -760,6 +771,9 @@ public sealed partial class CodeGen {
   // value is ? { Numeric: a, string: b, default: c }: the first case that matches the type of the value is the only one compiled
   Expr TypeSwitch(Node n, Scope scope, string? expected) {
     var subject = ExprOf(n.Children[0], scope);
+    if (IsSetValue(subject.Type)) {
+      return SetTypeSwitch(n, subject, scope, expected);   // chosen at run time by the tag (spec 11.3.6.1)
+    }
     string type = subject.Type;
     Node? chosen = null;
     bool sawDefault = false;

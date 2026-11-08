@@ -1,0 +1,2 @@
+Generic Nums { i32, u64, u8 }
+Nums k = 5

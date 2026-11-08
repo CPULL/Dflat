@@ -1,4 +1,4 @@
-Compiler version 0.0.82 alpha for version 0.0.28 of the specs 2026/11/08
+Compiler version 0.0.85 alpha for version 0.0.29 of the specs 2026/11/08
 
 Changes from the previous version -----------------------
 - tuple items by index (spec 3.2): t[1], t[SECOND] (a const), t[Slot.Second] (an enum value), read and assigned (t[0] = v, t[2] += x); nested (pairs[2][1]); a variable index or one out of range is a compile error (was "feature not supported: Collections")
@@ -62,6 +62,9 @@ Changes from the previous version -----------------------
 - a field shares the string it is given (spec 4): k.label = a with a local that owns its string; a change through a is seen through the field, the field keeps the text when a ends (level 3 warning in functions), k is locked until the last use of a; a parameter, a C string or an object of an inner scope still takes a copy
 - the keyword override is now replace (spec 11.1, 0.0.28): replace fun, replace public i32 level { ... }; override is a plain name; replace is a modifier only before a declaration, so c.replace(i, v) still works
 - a class can replace a trait property (spec 11.2): replace public i32 sides { R: { field + 1 } }; the code of the trait and the reads through the trait type then call the accessors of the class of the object, a trait property no class replaces stays a direct memory access; readonly trait properties (a simple field: the trait and its classes write it)
+- a plain parameter of a value (numbers, bool, char, enums, bitfields, dates, function values ...) is read-only (spec 13.1): x = 3, x += 1, x++ and &x are compile errors; copy it into a local or take &T x
+- set values, stage 1 (spec 11.3.6.1): a set as the type of a variable, a field, a result or an item of arr / vec / list (Nums k = 5b, arr<Num> a = [12, 12.0]); members: numbers up to 64 bits, bool, char, enums, bitfields; a member converts implicitly, a literal follows the rule of 11.3.6.1; read with if k is T x { }, k is T and k is ? { T x: ... } (chosen at run time, every member covered or default); == compares tag and value; Box<Num> b = Box<Num>(5) keeps the set when the target is declared with it. Not yet: strings, objects, tuples, nullable and wide members, hash, order and keys
+- set values (spec 11.3.6.1, 0.0.29): a value never assigned is the generic null (prints null, is is false, k == null is false with no nullable member, k = null is an error); a type switch on it goes to default or raises UnassignedTypeException (53); printing calls the toStr of the member type
 
 Done -----------------------
 

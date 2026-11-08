@@ -1,0 +1,1 @@
+param_plain_value_write.df(2): error: 'x' is a plain parameter: it is read-only (spec 13.1); copy it into a local (i32 v = x) or take &i32 x

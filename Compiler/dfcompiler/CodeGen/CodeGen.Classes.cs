@@ -1892,6 +1892,9 @@ public sealed partial class CodeGen {
     }
     // a value that is not an object (the other of equals when T is a number): the answer is known now
     var peek = ExprOf(n.Children[0], scope);
+    if (IsSetValue(peek.Type)) {
+      return new Expr($"(({peek.Code}).tag == {SetMemberTag(peek.Type, n.Children[1], n)}u)", "bool");   // k is i32 (spec 11.3.6.1)
+    }
     if (!IsClass(peek.Type) && peek.Type != "Exception") {
       return new Expr(peek.Type == ResolveType(n.Children[1]) ? "true" : "false", "bool");
     }
@@ -1942,6 +1945,10 @@ public sealed partial class CodeGen {
     }
     if (!LibraryCode && WeakRef(n.Children[0], scope) is CountedRefInfo weak) {
       return WeakIsBinding(n, weak, scope);
+    }
+    if (ExprOf(n.Children[0], scope) is { } setSubject && IsSetValue(setSubject.Type)) {
+      var (setCondition, setScope) = SetIsBinding(n, setSubject, scope);   // if k is i32 i { } (spec 11.3.6.1)
+      return (setCondition, setScope, null);
     }
     var (condition, inner) = PlainIsBinding(n, scope);
     return (condition, inner, null);

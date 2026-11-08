@@ -1917,12 +1917,16 @@ public sealed class Parser {
     bool saved = noBrace;
     noBrace = false;
     var pending = new List<Node>();
+    string? binding = null;
     SkipNewlines();
     while (!IsOp("}")) {
       if (AtEnd) {
         throw ErrorAt("unclosed '{'", open);
       }
       pending.Add(IsKw("default") ? new Node("Default", Next()) : ParseType(false));
+      if (Peek.Kind == TokenKind.Ident && PeekAt(1).Is(":")) {
+        binding = Next().Text;   // i32 x: ... binds the value as that type (spec 11.3.6.1, 11.3.7)
+      }
       SkipNewlines();
       if (IsOp(":")) {
         var colon = Next();
@@ -1932,7 +1936,8 @@ public sealed class Parser {
           labels.Add(label);
         }
         pending.Clear();
-        sw.Add(new Node("Arm", colon).Add(labels).Add(ParseExpr()));
+        sw.Add(new Node("Arm", colon, binding).Add(labels).Add(ParseExpr()));
+        binding = null;
         SkipNewlines();
       } else if (!IsOp(",")) {
         throw Error("expected ':' after the type of a case");

@@ -1,7 +1,7 @@
 # Dflat Language
 A new language D♭ that is the same as C# but easier to write and faster to execute
 
-**Version** 0.0.28  2026/11/08 by CPU
+**Version** 0.0.29  2026/11/08 by CPU
 
 ## D♭ — Dflat Language Specification (draft)
 
@@ -2405,6 +2405,8 @@ Pets p = Puppy()                         // tag "my.ns.Dog": Puppy is a subclass
 - A value of a set type is the pair (tag, value). The tag is the hash of the type of the member (6.2.1): natives and the default collections without namespace (`"i32".hash`), classes fully qualified (`"my.ns.Dog".hash`), generic arguments inside `<>` (`"list<my.ns.Dog>".hash`), tuples as `(tuple,...)` (`"(tuple,i32,string)".hash`), nullable types with `?` (`"i64?".hash`). The compiler knows the tag of every member, so no other tag exists.
 - For a class member the tag is the member as it is listed in the set, never the dynamic class of the object: a `Puppy` in `Pets` has the tag of `my.ns.Dog`. Inside the case the object is still checked by its real class (`if x is Puppy y`). The tags of a set are therefore closed: one per listed member.
 - Storage: the value is inline up to `uns` size, otherwise a pointer (a native wider than `uns`, a string, an object, a tuple), owned by the value. A null value of a nullable member is the null constant (6.2.1).
+- A set value that was never assigned (`Nums k`, a new field or item) holds the generic null, also when no member of the set is nullable. It prints `null`; `k is T` is false on it; a type switch on it goes to `default`, and without a `default` it raises `UnassignedTypeException` (ID 53, 15.3, not silent). The generic null is not the null of a member: on a set with no nullable member `k == null` is always `false` (not a compile error) and `k = null` is a compile error.
+- Printing a set value calls the `toStr` of the type of the member it holds.
 - Assignment: a value of a member type converts implicitly; any other type is a compile error. A number literal takes its default type (1.3) when the set lists it, otherwise the only listed type of the same kind (integer or real); when more than one fits it is a compile error, and the literal is written with its suffix or cast (`5b`, `(u64)5`).
 - Reading: only through `if k is T x { }` (one type; `x` exists only in the block) or `k is ? { T x: ..., ... }` (several types, with the coverage check of 11.3.7). Both compare the tag of `k` with the tag of `T`. `x` is a copy for natives and strings, a borrow for objects. A type that is not a member of the set is a compile error. No member, operator or cast works directly on `k`.
 - Equality, hash and order come from the pair: two values are equal only when both the tag and the value are equal (`'A'` and `i32 65` differ, `i32 0` and `r32 0.0` too); the hash combines the tag and the hash of the value (`$`, 6.2.1); the order compares the tags first, then the values (6.2.2). As a key of a `map` or a `set` it uses the multi-type layouts of 6.8.4.1.
@@ -3345,6 +3347,7 @@ class Exception {
 | 50 | `WritingOnRefCountWithoutLockingException` (12.7) | |
 | 51 | `UnassignedFunctionCallException` (13.3.2), a child of `NullPointerException` | |
 | 52 | `ModifiedObjectUsedAsKeyException` (11.2.1): the hash of a `Keyable` key changed while it is a key | |
+| 53 | `UnassignedTypeException` (11.3.6.1): a type switch without `default` on a set value that was never assigned | |
 
 - The list grows during development; each new standard exception takes the next ID.
 - `UsageOfDestroyedObjectException`: raised when an object that is gone is used: a child whose parent ended (12.5), or a variable released with `->` or `is atEnd.` (12.4). It is not silent and is catchable in Debug and Release builds (no `Panic` in Release).
@@ -4369,3 +4372,8 @@ Level 1 = most important, level 3 = least.
 
 - The keyword `override` is renamed `replace` everywhere (methods and properties, from a parent class or a trait); `override` is no longer a reserved word (11.1, 11.1.4, 11.2 and the examples)
 - 11.2 A trait property without accessor blocks is a simple field in the class (nothing to implement, no `replace`); a class can replace a trait property (`field` is the storage of the trait, the replacement has the final word); a property no class replaces is a direct memory access, otherwise (and in compiled libraries) a call
+
+## Changes in 0.0.29
+
+- 11.3.6.1 A set value never assigned holds the generic null (also for sets with no nullable member): it prints `null`, `is` is false, a type switch goes to `default` or raises `UnassignedTypeException`; `k == null` is always false on a set with no nullable member, `k = null` is a compile error there; printing a set value calls the `toStr` of its member type
+- 15.3 `UnassignedTypeException` (ID 53)

@@ -1,0 +1,77 @@
+// set values (spec 11.3.6.1): a set as the type of a value is a closed union, the pair (tag, value); it is read with is and is ? { }
+alias Root as r
+Generic Nums { i32, u64, u8 }
+Generic Num { i32, r64 }
+
+fun string describe(Nums k) {
+  return "generic copy"                                   // a set as a parameter keeps its meaning: one copy per type
+}
+
+fun Num pick(bool real) {
+  if real { return 2.5 }
+  return 7
+}
+
+class Holder {
+  public Nums value
+}
+
+Nums k = 5b                                               // u8
+i32 count = 12
+string text = k is ? { i32 x: "int", u64 x: "big", u8 x: "small" }
+r.Console.log(text)
+k = count                                                 // an i32
+if k is i32 i { r.Console.log($"i32 {i}") }
+if k is u8 b { r.Console.log("never") }
+r.Console.log(k is i32)
+r.Console.log(k is u8)
+text = k is ? { u8: "small", default: "not small" }
+r.Console.log(text)
+r.Console.log(k)
+
+Num n = 3                                                 // the default type of the literal, i32, is a member
+Num m = 3.0                                               // r64
+r.Console.log($"{n} {m} {n == m}")
+r.Console.log(pick(true) == pick(true))
+r.Console.log(pick(false))
+Num zero = 0.0
+Num minus = -0.0
+r.Console.log(zero == minus)                              // reals compare as reals
+
+arr<Num> mixed = [12, 12.0]
+for Num item in mixed {
+  r64 value = item is ? { i32 x: (r64)x * 2.0, r64 x: x / 2.0 }
+  r.Console.log(value)
+}
+vec<Nums> v = [1b, 2b]
+v.add(count)
+r.Console.log(v.len)
+r.Console.log(v.has(count))
+
+Holder h = Holder()
+r.Console.log(h.value)                                    // null: a new field holds the generic null
+r.Console.log(h.value is i32)                             // false
+r.Console.log(h.value == null)                            // false: no member of Nums is nullable
+r.Console.log(h.value is ? { u8: "small", default: "unassigned or other" })
+h.value = 9ul
+r.Console.log(h.value is ? { u64 x: x + 1ul, default: 0ul })
+
+public class Box<Item>(->Item value) {
+  public Item value
+}
+Box<Num> boxed = Box<Num>((i32)5)                         // declared with the set: the copy holds set values
+r.Console.log(boxed.value)
+boxed = Box<Num>(2.5)
+r.Console.log(boxed.value)
+var picked = Box<Num>(1.5)                                // no declared target: the argument selects the member, Box<r64>
+r64 half = picked.value / 2.0
+r.Console.log(half)
+
+Nums never
+r.Console.log(never)
+fun string strict(arr<Nums> items) {
+  return items[0] is ? { i32 x: "int", u64 x: "big", u8 x: "small" }
+  catch UnassignedTypeException { return "caught: never assigned" }
+}
+arr<Nums> empty = arr<Nums>[1]
+r.Console.log(strict(empty))

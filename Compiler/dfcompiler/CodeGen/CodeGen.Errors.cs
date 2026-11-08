@@ -133,7 +133,8 @@ public sealed partial class CodeGen {
     ["ObjectNotClonableException"] = 49,       // spec 12.6: tryClone()
     ["WritingOnRefCountWithoutLockingException"] = 50,  // spec 12.7: a write to a &@T without its lock
     ["UnassignedFunctionCallException"] = 51,   // spec 13.3.2: a call of a null function value (a child of NullPointerException)
-    ["ModifiedObjectUsedAsKeyException"] = 52   // spec 11.2.1: the hash of a Keyable key changed (raised when Keyable is built)
+    ["ModifiedObjectUsedAsKeyException"] = 52,   // spec 11.2.1: the hash of a Keyable key changed (raised when Keyable is built)
+    ["UnassignedTypeException"] = 53   // spec 11.3.6.1: a type switch without default on a set value never assigned
   };
 
   readonly Stack<Frame> frames = new();

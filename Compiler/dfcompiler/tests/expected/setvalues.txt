@@ -1,0 +1,25 @@
+small
+i32 12
+true
+false
+not small
+12
+3 3 false
+true
+7
+true
+24
+6
+3
+true
+null
+false
+false
+unassigned or other
+10
+5
+2.5
+0.75
+null
+caught: never assigned
+---- exit code 0 ----

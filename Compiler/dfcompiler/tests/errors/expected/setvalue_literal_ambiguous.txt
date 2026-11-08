@@ -1,0 +1,1 @@
+setvalue_literal_ambiguous.df(2): error: more than one member of the set Nums fits this literal (i32, u64, u8): write it with its suffix or a cast (spec 11.3.6.1)

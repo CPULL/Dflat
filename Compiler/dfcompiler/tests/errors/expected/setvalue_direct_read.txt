@@ -1,0 +1,1 @@
+setvalue_direct_read.df(3): error: a value of the set Nums is read with if k is T x { } or k is ? { } (spec 11.3.6.1)

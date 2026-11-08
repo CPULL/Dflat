@@ -1,0 +1,4 @@
+enum Color { Red, Green }
+fun paint(Color c) {
+  c = Color.Green
+}

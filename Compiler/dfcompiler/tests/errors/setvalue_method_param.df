@@ -1,0 +1,4 @@
+Generic Nums { i32, u64 }
+class Shop {
+  public fun pay(Nums m) { }
+}

@@ -1,0 +1,1 @@
+setvalue_null_assign.df(3): error: the set Nums has no nullable member: its values are never null (spec 11.3.6.1)

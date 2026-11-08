@@ -1,0 +1,1 @@
+setvalue_operator.df(3): error: no operator works directly on a value of a set: read it with if k is T x { } or k is ? { } (spec 11.3.6.1)

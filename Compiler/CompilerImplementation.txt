@@ -2428,3 +2428,33 @@ REPLACED TRAIT PROPERTIES (2026-11-08, spec 0.0.28 11.2, compiler 0.0.82alpha)
 - Not built: replacing a counted or weak trait property (NotSupported); a trait whose property is replaced in a compiled library (no
   libraries yet: the decision is "always a call").
 - Tests traitreplace, errors/trait_replace_adds_writer, errors/trait_readonly_outside.
+
+PLAIN VALUE PARAMETERS READ-ONLY (2026-11-08, spec 13.1, compiler 0.0.83alpha)
+- LValue of a Name: a parameter that is not given (->), not weak, not a & slot (CName (*...)), and not an object, array, string or struct
+  (they have their own read-only rules) is an error, so =, the compound operators, ++ / -- and &x on it are refused. Library code skips it.
+- No existing test or code example wrote to such a parameter. Tests errors/param_plain_value_write, param_plain_enum_write.
+- Found while doing it: generic methods inside classes are not built at all (fun T same<T>(T x) in a class: "not supported: Generics"),
+  and the spec does not define them; a set-typed method parameter is one of them.
+
+SET VALUES, STAGE 1 (2026-11-08, spec 0.0.28 11.3.6.1, compiler 0.0.84alpha)
+- CodeGen.SetValues.cs. A set name is now a value type (ResolveType returns it). C: df_setv { uint64_t bits; uint32_t tag; } (typeDefs);
+  tag = position of the member in SetMembers; a zeroed df_setv is the zero of the first member. Members: SetValueNatives (numbers up to
+  64 bits, bool, char) and enums / bitfields; any other member is NotSupported.
+- WrapSetValue / UnwrapSetValue memcpy the member value into / out of bits. Convert wraps a member value into a set and refuses a set
+  value going anywhere else; ExprOf with a set expected type applies the literal rule (SetValueLiteral). Combine refuses every operator
+  but == / != (SetValueEquals: same tag, then reals as reals, the rest by bits). StrOf prints the value of the member.
+- is: IsBinding (after the counted and weak cases) and IsExpr compare the tag; TypeSwitch with a set value subject goes to SetTypeSwitch
+  (a C switch on the tag, coverage of every member or default, bindings). Parser: a type switch arm can bind (i32 x: ...), Arm.Text.
+- A set written as the type of a parameter of a method is NotSupported (a generic method), but a type parameter of a generic class
+  filled with a set (vec<Nums>.add(T)) is a set value.
+- Box<Num> b = Box<Num>(5): ExprOf sets declaredSetTarget for a call whose expected type is a class copy with a set argument, and
+  GenericRefClass then keeps the set instead of choosing the member (11.3.9 stays for var and undeclared targets).
+- Printing a set value prints its member value (confirmed by the user, spec 0.0.29).
+- Tests setvalues, errors/setvalue_* (7); errors/setconv_declared updated (a set as a type argument is now a value type).
+
+SET VALUES, THE GENERIC NULL (2026-11-08, spec 0.0.29 11.3.6.1, compiler 0.0.85alpha)
+- The tag is 1 + the position of the member; tag 0 is the generic null of a value never assigned (a zeroed df_setv: new variables,
+  fields, items). SetValueStr prints null for it, is compares tags so it is false, SetTypeSwitch adds case 0 that raises
+  UnassignedTypeException (StandardExceptions 53, df_desc_UnassignedTypeException) when there is no default (default takes it).
+- k == null: SetValueEquals gives false (the value is still evaluated); k = null: Convert refuses null for a set (no nullable member yet).
+- Tests setvalues (extended), errors/setvalue_null_assign.

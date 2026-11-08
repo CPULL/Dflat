@@ -1,0 +1,1 @@
+param_plain_enum_write.df(3): error: 'c' is a plain parameter: it is read-only (spec 13.1); copy it into a local (Color v = c) or take &Color c

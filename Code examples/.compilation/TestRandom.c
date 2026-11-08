@@ -134,6 +134,7 @@ static const df_descriptor df_desc_ObjectNotClonableException = { 49, "ObjectNot
 static const df_descriptor df_desc_WritingOnRefCountWithoutLockingException = { 50, "WritingOnRefCountWithoutLockingException", &df_desc_Exception, false };
 static const df_descriptor df_desc_UnassignedFunctionCallException = { 51, "UnassignedFunctionCallException", &df_desc_NullPointerException, false };
 static const df_descriptor df_desc_ModifiedObjectUsedAsKeyException = { 52, "ModifiedObjectUsedAsKeyException", &df_desc_Exception, false };
+static const df_descriptor df_desc_UnassignedTypeException = { 53, "UnassignedTypeException", &df_desc_Exception, false };
 
 /* The exception of a function is a local of that function (df_err in the generated code) and travels back to the caller as the second
    value it returns. The runtime functions written in C cannot return it that way: they leave it here, and the code generated around

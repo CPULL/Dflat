@@ -1,0 +1,1 @@
+setvalue_not_member.df(3): error: bool is not a member of the set Nums (spec 11.3.6.1)

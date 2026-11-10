@@ -146,7 +146,7 @@ public sealed partial class CodeGen {
   bool MapValueBuilt(string value) {
     string inner = BaseOf(value);
     return IsInt(inner) || inner is "bool" or "char" or "r32" or "r64" or "date" or "time" or "clock" or "lapse" || IsEnum(inner) || value == "string"
-      || IsMapObjectValue(value);
+      || IsMapObjectValue(value) || IsFunType(value);
   }
 
   // an object value of a map or an hmap: the map owns it (spec 6.6), it ends when it is replaced or removed or with the map
@@ -352,11 +352,18 @@ public sealed partial class CodeGen {
     if (IsMapObjectValue(valueType) && !LibraryCode && !value.Fresh && value.Type != "null") {
       throw Error("the map owns its values: give it a new object, ->x to move one in, or x! for a copy (spec 6.6)", node);
     }
+    if (IsFunType(valueType)) {
+      CheckNotBorrowingFunction(valueType, node, scope, "a map");   // the map keeps a usage of the function value (spec 13.3.3)
+      return FnOwned(value with { Code = Convert(value, valueType, node) });
+    }
     return StrItemAs(value, valueType, Convert(value, valueType, node));
   }
 
   // a copy of a value for another map (add(other), clone): an object is cloned, a string is copied (spec 6.6, 12.6)
   string MapValueCopy(Node node, Scope scope, string valueType) {
+    if (IsFunType(valueType)) {
+      return $"df_fn_clone({Convert(CheckedMapValue(node, scope, valueType), valueType, node)})";   // a copy of a function value is f! (spec 13.3.3)
+    }
     if (!IsMapObjectValue(valueType)) {
       return MapValueItem(node, scope, valueType);
     }
@@ -369,6 +376,7 @@ public sealed partial class CodeGen {
   string StoreValue(string valueType, string slot, string item) =>
     valueType == "string" ? $"df_bt_sval_put({slot}, {item}); "
     : IsMapObjectValue(valueType) ? $"{{ void* old = (void*)*{slot}; *{slot} = {item}; if (old != NULL && old != (void*)*{slot}) {{ df_drop(old); }} }} "
+    : IsFunType(valueType) ? $"{{ df_fn old = *{slot}; *{slot} = {item}; df_fn_release(old); }} "   // the usage of the old value ends
     : $"*{slot} = {item}; ";
 
   // the C expression of the value slot of a key held in key (a pointer to the value, or NULL when the key is missing)
@@ -435,6 +443,12 @@ public sealed partial class CodeGen {
     string goneKey = NewTemp();
     string done = NewTemp();
     bool dropValue = outPointer == "NULL" && valueType == "string";
+    if (outPointer == "NULL" && IsFunType(valueType)) {
+      // the usage of the removed function value ends (spec 13.3.3)
+      string goneFn = NewTemp();
+      string removedFn = NewTemp();
+      return $"({{ df_fn {goneFn} = {{ 0 }}; bool {removedFn} = {MapRemove(held, type, key, "&" + goneFn)}; df_fn_release({goneFn}); {removedFn}; }})";
+    }
     if (outPointer == "NULL" && IsMapObjectValue(valueType)) {
       // the removed object ends (spec 6.6)
       string goneObject = NewTemp();
@@ -507,10 +521,11 @@ public sealed partial class CodeGen {
       : IsHmap(type) ? $"df_str_free({CursorKey(type, cursor)}); "
       : $"if (!{cursor}.on_null) {{ {KeyFreeCode(type, $"df_bt_cur_ptr(&{cursor})")}}} ")
     + (MapValue(type) == "string" ? $"df_bt_sval_clear({slot}); "
-      : IsMapObjectValue(MapValue(type)) ? $"if (*{slot} != NULL) {{ void* o = (void*)*{slot}; *{slot} = NULL; df_drop(o); }} " : "");
+      : IsMapObjectValue(MapValue(type)) ? $"if (*{slot} != NULL) {{ void* o = (void*)*{slot}; *{slot} = NULL; df_drop(o); }} "
+      : IsFunType(MapValue(type)) ? $"{{ df_fn f = *{slot}; *{slot} = (df_fn){{ 0 }}; df_fn_release(f); }} " : "");
 
   // the entries own something to free: a string key, a string value, an object value
-  bool MapOwnsStrings(string type) => KeyHasPointer(type) && !SetKeyOf(type) || HObjKeyOf(type) || HTKeyOf(type) || MapValue(type) == "string" || IsMapObjectValue(MapValue(type));
+  bool MapOwnsStrings(string type) => KeyHasPointer(type) && !SetKeyOf(type) || HObjKeyOf(type) || HTKeyOf(type) || MapValue(type) == "string" || IsMapObjectValue(MapValue(type)) || IsFunType(MapValue(type));
 
   // all the entries go: what they own is freed, then the nodes
   string MapClearCode(string held, string type) {
@@ -652,9 +667,9 @@ public sealed partial class CodeGen {
       sb.Append("    if (shown > 0) {\n      r = df_str_catx(r, df_str_lit(\", \", 2));\n    }\n");
       sb.Append($"    {CType(key)} k = {CursorKey(mapType, "c")};\n");
       sb.Append($"    {CType(value)} x = {ReadSlot(mapType, CursorValue("v", mapType, "c"))};\n");
-      sb.Append($"    r = {Cat(key)}(r, {StrOf(new Expr("k", key), at)});\n");
+      sb.Append($"    r = {Cat(key)}(r, {ItemStrOf(new Expr("k", key), at)});\n");
       sb.Append("    r = df_str_catx(r, df_str_lit(\": \", 2));\n");
-      sb.Append($"    r = {Cat(value)}(r, {StrOf(new Expr("x", value), at)});\n  }}\n");
+      sb.Append($"    r = {Cat(value)}(r, {ItemStrOf(new Expr("x", value), at)});\n  }}\n");
       sb.Append($"  return df_str_coll_end(r, {MapTree("v", mapType)}->count);\n}}\n\n");
       arrayCode.Append(sb);
     }
@@ -699,7 +714,9 @@ public sealed partial class CodeGen {
     string key = NewTemp();
     string slot = NewTemp();
 
-    string Same(string slotPointer, string value) => EqualsCode(new Expr(ReadSlot(type, slotPointer), valueType), new Expr(value, valueType), at);
+    // function values are not compared: the members that look for a value are a compile error in the program (ObjectCall), here they find nothing
+    string Same(string slotPointer, string value) => IsFunType(valueType) ? "false"
+      : EqualsCode(new Expr(ReadSlot(type, slotPointer), valueType), new Expr(value, valueType), at);
 
     switch (name) {
       case "tree_len":
@@ -738,7 +755,7 @@ public sealed partial class CodeGen {
             + $"df_string {taken} = df_bt_sval_take({buffer}); {taken}; }})", valueType, true);
         }
         return new Expr(head + MapKeyArg(args[0], scope, keyType, key) + $"{valueC} {taken} = {ZeroValue(valueType)}; (void){MapRemove(m, type, key, "&" + taken)}; {taken}; }})",
-          valueType, IsMapObjectValue(valueType));
+          valueType, IsMapObjectValue(valueType) || IsFunType(valueType));
       }
       case "tree_hasValue": {
         string value = NewTemp();
@@ -777,7 +794,7 @@ public sealed partial class CodeGen {
             + $"df_uns {removed} = df_ht_sweep({tree}, {HmapShape(type)}); {release}{removed}; }})", NativeUns);
         }
         return new Expr(head + $"{valueC} {value} = {given}; df_uns {removed} = 0; "
-          + $"if ({tree}->has_null && {Same(nullSlot, value)}) {{ {(valueType == "string" ? $"df_bt_sval_clear({nullSlot}); " : IsMapObjectValue(valueType) ? $"if (*{nullSlot} != NULL) {{ df_drop((void*)*{nullSlot}); *{nullSlot} = NULL; }} " : "")}"
+          + $"if ({tree}->has_null && {Same(nullSlot, value)}) {{ {(valueType == "string" ? $"df_bt_sval_clear({nullSlot}); " : IsMapObjectValue(valueType) ? $"if (*{nullSlot} != NULL) {{ df_drop((void*)*{nullSlot}); *{nullSlot} = NULL; }} " : IsFunType(valueType) ? $"df_fn_release(*{nullSlot}); *{nullSlot} = (df_fn){{ 0 }}; " : "")}"
           + $"df_bt_remove_null({tree}, {MapValueSize(type)}, NULL); {removed}++; }} "
           + ForEachEntry(m, type, (s, c) => $"if (!{c}.on_null && {Same(s, value)}) {{ {DropEntry(type, s, c)}df_bt_mark(&{c}); }} ")
           + $"{removed} += df_bt_sweep({tree}, {MapValueSize(type)}, {(KeyHasPointer(type) ? "true" : "false")}); {release}{removed}; }})", NativeUns);
@@ -855,7 +872,7 @@ public sealed partial class CodeGen {
         cloneUsed = true;
         return $"{items}.p[{index}++] = {CloneValue(item, elem, at)}; ";   // the vec owns clones of the objects (spec 6.6, 12.6)
       }
-      return $"{items}.p[{index}++] = {(elem == "string" ? $"df_str_dup({item})" : item)}; ";
+      return $"{items}.p[{index}++] = {(elem == "string" ? $"df_str_dup({item})" : IsFunType(elem) ? $"df_fn_retain({item})" : item)}; ";
     }));
     sb.Append($"{result}->{VecField(vecType, "count")} = {index}; {result}; }})");
     return new Expr(sb.ToString(), vecType, true);
@@ -880,7 +897,7 @@ public sealed partial class CodeGen {
       sb.Append("    if (shown > 0) {\n      r = df_str_catx(r, df_str_lit(\", \", 2));\n    }\n");
       string item = keys ? CursorKey(mapType, "c") : ReadSlot(mapType, CursorValue(map, mapType, "c"));
       sb.Append($"    {CType(elem)} x = {item};\n");
-      sb.Append($"    r = {(elem == "string" ? "df_str_cat" : "df_str_catx")}(r, {StrOf(new Expr("x", elem), at)});\n  }}\n");
+      sb.Append($"    r = {(elem == "string" ? "df_str_cat" : "df_str_catx")}(r, {ItemStrOf(new Expr("x", elem), at)});\n  }}\n");
       sb.Append($"  return df_str_coll_end(r, {MapTree(map, mapType)}->count);\n}}\n\n");
       arrayCode.Append(sb);
     }

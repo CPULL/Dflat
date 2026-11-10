@@ -442,10 +442,10 @@ public sealed partial class CodeGen {
     if (chosen.IsAbstract) {
       throw Error($"{chosen.Class!.Name}.{name} has no body", at);
     }
-    var codes = ArgCodes(chosen, args, scope, at);
+    var codes = ArgCodes(chosen, args, scope, at, out string prefix);
     codes.Insert(0, "(void*)self");
     string call = $"{chosen.CName}({string.Join(", ", codes)})";
-    return new Expr(UserCallCode(chosen, call), chosen.Ret, IsClass(chosen.Ret) && chosen.ReturnsOwned);
+    return ArgsFirst(new Expr(UserCallCode(chosen, call), chosen.Ret, IsClass(chosen.Ret) && chosen.ReturnsOwned), prefix);
   }
 
   // x.TraitName: the object seen as that trait

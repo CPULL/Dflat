@@ -1,0 +1,1 @@
+lambda_copy_writable_capture.df(8): error: this lambda has a & capture: a copy would be a second writable borrow of the same variable; share it with = instead of ! (spec 13.3.3)

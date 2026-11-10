@@ -1,0 +1,1 @@
+arr_mixed_return_notclonable.df(10): error: a copy of an array of H clones its objects, and H cannot be cloned: H is notclonable (spec 6.8.1, 12.6)

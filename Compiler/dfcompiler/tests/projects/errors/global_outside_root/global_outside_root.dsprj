@@ -1,0 +1,2 @@
+; a global outside the root file (spec 18.1)
+source=main.df

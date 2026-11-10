@@ -1,0 +1,15 @@
+  end rex
+  now rex2
+  kept tmp
+  end tmp
+  kept max
+  end max
+  shared counted 2
+  weak counted
+  rw+
+  k 3
+end of main
+  end rw+
+  end counted
+  end rex2
+---- exit code 0 ----

@@ -3,8 +3,8 @@ show a
   end a
 two arguments
 b and c
-  end b
   end c
+  end b
 receiver of a call
 d barks
   end d

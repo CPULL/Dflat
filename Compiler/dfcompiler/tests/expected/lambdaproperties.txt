@@ -1,0 +1,6 @@
+  ann level 7 tag tag-ann in library city
+  ann level 21 tag tag-ann in library city
+  snap 21 tag-ann
+  ann level 41 tag tag-ann in library city
+  kept 41
+---- exit code 0 ----

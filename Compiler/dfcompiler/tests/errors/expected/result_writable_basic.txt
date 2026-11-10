@@ -1,1 +1,1 @@
-result_writable_basic.df(5): error: a & result lends a place the function can write: this, a field, a & parameter or a global
+result_writable_basic.df(5): error: a & result lends a place the function can write: this, a field or a & parameter

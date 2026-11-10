@@ -15,6 +15,22 @@ static class SourceMap {
 
   public static int Base(int index) => index * Stride;
 
+  // the library each file belongs to (its folder name), for the files of the libraries only; the program and the stdlib have none
+  static readonly Dictionary<int, string> libraries = new();
+  static readonly HashSet<int> libraryRoots = new();
+
+  public static void SetLibrary(int index, string library, bool isRoot) {
+    libraries[index] = library;
+    if (isRoot) {
+      libraryRoots.Add(index);
+    }
+  }
+
+  public static string? LibraryOf(int line) => libraries.TryGetValue(line / Stride, out var library) ? library : null;
+
+  // the lib.df at the top of a library (spec 16)
+  public static bool IsLibraryRoot(int line) => libraryRoots.Contains(line / Stride);
+
   public static int RealLine(int line) => line % Stride;
 
   static string FileOf(int line) {
@@ -63,11 +79,13 @@ sealed class SourceLoader {
   }
 
   sealed class SourceFile {
-    public SourceFile(string path, Node tree) {
+    public SourceFile(string path, Node tree, int index) {
       Path = path;
       Tree = tree;
+      Index = index;
     }
 
+    public int Index { get; }
     public string Path { get; }
     public Node Tree { get; }
     public string Namespace { get; set; } = "";
@@ -167,7 +185,7 @@ sealed class SourceLoader {
     var tree = parser.ParseProgram();
     Warnings.AddRange(preprocessor.Warnings.Select(warning => SourceMap.Fix(Shift(warning, lineBase))));
     Warnings.AddRange(lexer.Warnings.Concat(parser.Warnings).Select(SourceMap.Fix));
-    var file = new SourceFile(full, tree);
+    var file = new SourceFile(full, tree, index);
     parsed[full] = file;
     return file;
   }
@@ -252,9 +270,21 @@ sealed class SourceLoader {
   // only the root file has top-level code, and a name is declared in one namespace only (names are not qualified yet)
   void CheckFile(SourceFile file) {
     bool isRoot = file == rootFile;
+    // the files of a library know their library (its folder name): its globals are visible only inside it (spec 18.1)
+    var library = roots.Where(root => root.What.StartsWith("the library ") && file.Path.StartsWith(root.Folder + System.IO.Path.DirectorySeparatorChar,
+        StringComparison.OrdinalIgnoreCase)).OrderByDescending(root => root.Folder.Length).FirstOrDefault();
+    bool isLibraryRoot = library != null && string.Equals(file.Path, System.IO.Path.Combine(library.Folder, "lib.df"), StringComparison.OrdinalIgnoreCase);
+    if (library != null) {
+      SourceMap.SetLibrary(file.Index, System.IO.Path.GetFileName(library.Folder), isLibraryRoot);
+    }
     foreach (var statement in file.Tree.Children) {
+      if (!isRoot && !isLibraryRoot && statement.Kind == "Decl"
+          && statement.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ').Contains("global") == true) {
+        throw new CompileException("a global can be declared only in the root file (program.df, main.df or lib.df) (spec 18.1)", statement.Line);
+      }
       bool declaration = statement.Kind is "Fun" or "Alias" or "Enum" or "Class" or "Trait" or "GenericSet"
-        or "Namespace" or "NamespaceLocal" or "Import" || IsConst(statement);
+        or "Namespace" or "NamespaceLocal" or "Import" || IsConst(statement)
+        || statement.Kind == "Decl" && statement.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ').Contains("global") == true;   // a global of a library (spec 18.1)
       if (!isRoot && !declaration) {
         throw new CompileException("only the root file can have top-level code: this file can have only declarations", statement.Line);
       }

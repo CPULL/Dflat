@@ -1,0 +1,1 @@
+global_init_later.df(12): error: the initializer of global 'a' uses global 'b', which is declared after it: globals are created in declaration order (spec 18.2)

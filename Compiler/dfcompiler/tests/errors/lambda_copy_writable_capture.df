@@ -1,0 +1,8 @@
+namespace lambda_copy_writable_capture
+alias Root as r
+public class Dog(string name) {
+  public string name
+}
+i32 k = 0
+fun() f = (; &k) { k++ }
+fun() g = f!

@@ -133,6 +133,11 @@ public sealed partial class CodeGen {
   }
 
   void FlowNode(Node node, FlowContext ctx) {
+    if (!ctx.InCatchBody && (globalReads.ContainsKey(node) || globalWrites.ContainsKey(node))) {
+      // a field of a global read or written under its lock (spec 18.5)
+      ctx.Flow.Raises.Add((StandardExceptions["CallingGlobalDefinedAfterException"], ctx.Cover));
+      ctx.Flow.Raises.Add((StandardExceptions["ReadLockBecameWriteLockException"], ctx.Cover));
+    }
     switch (node.Kind) {
       case "Block":
         FlowList(node.Children, ctx);
@@ -275,6 +280,11 @@ public sealed partial class CodeGen {
       currentFlowFun = fun;
       if (!fun.IsAbstract && !fun.IsExtern) {
         FlowNode(fun.Node, new FlowContext(flow, Cover.None, false));
+      }
+      if (lockedMethods.Contains(fun)) {
+        // the wrapper takes the lock of a global (spec 18.5)
+        flow.Raises.Add((StandardExceptions["CallingGlobalDefinedAfterException"], Cover.None));
+        flow.Raises.Add((StandardExceptions["ReadLockBecameWriteLockException"], Cover.None));
       }
       flows[fun] = flow;
     }

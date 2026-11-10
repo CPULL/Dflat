@@ -1,0 +1,1 @@
+lambda_counted_unlisted.df(7): error: 'd' is counted and cannot be borrowed: list it as @d, or %d for a weak reference (spec 13.3.1)

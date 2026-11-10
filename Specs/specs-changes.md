@@ -643,3 +643,26 @@
 - 11.3.6.1 A set value never assigned holds the generic null (also for sets with no nullable member): it prints `null`, `is` is false, a type switch goes to `default` or raises `UnassignedTypeException`; `k == null` is always false on a set with no nullable member, `k = null` is a compile error there; printing a set value calls the `toStr` of its member type
 - 15.3 `UnassignedTypeException` (ID 53)
 - 11.2.1 The collection owns its object keys (6.6): a new object or `->x` goes in, a lookup borrows, `->s[item]` gives the object back, the copying paths clone; the example that kept using a key after giving it is replaced; the fields of `Keyable` are not in the default hash, a clone or the text of the object
+
+## Changes in 0.0.30
+
+- 6.8.1 A view kept in a local borrows its array as `arr<T> b = a` does (the array still ends with its owner); a new array given to a borrowing parameter ends with the statement
+- 6.8.1 A local made a borrow by `a = b`: `return a` moves its own array or gives a copy of the borrowed one; `v.pop(&a)` ends only its own old array; `->a` and `&a` are compile errors after `a = b`
+
+## Changes in 0.0.31
+
+- 13.3.1 Properties in a lambda are read through their accessors (unlisted: read-only; `&prop` writes through `W:`; `prop!` copies the value read at creation; `->prop` is an error); the parent is read-only (unlisted, or `parent!`); counted and weak fields take `@field`, `&@field`, `%field`, `&%field`
+- 13.3.6 Function values in `map` / `hmap` values and struct fields: one usage each, copied with `!` when the map or the struct is copied, printed as their type; the map members that look for a value (`has`, `remove`, `removeAll`, `keyOf`) are a compile error on them
+- 13.3.6 Updated to compiler 0.0.95: counted and weak captures, `&a` of strings and arrays, properties and the parent, parameter modes in function types, the error of `f1!` with a `&` capture, the lock of `a` while a `&a` lambda is kept
+
+## Changes in 0.0.32
+
+- 2.5 Order of evaluation: operands and call arguments run from left to right; new objects nobody keeps end with the statement in the reverse order they were made
+
+## Changes in 0.0.33
+
+- 18 Globals (new chapter): `global <Class> <name> = <Class>(...)` in the root file; several globals of one class; created in declaration order, destroyed in reverse; library globals not visible outside the library; one read/write lock per global (read or write inferred, write when unsure), the lock covers one call; no borrows out of a global; rank order checked at runtime with a per-thread list of held locks (a held global is reentrant); no lambdas in a global's class; compile errors
+- 15.3 `CallingGlobalDefinedAfterException` (ID 54), `ReadLockBecameWriteLockException` (ID 55)
+- 13.1.1 A global is no longer a source of a `&T` result; a lent result of a method called on a global is copied at the call (plain) or a compile error (`&`)
+- 14.1 Globals are created before the program starts and destroyed after it ends
+- 1.5 `global` declaration

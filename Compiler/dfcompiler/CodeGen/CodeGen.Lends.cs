@@ -231,6 +231,40 @@ public sealed partial class CodeGen {
     return null;
   }
 
+  // fun() f = (; &a) { ... }: while the lambda lives the outer code cannot use a, until the last use of f or of a local that shares the
+  // lambda (fun() g = f) (spec 13.3.4). Checked inside one block, by statement order, as the lends above
+  void CheckCaptureLock(Node decl, Node? init) {
+    if (LibraryCode || init is not { Kind: "Lambda" } lambda || !followingStatements.TryGetValue(decl, out var after)) {
+      return;
+    }
+    var captured = lambda.Children.FirstOrDefault(child => child.Kind == "Captures")?.Children
+      .Where(capture => capture.Kind == "WritableCapture").Select(capture => capture.Text!).ToList() ?? new List<string>();
+    if (captured.Count == 0) {
+      return;
+    }
+    var holders = new HashSet<string> { decl.Text! };
+    int last = -1;
+    for (int index = 0; index < after.Count; index++) {
+      if (after[index] is { Kind: "Decl" } shared && shared.Children.FirstOrDefault(child => child.Kind == "Init")?.Children[0] is { Kind: "Name" } source
+          && holders.Contains(source.Text!)) {
+        holders.Add(shared.Text!);   // fun() g = f: the same lambda
+      }
+      if (holders.Any(holder => Mentions(after[index], holder))) {
+        last = index;
+      }
+    }
+    for (int index = 0; index < last; index++) {
+      if (captured.FirstOrDefault(name => UsesName(after[index], name)) is string used) {
+        throw Error($"'{used}' is captured with & by the lambda '{decl.Text}': it cannot be used until the last use of the lambda (spec 13.3.4)", after[index]);
+      }
+    }
+  }
+
+  // the name is read, written or captured by a lambda in the statement
+  static bool UsesName(Node node, string name) =>
+    node.Kind is "Name" or "WritableCapture" or "CopyCapture" or "MoveCapture" or "CountedCapture" or "WeakCapture" && node.Text == name
+    || node.Children.Any(child => UsesName(child, name));
+
   // a local of the function (not a parameter, not this, not a global) that owns its value, or borrows from such a local
   bool LocalLender(string root, Scope scope) =>
     root != "this" && scope.Find(root) is VarInfo held && held.IsLocal
@@ -250,13 +284,19 @@ public sealed partial class CodeGen {
   }
 
   // return x with a &T result: the caller writes x in place, so x is something this function can write: this and its fields, a & parameter,
-  // a global that is not const, or the &T result of another call (spec 13.1.1)
+  // or the &T result of another call; never a global (spec 13.1.1, 18.3)
   void CheckWritableLend(Node value, string type, Scope scope) {
     if (LibraryCode) {
       return;
     }
     if (InUnrestrictedMethod) {
       throw Error("an unrestricted method does not change its object: it cannot lend it read/write (a & result) (spec 1.6.2)", value);
+    }
+    // return g.field: a part of a global (its read may have become a copy, LowerGlobalAccesses)
+    var lent = value.Kind == "Copy" ? value.Children[0] : value;
+    if (LendPath(lent.Kind == "Index" ? lent.Children[0] : lent) is string globalPath
+        && GlobalNamed(Synthetic("Name", value, globalPath.Split('.')[0]), scope) is GlobalInfo lentGlobal) {
+      throw Error($"a & result cannot lend global '{lentGlobal.Name}': return a copy, or give the value with -> (spec 18.3)", value);
     }
     if (value.Kind == "Call") {
       if (CalleesOf(value) is { Count: > 0 } callees && callees.All(f => f.Writes.Contains(0))) {
@@ -266,9 +306,12 @@ public sealed partial class CodeGen {
     }
     var place = value.Kind == "Index" ? value.Children[0] : value;
     if (LendPath(place) is not string path) {
-      throw Error("a & result lends a place the function can write: this, a field, a & parameter or a global", value);
+      throw Error("a & result lends a place the function can write: this, a field or a & parameter", value);
     }
     string root = path.Split('.')[0];
+    if (root != "this" && GlobalNamed(Synthetic("Name", value, root), scope) is GlobalInfo global) {
+      throw Error($"a & result cannot lend global '{global.Name}': return a copy, or give the value with -> (spec 18.3)", value);
+    }
     if (root != "this" && scope.Find(root) is VarInfo held) {
       if (held.IsConst) {
         throw Error($"'{root}' is const: a & result cannot lend it (spec 13.1.1)", value);

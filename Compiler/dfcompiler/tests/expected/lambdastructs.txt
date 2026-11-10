@@ -1,0 +1,10 @@
+  h1 clicked 1
+  h1 clicked 2
+  end h1
+  h2 clicked 3
+  h1 clicked 4
+  unassigned
+end of main
+  end h1
+  end h2
+---- exit code 0 ----

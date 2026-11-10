@@ -1,0 +1,61 @@
+lender
+  c b1
+  end of lender
+  end b1
+lender2
+  end a2
+  a b2
+  end of lender2
+  end b2
+keptView
+  v 1
+  end of keptView
+  end v1
+  end v2
+tempArg
+  count 1
+  end t1
+  end of tempArg
+mixedReturn false
+  end m-b
+  got m-a
+mixedReturn true
+  end m-a
+  end m-b
+  got m-b
+mixedMulti false/true
+  end mm-b
+  end mm-a
+  end mm-b
+  got mm-a mm-b
+replacedLender
+  end r-a
+  a r-b1
+  end of replacedLender
+outerBorrower
+  end o-outer
+  outer 1
+  end of outerBorrower
+declBorrowerReturned
+  got d-b
+paramBorrow
+  len 1
+  end of paramBorrow
+  end p-d
+tempLend
+  lent 1
+  end of tempLend
+mixedPop
+  end mp-c
+  c mp-v
+  end of mixedPop
+  end mp-v
+  end mp-b
+plainItems
+  3 2
+end of main
+  end mm-b
+  end mm-a
+  end m-b
+  end m-a
+---- exit code 0 ----

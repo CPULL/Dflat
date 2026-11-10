@@ -1,0 +1,1 @@
+lambda_map_value_compare.df(8): error: function values are not compared: has needs values that have == (spec 13.3.2)

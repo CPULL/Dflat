@@ -28,6 +28,13 @@ public sealed partial class CodeGen {
     throw Error($"a collection owns its arrays of {ArrElem(elem)}: write ->{name} to move it in, or {name}! to put a copy (spec 6.8.1)", at);
   }
 
+  // f([Dog("a")]): a new array given to a plain arr<T> parameter of a function of the program. The function only borrows it (it keeps a copy
+  // or nothing) and its result cannot lend from it, so the array can end with the statement
+  bool TempArrayArg(ParamSig param, Node arg, FunSig? callee, int position) =>
+    callee != null && position >= 0 && !LibraryCode && IsArr(param.Type) && !param.IsGift && param.Ref == 0 && !param.IsVariadic && !IsByPointer(param)
+    && callee.Node.Line < LibraryLine && !callee.IsExtern && IsNewArray(arg)
+    && (callee.Ret == "void" || IsPlainValueType(callee.Ret) || callee.Gives.Contains(0) && (IsClass(callee.Ret) || callee.Ret == "string"));
+
   // an item that is replaced ends, unless it is the same block
   string ReplaceArrItem(string elem, string slot, string incoming) {
     string replaced = NewTemp();
@@ -125,6 +132,7 @@ public sealed partial class CodeGen {
   // the static array fields of the classes of the program end with the program, in the reverse order of their start
   string StaticEndCode() {
     var sb = new System.Text.StringBuilder();
+    sb.Append(GlobalsEndCode());   // the globals first, in reverse order: their atEnd may use the statics (spec 18.2)
     var statics = staticOrder.Where(field => (IsArr(field.Type) || TupleHoldsArrays(field.Type) || StructHoldsObjects(field.Type) || field.IsCounted) && field.Owner.Node.Line < LibraryLine).ToList();
     for (int index = statics.Count - 1; index >= 0; index--) {
       var field = statics[index];

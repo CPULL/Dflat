@@ -1,0 +1,2 @@
+; globals used from the other files of a program (spec 18)
+source=main.df

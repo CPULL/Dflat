@@ -1,0 +1,1 @@
+global_var.df(12): error: a global must be an object of a class: global <Class> <name> = <Class>(...) (spec 18.1)

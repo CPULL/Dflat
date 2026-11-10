@@ -171,7 +171,7 @@ public sealed partial class CodeGen {
         }
         return;
       }
-      sb.Append($"{pad}{target}.f_{field.Name} = {StructFieldValue(field, ExprOf(value, from, field.Type), value)};\n");
+      sb.Append($"{pad}{target}.f_{field.Name} = {StructFieldValue(field, ExprOf(value, from, field.Type), value, from)};\n");
     }
     foreach (var (field, value) in given) {
       Write(field, value, scope);

@@ -1,0 +1,18 @@
+namespace local
+
+public class Log {
+  vec<string> lines = vec<string>()
+  public fun write(string text) { lines.add(text) }
+  unrestricted fun u64 count() { lines.len }
+} atEnd { Root.Console.log($"log ends with {lines.len} lines") }
+
+public class Tally(u64 start) {
+  u64 sum = start
+  public fun add(u64 n) { sum += n; log.write($"add {n}") }
+  unrestricted fun u64 total() { sum }
+} atEnd { Root.Console.log($"tally ends at {sum}") }
+
+public fun record(string what) {
+  tally.add(what.len)
+  log.write(what)
+}

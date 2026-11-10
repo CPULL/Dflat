@@ -1,0 +1,63 @@
+// Counted and weak captures (spec 13.3.1): @a keeps a usage, %a a weak reference, &@a a read/write usage (writes inside enforce), ->a of a counted object moves its usage, f! adds a usage
+alias Root as r
+public class Dog(string name) {
+  public string name
+  public i32 score
+} atEnd {
+  r.Console.log("  end " + name)
+}
+fun ->fun() keeper() {
+  @Dog d = Dog("kept")
+  fun() f = (; @d) { r.Console.log($"  in lambda {d.name} users {d.usersCount}") }
+  r.Console.log($"  users {d.usersCount}")
+  return f
+}
+fun weakOne() {
+  fun() g
+  if (true) {
+    @Dog w = Dog("weak")
+    g = (; %w) {
+      enforce w {
+        r.Console.log($"  alive {w.name}")
+      } else {
+        r.Console.log("  gone")
+      }
+    }
+    g()
+  }
+  g()
+}
+fun writable() {
+  &@Player p = Player("ann")
+  fun() add = (; &@p) {
+    enforce p {
+      p.score += 5
+    }
+  }
+  add()
+  add()
+  enforce p { r.Console.log($"  score {p.score}") }
+}
+fun moved() {
+  @Dog m = Dog("moved")
+  fun() h = (; ->m) { r.Console.log($"  moved {m.name} {m.usersCount}") }
+  h()
+  fun() h2 = h!
+  h2()
+  r.Console.log("  end of moved")
+}
+public class Player(string name) {
+  public string name
+  public i32 score
+} atEnd {
+  r.Console.log("  end " + name)
+}
+fun main() {
+  r.Console.log("keeper")
+  fun() k = keeper()
+  k()
+  r.Console.log("weak"); weakOne()
+  r.Console.log("writable"); writable()
+  r.Console.log("moved"); moved()
+  r.Console.log("end of main")
+}

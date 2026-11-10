@@ -1,0 +1,1 @@
+global_no_init.df(12): error: a global needs its initializer: global <Class> <name> = <Class>(...) (spec 18.1)

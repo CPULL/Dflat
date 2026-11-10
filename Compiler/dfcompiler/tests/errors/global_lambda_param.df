@@ -1,0 +1,5 @@
+// spec 18.3, 18.6: a compile error of globals
+class Bus {
+  public fun each(fun(i32) f) { f(1) }
+}
+global Bus bus = Bus()

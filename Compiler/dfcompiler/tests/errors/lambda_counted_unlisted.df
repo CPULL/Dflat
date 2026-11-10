@@ -1,0 +1,7 @@
+namespace lambda_counted_unlisted
+alias Root as r
+public class Dog(string name) {
+  public string name
+}
+@Dog d = Dog("a")
+fun() f = () { r.Console.log(d.name) }

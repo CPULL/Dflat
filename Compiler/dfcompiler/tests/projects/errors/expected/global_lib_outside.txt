@@ -1,0 +1,1 @@
+main.df(4): error: global 'tally' belongs to library 'stats' and is not visible outside it (spec 18.1)

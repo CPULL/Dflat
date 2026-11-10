@@ -1,0 +1,9 @@
+namespace lambda_capture_lock
+alias Root as r
+public class Dog(string name) {
+  public string name
+}
+i32 k = 0
+fun() f = (; &k) { k++ }
+r.Console.log($"{k}")
+f()

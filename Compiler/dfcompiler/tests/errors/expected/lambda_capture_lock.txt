@@ -1,0 +1,1 @@
+lambda_capture_lock.df(8): error: 'k' is captured with & by the lambda 'f': it cannot be used until the last use of the lambda (spec 13.3.4)

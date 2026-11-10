@@ -193,6 +193,10 @@ public sealed partial class CodeGen {
   string ArrCloneHelper(string type, Node at) {
     string elem = ArrElem(type);
     string name = "df_arrclone_" + System.Text.RegularExpressions.Regex.Replace(type, @"[^A-Za-z0-9_]", "_");
+    cloneUsed = true;   // the items that are objects are cloned through their class
+    if (!LibraryCode && IsClass(elem) && !IsTraitType(elem) && NotClonableReason(ObjInfo(elem)) is string reason) {
+      throw Error($"a copy of an array of {DisplayName(elem)} clones its objects, and {DisplayName(elem)} cannot be cloned: {reason} (spec 6.8.1, 12.6)", at);
+    }
     if (arrCloneHelpers.Add(name)) {
       string item = CloneValue("a.p[i]", elem, at);   // the helpers of the items come first
       string arrType = ArrCType(elem);

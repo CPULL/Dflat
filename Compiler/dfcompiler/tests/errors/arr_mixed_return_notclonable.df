@@ -1,0 +1,15 @@
+namespace arr_mixed_return_notclonable
+alias Root as r
+public notclonable class H { }
+fun ->arr<H> pick(bool flip) {
+  arr<H> b = [H()]
+  arr<H> a = [H()]
+  if (flip) {
+    a = b
+  }
+  return a
+}
+fun main() {
+  arr<H> x = pick(true)
+  r.Console.log($"{x.len}")
+}

@@ -1,0 +1,1 @@
+parts/counter.df(8): error: a global can be declared only in the root file (program.df, main.df or lib.df) (spec 18.1)

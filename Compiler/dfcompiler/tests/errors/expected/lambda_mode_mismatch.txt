@@ -1,0 +1,1 @@
+lambda_mode_mismatch.df(6): error: this lambda is fun(Dog), but fun(&Dog) is expected

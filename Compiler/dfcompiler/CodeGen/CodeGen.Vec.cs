@@ -1114,7 +1114,9 @@ public class set<T> : SetCollection<T> {
       : target.Type == "string"
       ? StrAssign(target, "true", elem == "string?" ? incoming + ".val" : incoming) + "; "   // the item moves into the variable or the field, the old string ends
       : $"{CType(target.Type)} {old} = {target.Code}; {target.Code} = {store}; " + (owned ? $"if ({old} != {target.Code}) {{ df_drop((void*){old}); }} " : "")
-        + (ownsArray ? $"if ({old}.p != {target.Code}.p) {{ {ArrDropHelper(target.Type)}({old}); }} " : "");   // the old array of an owner ends (spec 6.8.1)
+        + (ownsArray && target.Variable?.ArrFlag is string flag
+          ? $"if ({flag} && {old}.p != {target.Code}.p) {{ {ArrDropHelper(target.Type)}({old}); }} {flag} = true; "   // a mixed local: its own old array ends, it owns the new one
+          : ownsArray ? $"if ({old}.p != {target.Code}.p) {{ {ArrDropHelper(target.Type)}({old}); }} " : "");   // the old array of an owner ends (spec 6.8.1)
     string code = $"({{ {CType(vec.Type)} {held} = {NullChecked(vec.Code, vec.Type)}; bool {ok} = false; {CType(elem)} {incoming} = {zero}; {LockCheck(held, vec.Type)}"
       + $"if ({held}->{count} > 0) {{ {held}->{count} -= 1; {incoming} = {held}->{items}.p[{held}->{count}]; {held}->{items}.p[{held}->{count}] = {zero}; {ok} = true; }} "
       + assignCode

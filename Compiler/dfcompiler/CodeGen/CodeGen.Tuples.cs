@@ -78,7 +78,11 @@ public sealed partial class CodeGen {
         value = StrReturned(value, s.Children[index], scope);
       }
       if (IsArr(elems[index].Type) && !LibraryCode) {
-        if (s.Children[index].Kind == "Name" && scope.Find(s.Children[index].Text!) is { OwnsArray: true } owned) {
+        if (s.Children[index].Kind == "Name" && scope.Find(s.Children[index].Text!) is { OwnsArray: true, ArrFlag: string flag } mixed) {
+          // a local that may borrow (a = b): its own array moves, a borrowed one is copied (spec 6.8.1)
+          value = new Expr($"({flag} ? {mixed.CName} : {ArrCloneHelper(elems[index].Type, s)}({mixed.CName}))", elems[index].Type, true);
+          emptied.Add(mixed);
+        } else if (s.Children[index].Kind == "Name" && scope.Find(s.Children[index].Text!) is { OwnsArray: true } owned) {
           emptied.Add(owned);   // the array moves to the caller (spec 6.8.1)
         } else if (!GivesOwnArray(s.Children[index])) {
           value = new Expr($"{ArrCloneHelper(elems[index].Type, s)}({Convert(value, elems[index].Type, s)})", elems[index].Type, true);   // a copy
@@ -87,7 +91,8 @@ public sealed partial class CodeGen {
       sb.Append($"{pad}{CType(elems[index].Type)} {temp} = {Convert(value, elems[index].Type, s.Children[index])};\n");
     }
     foreach (var owned in emptied.Distinct()) {
-      sb.Append($"{pad}{owned.CName}.p = NULL;\n{pad}{owned.CName}.len = 0;\n");
+      string empty = $"{owned.CName}.p = NULL; {owned.CName}.len = 0;";
+      sb.Append(owned.ArrFlag != null ? $"{pad}if ({owned.ArrFlag}) {{ {empty} }}\n" : $"{pad}{empty}\n");
     }
     return $"(({CType(currentRet!)}){{ {string.Join(", ", temps)} }})";
   }

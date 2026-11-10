@@ -1,0 +1,1 @@
+global_assign.df(13): error: global 'cache' cannot be assigned, moved or ended: it always holds the object it was created with (spec 18.3)

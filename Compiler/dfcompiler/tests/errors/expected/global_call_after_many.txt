@@ -1,0 +1,1 @@
+global_call_after_many.df(3): error: globals 'c1', 'c2' call global 'd', which is declared after them: a global can call only globals declared before it (spec 18.5)

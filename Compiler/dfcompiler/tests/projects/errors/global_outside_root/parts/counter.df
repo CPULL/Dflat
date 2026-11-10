@@ -1,0 +1,8 @@
+namespace local
+
+public class Counter {
+  i32 n = 0
+  unrestricted fun i32 total() { n }
+}
+
+global Counter counter = Counter()

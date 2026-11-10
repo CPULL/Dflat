@@ -1,0 +1,8 @@
+namespace lambda_map_value_compare
+alias Root as r
+public class Dog(string name) {
+  public string name
+}
+map<string, fun(i32)> m = []
+fun(i32) g = (i32 x) { }
+bool found = m.has(g)

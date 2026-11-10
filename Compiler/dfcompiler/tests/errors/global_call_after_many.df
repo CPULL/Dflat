@@ -1,0 +1,10 @@
+// spec 18.5: the code of a class calls a global declared after every global of that class
+class C {
+  public fun i32 useD() { d.n }
+}
+class D {
+  public i32 n = 0
+}
+global C c1 = C()
+global C c2 = C()
+global D d = D()

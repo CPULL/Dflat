@@ -1,0 +1,3 @@
+; a library that names a global of the program (spec 18.1)
+source=main.df
+include=libs/stats

@@ -1,0 +1,18 @@
+keeper
+  users 2
+  in lambda kept users 1
+weak
+  alive weak
+  end weak
+  gone
+writable
+  score 10
+  end ann
+moved
+  moved moved 1
+  moved moved 2
+  end of moved
+  end moved
+end of main
+  end kept
+---- exit code 0 ----

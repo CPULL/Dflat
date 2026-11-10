@@ -1,0 +1,5 @@
+7
+7
+shop ends at 7
+stats ends at 7
+---- exit code 0 ----

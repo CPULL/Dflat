@@ -1,0 +1,12 @@
+1
+refused: Calling Global Defined After Exception
+-1
+3
+103
+103
+2
+write refused
+read refused
+5
+1
+---- exit code 0 ----

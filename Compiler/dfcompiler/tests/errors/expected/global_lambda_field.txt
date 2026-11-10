@@ -1,0 +1,1 @@
+global_lambda_field.df(3): error: class 'Bus' is used by global 'bus' and cannot have lambdas or function values (spec 18.6)

@@ -1,0 +1,13 @@
+strings
+  abcc
+  new x
+arrays
+  end a1b
+  2 a2
+  11
+  end of arrays
+  end a2
+  end a3
+fields
+  box!!
+---- exit code 0 ----

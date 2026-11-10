@@ -15,11 +15,13 @@ borrowed true
   a is b
   end a2
   end of borrowed
+  end b
 borrowed false
   end a1
   a is b
   end of borrowed
   end a2
+  end b
 views
   view 2 v2
   v2

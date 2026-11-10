@@ -1,0 +1,5 @@
+namespace app
+import app.parts
+alias Root as r
+
+r.Console.log(counter.total())

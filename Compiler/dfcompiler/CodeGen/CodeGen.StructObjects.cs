@@ -13,8 +13,8 @@ public sealed partial class CodeGen {
   readonly HashSet<string> structDropHelpers = new();
   readonly HashSet<Node> structObjDecls = new();
 
-  // a field that owns something: a string, a string?, an object (a collection too)
-  bool IsOwningFieldType(string type) => type is "string" or "string?" || IsClass(type);
+  // a field that owns something: a string, a string?, an object (a collection too), a usage of a function value (spec 13.3.3)
+  bool IsOwningFieldType(string type) => type is "string" or "string?" || IsClass(type) || IsFunType(type);
 
   bool StructHoldsObjects(string type) =>
     structs.TryGetValue(type, out var info) && info.Fields.Any(field => field.Buffer == null && (IsOwningFieldType(field.Type) || StructHoldsObjects(field.Type)));
@@ -55,6 +55,8 @@ public sealed partial class CodeGen {
           body.Append($"  df_str_free(({slot}).val);\n  {slot} = (df_opt_string){{0}};\n");
         } else if (IsClass(field.Type)) {
           body.Append($"  df_drop((void*){slot});\n  {slot} = NULL;\n");
+        } else if (IsFunType(field.Type)) {
+          body.Append($"  df_fn_release({slot});\n  {slot} = (df_fn){{0}};\n");
         }
       }
       structProtos.Append($"static void {name}({info.CName}* v);\n");

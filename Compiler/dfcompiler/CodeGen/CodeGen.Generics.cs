@@ -148,7 +148,8 @@ public sealed partial class CodeGen {
     return name + "__" + string.Join("_", args.Select(SanitizeName));
   }
 
-  string DisplayName(string type) => displayNames.TryGetValue(type, out var shown) ? shown : type.StartsWith('#') ? type[1..] : type.StartsWith('_') ? "%" + type[1..] : type;
+  string DisplayName(string type) => displayNames.TryGetValue(type, out var shown) ? shown : type.StartsWith('#') ? type[1..] : type.StartsWith('_') ? "%" + type[1..]
+    : IsFunType(type) ? FunDisplay(type) : type;
 
   bool IsSetName(string name) => PredefinedSets.ContainsKey(name) || genericSets.ContainsKey(name);
 

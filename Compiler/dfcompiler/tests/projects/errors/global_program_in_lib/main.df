@@ -1,0 +1,8 @@
+namespace app
+import stats
+
+class Shop {
+  unrestricted fun i32 count() { 1 }
+}
+global Shop shop = Shop()
+Root.Console.log(peek())

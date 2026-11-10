@@ -1,0 +1,7 @@
+namespace lambda_counted_rw_from_readonly
+alias Root as r
+public class Dog(string name) {
+  public string name
+}
+@Dog d = Dog("a")
+fun() f = (; &@d) { }

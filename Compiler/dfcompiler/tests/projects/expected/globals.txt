@@ -1,0 +1,5 @@
+102
+4
+tally ends at 102
+log ends with 4 lines
+---- exit code 0 ----

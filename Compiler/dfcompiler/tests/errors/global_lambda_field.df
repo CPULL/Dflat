@@ -1,0 +1,5 @@
+// spec 18.3, 18.6: a compile error of globals
+class Bus {
+  public fun(i32) handler = (i32 x) { }
+}
+global Bus bus = Bus()

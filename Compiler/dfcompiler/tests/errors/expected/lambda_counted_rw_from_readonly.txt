@@ -1,0 +1,1 @@
+lambda_counted_rw_from_readonly.df(7): error: 'd' is read-only (@Dog): only a &@Dog or a &%Dog gives a read/write one (spec 12.7)

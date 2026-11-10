@@ -1,0 +1,43 @@
+// Globals (spec 18.3): fields read and written from outside under the lock (g.f = v, g.f += v, g.f++), a lent result copied
+// (g.first() gives a copy of the object), a field that holds an object or a string copied when it is read
+alias Root as r
+
+class Point(i32 px) {
+  public i32 x = px
+}
+
+class Store {
+  public i32 count = 0
+  public string name = "store"
+  public Point origin = Point(5)
+  public vec<i32> items = vec<i32>()
+  public fun Point first() { origin }
+  unrestricted fun string label() { name }
+  public fun add(i32 v) { items.add(v); count += 1 }
+}
+
+class Reader {
+  public fun i32 read() { st.count + st.origin.x }
+}
+
+global Store st = Store()
+
+st.count = 3
+st.count += 2
+st.count++
+r.Console.log(st.count)
+st.name = "main"
+string n = st.name
+r.Console.log(n)
+string l = st.label()
+r.Console.log(l)
+Point p = st.first()
+p.x = 99
+r.Console.log(st.origin.x)
+r.Console.log(p.x)
+Point q = st.origin
+q.x = 50
+r.Console.log(st.origin.x)
+r.Console.log(Reader().read())
+st.add(4)
+r.Console.log(st.count)

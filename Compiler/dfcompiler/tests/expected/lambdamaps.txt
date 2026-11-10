@@ -1,0 +1,15 @@
+  8
+  5
+  11
+  len 2 has true
+  bark ha
+  end ha
+  end hb
+  bark ha2
+  bark ha2
+  bark ha2
+  end of run
+  end ha2
+  end ha2
+end of main
+---- exit code 0 ----

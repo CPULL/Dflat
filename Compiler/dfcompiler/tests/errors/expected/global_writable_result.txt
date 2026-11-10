@@ -1,0 +1,1 @@
+global_writable_result.df(13): error: 'inner' lends its result with &, which cannot come out of global 'cache': call a method that returns a copy or gives the value with -> (spec 18.3)

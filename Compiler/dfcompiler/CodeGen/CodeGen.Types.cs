@@ -706,6 +706,11 @@ public sealed partial class CodeGen {
     return $"(({e.Code}) != 0)";
   }
 
+  // the text of an item of a struct or a collection: a function value prints as its type, or null (spec 13.3.2), as a field of a class does
+  string ItemStrOf(Expr e, Node at) => IsFunType(e.Type)
+    ? WithTemp(e, held => $"({held}.code == NULL ? df_str_lit(\"null\", 4) : {CString(CodePoints(FunDisplay(e.Type)))})")
+    : StrOf(e, at);
+
   string StrOf(Expr e, Node at) {
     if (IsSetValue(e.Type)) {
       return SetValueStr(e, at);

@@ -1,0 +1,11 @@
+// spec 18.3, 18.6: a compile error of globals
+class Point {
+  public i32 x = 0
+}
+class Store {
+  public Point origin = Point()
+}
+class Other {
+  public fun &Point at() { return st.origin }
+}
+global Store st = Store()

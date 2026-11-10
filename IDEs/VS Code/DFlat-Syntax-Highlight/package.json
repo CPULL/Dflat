@@ -1,22 +1,38 @@
+
 {
   "name": "dflat-syntax",
   "displayName": "DFlat Syntax Highlight",
-  "version": "0.0.2",
+  "description": "Syntax highlighting for the D♭ (Dflat) programming language",
+  "version": "0.0.3",
   "publisher": "local",
   "engines": {
     "vscode": "^1.60.0"
   },
+  "categories": [
+    "Programming Languages"
+  ],
   "contributes": {
-    "languages": [{
-      "id": "dflat",
-      "aliases": ["Dflat", "dflat"],
-      "extensions": [".df"],
-      "configuration": "./language-configuration.json"
-    }],
-    "grammars": [{
-      "language": "dflat",
-      "scopeName": "source.df",
-      "path": "./syntaxes/dflat.tmLanguage.json"
-    }]
+    "languages": [
+      {
+        "id": "dflat",
+        "aliases": [
+          "Dflat",
+          "dflat",
+          "D♭"
+        ],
+        "extensions": [
+          ".df"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "dflat",
+        "scopeName": "source.df",
+        "path": "./syntaxes/dflat.tmLanguage.json"
+      }
+    ]
   }
 }
+

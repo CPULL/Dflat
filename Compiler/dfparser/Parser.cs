@@ -300,6 +300,9 @@ public sealed class Parser {
            || Peek.Kind == TokenKind.Ident && Peek.Text == "replace" && (PeekAt(1).Kind is TokenKind.Ident or TokenKind.Keyword || PeekAt(1).Is("%") || PeekAt(1).Is("@") || PeekAt(1).Is("&"))
            || Peek.Kind == TokenKind.Ident && Peek.Text is "readonly" or "readwrite" or "writeonly" && (PeekAt(1).Kind is TokenKind.Ident or TokenKind.Keyword || PeekAt(1).Is("%"))
            || Peek.Kind == TokenKind.Ident && Peek.Text == "extern" && PeekAt(1).Kind == TokenKind.Keyword && PeekAt(1).Text == "fun"
+           // global Cache cache = Cache(1) (spec 18.1): global is a modifier only before a type and a name, so it is not a reserved word
+           || Peek.Kind == TokenKind.Ident && Peek.Text == "global" && PeekAt(1).Kind is TokenKind.Ident or TokenKind.Keyword && PeekAt(1).Line == Peek.Line
+              && (PeekAt(2).Kind == TokenKind.Ident || PeekAt(2).Is("<"))
            || Peek.Kind == TokenKind.Ident && Peek.Text == "notclonable" && PeekAt(1).Kind == TokenKind.Keyword && PeekAt(1).Text == "class") {   // spec 11.1, 12.6
       mods.Add(Next());
     }
@@ -1170,11 +1173,54 @@ public sealed class Parser {
     var list = new Node("ParamTypes", open);
     if (!IsOp(")")) {
       do {
-        list.Add(ParseType());
+        // the parameter modes are part of a function type: string(&MyObj), fun(->Dog), fun(@Dog), fun(&%Dog) (spec 13.3.2)
+        var at = Peek;
+        string marker = ParseParamMarker(false);
+        var type = ParseType();
+        list.Add(marker == "" ? type : new Node("ModeType", at, marker).Add(type));
       } while (AcceptOp(","));
     }
     ExpectOp(")");
     return list;
+  }
+
+  // the marker in front of the type of a parameter: & -> @ &@ % &% (spec 13.1), "" when there is none. named: a parameter name follows
+  // the type (a lambda parameter), otherwise the type stands alone (a function type)
+  string ParseParamMarker(bool named) {
+    CheckOldMarker();
+    bool Touching(int index) => PeekAt(index).Line == Peek.Line && PeekAt(index).Col == PeekAt(index - 1).Col + 1;
+    if (IsOp("&") && (PeekAt(1).Is("@") || PeekAt(1).Is("%")) && Touching(1) && PeekAt(2).Kind == TokenKind.Ident) {
+      Next();
+      return Next().Is("%") ? "&%" : "&@";
+    }
+    if (IsOp("@") && PeekAt(1).Kind == TokenKind.Ident && Touching(1)) {
+      Next();
+      return "@";
+    }
+    if (IsOp("%") && PeekAt(1).Kind == TokenKind.Ident && Touching(1) && (!named || PeekAt(2).Kind == TokenKind.Ident)) {
+      Next();
+      return "%";
+    }
+    if (IsOp("&") && !PeekAt(1).Is("*")) {
+      Next();
+      return "&";
+    }
+    return AcceptOp("->") ? "->" : "";
+  }
+
+  // a parameter node with its marker, as ParseParams writes it: &T name, ->T name, @T name, &@T name, %T name, &%T name
+  static Node MarkedParam(string marker, Token name, Node type) {
+    var p = new Node(marker switch { "&" => "WritableRefParam", "->" => "GiftParam", _ => "Param" }, name, name.Text).Add(type);
+    if (marker is "@" or "&@") {
+      p.Add(new Node("Counted", name));
+    }
+    if (marker is "%" or "&%") {
+      p.Add(new Node("Weak", name));
+    }
+    if (marker is "&@" or "&%") {
+      p.Add(new Node("ReadWrite", name));
+    }
+    return p;
   }
 
   // (i32, r128, string)  or  (i32 val, string name); at least 2 fields
@@ -1616,7 +1662,7 @@ public sealed class Parser {
         throw ErrorAt("unclosed '{'", open);
       }
       var mods = ParseModifiers();
-      if (IsKw("fun")) {
+      if (IsKw("fun") && !IsFunTypeDecl()) {   // fun(i32) onClick is a field of a function type (spec 13.3.2)
         node.Add(WithMods(ParseFun(), mods));
         needComma = false;
         continue;
@@ -2378,9 +2424,10 @@ public sealed class Parser {
       var n = Next();
       return new Node("Param", n, n.Text);
     }
+    string marker = ParseParamMarker(true);   // (&Dog d), (->Dog d), (@Dog d) ... as for functions (spec 13.3, 13.1)
     var type = ParseType();
     var name = ExpectIdent();
-    return new Node("Param", name, name.Text).Add(type);
+    return MarkedParam(marker, name, type);
   }
 
   // &limit (writable borrow) | limit! (copy) | ->limit (move) | @limit, &@limit (counted) | %limit, &%limit (weak) (spec 13.3.1); a plain

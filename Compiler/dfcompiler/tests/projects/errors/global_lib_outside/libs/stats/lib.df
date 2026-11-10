@@ -1,0 +1,12 @@
+namespace stats
+
+class Tally {
+  i32 total = 0
+  public fun add(i32 n) { total += n }
+  unrestricted fun i32 sum() { total }
+} atEnd { Root.Console.log($"stats ends at {total}") }
+
+global Tally tally = Tally()
+
+public fun record(i32 n) { tally.add(n) }
+public fun i32 recorded() { tally.sum() }

@@ -1,0 +1,1 @@
+global_mods.df(12): error: a global takes no other modifier: global <Class> <name> = <Class>(...) (spec 18.1)

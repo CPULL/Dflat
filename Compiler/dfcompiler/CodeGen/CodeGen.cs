@@ -69,6 +69,9 @@ sealed class FunSig {
   internal List<TypeParam>? TemplateParams { get; set; }   // a copy of a generic function: the type parameters of its template (spec 12.4)
   public string? LambdaCtx { get; set; }      // a lambda (spec 13.3.5): the C struct of its context, the hidden first parameter df_ctx
   public List<(string Name, VarInfo Var)> LambdaVars { get; } = new();   // its captures, as the body sees them
+  public ClassInfo? LambdaClass { get; set; }   // a lambda of a method that uses properties or the parent: its body sees the class (spec 13.3.1)
+  public bool LambdaSelf { get; set; }          // ... and borrows the object: the context keeps it (p_self)
+  public HashSet<string> LambdaReadOnlyMembers { get; } = new();   // the properties it uses without listing them: read-only
 }
 
 sealed class ParamSig {
@@ -122,6 +125,7 @@ sealed class VarInfo {
   public string? OwnFlag { get; set; }     // a string variable: the C flag that says whether it owns its string (CodeGen.Strings.cs)
   public bool ReadOnlyString { get; set; } // a string parameter or loop variable: a read-only borrow, never changed in place (spec 4.1)
   public VarInfo? AliasOf { get; set; }    // string b = a: b is known to be the same string as a (spec 4.1, in place through an alias)
+  public bool FnWrites { get; set; }       // a function value with a & capture (spec 13.3.3)
   public bool FnBorrows { get; set; }      // a function value that may borrow (a lambda with a borrowed capture, or a parameter): it is not
                                            // stored past its variables or returned (spec 13.3.4)
   public bool CapturedReadOnly { get; set; } // inside a lambda: an unlisted capture, a read-only borrow (spec 13.3.1)
@@ -274,6 +278,8 @@ public sealed partial class CodeGen {
     RegisterStructMethods();
     CheckClassInstances();
     DeclareGlobalConsts(program);
+    DeclareGlobals(program);   // spec 18
+    CheckGlobalUses(program);
     foreach (var statement in program.Children) {
       if (statement.Kind == "Fun") {
         if (IsGenericFunNode(statement)) {
@@ -285,6 +291,7 @@ public sealed partial class CodeGen {
     }
 
     ClassifyReturns();
+    LowerGlobalAccesses(program);   // spec 18.3: copies of lent results, the locks of field reads and writes
     LowerCountedVars(program);
     WarnCountedCycles();
     FindFailingFunctions();
@@ -298,7 +305,8 @@ public sealed partial class CodeGen {
         continue;
       }
       protos.Append(Signature(fun)).Append(";\n");
-      bodies.Append(fun.IsCtor ? EmitConstructor(fun) : EmitFun(fun)).Append('\n');
+      string emitted = fun.IsCtor ? EmitConstructor(fun) : EmitFun(fun);
+      bodies.Append(lockedMethods.Contains(fun) ? LockedMethodCode(fun, emitted, protos) : emitted).Append('\n');   // spec 18.4
     }
 
     // a main function is the entry point (spec 14.1); otherwise the top-level statements are
@@ -617,7 +625,7 @@ public sealed partial class CodeGen {
     assign = new AssignState();
     currentRet = f.Ret;
     currentEnum = f.EnumName;
-    currentClass = f.Class;
+    currentClass = f.Class ?? f.LambdaClass;
     currentFun = f;
     currentGenericT = f.GenericT;
     initializing = f.IsInit || f.IsStaticInit;
@@ -632,6 +640,11 @@ public sealed partial class CodeGen {
     }
     if (f.LambdaCtx != null) {
       fn.Decls.Append($"  {f.LambdaCtx}* c = ({f.LambdaCtx}*)df_ctx;\n  (void)c;\n");
+      if (f.LambdaClass != null && f.LambdaSelf) {
+        // the object of the method the lambda was written in: its properties and its parent are reached through it (spec 13.3.1)
+        fn.Decls.Append($"  {CType(f.LambdaClass.Name)} self = ({CType(f.LambdaClass.Name)})c->p_self;\n  (void)self;\n");
+        scope.Vars["this"] = new VarInfo(f.LambdaClass.Name, "self", true);
+      }
       foreach (var (name, variable) in f.LambdaVars) {
         scope.Vars[name] = variable;   // the captures (spec 13.3.1)
       }
@@ -741,6 +754,14 @@ public sealed partial class CodeGen {
       movedVars.TryAdd(variable, to);
     }
     pendingMoves.Clear();
+    if (globalWrites.TryGetValue(s, out var writtenGlobal) && wrappingGlobal.Add(s)) {
+      try {
+        EmitGlobalWrite(s, writtenGlobal, sb, scope, indent);   // g.f = v under the write lock (spec 18.3)
+      } finally {
+        wrappingGlobal.Remove(s);
+      }
+      return;
+    }
     if (s.Kind == "Assign" && s.Text == "=" && s.Children[0].Kind == "Name" && scope.Find(s.Children[0].Text!) is VarInfo reassigned) {
       movedVars.Remove(reassigned);   // rex = Dog("new"): usable again
     }
@@ -1069,6 +1090,7 @@ public sealed partial class CodeGen {
     }
     variable.IsWeak = weak;
     variable.FnBorrows = IsFunType(type) && init != null && FnMayBorrow(init.Children[0], scope);
+    variable.FnWrites = IsFunType(type) && init != null && FnMayWrite(init.Children[0], scope);
     if (type == "string" && init?.Children[0] is { Kind: "Name" } source && scope.Find(source.Text!) is VarInfo { Type: "string" } original) {
       variable.AliasOf = original.AliasOf ?? original;
     }
@@ -1090,6 +1112,7 @@ public sealed partial class CodeGen {
     scope.Vars[s.Text!] = variable;
     variable.IsLocal = currentFun != null && !fn!.IsMain;
     CheckBorrowLock(s, type, init?.Children[0], variable, scope);   // spec 12
+    CheckCaptureLock(s, init?.Children[0]);   // fun() f = (; &a) { ... }: a is the lambda's until the last use of f (spec 13.3.4)
     SetBorrowAccess(s, type, init?.Children[0], variable, scope);   // read-only or read/write borrow (spec 13.1.1)
     if (init == null) {
       assign.Unassigned.Add(variable);
@@ -1381,9 +1404,12 @@ public sealed partial class CodeGen {
     }
     var returned = ExprOf(s.Children[0], scope, currentRet);
     if (s.Children[0].Kind == "Name" && scope.Find(s.Children[0].Text!) is { OwnsArray: true } owned) {
-      // return a: the array moves to the caller, the local is emptied so its end frees nothing (spec 6.8.1)
+      // return a: the array moves to the caller, the local is emptied so its end frees nothing (spec 6.8.1); a local that may borrow
+      // (a = b) moves its own array, or gives the caller a copy of the borrowed one
       string moved = NewTemp();
-      returned = returned with { Code = $"({{ {CType(owned.Type)} {moved} = {owned.CName}; {owned.CName}.p = NULL; {owned.CName}.len = 0; {moved}; }})" };
+      returned = returned with { Code = owned.ArrFlag is string flag && !LibraryCode
+        ? $"({{ {CType(owned.Type)} {moved}; if ({flag}) {{ {moved} = {owned.CName}; {owned.CName}.p = NULL; {owned.CName}.len = 0; }} else {{ {moved} = {ArrCloneHelper(owned.Type, s)}({owned.CName}); }} {moved}; }})"
+        : $"({{ {CType(owned.Type)} {moved} = {owned.CName}; {owned.CName}.p = NULL; {owned.CName}.len = 0; {moved}; }})" };
     }
     if (TupleHoldsArrays(currentRet!) && !LibraryCode) {
       returned = new Expr(TupleOwnedCode(s.Children[0], returned, currentRet!, s), currentRet!);   // the caller gets its own arrays (spec 6.8.1)
@@ -1439,6 +1465,9 @@ public sealed partial class CodeGen {
       }
       if (variable == null && globalConsts.TryGetValue(target.Text!, out var global)) {
         return new LValueInfo(global.CName, global.Type, !initializing);
+      }
+      if (variable == null && globals.TryGetValue(target.Text!, out var globalObject)) {
+        return GlobalLValue(globalObject, target);   // spec 18.3
       }
       if (variable == null) {
         throw Error($"unknown variable '{target.Text}'", target);
@@ -1613,6 +1642,16 @@ public sealed partial class CodeGen {
 
   // a string says whether it is new (CodeGen.Strings.cs)
   Expr ExprOf(Node n, Scope scope, string? expected = null) {
+    if (prebuilt.TryGetValue(n, out var built)) {
+      return built;   // a value evaluated before the lock of a global, held in a C temporary (spec 18.5)
+    }
+    if (globalReads.TryGetValue(n, out var readGlobal) && wrappingGlobal.Add(n)) {
+      try {
+        return GlobalReadExpr(n, readGlobal.Global, readGlobal.Write, scope, expected);   // g.f under the lock (spec 18.3)
+      } finally {
+        wrappingGlobal.Remove(n);
+      }
+    }
     if (expected != null && IsSetValue(expected) && SetValueLiteral(n, scope, expected) is Expr setLiteral) {
       return setLiteral;   // Nums k = 5 (spec 11.3.6.1)
     }
@@ -1683,6 +1722,9 @@ public sealed partial class CodeGen {
         if (globalConsts.TryGetValue(n.Text!, out var global)) {
           return new Expr(global.CName, global.Type);
         }
+        if (globals.TryGetValue(n.Text!, out var globalObject)) {
+          return new Expr(globalObject.CName, globalObject.Type);   // spec 18: the object of the global, borrowed
+        }
         if (traits.TryGetValue(n.Text!, out var viewed) && scope.Find("this") != null && IsSubtype(scope.Find("this")!.Type, viewed.Name)) {
           return new Expr("self", viewed.Name);   // TraitName.member inside a class that implements it
         }
@@ -1747,6 +1789,7 @@ public sealed partial class CodeGen {
       case "Transmute":
         return Transmute(n, scope);
       case "Call":
+        CheckGlobalCall(n, scope);   // spec 18.3
         return DerefLend(RemoveCountingCall(n, scope) ?? CloneCall(n, scope) ?? Call(n, scope));   // a &T result of a value: (*address)
       case "CtorChain":
         return CtorChainCall(n, scope);
@@ -1809,6 +1852,9 @@ public sealed partial class CodeGen {
         }
         // a! of a string: a copy (the objects need cloning, spec 12.6)
         var copied = ExprOf(n.Children[0], scope);
+        if (n.Text == "global" && (copied.Fresh || !LendsHeapValue(copied.Type))) {
+          return copied;   // a value that comes out of a global: copied only when it is lent (spec 18.3)
+        }
         if (MapViewKind(copied.Type) is string viewKind) {
           return MapViewCopy(MapOfView(copied), viewKind == "mapKeys", n);
         }
@@ -1816,6 +1862,9 @@ public sealed partial class CodeGen {
           return new Expr(copied.Fresh ? copied.Code : $"df_str_dup({copied.Code})", "string", true);
         }
         if (IsFunType(copied.Type)) {
+          if (FnMayWrite(n.Children[0], scope)) {
+            throw Error("this lambda has a & capture: a copy would be a second writable borrow of the same variable; share it with = instead of ! (spec 13.3.3)", n);
+          }
           // f!: a new context, with what the lambda owns cloned (spec 13.3.3)
           return new Expr(copied.Fresh ? copied.Code : $"df_fn_clone({copied.Code})", copied.Type, true);
         }
@@ -2173,8 +2222,52 @@ public sealed partial class CodeGen {
       return Combine(op, lit, right, n);
     }
     var left = ExprOf(n.Children[0], scope, context);
+    if (HasEffects(n.Children[0]) && !IsLiteralNode(n.Children[1]) && left.Type is not ("void" or "null")) {
+      // twice(&t) + t: the left side runs first, then the right one reads (left to right; C leaves the order open)
+      string held = NewTemp();
+      var combined = BinaryOp(op, left with { Code = held }, n.Children[1], scope, n);
+      return combined with { Code = $"({{ __auto_type {held} = {left.Code}; {combined.Code}; }})" };
+    }
     return BinaryOp(op, left, n.Children[1], scope, n);
   }
+
+  // a part of an expression that can change something: a call, an assignment, ++ / --, &x, ->x (a lambda written there runs later)
+  static bool HasEffects(Node node) =>
+    node.Kind is "Call" or "Assign" or "PreInc" or "PreDec" or "PostInc" or "PostDec" or "Gift" or "WritableAddressOf"
+    || node.Kind is not ("Lambda" or "Fun") && node.Children.Any(HasEffects);
+
+  // a value that nothing can change: reading it before or after the other parts gives the same result
+  static bool IsLiteralNode(Node node) => node.Kind is "Int" or "Real" or "String" or "Char" or "Bool" or "Null"
+    || node.Kind is "Paren" or "Neg" && node.Children.Count == 1 && IsLiteralNode(node.Children[0]);
+
+  // the arguments of a call run from left to right: when one of them can change something and another is read, each argument is computed
+  // into a temporary, in order (C leaves the order of the arguments open)
+  static List<string> ArgsInOrder(List<Node?> args, List<string> codes, out string prefix) {
+    prefix = "";
+    bool needed = false;
+    for (int first = 0; first < args.Count && !needed; first++) {
+      for (int second = 0; second < args.Count && !needed; second++) {
+        needed = first != second && args[first] is Node effect && HasEffects(effect) && args[second] is Node read && !IsLiteralNode(read);
+      }
+    }
+    if (!needed) {
+      return codes;
+    }
+    var held = new List<string>();
+    var sb = new StringBuilder();
+    for (int index = 0; index < codes.Count; index++) {
+      string name = $"df_arg{index}_{System.Threading.Interlocked.Increment(ref argOrderCounter)}";
+      sb.Append($"__auto_type {name} = {codes[index]}; ");
+      held.Add(name);
+    }
+    prefix = sb.ToString();
+    return held;
+  }
+
+  static int argOrderCounter;
+
+  // the call after the arguments computed in order (ArgsInOrder); the same call when they were not needed
+  static Expr ArgsFirst(Expr call, string prefix) => prefix == "" ? call : call with { Code = $"({{ {prefix}{call.Code}; }})" };
 
   Expr BinaryOp(string op, Expr left, Node rightNode, Scope scope, Node at) {
     var right = ExprOf(rightNode, scope, NumericContext(left.Type));
@@ -2573,21 +2666,24 @@ public sealed partial class CodeGen {
       throw Error(problem!, at);
     }
     var codes = new List<string>();
+    var given = new List<Node?>();
     for (int index = 0; index < f.Params.Count; index++) {
       var param = f.Params[index];
       Node arg = slots[index] ?? param.Default!;
+      given.Add(arg);
       if (VariadicLend(param, arg, scope) is string lent) {
         codes.Add(lent);   // an arr, a vec or a view given alone to T name... (spec 13.4)
         continue;
       }
-      codes.Add(ArgCode(param, arg, scope));
+      codes.Add(ArgCode(param, arg, scope, f, index));
       CheckStoredFunction(f, param, arg, scope);   // after the value: a lambda says whether it borrows once it is compiled
     }
+    codes = ArgsInOrder(given, codes, out string prefix);
     if (self != null) {
       codes.Insert(0, self);   // a method of a struct: the address of the struct (spec 11.1.5.2)
     }
     string call = $"{f.CName}({string.Join(", ", codes)})";
-    return new Expr(UserCallCode(f, call), f.Ret, IsClass(f.Ret) && (f.IsCtor || f.ReturnsOwned) || StructHoldsObjects(f.Ret));
+    return ArgsFirst(new Expr(UserCallCode(f, call), f.Ret, IsClass(f.Ret) && (f.IsCtor || f.ReturnsOwned) || StructHoldsObjects(f.Ret)), prefix);
   }
 
   Expr MemberValue(Node n, Scope scope) {

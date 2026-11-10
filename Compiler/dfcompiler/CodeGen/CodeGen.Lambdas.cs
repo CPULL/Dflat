@@ -17,8 +17,8 @@ namespace dfcompiler;
 //
 // Inside a method the fields are captured by their bare names, like locals; a borrowed field borrows the object (13.3.1).
 //
-// Not built yet: counted and weak captures (@a, &@a, %a, &%a), &a of strings and arrays, parameter modes in function types, function
-// types in fields and collections, f1! copies, and the lock of the outer variable while a &a capture lives.
+// Counted and weak captures keep a usage or a weak reference in the context; properties and the parent are reached through the object
+// (p_self, LambdaClass). Not built yet: function types as map keys and set items, &a of string?, tuples, structs and function values.
 //
 // Exceptions: every lambda returns its exception, as a function that can fail does (a call through a function value cannot know which
 // lambda it reaches), and each call checks it; a silent one is ignored by the caller unless a catch there handles it (spec 15.4).
@@ -74,7 +74,12 @@ public sealed partial class CodeGen {
   // the way the program writes it: fun(i32), string(char, char)
   static string FunDisplay(string type) {
     var (ret, ps) = FunParts(type);
-    string list = string.Join(", ", ps.Select(p => IsFunType(p) ? FunDisplay(p) : p));
+    string Shown(string p) {
+      string marker = p.StartsWith("->") ? "->" : p.StartsWith("&") ? "&" : "";
+      string rest = p[marker.Length..];
+      return marker + (IsWeakType(rest) ? "%" + rest[1..] : IsFunType(rest) ? FunDisplay(rest) : rest);
+    }
+    string list = string.Join(", ", ps.Select(Shown));
     return ret == "void" ? $"fun({list})" : $"{(IsFunType(ret) ? FunDisplay(ret) : ret)}({list})";
   }
 
@@ -83,16 +88,77 @@ public sealed partial class CodeGen {
     var returns = n.Children.FirstOrDefault(child => child.Kind == "Returns");
     string ret = returns == null ? "void" : ResolveType(returns.Children[0]);
     var list = n.Children.First(child => child.Kind == "ParamTypes");
-    var ps = list.Children.Select(ResolveType).ToList();
+    var ps = list.Children.Select(ParamTypeText).ToList();
     return MakeFunType(ret, ps);
+  }
+
+  // a parameter of a function type with its mode (spec 13.3.2): T, &T, ->T, @T, &@T, %T (written _T inside the compiler), &%T
+  string ParamTypeText(Node typeNode) {
+    if (typeNode.Kind != "ModeType") {
+      return ResolveType(typeNode);
+    }
+    string type = ResolveType(typeNode.Children[0]);
+    switch (typeNode.Text) {
+      case "@" or "&@":
+        return (typeNode.Text == "&@" ? "&" : "") + CountedTypeOf(type, typeNode, true);
+      case "%" or "&%":
+        if (!IsClass(type)) {
+          throw Error("only objects have weak references", typeNode);
+        }
+        return (typeNode.Text == "&%" ? "&" : "") + "_" + type;
+      case "->":
+        return Giftable(type) ? "->" + type : type;   // ->i32: a basic value is a copy anyway (spec 13.1.1)
+      default:
+        return "&" + type;
+    }
+  }
+
+  bool Giftable(string type) => IsClass(type) || type == "string" || IsArr(type) || StructHoldsObjects(type);
+
+  // the same text for a parameter of a lambda
+  static string ParamTypeText(ParamSig p) =>
+    p.Ref == 2 ? "&" + p.Type : p.IsGift ? "->" + p.Type : (IsCountedType(p.Type) || IsWeakType(p.Type)) && p.IsWritable ? "&" + p.Type : p.Type;
+
+  // the parameter a call through a function value passes to: its mode comes from the function type
+  ParamSig ParamFromFunType(string name, string text) {
+    if (text.StartsWith("->")) {
+      return new ParamSig(name, text[2..], null) { IsGift = true };
+    }
+    if (text.StartsWith("&") && text.Length > 1 && (IsCountedType(text[1..]) || IsWeakType(text[1..]))) {
+      return new ParamSig(name, text[1..], null) { IsWritable = true, IsWeak = IsWeakType(text[1..]) };
+    }
+    if (text.StartsWith("&")) {
+      return new ParamSig(name, text[1..], null) { Ref = 2 };
+    }
+    return new ParamSig(name, text, null) { IsWeak = IsWeakType(text) };
+  }
+
+  // the parameters of a lambda, with their modes, as a function declares them (spec 13.3, 13.1)
+  ParamSig LambdaParam(Node p) {
+    string type = ResolveType(p.Children[0]);
+    bool weak = p.Children.Any(child => child.Kind == "Weak");
+    if (weak && !IsClass(type)) {
+      throw Error("only objects have weak references", p);
+    }
+    if (p.Children.Any(child => child.Kind == "Counted")) {
+      type = CountedTypeOf(type, p, true);
+    }
+    if (weak) {
+      type = "_" + type;
+    }
+    return new ParamSig(p.Text!, type, null) {
+      IsWritable = p.Children.Any(child => child.Kind == "ReadWrite"),
+      IsGift = p.Kind == "GiftParam" && Giftable(type),
+      Ref = p.Kind == "WritableRefParam" ? 2 : 0,
+      IsWeak = weak
+    };
   }
 
   // ---------------------------------------------------------------- lambda expressions
 
   int lambdaCounter;
   readonly HashSet<Node> borrowingLambdas = new();
-
-  static readonly HashSet<string> LambdaNotBuilt = new() { "CountedCapture", "WeakCapture" };
+  readonly HashSet<Node> writingLambdas = new();   // lambdas with a & capture: f! of one is a compile error (spec 13.3.3)
 
   // a capture kept by address (a borrow) can have any type; a copy or a move only the types handled below
   bool IsPlainValueType(string type) =>
@@ -112,14 +178,13 @@ public sealed partial class CodeGen {
       if (ps.Any(other => other.Name == p.Text)) {
         throw Error($"duplicate parameter '{p.Text}'", p);
       }
-      string type = ResolveType(p.Children[0]);
-      ps.Add(new ParamSig(p.Text!, type, null));
+      ps.Add(LambdaParam(p));
     }
     string ret = "void";
     if (expected != null && IsFunType(expected)) {
       var (expectedRet, expectedParams) = FunParts(expected);
-      if (expectedParams.Count != ps.Count || expectedParams.Zip(ps).Any(pair => pair.First != pair.Second.Type)) {
-        throw Error($"this lambda takes ({string.Join(", ", ps.Select(p => p.Type))}), but {FunDisplay(expected)} is expected", n);
+      if (expectedParams.Count != ps.Count || expectedParams.Zip(ps).Any(pair => pair.First != ParamTypeText(pair.Second))) {
+        throw Error($"this lambda is {FunDisplay(MakeFunType(expectedRet, ps.Select(ParamTypeText)))}, but {FunDisplay(expected)} is expected", n);
       }
       ret = expectedRet;
     }
@@ -131,16 +196,17 @@ public sealed partial class CodeGen {
       if (capture.Kind == "Capture") {
         throw Error($"'{name}' is captured read-only without listing it: remove it from the list, or write &{name} to change it (spec 13.3.1)", capture);
       }
-      if (LambdaNotBuilt.Contains(capture.Kind)) {
-        throw NotSupported("counted and weak captures (@a, &@a, %a, &%a, spec 13.3.1)", capture);
-      }
       if (listed.ContainsKey(name)) {
         throw Error($"'{name}' is listed twice", capture);
       }
       if (ps.Any(p => p.Name == name)) {
         throw Error($"'{name}' is a parameter of the lambda, not a capture", capture);
       }
-      if (OuterOf(name, scope, capture) == null) {
+      if (capture.Kind is "CountedCapture" or "WeakCapture") {
+        CountedSource(capture, scope);   // @a, &@a, %a, &%a: a counted object, or a weak reference for %a (spec 13.3.1)
+      } else if (LambdaClassMember(name, scope) is FieldInfo member) {
+        CheckMemberCapture(member, capture);
+      } else if (OuterOf(name, scope, capture) == null) {
         throw Error($"unknown variable '{name}'", capture);
       }
       listed[name] = capture;
@@ -148,7 +214,17 @@ public sealed partial class CodeGen {
     var used = new List<string>();
     CollectNames(block, used);
     var captures = new List<(string Name, VarInfo Outer, string Kind, Node At)>();
+    var counted = new List<(string Name, CountedRefInfo Source, Node At)>();
+    var members = new List<(FieldInfo Field, string Kind, Node At)>();   // properties and the parent, reached through the object
     foreach (var (name, at) in listed) {
+      if (at.Kind is "CountedCapture" or "WeakCapture") {
+        counted.Add((name, CountedSource(at, scope), at));
+        continue;
+      }
+      if (LambdaClassMember(name, scope) is FieldInfo listedMember) {
+        members.Add((listedMember, at.Kind, at));
+        continue;
+      }
       captures.Add((name, OuterOf(name, scope, at)!, at.Kind, at));
     }
     foreach (string name in used.Distinct()) {
@@ -158,15 +234,36 @@ public sealed partial class CodeGen {
       if (name == "this" && scope.Find(name) != null) {
         throw Error("there is no this in a lambda: the fields are captured by their bare names (spec 13.3.1)", n);
       }
+      var named = Synthetic("Name", n, name);
+      if (CountedRef(named, scope) is CountedRefInfo shared) {
+        throw Error($"'{name}' is counted and cannot be borrowed: list it as @{name}, or %{name} for a weak reference (spec 13.3.1)", n);
+      }
+      if (WeakRef(named, scope) is CountedRefInfo) {
+        throw Error($"'{name}' is a weak reference: list it as %{name} (spec 13.3.1)", n);
+      }
+      if (LambdaClassMember(name, scope) is FieldInfo usedMember) {
+        members.Add((usedMember, "Implicit", n));
+        continue;
+      }
       if (OuterOf(name, scope, n) is VarInfo outer) {
         captures.Add((name, outer, "Implicit", n));
       }
+    }
+    bool needsSelf = members.Any(member => !member.Field.IsStatic && member.Kind is "Implicit" or "WritableCapture");
+    if (needsSelf && scope.Find("this") == null) {
+      var first = members.First(member => !member.Field.IsStatic);
+      throw Error($"'{first.Field.Name}' belongs to an object; a static function has no object", first.At);
     }
 
     int id = ++lambdaCounter;
     string ctxName = $"df_lctx_{id}";
     var funNode = Synthetic("Fun", n, $"lambda_{id}").Add(block);
-    var lambda = new FunSig($"lambda_{id}", ret, ps, funNode, null) { LambdaCtx = captures.Count > 0 ? ctxName : "df_lhead" };
+    bool hasContext = captures.Count + counted.Count > 0 || needsSelf || members.Any(member => member.Kind == "CopyCapture");
+    var lambda = new FunSig($"lambda_{id}", ret, ps, funNode, null) { LambdaCtx = hasContext ? ctxName : "df_lhead" };
+    if (members.Any(member => member.Kind is "Implicit" or "WritableCapture")) {
+      lambda.LambdaClass = currentClass;   // its body reaches the properties and the parent through the class (spec 13.3.1)
+      lambda.LambdaSelf = needsSelf;
+    }
     if (ret == "string" || IsClass(ret) || IsArr(ret)) {
       lambda.Gives.Add(0);   // the caller of a function value owns the new value it gets
       lambda.ReturnsOwned = true;
@@ -177,9 +274,68 @@ public sealed partial class CodeGen {
     var inits = new StringBuilder();
     var ends = new StringBuilder();
     var clones = new StringBuilder();   // f! (spec 13.3.3): what the lambda owns is cloned; borrows are copied as they are
+    if (needsSelf) {
+      // the lambda borrows the object of the method: its properties and its parent are read (or, listed &, written) through it
+      borrows = true;
+      fields.Append("  void* p_self;\n");
+      inits.Append("c_->p_self = (void*)self; ");
+    }
+    foreach (var (member, kind, at) in members) {
+      string name = member.Name;
+      if (kind == "Implicit") {
+        lambda.LambdaReadOnlyMembers.Add(name);   // read-only, as any capture that is not listed (spec 13.3.1)
+        continue;
+      }
+      if (kind != "CopyCapture") {
+        continue;   // &prop: written through its accessors
+      }
+      // prop! and parent!: the value read now (through the getter) is copied into the lambda
+      string type = member.Type;
+      string cType = CType(type);
+      string field = $"c->v_{name}";
+      if (IsPlainValueType(type)) {
+        var read = ExprOf(Synthetic("Name", at, name), scope, type);
+        fields.Append($"  {cType} v_{name};\n");
+        inits.Append($"c_->v_{name} = {Convert(read, type, at)}; ");
+        lambda.LambdaVars.Add((name, new VarInfo(type, field, false)));
+      } else if (type == "string") {
+        var read = ExprOf(Synthetic("Name", at, name), scope, type);
+        fields.Append($"  df_string v_{name};\n");
+        inits.Append($"c_->v_{name} = {(read.Fresh ? read.Code : $"df_str_dup({read.Code})")}; ");
+        ends.Append($"  df_str_free({field});\n");
+        clones.Append($"  n->v_{name} = df_str_dup(c->v_{name});\n");
+        lambda.LambdaVars.Add((name, new VarInfo(type, field, false) { RefSlot = true }));
+      } else if (IsArr(type) || IsClass(type) && !IsTraitType(type)) {
+        var copy = ExprOf(Synthetic("Copy", at).Add(Synthetic("Name", at, name)), scope);
+        OwnedCapture(name, type, copy.Code, fields, inits, ends, clones, lambda, at);
+      } else {
+        throw NotSupported($"{name}! of a {type} property in a lambda (spec 13.3.1)", at);
+      }
+    }
+    foreach (var (name, source, at) in counted) {
+      // @a and &@a: a usage of the lambda (+1 now, -1 when it ends); %a and &%a: a weak reference (spec 13.3.1). A move ->a of a counted
+      // object is below, with the other moves
+      bool weak = at.Kind == "WeakCapture";
+      bool writable = at.Children.Any(child => child.Kind == "ReadWrite");
+      fields.Append($"  df_rc* v_{name};\n");
+      inits.Append($"c_->v_{name} = {(weak ? "df_rc_weak" : "df_rc_use")}({source.Code}); ");
+      ends.Append(weak ? $"  df_rc_unweak(c->v_{name});\n" : $"  df_rc_release(c->v_{name});\n");
+      clones.Append($"  n->v_{name} = {(weak ? "df_rc_weak" : "df_rc_use")}(c->v_{name});\n");
+      lambda.LambdaVars.Add((name, new VarInfo(source.Type, $"c->v_{name}", true) { IsCounted = !weak, IsWeak = weak, IsWritable = writable }));
+    }
     foreach (var (name, outer, kind, at) in captures) {
+      if (outer.IsCounted && kind == "MoveCapture") {
+        // ->a of a counted object: its usage moves into the lambda, the count does not change (spec 13.3.1, 12.7)
+        fields.Append($"  df_rc* v_{name};\n");
+        inits.Append($"c_->v_{name} = {outer.CName}; {outer.CName} = NULL; ");
+        ends.Append($"  df_rc_release(c->v_{name});\n");
+        clones.Append($"  n->v_{name} = df_rc_use(c->v_{name});\n");
+        lambda.LambdaVars.Add((name, new VarInfo(outer.Type, $"c->v_{name}", true) { IsCounted = true, IsWritable = outer.IsWritable }));
+        continue;
+      }
       if (outer.IsCounted || outer.IsWeak) {
-        throw NotSupported($"the counted or weak '{name}' in a lambda (@{name}, %{name}, spec 13.3.1)", at);
+        throw Error(outer.IsWeak ? $"'{name}' is a weak reference: list it as %{name} (spec 13.3.1)"
+          : $"'{name}' is counted and cannot be borrowed or copied this way: list it as @{name}, %{name} or ->{name} (spec 13.3.1)", at);
       }
       string type = outer.Type;
       string cType = CType(type);
@@ -191,8 +347,20 @@ public sealed partial class CodeGen {
             if (outer.IsConst) {
               throw Error($"'{name}' is const: it cannot be captured with &", at);
             }
+            if (type == "string" || IsArr(type)) {
+              // &s, &a: the lambda can replace the string or the array, as a & parameter can (spec 13.1): the variable must own it
+              if (outer.ArrFlag != null) {
+                throw Error($"'{name}' may only borrow its array here (it is assigned another array): &{name} needs the variable that owns it (spec 13.1, 6.8.1)", at);
+              }
+              string address = WritableAddress(Synthetic("Name", at, name), scope, type, at);
+              borrows = true;
+              fields.Append($"  void* p_{name};\n");
+              inits.Append($"c_->p_{name} = (void*)({address}); ");
+              lambda.LambdaVars.Add((name, new VarInfo(type, $"(*({cType}*)c->p_{name})", false) { RefSlot = true, BorrowsArray = IsArr(type) }));
+              break;
+            }
             if (!IsPlainValueType(type) && !IsClass(type)) {
-              throw NotSupported($"&{name} of a {type} in a lambda (numbers, bool, char, dates and objects are built)", at);
+              throw NotSupported($"&{name} of a {type} in a lambda (numbers, bool, char, dates, objects, strings and arrays are built)", at);
             }
           }
           borrows = true;
@@ -232,7 +400,7 @@ public sealed partial class CodeGen {
             ends.Append($"  df_fn_release({field});\n");
             clones.Append($"  n->v_{name} = df_fn_clone(c->v_{name});\n");
             borrows |= outer.FnBorrows;
-            lambda.LambdaVars.Add((name, new VarInfo(type, field, false) { FnBorrows = outer.FnBorrows }));
+            lambda.LambdaVars.Add((name, new VarInfo(type, field, false) { FnBorrows = outer.FnBorrows, FnWrites = outer.FnWrites }));
           } else if (IsArr(type) || IsClass(type) && !IsTraitType(type)) {
             // a clone (12.6): the lambda owns it
             var copy = ExprOf(Synthetic("Copy", at).Add(Synthetic("Name", at, name)), scope);
@@ -262,7 +430,7 @@ public sealed partial class CodeGen {
             ends.Append($"  df_fn_release({field});\n");
             clones.Append($"  n->v_{name} = df_fn_clone(c->v_{name});\n");
             borrows |= outer.FnBorrows;
-            lambda.LambdaVars.Add((name, new VarInfo(type, field, false) { FnBorrows = outer.FnBorrows }));
+            lambda.LambdaVars.Add((name, new VarInfo(type, field, false) { FnBorrows = outer.FnBorrows, FnWrites = outer.FnWrites }));
           } else {
             throw NotSupported($"->{name} of a {type} in a lambda (spec 13.3.1)", at);
           }
@@ -275,8 +443,12 @@ public sealed partial class CodeGen {
     if (borrows) {
       borrowingLambdas.Add(n);
     }
-    string fnType = MakeFunType(ret, ps.Select(p => p.Type));
-    if (captures.Count == 0) {
+    if (captures.Any(capture => capture.Kind == "WritableCapture" || capture.Kind is "CopyCapture" or "MoveCapture" && capture.Outer.FnWrites)
+        || members.Any(member => member.Kind == "WritableCapture")) {
+      writingLambdas.Add(n);
+    }
+    string fnType = MakeFunType(ret, ps.Select(ParamTypeText));
+    if (!hasContext) {
       return new Expr($"((df_fn){{ (void*){lambda.CName}, NULL }})", fnType);
     }
     lambdaHelpers.Append($"typedef struct {{\n  df_lhead h;\n{fields}}} {ctxName};\n\n");
@@ -285,6 +457,29 @@ public sealed partial class CodeGen {
     string code = $"({{ {ctxName}* c_ = ({ctxName}*)df_alloc(sizeof({ctxName})); c_->h.rc = 1; c_->h.end = df_lend_{id}; c_->h.clone = df_lclone_{id}; {inits}"
       + $"(df_fn){{ (void*){lambda.CName}, &c_->h }}; }})";
     return new Expr(code, fnType, true);
+  }
+
+  // the counted object (or, for %a, also a weak reference) a @a, &@a, %a or &%a capture takes; &@a and &%a need a read/write source
+  CountedRefInfo CountedSource(Node capture, Scope scope) {
+    string name = capture.Text!;
+    var named = Synthetic("Name", capture, name);
+    bool weak = capture.Kind == "WeakCapture";
+    bool writable = capture.Children.Any(child => child.Kind == "ReadWrite");
+    string form = (writable ? "&" : "") + (weak ? "%" : "@") + name;
+    if (CountedRef(named, scope) is not CountedRefInfo source) {
+      if (WeakRef(named, scope) is CountedRefInfo weakSource) {
+        if (!weak) {
+          throw Error($"'{name}' is a weak reference: {form} needs the counted object; list %{name}, or take a usage inside enforce {name} (spec 13.3.1, 12.7)", capture);
+        }
+        source = weakSource;
+      } else if (OuterOf(name, scope, capture) == null && scope.Find(name) == null) {
+        throw Error($"unknown variable '{name}'", capture);
+      } else {
+        throw Error($"'{name}' is not counted: {form} takes a counted object (@T); capture it as {name}, &{name}, {name}! or ->{name} (spec 13.3.1)", capture);
+      }
+    }
+    CheckWritableSource(source, writable, capture);
+    return source;
   }
 
   // what a captured name is outside the lambda: a variable, or a field of the class of the method (borrowing it borrows the object, 13.3.1).
@@ -296,11 +491,34 @@ public sealed partial class CodeGen {
     if (currentClass == null || FindField(currentClass, name, at) is not FieldInfo field) {
       return null;
     }
-    if (field.IsCounted || field.IsWeak || field.HasAccessors || field.IsParentRef) {
-      throw NotSupported($"the field '{name}' in a lambda (counted, weak, parent and property fields, spec 13.3.1)", at);
+    if (field.IsCounted && !field.HasAccessors || field.IsWeak) {
+      throw Error(field.IsWeak ? $"'{name}' is a weak reference: list it as %{name} (spec 13.3.1)"
+        : $"'{name}' is counted and cannot be borrowed or copied this way: list it as @{name} or %{name} (spec 13.3.1)", at);
+    }
+    if (field.HasAccessors || field.IsParentRef) {
+      return null;   // a property or the parent: reached through the object (LambdaClassMember)
     }
     var bare = BareField(name, scope, at, true)!.Value;
     return new VarInfo(field.Type, bare.Code, field.IsConst || field.IsReadOnly && !initializing);
+  }
+
+  // a property or the reference to the parent of the class of the method, used by a lambda by its bare name (spec 13.3.1)
+  FieldInfo? LambdaClassMember(string name, Scope scope) =>
+    scope.Find(name) == null && currentClass != null && FindField(currentClass, name) is FieldInfo field && (field.HasAccessors || field.IsParentRef) ? field : null;
+
+  // the listed forms of a property or the parent: &prop writes through its accessors, prop! copies the value it reads now; the parent is
+  // only read (unlisted) or copied, and nothing can be moved out of them
+  void CheckMemberCapture(FieldInfo member, Node capture) {
+    string name = member.Name;
+    switch (capture.Kind) {
+      case "MoveCapture":
+        throw Error(member.IsParentRef ? $"'{name}' is the reference to the parent: ->{name} cannot take it (spec 12.5)"
+          : $"'{name}' is a property: ->{name} cannot take its value; copy it with {name}! (spec 13.3.1)", capture);
+      case "WritableCapture" when member.IsParentRef:
+        throw Error($"'{name}' is the reference to the parent: only the constructor sets it, &{name} cannot be captured (spec 12.5)", capture);
+      case "WritableCapture" when !member.CanWrite:
+        throw Error($"'{name}' cannot be assigned: it has no W:, so &{name} cannot be captured", capture);
+    }
   }
 
   // a capture the lambda owns (a clone or a move): an object (dropped) or an array (its items end with it) when the lambda ends
@@ -353,6 +571,14 @@ public sealed partial class CodeGen {
     "Member" or "Index" => false,              // a field or an item keeps only values that do not borrow
     "Copy" => FnMayBorrow(value.Children[0], scope),
     _ => true
+  };
+
+  // the value may hold a & capture (a lambda written with one, or a variable that keeps one): f! of it is a compile error (spec 13.3.3)
+  bool FnMayWrite(Node value, Scope scope) => value.Kind switch {
+    "Lambda" => writingLambdas.Contains(value),
+    "Name" => scope.Find(value.Text!)?.FnWrites ?? false,
+    "Paren" => FnMayWrite(value.Children[0], scope),
+    _ => false
   };
 
   // a usage of the function value for a variable or a result: a new lambda is taken as it is, an existing value gets one more usage
@@ -422,16 +648,17 @@ public sealed partial class CodeGen {
     }
     var codes = new List<string>();
     for (int index = 0; index < args.Count; index++) {
-      codes.Add(ArgCode(new ParamSig($"argument {index + 1}", types[index], null), args[index], scope));
+      codes.Add(ArgCode(ParamFromFunType($"argument {index + 1}", types[index]), args[index], scope));
     }
+    codes = ArgsInOrder(args.Cast<Node?>().ToList(), codes, out string prefix);
     string fnCode = callee.Code;
     if (callee.Fresh) {
       fn!.UsesTmp = true;
       fnCode = $"df_fn_tmp({fnCode})";
     }
     string temp = NewTemp();
-    string call = PairCheck(LambdaCall(temp, ret, types.Select(CType), codes), ret);
-    string code = $"({{ df_fn {temp} = {fnCode}; if (!{temp}.code) {{ df_raise(&df_desc_UnassignedFunctionCallException, {fn!.NameConst}); {RaiseJump} }} {call}; }})";
+    string call = PairCheck(LambdaCall(temp, ret, types.Select(type => ParamCType(ParamFromFunType("p", type))), codes), ret);
+    string code = $"({{ {prefix}df_fn {temp} = {fnCode}; if (!{temp}.code) {{ df_raise(&df_desc_UnassignedFunctionCallException, {fn!.NameConst}); {RaiseJump} }} {call}; }})";
     bool fresh = ret == "string" || IsClass(ret) || IsArr(ret) || ret == "string?" || IsFunType(ret);
     return new Expr(code, ret, fresh);
   }

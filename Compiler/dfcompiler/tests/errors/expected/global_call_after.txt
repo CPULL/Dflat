@@ -1,0 +1,1 @@
+global_call_after.df(3): error: global 'low' calls global 'high', which is declared after it: a global can call only globals declared before it (spec 18.5)

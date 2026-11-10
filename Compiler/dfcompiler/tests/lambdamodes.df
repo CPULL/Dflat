@@ -1,0 +1,38 @@
+// Parameter modes in function types (spec 13.3.2): fun(&Dog), fun(->Dog), fun(@Dog), fun(%Dog), fun(&@Dog), fun(&i32); the lambda declares the same modes and the call repeats the markers
+alias Root as r
+public class Dog(string name) {
+  public string name
+} atEnd {
+  r.Console.log("  end " + name)
+}
+fun run(fun(&Dog) rename, Dog d) {
+}
+fun main() {
+  fun(&Dog) rename = (&Dog d) { d = Dog(d.name + "2") }
+  Dog rex = Dog("rex")
+  rename(&rex)
+  r.Console.log("  now " + rex.name)
+  fun(->Dog) keep = (->Dog d) { r.Console.log("  kept " + d.name) }
+  keep(Dog("tmp"))
+  Dog max = Dog("max")
+  keep(->max)
+  fun(@Dog) share = (@Dog d) { r.Console.log($"  shared {d.name} {d.usersCount}") }
+  @Dog c = Dog("counted")
+  share(@c)
+  fun(%Dog) peek = (%Dog d) {
+    enforce d { r.Console.log("  weak " + d.name) }
+  }
+  peek(%c)
+  fun(&@Dog) grow = (&@Dog d) {
+    enforce d { d.name = d.name + "+" }
+  }
+  &@Dog w = Dog("rw")
+  grow(&@w)
+  enforce w { r.Console.log("  " + w.name) }
+  fun(&i32) inc = (&i32 n) { n += 1 }
+  i32 k = 1
+  inc(&k)
+  inc(&k)
+  r.Console.log($"  k {k}")
+  r.Console.log("end of main")
+}

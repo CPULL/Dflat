@@ -134,7 +134,9 @@ public sealed partial class CodeGen {
     ["WritingOnRefCountWithoutLockingException"] = 50,  // spec 12.7: a write to a &@T without its lock
     ["UnassignedFunctionCallException"] = 51,   // spec 13.3.2: a call of a null function value (a child of NullPointerException)
     ["ModifiedObjectUsedAsKeyException"] = 52,   // spec 11.2.1: the hash of a Keyable key changed (raised when Keyable is built)
-    ["UnassignedTypeException"] = 53   // spec 11.3.6.1: a type switch without default on a set value never assigned
+    ["UnassignedTypeException"] = 53,   // spec 11.3.6.1: a type switch without default on a set value never assigned
+    ["CallingGlobalDefinedAfterException"] = 54,   // spec 18.5: a call to a global that does not rank below every global lock held
+    ["ReadLockBecameWriteLockException"] = 55   // spec 18.5: the read lock of a global held, its write lock asked
   };
 
   readonly Stack<Frame> frames = new();

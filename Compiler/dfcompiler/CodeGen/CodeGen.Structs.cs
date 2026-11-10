@@ -132,6 +132,9 @@ public sealed partial class CodeGen {
     if (type is "string" or "string?") {
       return;
     }
+    if (IsFunType(type)) {
+      return;   // a usage of a function value that does not borrow; a copy of the struct copies it with ! (spec 13.3.3)
+    }
     if (IsClass(type)) {
       // an object the struct owns: copying the struct clones it (spec 11.1.5.3)
       if (NotClonableReason(ObjInfo(type)) is string reason) {
@@ -186,8 +189,14 @@ public sealed partial class CodeGen {
   }
 
   // the value a field keeps: a string or an object of its own (spec 11.1.5.3)
-  string StructFieldValue(StructField field, Expr value, Node at) {
+  string StructFieldValue(StructField field, Expr value, Node at, Scope? scope = null) {
     string converted = Convert(value, field.Type, at);
+    if (IsFunType(field.Type)) {
+      if (scope != null) {
+        CheckNotBorrowingFunction(field.Type, at, scope, $"the field '{field.Name}'");   // the struct keeps a usage (spec 13.3.4)
+      }
+      return FnOwned(value with { Code = converted });
+    }
     if (field.Type == "string") {
       return StrOwned(value, converted);
     }
@@ -266,7 +275,7 @@ public sealed partial class CodeGen {
       }
       var expr = ExprOf(value, scope, field.Type);
       string temp = NewTemp();
-      code.Append($"{CType(field.Type)} {temp} = {StructFieldValue(field, expr, value)}; ");
+      code.Append($"{CType(field.Type)} {temp} = {StructFieldValue(field, expr, value, scope)}; ");
       made[field] = temp;
     }
     var parts = info.Fields.Select(field => $".f_{field.Name} = {(made.TryGetValue(field, out var temp) ? temp : StructFieldDefault(field))}");
@@ -394,7 +403,7 @@ public sealed partial class CodeGen {
       string label = (index > 0 ? ", " : "") + field.Name + ": ";
       string value = IsClass(field.Type)
         ? $"(o.f_{field.Name} == NULL ? df_str_lit(\"null\", 4) : {CString(CodePoints(DisplayName(field.Type) + "{}"))})"   // as in classes
-        : StrOf(new Expr(StructFieldRead("o", field), field.Type), info.Node);   // a struct field writes its own printer first
+        : ItemStrOf(new Expr(StructFieldRead("o", field), field.Type), info.Node);   // a struct field writes its own printer first
       sb.Append($"  r = df_str_cat(r, {CString(CodePoints(label))});\n");
       sb.Append($"  r = {(field.Type == "string" ? "df_str_cat" : "df_str_catx")}(r, {value});\n");
     }
@@ -510,6 +519,9 @@ public sealed partial class CodeGen {
       return StructOffset(info, args, at);   // s.offset(x) (spec 11.1.5.6)
     }
     if (!funs.TryGetValue(info.Name + "." + callee.Text, out var all)) {
+      if (info.Fields.FirstOrDefault(field => field.Name == callee.Text && IsFunType(field.Type)) is StructField held) {
+        return FnValueCall(new Expr($"{receiver.Code}.f_{held.Name}", held.Type), args, scope, at);   // b.onClick(3): a field of a function type (spec 13.3.2)
+      }
       throw Error($"the struct '{info.Name}' has no method '{callee.Text}'", at);
     }
     var overloads = all.Where(fun => !fun.IsStatic).ToList();

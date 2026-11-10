@@ -329,8 +329,9 @@ public sealed partial class CodeGen {
     }
     for (int index = 0; index < statements.Count; index++) {
       var statement = statements[index];
-      bool mixed = statement.Kind == "Decl" && !IsOwnedLocalArray(statement, statements.Skip(index + 1)) && IsMixedLocalArray(statement, statements.Skip(index + 1));
-      if (statement.Kind == "Decl" && (mixed || IsOwnedLocalArray(statement, statements.Skip(index + 1)))) {
+      var before = statements.Take(index);
+      bool mixed = statement.Kind == "Decl" && !IsOwnedLocalArray(statement, statements.Skip(index + 1), before) && IsMixedLocalArray(statement, statements.Skip(index + 1), before);
+      if (statement.Kind == "Decl" && (mixed || IsOwnedLocalArray(statement, statements.Skip(index + 1), before))) {
         owners.Add(statement);   // hoisted, so the drop at the end of the scope sees it
         ownedArrayDecls.Add(statement);
         if (mixed) {
@@ -355,7 +356,7 @@ public sealed partial class CodeGen {
   // an array that ends with its scope (spec 6.8.1, point 20), for now only when that is safe to see: a local declared with its type from a new
   // array (a literal, arr<T>[n], a clone, ->b) or with no value, assigned again only new arrays, and used afterwards only in the ways
   // ArrayUsesStayLocal accepts. Any other use (b = a, a view a[x..y], an argument a function keeps) leaves it as before: not freed
-  bool IsOwnedLocalArray(Node decl, IEnumerable<Node> after) {
+  bool IsOwnedLocalArray(Node decl, IEnumerable<Node> after, IEnumerable<Node>? block = null) {
     var typeNode = decl.Children.FirstOrDefault(child => TypeNodeKinds.Contains(child.Kind));
     var init = decl.Children.FirstOrDefault(child => child.Kind == "Init")?.Children[0];
     bool varLiteral = typeNode is { Kind: "Type", Text: "var" } && init is { Kind: "List" };   // var x = [1, 2] is an arr of its scope
@@ -366,21 +367,135 @@ public sealed partial class CodeGen {
       return false;
     }
     bool plain = !varLiteral && TryResolveType(typeNode!) is string arrType && IsArr(arrType) && HasPlainItems(arrType);
-    return (init == null || GivesOwnArray(init)) && after.All(node => ArrayUsesStayLocal(node, null, null, 0, decl.Text!, true, plain));
+    if (init != null && !GivesOwnArray(init)) {
+      return false;
+    }
+    var region = after.ToList();
+    return WithArrScan(decl, region, block, scan => region.All(node => ArrayUsesStayLocal(node, null, null, 0, decl.Text!, true, plain))
+      && !(scan.AssignLent && scan.Released));   // a = b, then b replaced or moved while a still holds it: b is left as it was (not freed)
   }
 
   // a local array that is also assigned arrays it only borrows (a = b): a flag says at run time whether it holds its own array, which ends
-  // when it is assigned again and with the scope. Such a local cannot give its array away (return a, ->a, v.pop(&a))
-  bool IsMixedLocalArray(Node decl, IEnumerable<Node> after) {
+  // when it is assigned again and with the scope. return a moves its own array out or gives a copy of the borrowed one; ->a and &a are
+  // compile errors (it may only borrow)
+  bool IsMixedLocalArray(Node decl, IEnumerable<Node> after, IEnumerable<Node>? block = null) {
+    bool saved = mixedPass;
     mixedPass = true;
     try {
-      return IsOwnedLocalArray(decl, after);
+      return IsOwnedLocalArray(decl, after, block);
     } finally {
-      mixedPass = false;
+      mixedPass = saved;
     }
   }
 
   bool mixedPass;
+
+  // the scan of the uses of one array (the lender): the statements where it lives, the local arrays declared there (they end no later than
+  // the lender), and what the scan found
+  sealed class ArrScan {
+    public string Lender = "";
+    public List<Node> Region = new();
+    public Dictionary<string, Node> Inner = new();   // name -> its declaration
+    public List<Node> Block = new();   // the statements of the lender's block (before it, itself, after it)
+    public Dictionary<string, bool> Mixed = new();
+    public HashSet<string> Visiting = new();
+    public bool AssignLent;   // a = b: an existing local borrows the lender
+    public bool Released;   // the lender is assigned again, moved or handed out with &
+  }
+
+  ArrScan? arrScan;
+  bool borrowerPass;   // checking a local that borrows the lender: it must not give the array away
+
+  bool WithArrScan(Node lender, List<Node> region, IEnumerable<Node>? block, Func<ArrScan, bool> check) {
+    var scan = new ArrScan { Lender = lender.Text!, Region = region };
+    foreach (var node in region) {
+      CollectArrLocals(node, scan.Inner);
+    }
+    if (block != null) {
+      scan.Block = block.Append(lender).Concat(region).ToList();
+      foreach (var statement in block.Where(statement => statement.Kind == "Decl")) {
+        scan.Inner[statement.Text!] = statement;   // declared in the same block before the lender: it ends with the same scope
+      }
+    }
+    var saved = arrScan;
+    bool savedBorrower = borrowerPass;
+    arrScan = scan;
+    borrowerPass = false;
+    try {
+      return check(scan);
+    } finally {
+      arrScan = saved;
+      borrowerPass = savedBorrower;
+    }
+  }
+
+  static void CollectArrLocals(Node node, Dictionary<string, Node> names) {
+    if (node.Kind is "Fun" or "Lambda") {
+      return;
+    }
+    if (node.Kind == "Decl" && node.Text != null) {
+      names[node.Text] = node;
+    }
+    foreach (var child in node.Children) {
+      CollectArrLocals(child, names);
+    }
+  }
+
+  // arr<T> c = b, var v = b[x..y], a = b: a local declared where the lender lives borrows it; the lender can still end with its scope when
+  // the borrower never gives the array away (no return, ->, &, pop(&c)) and uses it only in the ways that keep it local (spec 6.8.1)
+  bool BorrowerStaysLocal(string borrower, bool plain) {
+    if (arrScan == null || borrower == arrScan.Lender || !arrScan.Inner.ContainsKey(borrower)) {
+      return false;
+    }
+    if (!arrScan.Visiting.Add(borrower)) {
+      return true;   // already being checked
+    }
+    bool saved = borrowerPass;
+    borrowerPass = true;
+    try {
+      return arrScan.Region.All(node => ArrayUsesStayLocal(node, null, null, 0, borrower, true, plain));
+    } finally {
+      borrowerPass = saved;
+    }
+  }
+
+  // a borrower that is a mixed local (a = b): return a gives the caller a copy of what it borrows, so the lender can still end
+  bool MixedBorrower(string borrower) {
+    if (arrScan == null || !arrScan.Inner.TryGetValue(borrower, out var decl)) {
+      return false;
+    }
+    if (arrScan.Mixed.TryGetValue(borrower, out bool known)) {
+      return known;
+    }
+    arrScan.Mixed[borrower] = false;
+    var holder = arrScan.Block.Contains(decl) ? arrScan.Block : arrScan.Region.Select(node => FindHolder(node, decl)).FirstOrDefault(found => found != null)?.Children;
+    if (holder == null) {
+      return false;
+    }
+    int index = holder.IndexOf(decl);
+    var scan = arrScan;
+    bool savedBorrower = borrowerPass;
+    try {
+      return scan.Mixed[borrower] = IsMixedLocalArray(decl, holder.Skip(index + 1), holder.Take(index));
+    } finally {
+      arrScan = scan;
+      borrowerPass = savedBorrower;
+    }
+  }
+
+  bool NoteAssignLent() {
+    if (!borrowerPass && arrScan != null) {
+      arrScan.AssignLent = true;
+    }
+    return true;
+  }
+
+  bool NoteReleased(string name) {
+    if (!borrowerPass && arrScan?.Lender == name) {
+      arrScan.Released = true;
+    }
+    return true;
+  }
 
   static bool Mentions(Node node, string name) => node is { Kind: "Name" } && node.Text == name || node.Children.Any(child => Mentions(child, name));
 
@@ -402,12 +517,13 @@ public sealed partial class CodeGen {
   bool ArrayUsesStayLocal(Node node, Node? parent, Node? grand, int position, string name, bool canReturn, bool plain) {
     if (node is { Kind: "WritableAddressOf", Children: [{ Kind: "Name" } handed] } && handed.Text == name) {
       // f(&a) to a &arr<T> parameter: the function may replace the array, the variable still owns the one it ends with (spec 13.1)
-      return !mixedPass && parent is { Kind: "Args" } && grand is { Kind: "Call" } && CalleesOf(grand) is { Count: > 0 } writers
-        && writers.All(f => IsWritableRefParamNode(f, position));
+      return !mixedPass && !borrowerPass && parent is { Kind: "Args" } && grand is { Kind: "Call" } && CalleesOf(grand) is { Count: > 0 } writers
+        && writers.All(f => IsWritableRefParamNode(f, position)) && NoteReleased(name);
     }
     if (node is { Kind: "Call" } && node.Children[0] is { Kind: "Member", Text: "pop" } && node.Children.Count > 1
         && node.Children[1].Children is [{ Kind: "WritableAddressOf" } written] && written.Children[0] is { Kind: "Name" } popped && popped.Text == name) {
-      return canReturn && !mixedPass && ArrayUsesStayLocal(node.Children[0], node, parent, 0, name, canReturn, plain);   // v.pop(&a): the old array of a ends
+      // v.pop(&a): the old array of a ends (a mixed local: when it holds its own); a owns the one it receives
+      return canReturn && (!borrowerPass || MixedBorrower(name)) && NoteReleased(name) && ArrayUsesStayLocal(node.Children[0], node, parent, 0, name, canReturn, plain);
     }
     if (node is { Kind: "Index", Children: [{ Kind: "Name" } viewed, { Kind: "Range" } range] } && viewed.Text == name) {
       // a view a[x..y] used at once (its len, a copy, the source of a for, an index, a read of the runtime) does not outlive a
@@ -415,6 +531,7 @@ public sealed partial class CodeGen {
         { Kind: "Member", Text: "len" } or { Kind: "Copy" or "For" or "In" } => true,
         { Kind: "Index" } => position == 0,
         { Kind: "Args" } => grand is { Kind: "Call" } && IsRuntimeCall(grand),
+        { Kind: "Init" } => grand is { Kind: "Decl" } viewDecl && BorrowerStaysLocal(viewDecl.Text!, plain),   // var v = a[x..y] kept in a local
         _ => false
       };
       return used && ArrayUsesStayLocal(range, node, parent, 1, name, canReturn, plain);
@@ -426,13 +543,20 @@ public sealed partial class CodeGen {
         { Kind: "For" or "In" or "Copy" } => true,   // a! only reads it
         { Kind: "Hole" } => position == 0,   // $"{a}" prints it
         { Kind: "Tuple" } => true,   // (a, 1): a tuple that is kept copies it, a tuple given as an argument borrows it
-        { Kind: "Gift" } => canReturn && !mixedPass,   // ->a moves the block out and empties a
-        { Kind: "Return" } => canReturn && !mixedPass,   // return a, or return a, n of several values: a moves out
-        { Kind: "Targets" } => canReturn && grand is { Kind: "MultiAssign" } && GivesOwnMultiValues(grand),   // a, n = f(): the old block is freed
+        { Kind: "Gift" } => canReturn && !mixedPass && !borrowerPass && NoteReleased(name),   // ->a moves the block out and empties a
+        // return a, or return a, n of several values: a moves out (a mixed local: its own array moves, a borrowed one is copied)
+        { Kind: "Return" } => canReturn && (!borrowerPass || MixedBorrower(name)),
+        { Kind: "Targets" } => canReturn && !borrowerPass && grand is { Kind: "MultiAssign" } && GivesOwnMultiValues(grand) && NoteReleased(name),   // a, n = f(): the old block is freed
         { Kind: "Args" } => grand is { Kind: "Call" } && ArgumentStaysLocal(grand, position, plain),
-        { Kind: "Assign", Text: "=" } when position == 0 => canReturn && (GivesOwnArray(parent.Children[1])
-          || mixedPass && !Mentions(parent.Children[1], name)),   // a = [..]: the old block is freed; a = b: a borrows from now on
+        // a = [..]: the old block is freed; a = b: a borrows from now on. A borrower (borrowerPass) only changes what it borrows
+        { Kind: "Assign", Text: "=" } when position == 0 => borrowerPass || canReturn && (GivesOwnArray(parent.Children[1])
+          || mixedPass && !Mentions(parent.Children[1], name)) && NoteReleased(name),
+        // a = b, a local declared where b lives: a borrows b (spec 6.8.1)
+        { Kind: "Assign", Text: "=" } when position == 1 && parent.Children[0] is { Kind: "Name" } borrower && borrower.Text != name
+          && BorrowerStaysLocal(borrower.Text!, plain) => NoteAssignLent(),
         { Kind: "Assign", Text: "=" } => plain && position == 1 && parent.Children[0].Kind == "Member",   // obj.field = a: the field gets a copy
+        { Kind: "Init" } => grand is { Kind: "Decl" } borrowing && (IsArrTypeNode(borrowing.Children.FirstOrDefault(child => TypeNodeKinds.Contains(child.Kind)))
+          || borrowing.Children.Any(child => child is { Kind: "Type", Text: "var" })) && BorrowerStaysLocal(borrowing.Text!, plain),   // arr<T> c = a borrows
         _ => false
       };
     }
@@ -503,7 +627,8 @@ public sealed partial class CodeGen {
       return paramStaysLocal[(f, position)] = false;
     }
     paramStaysLocal[(f, position)] = true;   // a recursive call is assumed to keep it local
-    return paramStaysLocal[(f, position)] = ArrayUsesStayLocal(body, null, null, 0, param.Name, false, HasPlainItems(param.Type));
+    bool plain = HasPlainItems(param.Type);
+    return paramStaysLocal[(f, position)] = WithArrScan(Synthetic("Decl", body, param.Name), new List<Node> { body }, null, _ => ArrayUsesStayLocal(body, null, null, 0, param.Name, false, plain));
   }
 
   readonly Dictionary<FunSig, bool> returnsNewArray = new();
@@ -524,9 +649,32 @@ public sealed partial class CodeGen {
     CollectDeclarations(body, locals);
     var returns = CollectReturns(body).ToList();
     bool result = returns.Count > 0 && returns.All(ret => ret.Children.Count == 1 && (IsNewArray(ret.Children[0])
-      || ret.Children[0] is { Kind: "Name" } returned && (locals.TryGetValue(returned.Text!, out var decl) ? IsOwnedLocalArray(decl, new[] { body })
+      || ret.Children[0] is { Kind: "Name" } returned && (locals.TryGetValue(returned.Text!, out var decl)
+        ? IsOwnedLocalArray(decl, new[] { body }) || IsMixedInItsBlock(body, decl)   // a mixed local moves its own array or gives a copy
         : f.Params.FirstOrDefault(p => p.Name == returned.Text) is ParamSig given && OwnsGivenArray(f, given))));
     return returnsNewArray[f] = result;
+  }
+
+  // the local is a mixed array where it is declared, as the scope of its block will see it (AddImplicitDrops)
+  bool IsMixedInItsBlock(Node body, Node decl) {
+    if (FindHolder(body, decl) is not Node holder) {
+      return false;
+    }
+    var statements = holder.Children;
+    int index = statements.IndexOf(decl);
+    return !IsOwnedLocalArray(decl, statements.Skip(index + 1), statements.Take(index)) && IsMixedLocalArray(decl, statements.Skip(index + 1), statements.Take(index));
+  }
+
+  static Node? FindHolder(Node node, Node wanted) {
+    if (node.Children.Contains(wanted)) {
+      return node;
+    }
+    foreach (var child in node.Children) {
+      if (FindHolder(child, wanted) is Node found) {
+        return found;
+      }
+    }
+    return null;
   }
 
   // a[i] items end with the array: objects dropped, strings freed, arrays of arrays dropped in turn; then the block is freed

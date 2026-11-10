@@ -1,0 +1,4 @@
+namespace app
+import stats
+
+Root.Console.log(tally.sum())

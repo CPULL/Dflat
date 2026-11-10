@@ -1,0 +1,6 @@
+// spec 18.3, 18.6: a compile error of globals
+class Bus {
+  vec<i32> items = vec<i32>()
+  public fun sortAll() { items.sort((i32 a, i32 b) { a - b }) }
+}
+global Bus bus = Bus()

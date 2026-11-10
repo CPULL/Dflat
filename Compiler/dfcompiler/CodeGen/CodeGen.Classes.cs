@@ -1065,14 +1065,15 @@ public sealed partial class CodeGen {
       // : Trait(args): the init function of that constructor of the trait (its property initializers, then its body)
       FunSig tinit;
       List<string> traitCodes;
+      string traitPrefix;
       try {
         tinit = ResolveOverload(funs[trait.Name + TraitInitSuffix], args, scope, n);
-        traitCodes = ArgCodes(tinit, args, scope, n);
+        traitCodes = ArgCodes(tinit, args, scope, n, out traitPrefix);
       } catch (CompileException e) {
         throw new CompileException(e.Message.Replace($"'{trait.Name}{TraitInitSuffix}'", $"'{trait.Name}'"), e.Line);
       }
       traitCodes.Insert(0, "(void*)self");
-      return new Expr(UserCallCode(tinit, $"{tinit.CName}({string.Join(", ", traitCodes)})"), "void");
+      return ArgsFirst(new Expr(UserCallCode(tinit, $"{tinit.CName}({string.Join(", ", traitCodes)})"), "void"), traitPrefix);
     }
     var target = classes[n.Text!];
     var chosenCtor = ResolveOverload(funs[target.Name], args, scope, n);
@@ -1093,9 +1094,9 @@ public sealed partial class CodeGen {
         next = after;
       }
     }
-    var codes = ArgCodes(chosen, args, scope, n);
+    var codes = ArgCodes(chosen, args, scope, n, out string prefix);
     codes.Insert(0, $"(({CType(target.Name)})self)");
-    return new Expr(UserCallCode(chosen, $"{chosen.CName}({string.Join(", ", codes)})"), "void");
+    return ArgsFirst(new Expr(UserCallCode(chosen, $"{chosen.CName}({string.Join(", ", codes)})"), "void"), prefix);
   }
 
   // this.name = value for an instance field, name = value for a static one; _= for a weak field
@@ -1190,7 +1191,7 @@ public sealed partial class CodeGen {
   // top-level const: C globals set at program start, in source order, before the statics (which may read them);
   // they leave the top-level code, so their values can use literals, other consts, functions and statics only
   void DeclareGlobalConsts(Node program) {
-    var decls = program.Children.Where(statement => statement.Kind == "Decl"
+    var decls = program.Children.Where(statement => statement.Kind == "Decl" && !IsGlobalDecl(statement)   // global const: an error of DeclareGlobals
       && statement.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ').Contains("const") == true).ToList();
     if (decls.Count == 0) {
       return;
@@ -1245,6 +1246,7 @@ public sealed partial class CodeGen {
         sb.Append($"  {field.StaticInit!.CName}();\n");
       }
     }
+    sb.Append(GlobalsInitCode());   // the globals, in declaration order (spec 18.2)
     return sb.ToString();
   }
 
@@ -1532,23 +1534,25 @@ public sealed partial class CodeGen {
     return result;
   }
 
-  List<string> ArgCodes(FunSig f, List<Node> args, Scope scope, Node at) {
+  List<string> ArgCodes(FunSig f, List<Node> args, Scope scope, Node at, out string prefix) {
     var (slots, problem) = MapArgs(f, args);
     if (slots == null) {
       throw Error(problem!, at);
     }
     var codes = new List<string>();
+    var given = new List<Node?>();
     for (int index = 0; index < f.Params.Count; index++) {
       var param = f.Params[index];
       Node arg = slots[index] ?? param.Default!;
+      given.Add(arg);
       if (VariadicLend(param, arg, scope) is string lent) {
         codes.Add(lent);   // an arr, a vec or a view given alone to T name... (spec 13.4)
         continue;
       }
-      codes.Add(ArgCode(param, arg, scope));
+      codes.Add(ArgCode(param, arg, scope, f, index));
       CheckStoredFunction(f, param, arg, scope);   // after the value: a lambda says whether it borrows once it is compiled
     }
-    return codes;
+    return ArgsInOrder(given, codes, out prefix);
   }
 
   // &T x gets the address of a variable, or of a temporary holding the value; &T x gets the address of a variable, a field or an
@@ -1661,7 +1665,7 @@ public sealed partial class CodeGen {
   };
 
   // one argument: an object given to a parameter written ->T moves (the call writes ->x); the others only borrow
-  string ArgCode(ParamSig param, Node arg, Scope scope) {
+  string ArgCode(ParamSig param, Node arg, Scope scope, FunSig? callee = null, int position = -1) {
     if (arg.Kind == "WritableAddressOf" && arg.Children.Count > 0 && arg.Children[0].Kind is not ("CountedOf" or "WeakOf")) {
       CheckUnrestrictedWrite(arg.Children[0], scope);   // f(&field) can change the object (spec 1.6.2)
     }
@@ -1772,6 +1776,10 @@ public sealed partial class CodeGen {
     if (!param.IsGift) {
       value = TempTuple(value, arg);   // g(f()): a borrowed tuple copies what it keeps, so its arrays end with the statement (spec 6.8.1)
     }
+    if (TempArrayArg(param, arg, callee, position)) {
+      // f([Dog("a")]): a new array lent to the call ends with the statement, as a new object does (spec 6.8.1, 12)
+      return TempBoxCode(param.Type, Convert(value, param.Type, arg), $"{ArrDropHelper(param.Type)}(*t);");
+    }
     return Convert(value, param.Type, arg);
   }
 
@@ -1794,7 +1802,7 @@ public sealed partial class CodeGen {
       CheckUnrestrictedCall(chosen, name, receiver, at);   // inside an unrestricted method (spec 1.6.2)
     }
     CheckParentAccess(chosen, receiver, name, at);
-    var codes = ArgCodes(chosen, args, scope, at);
+    var codes = ArgCodes(chosen, args, scope, at, out string prefix);
     string call;
     if (receiver == null) {
       call = $"{chosen.CName}({string.Join(", ", codes)})";
@@ -1811,7 +1819,7 @@ public sealed partial class CodeGen {
         call = $"({{ void* {temp} = (void*)({self}); (({RetCType(chosen)}(*)({string.Join(", ", paramTypes)}))"
           + $"(df_impl_of({temp}, &df_trait_{chosen.Class.Name})->methods[{chosen.TSlot}]))({string.Join(", ", codes)}); }})";
         // the trait function and its implementations are one group (same name and parameters): they fail together
-        return new Expr(UserCallCode(chosen, call), chosen.Ret, IsClass(chosen.Ret) && chosen.ReturnsOwned);
+        return ArgsFirst(new Expr(UserCallCode(chosen, call), chosen.Ret, IsClass(chosen.Ret) && chosen.ReturnsOwned), prefix);
       }
       if (!virtualCall) {
         codes.Insert(0, $"(({declarer}){self})");
@@ -1824,7 +1832,7 @@ public sealed partial class CodeGen {
         call = $"({{ {CType(cls.Name)} {temp} = {self}; (({RetCType(chosen)}(*)({string.Join(", ", paramTypes)}))({temp}->cls->vtable[{chosen.Slot}]))({string.Join(", ", codes)}); }})";
       }
     }
-    var result = new Expr(UserCallCode(chosen, call), chosen.Ret, IsClass(chosen.Ret) && chosen.ReturnsOwned);
+    var result = ArgsFirst(new Expr(UserCallCode(chosen, call), chosen.Ret, IsClass(chosen.Ret) && chosen.ReturnsOwned), prefix);
     return BoxInner(chosen.Ret) != null && result.Fresh ? UnboxTaken(result) : UnboxTupleResult(result);   // pack.replace(i, x) gives the usage of the old item
   }
 
@@ -1832,6 +1840,9 @@ public sealed partial class CodeGen {
   Expr? ObjectCall(Expr receiver, string name, List<Node> args, Scope scope, Node at) {
     if (!IsClass(receiver.Type)) {
       return null;
+    }
+    if (!LibraryCode && IsMap(receiver.Type) && IsFunType(MapValue(receiver.Type)) && name is "has" or "remove" or "removeAll" or "keyOf") {
+      throw Error($"function values are not compared: {name} needs values that have == (spec 13.3.2)", at);
     }
     return MethodCall(ObjInfo(receiver.Type), name, TempObject(receiver).Code, false, args, scope, at);   // make().bark()
   }

@@ -1,0 +1,6 @@
+namespace lambda_mode_mismatch
+alias Root as r
+public class Dog(string name) {
+  public string name
+}
+fun(&Dog) f = (Dog d) { }

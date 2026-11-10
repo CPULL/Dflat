@@ -1,0 +1,1 @@
+libs/stats/lib.df(3): error: global 'shop' belongs to the program and is not visible in library 'stats' (spec 18.1)

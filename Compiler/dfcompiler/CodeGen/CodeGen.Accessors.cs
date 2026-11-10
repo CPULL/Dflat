@@ -287,7 +287,7 @@ public sealed partial class CodeGen {
     var receiver = target.Kind == "Member" && target.Children.Count == 1 ? target.Children[0] : null;
     // a name that is not a value (Shape.count, a static through its class) is never an object with properties
     // any other receiver (blocks[i].pos.x) is a property too, so the setter is never skipped; it is evaluated once per use
-    if (receiver != null && !(receiver.Kind == "Name" && scope.Find(receiver.Text!) == null && receiver.Text != "this"
+    if (receiver != null && !(receiver.Kind == "Name" && scope.Find(receiver.Text!) == null && receiver.Text != "this" && !globals.ContainsKey(receiver.Text!)
         && (currentClass == null || FindField(currentClass, receiver.Text!) == null))) {
       var obj = ExprOf(receiver, scope);
       if (IsClass(obj.Type) && FindField(ObjInfo(obj.Type), target.Text!) is { HasAccessors: true } property) {
@@ -325,6 +325,9 @@ public sealed partial class CodeGen {
   Expr PropertySet(Expr obj, FieldInfo property, Node value, Scope scope, Node at) {
     if (!property.CanWrite) {
       throw Error($"'{property.Name}' cannot be assigned: it has no W:", at);
+    }
+    if (obj.Code is "self" or "" && currentFun?.LambdaReadOnlyMembers.Contains(property.Name) == true) {
+      throw Error($"'{property.Name}' is captured read-only by the lambda: list it as &{property.Name} to change it (spec 13.3.1)", at);
     }
     CheckAccessorVisible(obj, property, SetterName(property.Name), "W:", at);
     return (obj.Code == "" ? MethodCall(ObjInfo(obj.Type), SetterName(property.Name), null, false, new List<Node> { value }, scope, at)

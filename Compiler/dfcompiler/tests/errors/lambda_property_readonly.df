@@ -1,0 +1,7 @@
+namespace lambda_property_readonly
+public class Box {
+  public i32 level { R: { field } W: { field = value } }
+  public fun go() {
+    fun() f = () { level = 4 }
+  }
+}

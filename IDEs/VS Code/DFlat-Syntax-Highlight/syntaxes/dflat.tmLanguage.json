@@ -1,42 +1,90 @@
+
 {
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "Dflat",
   "scopeName": "source.df",
   "patterns": [
-    { "include": "#directives" },
-    { "include": "#code" }
+    {
+      "include": "#directives"
+    },
+    {
+      "include": "#code"
+    }
   ],
   "repository": {
     "code": {
       "patterns": [
-        { "include": "#comments" },
-        { "include": "#strings" },
-        { "include": "#labels" },
-        { "include": "#numbers" },
-        { "include": "#catch_all" },
-        { "include": "#keywords_control" },
-        { "include": "#keywords_declaration" },
-        { "include": "#keywords_types" },
-        { "include": "#keywords_modifiers" },
-        { "include": "#keywords_constants" },
-        { "include": "#keywords_language_variables" },
-        { "include": "#keywords_builtins" },
-        { "include": "#operators" }
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#labels"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#catch_all"
+        },
+        {
+          "include": "#is_done_atend"
+        },
+        {
+          "include": "#keywords_control"
+        },
+        {
+          "include": "#keywords_declaration"
+        },
+        {
+          "include": "#keywords_types"
+        },
+        {
+          "include": "#keywords_modifiers"
+        },
+        {
+          "include": "#keywords_constants"
+        },
+        {
+          "include": "#keywords_language_variables"
+        },
+        {
+          "include": "#keywords_builtins"
+        },
+        {
+          "include": "#operators"
+        }
       ]
     },
     "directives": {
       "name": "meta.preprocessor.df",
       "match": "^(##)([A-Za-z]+)\\b(.*)$",
       "captures": {
-        "1": { "name": "punctuation.definition.directive.df" },
-        "2": { "name": "keyword.control.directive.df" },
+        "1": {
+          "name": "punctuation.definition.directive.df"
+        },
+        "2": {
+          "name": "keyword.control.directive.df"
+        },
         "3": {
           "patterns": [
-            { "include": "#comments" },
-            { "include": "#strings" },
-            { "include": "#numbers" },
-            { "include": "#keywords_constants" },
-            { "include": "#operators" }
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#numbers"
+            },
+            {
+              "include": "#keywords_constants"
+            },
+            {
+              "include": "#operators"
+            }
           ]
         }
       }
@@ -56,7 +104,7 @@
     },
     "escapes": {
       "name": "constant.character.escape.df",
-      "match": "\\\\(u\\{[0-9a-fA-F]+\\}|#\\{[0-9]+\\}|.)"
+      "match": "\\\\(u\\{[0-9a-fA-F]+\\}|#\\{[0-9]+\\}|[nrt\\\\\\'\\\"0])"
     },
     "strings": {
       "patterns": [
@@ -65,15 +113,29 @@
           "begin": "\\$\"",
           "end": "\"",
           "patterns": [
-            { "include": "#escapes" },
+            {
+              "include": "#escapes"
+            },
             {
               "name": "meta.interpolation.df",
-              "begin": "\\{",
+              "begin": "(?<!\\\\)\\{",
               "end": "\\}",
-              "beginCaptures": { "0": { "name": "punctuation.section.interpolation.begin.df" } },
-              "endCaptures": { "0": { "name": "punctuation.section.interpolation.end.df" } },
+              "beginCaptures": {
+                "0": {
+                  "name": "punctuation.section.interpolation.begin.df"
+                }
+              },
+              "endCaptures": {
+                "0": {
+                  "name": "punctuation.section.interpolation.end.df"
+                }
+              },
               "contentName": "source.df",
-              "patterns": [ { "include": "#code" } ]
+              "patterns": [
+                {
+                  "include": "#code"
+                }
+              ]
             }
           ]
         },
@@ -81,13 +143,21 @@
           "name": "string.quoted.double.df",
           "begin": "\"",
           "end": "\"",
-          "patterns": [ { "include": "#escapes" } ]
+          "patterns": [
+            {
+              "include": "#escapes"
+            }
+          ]
         },
         {
           "name": "string.quoted.single.df",
           "begin": "'",
           "end": "'",
-          "patterns": [ { "include": "#escapes" } ]
+          "patterns": [
+            {
+              "include": "#escapes"
+            }
+          ]
         }
       ]
     },
@@ -99,56 +169,72 @@
       "patterns": [
         {
           "name": "constant.numeric.hex.df",
-          "match": "\\b0[xX][0-9a-fA-F_]+[uUlLbBsSfF]*\\b"
+          "match": "\\b0[xX][0-9a-fA-F_]+\\b"
         },
         {
           "name": "constant.numeric.binary.df",
-          "match": "\\b0[bB][01_]+[uUlLbBsSfF]*\\b"
+          "match": "\\b0[bB][01_]+\\b"
         },
         {
           "name": "constant.numeric.decimal.df",
-          "match": "\\b[0-9][0-9_]*(\\.[0-9_]+)?([eE][+-]?[0-9_]+)?[uUlLbBsSfF]*\\b"
+          "match": "\\b[0-9][0-9_]*(\\.[0-9_]+)?([eE][+-]?[0-9_]+)?\\b"
         }
       ]
     },
     "catch_all": {
       "match": "\\b(catch)\\s+(all)\\b",
       "captures": {
-        "1": { "name": "keyword.control.df" },
-        "2": { "name": "keyword.control.df" }
+        "1": {
+          "name": "keyword.control.df"
+        },
+        "2": {
+          "name": "keyword.control.df"
+        }
+      }
+    },
+    "is_done_atend": {
+      "match": "\\b(is)\\s+(done|atEnd)\\s*\\.",
+      "captures": {
+        "1": {
+          "name": "keyword.control.df"
+        },
+        "2": {
+          "name": "keyword.control.df"
+        }
       }
     },
     "keywords_control": {
-      "name": "keyword.control.df",
-      "match": "\\b(if|then|else|while|for|in|step|switch|default|jump|break|continue|return|throw|catch|atEnd|of|enforce|is|where|with)\\b"
+      "match": "\\b(if|then|else|while|for|in|step|switch|default|jump|break|continue|return|throw|catch|atEnd|enforce|is|on|all|lockfail|timeout)\\b",
+      "name": "keyword.control.df"
     },
     "keywords_declaration": {
-      "name": "keyword.declaration.df",
-      "match": "\\b(fun|class|trait|enum|bitfield8|bitfield16|bitfield32|bitfield64|Generic|placeholder|alias|as|namespace|import|local|var)\\b"
+      "match": "\\b(fun|class|trait|enum|struct|bitfield8|bitfield16|bitfield32|bitfield64|alias|as|namespace|import|var|global|extern)\\b",
+      "name": "keyword.other.declaration.df"
     },
     "keywords_types": {
-      "name": "storage.type.df",
-      "match": "\\b(i8|i16|i32|i64|i128|i256|u8|u16|u32|u64|u128|u256|r16|r32|r64|r128|int|uns|real|dec|bool|char|byte|date|time|clock|lapse|addr|string|arr|vec|list|map|bmap|hmap|set|bset|hset|dfoot)\\b"
+      "match": "\\b(i8|i16|i32|i64|i128|i256|u8|u16|u32|u64|u128|u256|r16|r32|r64|r128|int|uns|real|dec|bool|char|byte|date|time|clock|lapse|addr|string|arr|vec|list|map|bmap|hmap|set|bset|hset|dfoot)\\b",
+      "name": "storage.type.df"
     },
     "keywords_modifiers": {
-      "name": "storage.modifier.df",
-      "match": "\\b(public|internal|private|const|static|override|specific|any|volatile|readonly|readwrite|writeonly)\\b"
+      "match": "\\b(public|internal|asparent|unrestricted|const|static|volatile|unsafe|notclonable|replace|any)\\b",
+      "name": "storage.modifier.df"
     },
     "keywords_constants": {
-      "name": "constant.language.df",
-      "match": "\\b(true|false|null)\\b"
+      "match": "\\b(true|false|null|NaN)\\b",
+      "name": "constant.language.df"
     },
     "keywords_language_variables": {
-      "name": "variable.language.df",
-      "match": "\\b(this|parent)\\b"
+      "match": "\\b(this|parent)\\b",
+      "name": "variable.language.df"
     },
     "keywords_builtins": {
-      "name": "support.type.builtin.df",
-      "match": "\\b(Root|Panic|asRefCount|asSharedRefCount|isRC)\\b"
+      "match": "\\b(Root|Panic|Exception|SilentException|asRefCount|isRC)\\b",
+      "name": "support.function.df"
     },
     "operators": {
       "name": "keyword.operator.df",
-      "match": "->|\\.\\.\\.|\\.\\.=|\\.\\.|\\?\\?=|\\?\\?|\\?\\.|_=|\\^\\^|&&|\\|\\||<<=|<<|\\+\\+|--|[-+*/%&|^=!<>]=|(?<![\\p{L}\\p{N}_])_(?=[\\p{L}\\p{N}(\\[])|[-+*/%&|^!=<>?:;.,]"
+      "match": "->|\\.\\.=|\\.\\.|\\?\\{|\\?\\?=|\\?\\?|\\?\\.|\\^\\^|&&|\\|\\||>>=|<<=|>>|<<|\\+\\+|--|[-+*/%&|^=!<>]=|~|[-+*/%&|^!=<>?:;.,]"
     }
   }
 }
+

@@ -1,0 +1,1 @@
+global_local_borrow.df(13): error: global 'cache' cannot be lent, given or shared: call its methods, or copy it with cache! (spec 18.3)

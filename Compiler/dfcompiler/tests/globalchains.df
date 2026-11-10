@@ -1,0 +1,36 @@
+// Globals (spec 18.3): chains through the fields of a global from outside (g.f.m(), g.f[i], g.f[i] = v, g.f.m().h), each one under
+// the lock of the global (read when its calls do not change anything, write otherwise); what is lent comes out as a copy; a property
+// of a global read and written through its accessors
+alias Root as r
+
+class Point(i32 px) {
+  public i32 x = px
+  public fun move(i32 d) { x += d }
+  unrestricted fun i32 get() { x }
+}
+
+class Store {
+  public vec<i32> items = vec<i32>()
+  public list<Point> points = list<Point>()
+  public Point origin = Point(5)
+  i32 hidden = 1
+  public i32 level { R: { field } W: { field = value * 2 } }
+}
+
+global Store st = Store()
+
+st.items.add(4)
+st.items.add(9)
+r.Console.log(st.items.len)
+r.Console.log(st.items[1])
+st.items[0] = 7
+r.Console.log(st.items[0])
+r.Console.log(st.items.has(7))
+st.origin.move(3)
+r.Console.log(st.origin.get())
+st.points.add(Point(1))
+Point copy = st.points[0]
+copy.x = 100
+r.Console.log(st.points[0].x)
+st.level = 4
+r.Console.log(st.level)

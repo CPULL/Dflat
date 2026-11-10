@@ -1,0 +1,1 @@
+global_in_class.df(13): error: a global can be declared only at the top level of the root file (program.df, main.df or lib.df) (spec 18.1)

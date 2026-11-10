@@ -1,0 +1,1 @@
+lambda_property_readonly.df(5): error: 'level' is captured read-only by the lambda: list it as &level to change it (spec 13.3.1)

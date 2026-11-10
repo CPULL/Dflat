@@ -219,7 +219,7 @@ public sealed partial class CodeGen {
       return true;
     }
     // a local variable, a field of the class being compiled, or a top-level const
-    return scope.Find(first) != null || (currentClass != null && FindField(currentClass, first) != null) || globalConsts.ContainsKey(first)
+    return scope.Find(first) != null || (currentClass != null && FindField(currentClass, first) != null) || globalConsts.ContainsKey(first) || globals.ContainsKey(first)
       || (traits.ContainsKey(first) && scope.Find("this") != null);
   }
 

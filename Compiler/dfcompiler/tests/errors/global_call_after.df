@@ -1,0 +1,10 @@
+// spec 18.5: the code of a class calls a global declared after every global of that class
+class Low {
+  public fun poke() { high.bump() }
+}
+class High {
+  i32 n = 0
+  public fun bump() { n += 1 }
+}
+global Low low = Low()
+global High high = High()

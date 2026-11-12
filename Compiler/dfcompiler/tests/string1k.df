@@ -1,0 +1,35 @@
+// string1k (spec 4.5): a 1 KB string value; conversions, ==, .len, +=, .sizeof, the other string functions through string, structs, the silent StringTruncatedException
+namespace string1k
+import Root
+struct Entry { string1k name, i32 score }
+string1k a = "hello"
+string b = a
+Console.log(b)
+Console.log(a)
+Console.log(a.len)
+Console.log(a.sizeof)
+a += " world"
+Console.log($"{a} / {a.toUpper()}")
+string1k c = "hello world"
+Console.log(a == c)
+Console.log(a == "hello world")
+Console.log(a != "x")
+arr<Entry> all = [Entry("anna", 3), Entry("bob", 5)]
+Console.log(all[1].name)
+Console.log(all[0])
+string1k accented = "città"
+Console.log(accented.len)
+string big = "ab".padRight(1500, 'x')
+string1k cut = big
+Console.log(cut.len)
+fun check() {
+  string long = "é".padRight(1100, 'é')
+  string1k short = long
+  catch StringTruncatedException ex {
+    Console.log("truncated")
+  }
+}
+check()
+string1k forC = "for C"
+addr cText = forC.toCStr()
+Console.log(string(cText))

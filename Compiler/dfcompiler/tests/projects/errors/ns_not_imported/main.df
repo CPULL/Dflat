@@ -1,0 +1,4 @@
+namespace app
+
+Root.Console.log(app.util.twice(1))
+Root.Console.log(twice(2))

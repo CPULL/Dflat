@@ -1,0 +1,4 @@
+namespace app
+import mylib
+
+Root.Console.log(secret())

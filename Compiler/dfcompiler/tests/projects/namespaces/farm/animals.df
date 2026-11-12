@@ -1,0 +1,5 @@
+namespace app.farm
+
+public class Dog(string name, i32 legs) {
+  public i32 legs
+}

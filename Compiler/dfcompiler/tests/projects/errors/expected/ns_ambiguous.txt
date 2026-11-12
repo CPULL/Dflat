@@ -1,0 +1,1 @@
+main.df(5): error: 'one' is declared in the imported namespaces 'app.left' and 'app.right': write which one (app.left.one or app.right.one)

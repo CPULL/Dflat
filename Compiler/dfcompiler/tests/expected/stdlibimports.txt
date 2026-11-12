@@ -1,0 +1,7 @@
+Hello
+4
+true
+the full name still works
+stdlibimports.txt
+true
+---- exit code 0 ----

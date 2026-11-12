@@ -162,7 +162,7 @@ public sealed partial class CodeGen {
 
   // a capture kept by address (a borrow) can have any type; a copy or a move only the types handled below
   bool IsPlainValueType(string type) =>
-    IsNumeric(type) || type is "bool" or "char" or "date" or "time" or "clock" or "lapse" or "addr" || IsEnum(type);
+    IsNumeric(type) || type is "bool" or "char" or "date" or "time" or "clock" or "lapse" or "addr" or "string1k" || IsEnum(type);
 
   Expr LambdaExpr(Node n, Scope scope, string? expected) {
     var paramsNode = n.Children.First(child => child.Kind == "Params");

@@ -1,4 +1,4 @@
-Compiler version 0.0.101 alpha for version 0.0.33 of the specs 2026/11/09
+Compiler version 0.0.102 alpha for version 0.0.34 of the specs 2026/11/12
 
 Changes from the previous version -----------------------
 - tuple items by index (spec 3.2): t[1], t[SECOND] (a const), t[Slot.Second] (an enum value), read and assigned (t[0] = v, t[2] += x); nested (pairs[2][1]); a variable index or one out of range is a compile error (was "feature not supported: Collections")
@@ -85,6 +85,11 @@ Changes from the previous version -----------------------
 - globals, part 3 (spec 18.3, 18.4, 18.6): a class used by a global (its parents and traits too) cannot have lambdas or function values (fields, parameters, results, locals, calls); an unrestricted method that can reach a write of a global of its class (a callback through an owned object, a function, another class) or a lambda takes the write lock, so ReadLockBecameWriteLockException is only a safety net; a & result cannot lend a global or a part of it (return g.f in a fun &T), and a global is no longer listed among the places a & result lends (spec 13.1.1)
 - globals, part 4 (spec 18.1, 18.3, 18.5): globals in libraries (in the lib.df of the library): used only by the code of that library, created before the program's globals and destroyed after them, ranked below them; a library cannot name a program global (compile errors both ways); chains through the fields of a global from outside: g.f.m(), g.f[i], g.f[i] = v, g.f.m().h under the lock of the global (write when one of its calls can change what it reaches, read otherwise), a lent value copied (Point p = g.points[0]); a property of a global read and written from outside through its accessors, under the lock. (part 5 below: values evaluated before the lock)
 - globals, part 5 (spec 18.5): the code of a class that calls a global declared after every global of that class is a compile error (global 'low' calls global 'high', which is declared after it); the arguments of the calls in a chain on a global and the value of g.f = v (g.f += v, g.items[i] = v) are evaluated before the lock of the global, as the arguments of a method call, so they can call a global declared after it. Still: the check at run time is never left out (the lock is taken by the called method), the copy of a lent method result is made just after the lock is released
+- namespaces (spec 16.1): top-level declarations without a keyword are seen only by their namespace, internal also by the sub-namespaces, public by everyone; unqualified names: own namespace (wins), enclosing namespaces, imported ones (two imported ones: error asking for the qualified name); fully qualified names (a.b.c.Dog, a.b.c.make(), through an alias of the namespace) need no import; a.b.c.Dog d = Dog() takes the namespace of the type; the same name in several namespaces is allowed (was a compile error); internal members are checked; the hash of a class or enum uses its namespace (Root. without one); private is no longer a keyword (properties: readonly with a W: block)
+- the standard library follows the import rule (spec 16.1): import Root lets a file write Console.log, Math.sqrt, Time.now; import Root.Console, import Root.IO ... their names; without the import a stdlib name is written in full (Root.Console.log, Root.IO.File: bare File and Console.Color were accepted before); the same name from two imported stdlib namespaces asks for the full name
+- () is the empty construction (spec 11.1.1, 11.1.5.1): Aclass a = (), a = (), f(()), return (), a field initializer, Box<i32> b = (), Vec3 v = () call the constructor without parameters of the type known from the context (a struct gets its start values); errors for no known type, a trait, a class without a constructor without parameters, a type that is not a class or a struct
+- stack trace of a debug build (spec 15.2): every function of the program has a frame in a call stack (popped on every way out), each statement writes its line; an exception copies the calls when it is raised (innermost first) and ex.line is its line (was 0); an uncaught exception or a panic prints <file> (<line>) <function> per call before Panic; constructors show as Dog(i32); a release build has no frames.; ex.stackTrace gives an arr<DebugLine> (file and function are string1k), empty in release
+- string1k (spec 4.5): a 1 KB string value (the UTF-8 text ended by a 0, no stored length, at most 1023 bytes: a C char[1024]), copied like a number; toCStr() gives the address of the buffer; converts to and from string, cut at a whole character with the silent StringTruncatedException (56); ==, .len (characters), += and .sizeof (1024) on the buffer, the other string functions through string; a field of a plain struct (also in collections), printed as its text
 
 Done -----------------------
 
@@ -151,7 +156,7 @@ Silent exceptions: library calls (date(string), time(...), (time)n) raise them o
 Strings: layout of spec 4.4 (single-block classes 0-7, literals class 11, moved class 13 read only); ownership and freeing (step b); changes in place (step c); block strings (step d; the iterator counter of the root is not used yet, the functions that are not block-aware read a flat copy). Still leaking (never a double free): the items of arrays (arrays are never freed), strings in tuples, var declarations of strings, a for-in over a new string left with return. Missing: the compile error for an owner that ends or is assigned again while a borrow is alive
 Parsing: date.parse, time.parse and <integer or real type>.parse(text, default, format) (all of section 9 for numbers); tryParse for integers, reals, date and time with (&)variable (a library form, not general (&) parameters); no dec
 Formatting: dates and times (8.4), integers and reals (8.1, 8.2) and strings (8.3), all as toStr(format) and {x:format}; the other types (char, bool ...) ignore a spec with a warning
-Namespaces and imports (spec 16, 2026-10-28): multi-file projects (source= main.df, program.df or lib.df), import of a folder of the program or of an include= library, the namespace of each file checked against its folder (case-insensitive, or namespace local), overlapping roots and libraries inside Root are errors, top-level code and main only in the root file, errors and warnings name their file. Missing: names qualified by their namespace and internal (a name declared in two namespaces is an error for now)
+Namespaces and imports (spec 16, 2026-10-28): multi-file projects (source= main.df, program.df or lib.df), import of a folder of the program or of an include= library, the namespace of each file checked against its folder (case-insensitive, or namespace local), overlapping roots and libraries inside Root are errors, top-level code and main only in the root file, errors and warnings name their file; names qualified by their namespace and the visibility of 16.1 (2026-11-12)
 Time zones: dates are UTC; z prints +0 and parses an offset
 
 Not yet -----------------------
@@ -173,7 +178,6 @@ Compiled libraries (spec 15.8)
 TextStream, MemoryStream, ConsoleStream, async read / write, array views as buffers
 DateTime library (CalendarDate, ZonedDateTime)
 Runtime without C library
-Debug builds (line, stack trace)
 
 
 Classes and traits (spec 0.0.8, section 11, 12, 14.2) -----------------------
@@ -193,7 +197,7 @@ Phase 1  Classes core                                              DONE
   primary constructor (header parameters are private fields; redeclaring one in the body sets its visibility),
   default constructor, field initializers, parameter defaults and named arguments
   methods (overloads, defaults, named arguments), this, bare field and method names inside methods
-  visibility private / public (internal acts as public until namespaces exist), checked at compile time
+  visibility private (no keyword) / internal / public, checked at compile time (internal: spec 16.1, 2026-11-12)
   statics: properties, static const, static functions, initialized at program start in dependency order (cycle = error)
   ?. on objects, NullPointerException on null access (catchable), identity ==, objects in arrays, tuples, parameters
   default toStr: Px { a: .., b: .., c: .., ... } (first 3 fields, dots when more)

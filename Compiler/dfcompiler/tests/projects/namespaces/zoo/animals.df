@@ -1,0 +1,15 @@
+namespace app.zoo
+
+public fun i32 one() { 10 }
+
+public enum Color { Red, Blue }
+
+public class Dog(string name) {
+  public fun ->string describe() { $"zoo dog {name}, keeper {keeper()}" }
+}
+
+public fun ->string keeper() { Keeper().name }   // Keeper is internal in app, the enclosing namespace
+
+public class Cage {
+  internal i32 size = 4                        // seen by app.zoo and app.zoo.small
+}

@@ -113,7 +113,9 @@ What the specification decides and the compiler does not build. The point number
 - Replacing a counted (`@T`) or weak (`%T`) property of a trait: traits do not have counted or weak properties yet.
 - Composite keys of `map`, `hmap`, `set`, `hset` not built yet: structs inside a struct key, tuples that hold objects or other tuples. (Built 0.0.92alpha: tuples of exact natives and strings, structs of exact natives; 0.0.93alpha: struct fields that are strings or objects of `Keyable` classes, the collection keeping a clone. A `map` / `set` orders the keys item by item, an object by its hash; an `hmap` compares an object with the `equals` of its class when it replaces it.)
 - Built 0.0.89alpha: static properties with accessor blocks, `??=` on a property (`_=` is the old weak syntax, gone), `m.add(->other)` / `s.add(->other)` / `m += ->other` (a true move since 0.0.91alpha: no copies, objects that cannot be cloned move too; a set also takes a vec or a list), the options `double-grow-limit` and `further-grow-factor`. An `enforce` expression inside a larger expression or as an argument already worked.
-- Namespaces: names qualified by their namespace and the `internal` visibility (a top-level name declared in two namespaces is an error that says so).
+- Namespaces (Specs16.1): built 0.0.102alpha (qualified names, top-level visibility, `internal` members, qualified hash names). `import Root` / `import Root.IO` and the empty construction `()` (Specs11.1.1): built 0.0.102alpha.
+- Stack trace (Specs15.2): the printed trace, `ex.line` and `ex.stackTrace` built 0.0.102alpha.
+- `string1k` (Specs4.5): built 0.0.102alpha. Not built: `string1k` as a key of maps and sets, its hash, `string1k?`.
 
 ### Traits and iterators
 

@@ -1,0 +1,27 @@
+// () is the empty construction (spec 11.1.1, 11.1.5.1): the constructor without parameters of the type known from the context
+namespace emptynew
+import Root
+class Aclass {
+  public i32 n = 7
+}
+class Box<T> {
+  public T v
+}
+struct Vec3 { r32 x, r32 y, r32 z = -1.0 }
+fun show(Aclass a) { Console.log(a.n) }
+fun ->Aclass make() { return () }
+class Holder {
+  public Aclass inner = ()
+}
+Aclass a = ()
+Console.log(a.n)
+a.n = 9
+a = ()
+Console.log(a.n)
+show(())
+Console.log(make().n)
+Vec3 v = ()
+Console.log(v)
+Box<i32> b = ()
+Console.log(b.v)
+Console.log(Holder().inner.n)

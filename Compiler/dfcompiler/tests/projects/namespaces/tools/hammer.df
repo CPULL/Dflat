@@ -1,0 +1,5 @@
+namespace app.tools
+
+public class Hammer {
+  public fun string hit() { "bang" }
+}

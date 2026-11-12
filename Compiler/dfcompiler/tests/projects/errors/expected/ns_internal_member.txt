@@ -1,0 +1,1 @@
+main.df(4): error: 'count' is internal in Box: only the namespace 'mylib' and its sub-namespaces see it

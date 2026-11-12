@@ -1,0 +1,1 @@
+main.df(4): error: 'Tool' of the namespace 'app.util' has no visibility keyword: only its own namespace sees it (mark it internal or public to use it from the namespace 'app')

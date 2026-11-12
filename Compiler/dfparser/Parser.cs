@@ -16,7 +16,7 @@ public sealed class Parser {
   };
 
   static readonly HashSet<string> Modifiers = new() {
-    "public", "internal", "private", "const", "static", "asparent", "unrestricted"
+    "public", "internal", "const", "static", "asparent", "unrestricted"
   };
 
   // Rust-style precedence, lowest first. "..", "??" and "? { }" sit below these.
@@ -1565,7 +1565,7 @@ public sealed class Parser {
     SkipTerminators();
     while (!IsOp("}")) {
       Token? visibility = null;
-      if (Peek.Kind == TokenKind.Keyword && Peek.Text is "public" or "private" or "internal") {
+      if (Peek.Kind == TokenKind.Keyword && Peek.Text is "public" or "internal") {
         visibility = Next();
       }
       if (Peek.Kind != TokenKind.Ident || Peek.Text is not ("R" or "W") || !PeekAt(1).Is(":")) {
@@ -1668,7 +1668,7 @@ public sealed class Parser {
         continue;
       }
       if (mods.Count > 0) {
-        throw ErrorAt(mods[0].Text is "public" or "private" or "internal" or "unrestricted" or "asparent"
+        throw ErrorAt(mods[0].Text is "public" or "internal" or "unrestricted" or "asparent"
           ? "the fields of a struct are always public: they take no visibility keyword (spec 11.1.5.1)"
           : $"'{mods[0].Text}' does not apply to the field of a struct (spec 11.1.5.1)", mods[0]);
       }
@@ -2368,7 +2368,9 @@ public sealed class Parser {
     noBrace = false;
     SkipNewlines();
     if (IsOp(")")) {
-      throw ErrorAt("a tuple needs at least 2 elements", open);
+      Next();
+      noBrace = saved;
+      return new Node("EmptyNew", open);   // () builds an object of the type known from the context (spec 11.1.1)
     }
     var first = ParseExpr();
     SkipNewlines();

@@ -1,0 +1,5 @@
+namespace local
+
+class Tool {
+  public i32 size = 3
+}

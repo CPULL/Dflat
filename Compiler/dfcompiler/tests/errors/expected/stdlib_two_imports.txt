@@ -1,0 +1,1 @@
+stdlib_two_imports.df(4): error: 'log' is in the imported namespaces Root.Console and Root.Math: write which one (Root.Console.log or Root.Math.log)

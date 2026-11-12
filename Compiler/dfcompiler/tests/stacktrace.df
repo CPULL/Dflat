@@ -1,0 +1,14 @@
+// The stack trace of a debug build (spec 15.2): innermost first, printed after the message when an exception nobody catches ends the program
+namespace stacktrace
+import Root
+class Calc {
+  public fun i32 divide(i32 a, i32 b) {
+    return a / b
+  }
+}
+fun i32 run(i32 x) {
+  var c = Calc()
+  return c.divide(10, x)
+}
+Console.log(run(2))
+Console.log(run(0))

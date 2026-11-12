@@ -1,0 +1,1 @@
+emptynew_no_type.df(2): error: () builds an object of the type known from the context: here no type is known, write the class (Aclass())

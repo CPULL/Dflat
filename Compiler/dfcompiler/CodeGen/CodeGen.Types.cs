@@ -68,7 +68,7 @@ public sealed partial class CodeGen {
 
   bool IsKnownType(string t) {
     return SignedTypes.Contains(t) || UnsignedTypes.Contains(t) || RealTypes.Contains(t)
-      || t is "bool" or "char" or "string" or "byte" or "uns" or "int" or "date" or "time" or "clock" or "lapse" or "Exception" or "addr" || IsEnum(t) || IsClass(t) || IsStruct(t);
+      || t is "bool" or "char" or "string" or "string1k" or "byte" or "uns" or "int" or "date" or "time" or "clock" or "lapse" or "Exception" or "addr" || IsEnum(t) || IsClass(t) || IsStruct(t);
   }
 
   // the native integer types (spec 2.1): int and uns, and the unsuffixed integer literals; the size of the cpu or of --native-int, set
@@ -175,6 +175,7 @@ public sealed partial class CodeGen {
       "bool" => "bool",
       "char" => "uint32_t",
       "string" => "df_string",
+      "string1k" => "df_s1k",      // spec 4.5
       "date" => "int64_t",
       "time" => "int32_t",
       "clock" => "uint64_t",
@@ -292,6 +293,9 @@ public sealed partial class CodeGen {
     }
     if (type == "string") {
       return "df_str_lit(\"\", 0)";
+    }
+    if (type == "string1k") {
+      return "((df_s1k){0})";   // length 0, the text "" (spec 4.5)
     }
     if (IsNullable(type)) {
       return $"(({CType(type)}){{0}})";
@@ -474,6 +478,9 @@ public sealed partial class CodeGen {
     if (to == from) {
       return true;
     }
+    if (to == "string1k" && from == "string" || to == "string" && from == "string1k") {
+      return true;   // string1k converts to and from string (spec 4.5)
+    }
     if ((IsTuple(to) || IsMulti(to)) && IsStruct(from)) {
       return StructToTupleAssignable(from, to);   // a struct converts to a tuple (spec 11.1.5.8)
     }
@@ -521,6 +528,13 @@ public sealed partial class CodeGen {
   string Convert(Expr e, string to, Node at) {
     if (e.Type == to) {
       return e.Code;
+    }
+    if (to == "string1k" && e.Type == "string") {
+      // cut to 1021 bytes at a whole character, with the silent StringTruncatedException (spec 4.5)
+      return SilentCall($"df_s1k_from_str({StrRead(e)})", "string1k", "StringTruncatedException", at);
+    }
+    if (to == "string" && e.Type == "string1k") {
+      return $"df_s1k_to_str({e.Code})";
     }
     if (IsSetValue(e.Type) && !LibraryCode) {
       throw Error($"a value of the set {DisplayName(e.Type)} is read with if k is T x {{ }} or k is ? {{ }} (spec 11.3.6.1)", at);
@@ -712,6 +726,9 @@ public sealed partial class CodeGen {
     : StrOf(e, at);
 
   string StrOf(Expr e, Node at) {
+    if (e.Type == "string1k") {
+      return $"df_s1k_to_str({e.Code})";   // spec 4.5
+    }
     if (IsSetValue(e.Type)) {
       return SetValueStr(e, at);
     }

@@ -1,0 +1,4 @@
+namespace stdlib_two_imports
+import Root.Console
+import Root.Math
+log("x")

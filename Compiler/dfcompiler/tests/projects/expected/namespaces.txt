@@ -1,0 +1,10 @@
+1
+10
+zoo dog Leo, keeper Kim
+Dog { name: Leo }
+3
+5
+bang
+squeak, cage 4, keeper Kim
+Blue
+---- exit code 0 ----

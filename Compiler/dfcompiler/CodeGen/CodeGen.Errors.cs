@@ -108,6 +108,7 @@ public sealed partial class CodeGen {
     // Root.IO (spec 17.6.6)
     ["FileNotFoundException"] = 25,
     ["InvalidFileAccessException"] = 26,
+    ["StringTruncatedException"] = 56,   // spec 4.5
     ["FileAccessException"] = 27,
     ["DirectoryNotEmptyException"] = 28,
     ["FileNameAlreadyExistsException"] = 29,
@@ -209,6 +210,18 @@ public sealed partial class CodeGen {
   static string FunHeader(FunSig f) {
     string ret = f.Ret == "void" ? "" : (IsMulti(f.Ret) ? string.Join(", ", TupleElems(f.Ret).Select(elem => elem.Type)) : f.Ret) + " ";
     return $"{ret}{f.Name}({string.Join(", ", f.Params.Select(p => p.Type))})";
+  }
+
+  // a debug build: the frame of the function in the call stack (spec 15.2), popped on every way out; the code of the library has none
+  string DebugFrame(int line, string? name) {
+    if (ReleaseBuild || line <= 0 || line >= LibraryLine) {
+      return "";
+    }
+    string file = CQuoted(CodePoints(SourceMap.FileName(line)), out _);
+    // a constructor shows as Dog(string), not by the name of its C function (Dog.__init)
+    string? shown = name ?? (fn!.Header.Contains(".__init(") ? fn.Header.Replace(".__init(", "(") : null);
+    string function = shown != null ? CQuoted(CodePoints(shown), out _) : fn!.NameConst;
+    return $"  df_frame df_fr __attribute__((cleanup(df_frame_pop))) = {{ {file}, {function}, {SourceMap.RealLine(line)}, df_frame_top }};\n  df_frame_top = &df_fr;\n";
   }
 
   FunctionContext NewFunctionContext(string header, string retType, bool isMain) {
@@ -847,15 +860,31 @@ public sealed partial class CodeGen {
   }
 
   // the members of every exception (spec 15.2); also reserved as field names of an exception class
-  static readonly string[] ExceptionMembers = { "id", "message", "function", "line" };
+  static readonly string[] ExceptionMembers = { "id", "message", "function", "line", "stackTrace" };
 
-  // ex.id, ex.message, ex.function, ex.line
+  // ex.stackTrace (spec 15.2): a new arr<DebugLine> made from the calls copied when the exception was raised; null in release
+  Expr StackTraceExpr(Expr exception, Node at) {
+    if (!structs.ContainsKey("DebugLine")) {
+      throw Error("stackTrace needs the struct DebugLine of the library (spec 15.2)", at);
+    }
+    string arrType = "arr<DebugLine>";
+    string arrC = CType(arrType), itemC = CType("DebugLine");
+    string e = NewTemp(), a = NewTemp(), i = NewTemp();
+    return new Expr($"({{ df_exception* {e} = (df_exception*)({exception.Code}); {arrC} {a} = {{ 0 }}; "
+      + $"if ({e}->trace) {{ {a}.p = ({itemC}*)df_calloc({e}->traceLen, sizeof({itemC})); {a}.len = (df_uns){e}->traceLen; "
+      + $"for (uint64_t {i} = 0; {i} < {e}->traceLen; {i}++) {{ {a}.p[{i}].f_file = df_s1k_from_cstr({e}->trace[{i}].file); "
+      + $"{a}.p[{i}].f_lineNum = (df_uns){e}->trace[{i}].line; {a}.p[{i}].f_column = 0; "
+      + $"{a}.p[{i}].f_function = df_s1k_from_cstr({e}->trace[{i}].function); }} }} df_silent_desc = NULL; {a}; }})", arrType, true);
+  }
+
+  // ex.id, ex.message, ex.function, ex.line, ex.stackTrace
   Expr ExceptionMember(Expr exception, string member, Node at) {
     return member switch {
       "id" => new Expr($"(({exception.Code})->id)", "u64"),
       "message" => new Expr($"df_str_dup_cstr(({exception.Code})->message)", "string", true),   // a new string: read only, it ends with the statement
       "function" => new Expr($"df_str_dup_cstr(({exception.Code})->function)", "string", true),
       "line" => new Expr($"(({exception.Code})->line)", "u64"),
+      "stackTrace" => StackTraceExpr(exception, at),
       _ when ExceptionMembers.FirstOrDefault(known => known.Equals(member, StringComparison.OrdinalIgnoreCase)) is string known
         => throw Error($"Exception has no member '{member}': write {known} (spec 15.2)", at),
       _ => throw Error($"member '{member}' of Exception is not supported yet", at)

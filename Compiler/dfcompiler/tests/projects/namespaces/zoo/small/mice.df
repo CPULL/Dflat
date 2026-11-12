@@ -1,0 +1,5 @@
+namespace local
+
+public class Mouse {
+  public fun ->string greet() { $"squeak, cage {Cage().size}, keeper {keeper()}" }
+}

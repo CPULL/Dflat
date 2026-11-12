@@ -1,0 +1,1 @@
+emptynew_trait.df(3): error: () cannot build Shape: it is a trait, write the class to build (Aclass())

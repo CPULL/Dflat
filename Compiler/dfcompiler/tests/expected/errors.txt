@@ -1,5 +1,5 @@
 safeDivide(10, 2) = 5
-caught: Division By Zero Exception | id 14 | in i32 divide(i32, i32) | line 0
+caught: Division By Zero Exception | id 14 | in i32 divide(i32, i32) | line 4
 safeDivide(10, 0) = -1
   mode 1: generic catch, message 'plain'
   mode 1: code after the catches runs

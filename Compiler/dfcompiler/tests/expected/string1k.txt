@@ -1,0 +1,15 @@
+hello
+hello
+5
+1024
+hello world / HELLO WORLD
+true
+true
+true
+bob
+Entry { name: anna, score: 3 }
+5
+1023
+truncated
+for C
+---- exit code 0 ----

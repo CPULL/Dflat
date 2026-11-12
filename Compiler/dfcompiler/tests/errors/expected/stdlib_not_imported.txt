@@ -1,0 +1,1 @@
+stdlib_not_imported.df(2): error: 'Console' is in the standard library: write Root.Console or import Root

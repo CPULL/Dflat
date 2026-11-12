@@ -26,5 +26,6 @@ big total
 found a * b == 6
 dividing by zero...
 Division By Zero Exception
+basics.df (78) Main()
 Panic -1000
 ---- exit code -1000 ----

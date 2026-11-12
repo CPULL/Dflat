@@ -45,20 +45,60 @@ typedef struct {
   uint64_t len;    /* byte length */
 } df_sv;
 
+/* ---- the call stack of a debug build (spec 15.2) ----
+   Every function of the program pushes a frame when it starts and pops it on every way out (the cleanup attribute); each statement
+   writes its line in the frame on top. A release build has no frames. */
+typedef struct df_frame {
+  const char* file;
+  const char* function;
+  uint64_t line;
+  struct df_frame* prev;
+} df_frame;
+
+static df_frame* df_frame_top = NULL;
+
+static void df_frame_pop(df_frame* frame) {
+  df_frame_top = frame->prev;
+}
+
+#define DF_LINE(n) (df_frame_top ? (void)(df_frame_top->line = (n)) : (void)0)
+
+/* one call of a stack trace: file, line and function, innermost first */
+typedef struct {
+  const char* file;
+  const char* function;
+  uint64_t line;
+} df_trace_item;
+
+static void df_trace_print(const df_trace_item* items, uint64_t count) {
+  for (uint64_t i = 0; i < count; i++) {
+    printf("%s (%llu) %s\n", items[i].file, (unsigned long long)items[i].line, items[i].function);
+  }
+}
+
 /* ---- panic ---- */
 
 /* set by the console when it changes the terminal mode (Console.read): gives the terminal back before a panic */
 static void (*df_panic_hook)(void) = NULL;
 
-/* critical exit: prints "Panic <code>" on stdout, no cleanup */
-static void df_panic(int64_t code) {
+/* critical exit: prints the calls of a debug build, then "Panic <code>" on stdout, no cleanup */
+static void df_panic_exit(int64_t code, bool frames) {
   if (df_panic_hook) {
     df_panic_hook();
   }
   fflush(stdout);
+  if (frames) {
+    for (df_frame* frame = df_frame_top; frame; frame = frame->prev) {
+      printf("%s (%llu) %s\n", frame->file, (unsigned long long)frame->line, frame->function);
+    }
+  }
   printf("Panic %lld\n", (long long)code);
   fflush(stdout);
   _Exit((int)code);
+}
+
+static void df_panic(int64_t code) {
+  df_panic_exit(code, true);
 }
 
 #define DF_PANIC_UNHANDLED (-1000)
@@ -96,7 +136,34 @@ typedef struct {
   char* message;     /* C-style, max 2 KB */
   char* function;    /* C-style, max 1 KB: minified header of the failing function */
   uint64_t line;     /* 0 in release */
+  df_trace_item* trace;   /* the calls when it was raised, innermost first (spec 15.2); NULL in release */
+  uint64_t traceLen;
 } df_exception;
+
+/* a debug build copies the frames into the exception when it is raised: its line and its stack trace */
+static void df_exc_trace(df_exception* exception) {
+  exception->trace = NULL;
+  exception->traceLen = 0;
+#ifndef DF_RELEASE
+  uint64_t count = 0;
+  for (df_frame* frame = df_frame_top; frame; frame = frame->prev) {
+    count++;
+  }
+  if (count > 0) {
+    exception->trace = (df_trace_item*)malloc(count * sizeof(df_trace_item));
+    if (exception->trace) {
+      uint64_t i = 0;
+      for (df_frame* frame = df_frame_top; frame; frame = frame->prev, i++) {
+        exception->trace[i].file = frame->file;
+        exception->trace[i].function = frame->function;
+        exception->trace[i].line = frame->line;
+      }
+      exception->traceLen = count;
+    }
+    exception->line = df_frame_top->line;
+  }
+#endif
+}
 
 static const df_descriptor df_desc_Exception = { 10, "Exception", NULL, false };
 static const df_descriptor df_desc_NullPointerException = { 11, "NullPointerException", &df_desc_Exception, false };
@@ -140,6 +207,7 @@ static const df_descriptor df_desc_ModifiedObjectUsedAsKeyException = { 52, "Mod
 static const df_descriptor df_desc_UnassignedTypeException = { 53, "UnassignedTypeException", &df_desc_Exception, false };
 static const df_descriptor df_desc_CallingGlobalDefinedAfterException = { 54, "CallingGlobalDefinedAfterException", &df_desc_Exception, false };
 static const df_descriptor df_desc_ReadLockBecameWriteLockException = { 55, "ReadLockBecameWriteLockException", &df_desc_Exception, false };
+static const df_descriptor df_desc_StringTruncatedException = { 56, "StringTruncatedException", &df_desc_Exception, true };
 
 /* The exception of a function is a local of that function (df_err in the generated code) and travels back to the caller as the second
    value it returns. The runtime functions written in C cannot return it that way: they leave it here, and the code generated around
@@ -178,6 +246,7 @@ static df_exception* df_new_exception(const df_descriptor* descriptor, const cha
   exception->message = df_cstr_truncated(message, messageLength, 2048);
   exception->function = df_cstr_truncated(function, strlen(function), 1024);
   exception->line = 0;
+  df_exc_trace(exception);
   df_exc_live++;
   return exception;
 }
@@ -221,11 +290,14 @@ static void df_silent_note(const df_descriptor* descriptor) {
   df_silent_desc = descriptor;
 }
 
-/* unhandled exception: its message, then Panic -1000 */
+/* unhandled exception: its message, the calls where it was raised (debug), then Panic -1000 */
 static void df_panic_unhandled(const df_exception* error) {
   fflush(stdout);
   printf("%s\n", error ? error->message : "");
-  df_panic(DF_PANIC_UNHANDLED);
+  if (error) {
+    df_trace_print(error->trace, error->traceLen);
+  }
+  df_panic_exit(DF_PANIC_UNHANDLED, false);
 }
 
 /* ---- strings (spec 4.4) ----
@@ -1724,12 +1796,83 @@ static void df_exc_release(df_exception* exception) {
   }
   free(exception->message);
   free(exception->function);
+  free(exception->trace);
   free(exception);
   df_exc_live--;
 }
 
 static df_string df_str_obj(const void* obj) {
   return obj ? ((const df_object*)obj)->cls->str(obj) : df_str_lit("null", 4);
+}
+
+/* ---- string1k (spec 4.5): 1024 bytes, the UTF-8 text ended by a 0, no stored length; at most 1023 bytes (a C char[1024]) ---- */
+
+typedef struct { uint8_t b[1024]; } df_s1k;
+
+#define DF_S1K_MAX 1023
+
+static uint64_t df_s1k_bytes(const df_s1k* v) {
+  uint64_t n = 0;
+  while (n < DF_S1K_MAX && v->b[n] != 0) {
+    n++;
+  }
+  return n;
+}
+
+/* the text after the bytes there: cut at the last whole character that fits, with the note of the silent StringTruncatedException */
+static void df_s1k_put(df_s1k* v, uint64_t at, const char* text, uint64_t length) {
+  uint64_t keep = length;
+  if (at + keep > DF_S1K_MAX) {
+    keep = DF_S1K_MAX - at;
+    while (keep > 0 && ((unsigned char)text[keep] & 0xC0) == 0x80) {
+      keep--;
+    }
+    df_silent_note(&df_desc_StringTruncatedException);
+  }
+  memcpy(v->b + at, text, keep);
+  v->b[at + keep] = 0;
+  v->b[DF_S1K_MAX] = 0;
+}
+
+static df_s1k df_s1k_from_str(df_string s) {
+  df_s1k v;
+  df_sv text = df_view(s);
+  df_s1k_put(&v, 0, text.p, text.len);
+  return v;
+}
+
+static df_s1k df_s1k_from_cstr(const char* text) {
+  df_s1k v;
+  df_s1k_put(&v, 0, text, strlen(text));
+  return v;
+}
+
+static df_string df_s1k_to_str(df_s1k v) {
+  v.b[DF_S1K_MAX] = 0;
+  return df_str_dup_cstr((const char*)v.b);
+}
+
+/* += in place */
+static bool df_s1k_append(df_s1k* v, df_string s) {
+  df_sv text = df_view(s);
+  df_s1k_put(v, df_s1k_bytes(v), text.p, text.len);
+  return true;
+}
+
+/* .len: the characters, as for string */
+static uint64_t df_s1k_len(df_s1k v) {
+  uint64_t bytes = df_s1k_bytes(&v), count = 0;
+  for (uint64_t i = 0; i < bytes; i++) {
+    if ((v.b[i] & 0xC0) != 0x80) {
+      count++;
+    }
+  }
+  return count;
+}
+
+static bool df_s1k_eq(df_s1k a, df_s1k b) {
+  uint64_t bytes = df_s1k_bytes(&a);
+  return bytes == df_s1k_bytes(&b) && memcmp(a.b, b.b, bytes) == 0;
 }
 
 /* ---- arrays (arr<T>): pointer and length; a null array has no pointer ---- */

@@ -1,0 +1,1 @@
+s1k_to_number.df(3): error: cannot convert string1k to i32 implicitly; use a cast

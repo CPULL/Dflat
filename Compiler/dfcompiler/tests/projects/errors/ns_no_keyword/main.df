@@ -1,0 +1,4 @@
+namespace app
+import app.util
+
+Root.Console.log(Tool().size)

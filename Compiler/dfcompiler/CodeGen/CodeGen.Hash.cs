@@ -22,7 +22,7 @@ public sealed partial class CodeGen {
   };
 
   // the fully qualified name of a type for its hash (spec 6.2.1): natives and the default collections without namespace, classes and enums with
-  // it (Root. when the program does not give one: namespaces do not qualify names yet), generic arguments in <> separated by ',' with no spaces
+  // it (Root. when the program has no namespace), generic arguments in <> separated by ',' with no spaces
   string QualifiedTypeName(string type) {
     if (IsNullable(type)) {
       return QualifiedTypeName(BaseOf(type)) + "?";
@@ -35,7 +35,7 @@ public sealed partial class CodeGen {
     }
     if (classInstanceArgs.TryGetValue(type, out var instance)) {
       string args = string.Join(",", instance.Args.Select(QualifiedTypeName));
-      string template = instance.Template.Node.Line >= LibraryLine ? instance.Template.Name : "Root." + instance.Template.Name;
+      string template = instance.Template.Node.Line >= LibraryLine ? instance.Template.Name : UserQualifiedName(instance.Template.Name);
       return $"{template}<{args}>";
     }
     if (type == "StringEncoding") {
@@ -48,9 +48,18 @@ public sealed partial class CodeGen {
       return "Root.ExecProcess.RunResult";
     }
     if (IsClass(type) || IsEnum(type)) {
-      return "Root." + type;
+      return UserQualifiedName(type);
+    }
+    if (IsStruct(type) && SourceMap.DeclNamespace(type) is string structNs && structNs != "") {
+      return structNs + "." + SourceMap.PrintName(type);
     }
     return type;
+  }
+
+  // a class or an enum of the program with its namespace (spec 16); Root. for a program without a namespace and for the stdlib
+  static string UserQualifiedName(string type) {
+    string? ns = SourceMap.DeclNamespace(type);
+    return ns is null or "" ? "Root." + type : ns + "." + SourceMap.PrintName(type);
   }
 
   // a collection for the hash: a copy of a library generic (vec, list, map, their iterators and views) or a class with the trait Collection or Iterator

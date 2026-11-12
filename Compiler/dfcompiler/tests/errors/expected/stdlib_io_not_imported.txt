@@ -1,0 +1,1 @@
+stdlib_io_not_imported.df(3): error: 'File' is in the standard library: write Root.IO.File or import Root.IO

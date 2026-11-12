@@ -1,4 +1,5 @@
 namespace process
+import Root.IO
 alias Root as r
 alias Root.IO as fs
 alias Root.ExecProcess as ep

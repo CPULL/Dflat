@@ -350,6 +350,14 @@ public sealed partial class CodeGen {
     if (IsClass(receiver.Type)) {
       return ObjectCall(receiver, name, args, scope, at);
     }
+    if (receiver.Type == "string1k" && name == "toCStr" && args.Count == 0) {
+      // the address of its own buffer, no copy: a string1k is a C char[1024] (spec 4.5); the receiver must be a place
+      return new Expr($"((void*)(({receiver.Code}).b))", "addr");
+    }
+    if (receiver.Type == "string1k" && Methods["string"].TryGetValue(name, out var stringOverloads)) {
+      // every other string function works on the string it converts to (spec 4.5)
+      return StdCall($"string.{name}", stringOverloads, args, scope, at, StrRead(new Expr($"df_s1k_to_str({receiver.Code})", "string", true)));
+    }
     if (Methods.TryGetValue(receiver.Type, out var byName) && byName.TryGetValue(name, out var overloads)) {
       return StdCall($"{receiver.Type}.{name}", overloads, args, scope, at, StrRead(receiver));
     }
@@ -424,6 +432,11 @@ public sealed partial class CodeGen {
     // Console.Color (stdlib 2): the 16 colours of Console.setColors, in the order of the ANSI colours
     if (!declared.Contains("ConsoleColor") && Mentions(program, node => node.Text == "setColors" || node.Kind is "Member" or "Type" && node.Text is "Color" or "Console.Color" or "Root.Console.Color")) {
       source.Append("enum ConsoleColor { Black, Red, Green, Yellow, Blue, Magenta, Cyan, White, Gray, BrightRed, BrightGreen, BrightYellow, BrightBlue, BrightMagenta, BrightCyan, BrightWhite }\n");
+    }
+    // the stack trace of an exception (spec 15.2)
+    if (!program.Children.Any(child => child.Kind == "Struct" && child.Text == "DebugLine")
+        && Mentions(program, node => node.Text == "DebugLine" || node.Kind == "Member" && node.Text == "stackTrace")) {
+      source.Append("struct DebugLine { string1k file, uns lineNum, uns column, string1k function }\n");
     }
     if (!declared.Contains("SortDirection") && Mentions(program, node => node.Text == "SortDirection")) {
       source.Append("enum SortDirection { ASC, DESC }" + Environment.NewLine);

@@ -719,10 +719,10 @@ public sealed partial class CodeGen {
     foreach (var field in ctorFields.Where(field => field.Init != null)) {
       if (field.HasAccessors && !field.CanWrite) {
         // a start value goes through W: (spec 11.1.4); without one, straight into the storage
-        block.Add(Synthetic("Assign", at, "=").Add(Synthetic("RawField", at, field.Name)).Add(field.Init!));
+        block.Add(Synthetic("Assign", field.Init!, "=").Add(Synthetic("RawField", field.Init!, field.Name)).Add(field.Init!));
         continue;
       }
-      block.Add(Assignment(field.Name, field.Init!, at, false, field.IsWeak));
+      block.Add(Assignment(field.Name, field.Init!, field.Init!, false, field.IsWeak));   // the line of the initializer (errors, stack trace)
     }
     // the init functions of the class (Foo.__ctor, what a chain : Foo(...) calls) and its constructors (Foo)
     var inits = new List<FunSig>();
@@ -1352,8 +1352,17 @@ public sealed partial class CodeGen {
   }
 
   void CheckAccess(Vis visibility, ClassInfo owner, string what, Node at) {
+    if (visibility == Vis.Internal) {
+      // internal (spec 1.6.1): the namespace of the class and its sub-namespaces
+      string? here = SourceMap.NamespaceOf(at.Line), home = SourceMap.NamespaceOf(owner.Node.Line);
+      if (LibraryCode || at.Line >= LibraryLine || owner.Node.Line >= LibraryLine || here == null || home == null
+          || here == home || home == "" || here.StartsWith(home + ".")) {
+        return;
+      }
+      throw Error($"'{what}' is internal in {DisplayName(owner.Name)}: only the namespace '{home}' and its sub-namespaces see it", at);
+    }
     if (visibility != Vis.Private) {
-      return;                                   // internal is as open as public until namespaces exist
+      return;
     }
     if (owner.IsTrait) {
       // private in a trait (spec 11.2): the code of the trait and of its sub-traits, not the class that implements it
@@ -2059,7 +2068,7 @@ public sealed partial class CodeGen {
           ? $"  return {StrOf(new Expr(CellRead($"o->{FindField(cls, "value")!.CName}", boxed), boxed), cls.Node)};\n"   // a counted value prints its value
           : $"  return df_str_obj(DF_RC_OBJ(const void*, o->{FindField(cls, "value")!.CName}));\n");
       }
-      sb.Append($"  df_string r ={CString(CodePoints(DisplayName(cls.Name) + (all.Count == 0 ? " {}" : " { ")))};\n");
+      sb.Append($"  df_string r ={CString(CodePoints(SourceMap.PrintName(DisplayName(cls.Name)) + (all.Count == 0 ? " {}" : " { ")))};\n");
       for (int index = 0; index < all.Count && index < 3; index++) {
         var field = all[index];
         string label = (index > 0 ? ", " : "") + field.Name + ": ";
@@ -2141,6 +2150,7 @@ public sealed partial class CodeGen {
       sb.Append("  df_exc_live++;\n");
       sb.Append("  self->message = df_cstr_truncated(df_view(v_message).p, df_str_len(v_message), 2048);\n");
       sb.Append("  self->function = df_cstr_truncated(\"\", 0, 1024);\n");
+      sb.Append("  self->trace = NULL;\n  self->traceLen = 0;\n");
     }
     if (f.ParentInit != null) {
       string forwarded = cls.Parent!.IsException ? ", v_message" : "";

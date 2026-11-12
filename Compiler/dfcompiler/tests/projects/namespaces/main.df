@@ -1,0 +1,24 @@
+// Names qualified by their namespace (spec 16, 1.6.1): a clash is solved by the own namespace or by the qualified name
+namespace app
+import app.zoo
+alias app.farm as farm
+alias Root as r
+
+internal class Keeper {        // internal: app.zoo and app.zoo.small (sub-namespaces) see it
+  public string name = "Kim"
+}
+
+fun i32 one() { 1 }            // app.zoo has a public one() too: the own namespace wins
+
+r.Console.log(one())
+r.Console.log(app.zoo.one())
+var lion = Dog("Leo")          // app.zoo.Dog (imported); app.farm.Dog is not imported
+r.Console.log(lion.describe())
+r.Console.log(lion)
+farm.Dog cow = farm.Dog("Rex", 3)
+r.Console.log(cow.legs)
+r.Console.log(app.farm.Dog("Max", 5).legs)
+app.tools.Hammer h = Hammer()  // not imported: the qualified type brings its namespace in, the bare constructor follows it
+r.Console.log(h.hit())
+r.Console.log(app.zoo.small.Mouse().greet())
+r.Console.log(app.zoo.Color.Blue)

@@ -1,0 +1,6 @@
+namespace app
+
+class Box {
+  private i32 size = 3
+}
+Root.Console.log(Box())

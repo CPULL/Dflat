@@ -1,0 +1,12 @@
+// The standard library follows the import rule (spec 16.1): import Root, import Root.Console, import Root.IO
+namespace stdlibimports
+import Root
+import Root.IO
+
+Console.log("Hello")
+Console.log(Math.sqrt(16.0))
+Console.log(Math.PI > 3.0)
+Root.Console.log("the full name still works")
+File f = File("stdlibimports.txt")
+Console.log(f.name)
+Console.log(Time.now() != null)

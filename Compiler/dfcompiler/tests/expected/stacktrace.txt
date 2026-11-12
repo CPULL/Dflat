@@ -1,0 +1,7 @@
+5
+Division By Zero Exception
+stacktrace.df (6) i32 Calc.divide(i32, i32)
+stacktrace.df (11) i32 run(i32)
+stacktrace.df (14) Main()
+Panic -1000
+---- exit code -1000 ----

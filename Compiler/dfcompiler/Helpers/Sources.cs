@@ -31,7 +31,46 @@ static class SourceMap {
   // the lib.df at the top of a library (spec 16)
   public static bool IsLibraryRoot(int line) => libraryRoots.Contains(line / Stride);
 
+  // the namespace of each file (lower case, "" for a program without one), for the internal visibility (spec 1.6.1)
+  static readonly Dictionary<int, string> namespaces = new();
+
+  public static void SetNamespace(int index, string ns) => namespaces[index] = ns;
+
+  public static string? NamespaceOf(int line) => namespaces.TryGetValue(line / Stride, out var ns) ? ns : null;
+
+  // a name declared in several namespaces has a hidden name (spec 16): the messages show it qualified, the printing as written
+  static readonly Dictionary<string, (string Shown, string Simple)> hiddenNames = new();
+  static System.Text.RegularExpressions.Regex? hiddenPattern;
+
+  public static void AddName(string hidden, string shown, string simple) {
+    hiddenNames[hidden] = (shown, simple);
+    hiddenPattern = null;
+  }
+
+  public static string ShowNames(string text) {
+    if (hiddenNames.Count == 0) {
+      return text;
+    }
+    hiddenPattern ??= new System.Text.RegularExpressions.Regex(@"\b(" + string.Join("|", hiddenNames.Keys.OrderByDescending(k => k.Length)
+      .Select(System.Text.RegularExpressions.Regex.Escape)) + @")\b");
+    return hiddenPattern.Replace(text, match => hiddenNames[match.Value].Shown);
+  }
+
+  // the namespace of every top-level declaration of the program, by its name in the merged program (for the hash, spec 6.2.1)
+  static readonly Dictionary<string, string> declNamespaces = new();
+
+  public static void AddDecl(string name, string ns) => declNamespaces[name] = ns;
+
+  public static string? DeclNamespace(string name) => declNamespaces.TryGetValue(name, out var ns) ? ns : null;
+
+  public static string PrintName(string name) => hiddenNames.TryGetValue(name, out var found) ? found.Simple : name;
+
+  public static string? QualifiedName(string name) => hiddenNames.TryGetValue(name, out var found) ? found.Shown : null;
+
   public static int RealLine(int line) => line % Stride;
+
+  // the name of the file of a line, without its folder (the stack trace of a debug build, spec 15.2)
+  public static string FileName(int line) => Path.GetFileName(FileOf(line));
 
   static string FileOf(int line) {
     int index = line / Stride;
@@ -50,9 +89,9 @@ static class SourceMap {
   public static string Fix(string warning) {
     int close = warning.IndexOf(')');
     if (warning.StartsWith('(') && close > 1 && int.TryParse(warning[1..close], out int line)) {
-      return Where(line) + warning[(close + 1)..];
+      return Where(line) + ShowNames(warning[(close + 1)..]);
     }
-    return files[0] + warning;
+    return files[0] + ShowNames(warning);
   }
 }
 
@@ -65,7 +104,7 @@ sealed class SourceException : Exception {
 // Reads the root file and every file it reaches through `import` (spec 16): the roots are the folder of the program, the libraries
 // given with include= and the stdlib. A multi-file project also compiles the other files of the folder of the root file. The files are
 // merged into one program: the other files first, the root file last.
-sealed class SourceLoader {
+sealed partial class SourceLoader {
   sealed class SourceRoot {
     public SourceRoot(string folder, string ns, string what) {
       Folder = folder;
@@ -99,7 +138,6 @@ sealed class SourceLoader {
   readonly HashSet<string> visited = new(StringComparer.OrdinalIgnoreCase);
   readonly List<SourceFile> order = new();
   readonly List<SourceRoot> roots = new();
-  readonly Dictionary<string, string> declaredIn = new();   // top-level name -> namespace, while names are not qualified
   SourceFile? rootFile;
 
   public SourceLoader(IReadOnlyDictionary<string, PpVariable> variables, IReadOnlyDictionary<string, PpValue> projectVariables) {
@@ -150,6 +188,12 @@ sealed class SourceLoader {
       }
     }
     Visit(rootFile, multiFile);
+
+    // a fully qualified name brings in its namespace without an import (spec 16); then the names are resolved
+    LoadQualified(multiFile);
+    order.Remove(rootFile);
+    order.Add(rootFile);
+    ResolveNames();
 
     // the program: the imported files first (their declarations are seen before they are used), then the root file
     var program = rootFile.Tree;
@@ -260,14 +304,14 @@ sealed class SourceLoader {
     }
     CheckFile(file);
     foreach (var import in file.Tree.Children.Where(statement => statement.Kind == "Import")) {
-      foreach (var imported in Resolve(import, multiFile)) {
+      foreach (var imported in Resolve(import.Text!, import.Line, multiFile)!) {
         Visit(imported, multiFile);
       }
     }
     order.Add(file);
   }
 
-  // only the root file has top-level code, and a name is declared in one namespace only (names are not qualified yet)
+  // only the root file has top-level code
   void CheckFile(SourceFile file) {
     bool isRoot = file == rootFile;
     // the files of a library know their library (its folder name): its globals are visible only inside it (spec 18.1)
@@ -282,7 +326,7 @@ sealed class SourceLoader {
           && statement.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ').Contains("global") == true) {
         throw new CompileException("a global can be declared only in the root file (program.df, main.df or lib.df) (spec 18.1)", statement.Line);
       }
-      bool declaration = statement.Kind is "Fun" or "Alias" or "Enum" or "Class" or "Trait" or "GenericSet"
+      bool declaration = statement.Kind is "Fun" or "Alias" or "Enum" or "Class" or "Trait" or "GenericSet" or "Struct"
         or "Namespace" or "NamespaceLocal" or "Import" || IsConst(statement)
         || statement.Kind == "Decl" && statement.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ').Contains("global") == true;   // a global of a library (spec 18.1)
       if (!isRoot && !declaration) {
@@ -290,13 +334,6 @@ sealed class SourceLoader {
       }
       if (!isRoot && statement.Kind == "Fun" && statement.Text == "main") {
         throw new CompileException("main can be only in the root file", statement.Line);
-      }
-      if (declaration && statement.Text != null && statement.Kind is not ("Namespace" or "NamespaceLocal" or "Import")) {
-        if (declaredIn.TryGetValue(statement.Text, out var other) && other != file.Namespace) {
-          throw new CompileException($"'{statement.Text}' is declared in the namespace '{Show(other)}' and in '{Show(file.Namespace)}': "
-            + "names qualified by their namespace are not built yet, so a name can be used in one namespace only", statement.Line);
-        }
-        declaredIn[statement.Text] = file.Namespace;
       }
     }
   }
@@ -309,8 +346,8 @@ sealed class SourceLoader {
   }
 
   // import a.b.c: the root whose namespace starts the path, then down its folders; all the .df files of the folder
-  List<SourceFile> Resolve(Node import, bool multiFile) {
-    string name = import.Text!;
+  // quiet: a qualified name that may not be a namespace gives null instead of an error
+  List<SourceFile>? Resolve(string name, int line, bool multiFile, bool quiet = false) {
     string lower = name.ToLowerInvariant();
     SourceRoot? best = null;
     foreach (var root in roots) {
@@ -320,13 +357,10 @@ sealed class SourceLoader {
       }
     }
     if (best == null) {
-      throw NotFound(name, import, multiFile);
+      return quiet ? null : throw NotFound(name, line, multiFile);
     }
     if (best.Namespace == "root") {
       return new List<SourceFile>();   // the stdlib is part of the compiler
-    }
-    if (best.What.StartsWith("the library ")) {
-      ImportedLibraries[best.Namespace] = best.Folder;
     }
     string rest = best.Namespace == "" ? lower : lower == best.Namespace ? "" : lower[(best.Namespace.Length + 1)..];
     string folder = best.Folder;
@@ -335,15 +369,21 @@ sealed class SourceLoader {
       var matching = Directory.GetDirectories(folder)
         .Where(dir => string.Equals(System.IO.Path.GetFileName(dir), segment, StringComparison.OrdinalIgnoreCase)).ToList();
       if (matching.Count > 1) {
-        throw new CompileException($"the folders {string.Join(" and ", matching.Select(System.IO.Path.GetFileName))} differ only by case", import.Line);
+        throw new CompileException($"the folders {string.Join(" and ", matching.Select(System.IO.Path.GetFileName))} differ only by case", line);
       }
       if (matching.Count == 0) {
-        throw NotFound(name, import, multiFile);
+        return quiet ? null : throw NotFound(name, line, multiFile);
       }
       folder = matching[0];
       segments.Add(System.IO.Path.GetFileName(folder));
     }
     string expected = string.Join(".", new[] { best.Namespace }.Concat(segments.Select(s => s.ToLowerInvariant())).Where(s => s != ""));
+    if (quiet && Directory.GetFiles(folder, "*.df").Length == 0) {
+      return null;
+    }
+    if (best.What.StartsWith("the library ")) {
+      ImportedLibraries[best.Namespace] = best.Folder;
+    }
     var files = new List<SourceFile>();
     foreach (string path in Directory.GetFiles(folder, "*.df").OrderBy(p => p, StringComparer.OrdinalIgnoreCase)) {
       var file = Parse(path, path);
@@ -351,7 +391,7 @@ sealed class SourceLoader {
       files.Add(file);
     }
     if (files.Count == 0) {
-      throw new CompileException($"the folder of the namespace '{name}' has no .df file", import.Line);
+      throw new CompileException($"the folder of the namespace '{name}' has no .df file", line);
     }
     return files;
   }
@@ -372,8 +412,8 @@ sealed class SourceLoader {
     return expected;
   }
 
-  static CompileException NotFound(string name, Node import, bool multiFile) {
+  static CompileException NotFound(string name, int line, bool multiFile) {
     string hint = multiFile ? "" : " (a single-file compilation can import only its own subfolders and the stdlib)";
-    return new CompileException($"cannot find the namespace '{name}'{hint}", import.Line);
+    return new CompileException($"cannot find the namespace '{name}'{hint}", line);
   }
 }

@@ -1,0 +1,2 @@
+namespace stdlib_not_imported
+Console.log("no import")

@@ -12,10 +12,10 @@ public sealed partial class CodeGen {
 
   // the fields every exception object has after the class header (the record of the runtime)
   const string ExceptionFields =
-    "  uint64_t id;\n  const df_descriptor* descriptor;\n  char* message;\n  char* function;\n  uint64_t line;\n";
+    "  uint64_t id;\n  const df_descriptor* descriptor;\n  char* message;\n  char* function;\n  uint64_t line;\n  df_trace_item* trace;\n  uint64_t traceLen;\n";
 
   // exceptions that do nothing when no catch can handle them (spec 15.3)
-  static readonly HashSet<int> SilentStandard = new() { 12, 17, 18, 24, 27, 28, 29, 32 };
+  static readonly HashSet<int> SilentStandard = new() { 12, 17, 18, 24, 27, 28, 29, 32, 56 };
 
   bool IsExceptionClass(string type) => classes.TryGetValue(type, out var cls) && cls.IsException;
 
@@ -108,7 +108,7 @@ public sealed partial class CodeGen {
     var created = ExprOf(call, scope);
     string temp = NewTemp();
     string raise = $"{{ {CType(name)} {temp} = {created.Code}; "
-      + $"{temp}->function = df_cstr_truncated({fn!.NameConst}, strlen({fn.NameConst}), 1024); "
+      + $"{temp}->function = df_cstr_truncated({fn!.NameConst}, strlen({fn.NameConst}), 1024); df_exc_trace((df_exception*){temp}); "
       + $"df_err = (df_exception*){temp}; df_err_thrown = true; goto {Handler}; }}";
     sb.Append(condition == "" ? $"{pad}{raise}\n" : $"{pad}if ({condition}) {raise}\n");
     return condition == "";

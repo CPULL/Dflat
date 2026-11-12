@@ -1,6 +1,7 @@
 // gfx demo: a window, a texture made in code, a moving and rotating sprite, labels with the font of the library (3 seconds)
 namespace demo
 import gfx
+import Root.IO
 alias Root as r
 
 r.Console.log($"available: {Gfx.isAvailable()}")

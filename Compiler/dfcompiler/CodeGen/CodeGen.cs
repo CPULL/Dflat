@@ -337,6 +337,7 @@ public sealed partial class CodeGen {
       fn.Decls.Append("  size_t df_tm = df_tmp_top;\n  (void)df_tm;\n");
     }
     main.Append(fn.Decls);
+    main.Append(DebugFrame(statements.Count > 0 ? statements[0].Line : 0, "Main()"));
     if (fn.UsesRetVar) {
       main.Append($"  int32_t {fn.RetVar} = 0;\n");
     }
@@ -710,6 +711,7 @@ public sealed partial class CodeGen {
       fn.Decls.Append("  size_t df_tm = df_tmp_top;\n  (void)df_tm;\n");
     }
     sb.Append(fn.Decls);
+    sb.Append(DebugFrame(f.Node.Line, null));
     if (fn.UsesRetVar) {
       sb.Append($"  {CType(f.Ret)} {fn.RetVar} = {ZeroValue(f.Ret)};\n");
     }
@@ -766,6 +768,9 @@ public sealed partial class CodeGen {
       movedVars.Remove(reassigned);   // rex = Dog("new"): usable again
     }
     string pad = Pad(indent);
+    if (!ReleaseBuild && s.Line > 0 && s.Line < LibraryLine && s.Kind is not ("AtEnd" or "Catch" or "Label")) {
+      sb.Append($"{pad}DF_LINE({SourceMap.RealLine(s.Line)});\n");   // the line of the statement, for the stack trace (spec 15.2)
+    }
     if (s.Children.Any(child => child.Kind == "AtEnd" && child.Text == "trailing")) {
       throw NotSupported("atEnd after a statement (14.2, form 3): only after a function or a class", s);
     }
@@ -1578,6 +1583,11 @@ public sealed partial class CodeGen {
     if (op == "=" && target.Type == "string" && InPlaceAssign(targetNode, s.Children[1], scope, s) is string inPlace) {
       return inPlace;   // x = x.trim() changes x (spec 4.1)
     }
+    if (op == "+=" && target.Type == "string1k") {
+      // in place, cut like a conversion (spec 4.5)
+      var added = ExprOf(s.Children[1], scope);
+      return "(void)" + SilentCall($"df_s1k_append(&{target.Code}, {StrReadOf(added, s)})", "bool", "StringTruncatedException", s);
+    }
     if (op == "+=" && target.Type == "string" && StrAppendAssign(targetNode, s.Children[1], scope, s) is string appended) {
       return appended;   // always in place
     }
@@ -1750,6 +1760,8 @@ public sealed partial class CodeGen {
         throw Error("%x makes a weak reference: it is the value of a weak variable, field or parameter (%T w = %x, spec 12.7)", n);
       case "Tuple":
         return TupleLiteral(n, scope, expected);
+      case "EmptyNew":
+        return EmptyNew(n, scope, expected);
       case "Interp":
         return Interpolated(n, scope);
       case "Binary":
@@ -2275,6 +2287,17 @@ public sealed partial class CodeGen {
   }
 
   Expr Combine(string op, Expr l, Expr r, Node at) {
+    // string1k (spec 4.5): == between two of them on the buffers; every other operation on the string it converts to
+    if (l.Type == "string1k" && r.Type == "string1k" && op is "==" or "!=") {
+      string same = $"df_s1k_eq({l.Code}, {r.Code})";
+      return new Expr(op == "==" ? same : $"(!{same})", "bool");
+    }
+    if (l.Type == "string1k") {
+      l = new Expr(StrRead(new Expr($"df_s1k_to_str({l.Code})", "string", true)), "string");
+    }
+    if (r.Type == "string1k") {
+      r = new Expr(StrRead(new Expr($"df_s1k_to_str({r.Code})", "string", true)), "string");
+    }
     if ((IsSetValue(l.Type) || IsSetValue(r.Type)) && op is not ("==" or "!=")) {
       throw Error($"no operator works directly on a value of a set: read it with if k is T x {{ }} or k is ? {{ }} (spec 11.3.6.1)", at);
     }
@@ -2760,6 +2783,9 @@ public sealed partial class CodeGen {
     }
     if (obj.Type == "string" && n.Text == "len") {
       return new Expr($"df_str_chars({StrRead(obj)})", "u64");
+    }
+    if (obj.Type == "string1k" && n.Text is "len" or "sizeof") {
+      return n.Text == "len" ? new Expr($"df_s1k_len({obj.Code})", "u64") : new Expr("((uint64_t)1024)", "u64");   // spec 4.5
     }
     if (IsArr(obj.Type) && n.Text == "len") {
       return new Expr($"(({obj.Code}).len)", NativeUns);

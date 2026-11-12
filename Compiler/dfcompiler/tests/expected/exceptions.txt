@@ -21,5 +21,6 @@ by trait: alert
 catch all
 silent standard
 unhandled network
+exceptions.df (161) Main()
 Panic -1000
 ---- exit code -1000 ----

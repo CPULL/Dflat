@@ -1,0 +1,7 @@
+line 5
+4
+stacktracecatch.df (5) i32 inner(i32)
+stacktracecatch.df (8) i32 outer(i32)
+stacktracecatch.df (11) show()
+stacktracecatch.df (21) Main()
+---- exit code 0 ----

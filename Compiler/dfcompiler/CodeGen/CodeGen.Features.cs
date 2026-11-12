@@ -207,12 +207,12 @@ public sealed partial class CodeGen {
     if (valueNode.Kind == "WritableAddressOf") {
       valueNode = valueNode.Children[0];   // &x: the type of x
     }
-    if (valueNode.Kind is "List" or "MapLit") {
+    if (valueNode.Kind is "List" or "MapLit" or "EmptyNew") {
       // a literal has the type of what receives it (spec 6.3): typed as this parameter, or it does not fit (point 53)
       try {
         var literal = ExprOf(valueNode, scope, paramType);
         // a bare [...] is an arr (6.3): when several collections fit, the arr wins
-        return literal.Type == paramType ? (IsArr(paramType) || valueNode.Kind == "MapLit" ? 0 : 1) : Assignable(paramType, literal.Type) ? 100 : null;
+        return literal.Type == paramType ? (IsArr(paramType) || valueNode.Kind is "MapLit" or "EmptyNew" ? 0 : 1) : Assignable(paramType, literal.Type) ? 100 : null;
       } catch (CompileException) {
         return null;
       }

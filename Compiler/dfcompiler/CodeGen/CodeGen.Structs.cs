@@ -123,7 +123,7 @@ public sealed partial class CodeGen {
     if (IsArr(type)) {
       throw Error("a struct cannot have an array of undefined size: an arr field needs a size known at compile time, arr<T>[N] (spec 11.1.5.4)", at);
     }
-    if (IsStruct(type) || IsEnum(type) || IsNumeric(type) || type is "bool" or "char" or "addr" || IsTimeType(type)) {
+    if (IsStruct(type) || IsEnum(type) || IsNumeric(type) || type is "bool" or "char" or "addr" or "string1k" || IsTimeType(type)) {
       return;
     }
     if (IsNullable(type) && !IsStruct(BaseOf(type)) && BaseOf(type) != "string" && !IsTuple(BaseOf(type))) {
@@ -397,7 +397,7 @@ public sealed partial class CodeGen {
     }
     var sb = new StringBuilder();
     sb.Append($"static df_string {name}({info.CName} o) {{\n");
-    sb.Append($"  df_string r = {CString(CodePoints(info.Name + " { "))};\n");
+    sb.Append($"  df_string r = {CString(CodePoints(SourceMap.PrintName(info.Name) + " { "))};\n");
     for (int index = 0; index < info.Fields.Count && index < 3; index++) {
       var field = info.Fields[index];
       string label = (index > 0 ? ", " : "") + field.Name + ": ";

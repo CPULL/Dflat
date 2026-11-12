@@ -666,3 +666,16 @@
 - 13.1.1 A global is no longer a source of a `&T` result; a lent result of a method called on a global is copied at the call (plain) or a compile error (`&`)
 - 14.1 Globals are created before the program starts and destroyed after it ends
 - 1.5 `global` declaration
+
+## Changes in 0.0.34
+
+- 16.1 Names and visibility (new): top-level declarations without a keyword are seen only by their namespace, `internal` by the namespace and its sub-namespaces, `public` by everyone; unqualified names: own namespace first (it wins), then the enclosing namespaces, then the imported ones; the same name in two imported namespaces asks for the qualified name; a fully qualified name needs no import; an alias of a namespace qualifies; `a.b.c.C c = C()` takes the namespace of the declared type; the hash of a class uses its qualified name
+- 1.6.1 No `private` keyword (private is written with no keyword); top-level visibility points to 16.1
+- 11.1.4 A writer only for the class is written `public readonly i32 level { R: { field } W: { ... } }` (was `private W:`)
+- 11.1.1 `()` is the empty construction (as `[]` for collections): it calls the constructor without parameters wherever the type is known (declarations, assignments, arguments, `return`); no arguments inside it; errors for a class without such a constructor, a trait, and no known type
+- 11.1.5.1 `()` creates a struct with its start values (`Vec3 v = ()`)
+- 16.1 The standard library follows the import rule: `import Root` / `import Root.IO` let a file use their names directly
+- 15.2 `stackTrace` is innermost first; a debug program ended by a panic or an uncaught exception prints it after the message, one `<filename> (<line num>) <function name>` line per call
+- 4.5 `string1k` (new): a 1 KB string value (UTF-8 text ended by a 0, no stored length; at most 1023 bytes; the same as a C `char[1024]`; `toCStr()` gives the address of the buffer), copied like a number; automatic conversion to and from `string`, cut at a whole character with the silent `StringTruncatedException`; `==`, `.len`, `+=` direct, the rest through `string`; `.sizeof` is 1024
+- 15.3 `StringTruncatedException` (ID 56, silent)
+- 15.2 `DebugLine.file` and `DebugLine.function` are `string1k`

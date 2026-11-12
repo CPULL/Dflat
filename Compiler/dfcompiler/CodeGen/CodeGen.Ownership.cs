@@ -128,8 +128,9 @@ public sealed partial class CodeGen {
       case "Gift":
       case "List":
       case "MapLit":
+      case "EmptyNew":
       case "Copy":
-        return true;   // ->x, a literal or a copy: a new object
+        return true;   // ->x, a literal, () or a copy: a new object
       case "Call":
         return CallMoves(e, state);
       case "Name":
@@ -201,7 +202,7 @@ public sealed partial class CodeGen {
   bool GuessOwner(Node e, Dictionary<FunSig, int>? state) {
     return e.Kind switch {
       "Null" or "Gift" => true,
-      "List" or "MapLit" => true,   // a literal: a new collection (it only matters when the variable is an object)
+      "List" or "MapLit" or "EmptyNew" => true,   // a literal or (): a new collection or object (it only matters when the variable is an object)
       "Index" => e.Children[0].Kind == "GenericRef" || (e.Children.Count > 1 && e.Children[1].Kind == "Range"),   // vec<T>[n]: a new collection; c[a..b]: a new view
       "Paren" => GuessOwner(e.Children[0], state),
       "Copy" => true,   // x! and m.keys!: a new copy

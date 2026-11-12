@@ -1,0 +1,5 @@
+namespace mylib
+
+public class Box {
+  internal fun i32 count() { 3 }
+}

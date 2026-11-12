@@ -1,0 +1,2 @@
+; names qualified by their namespace (spec 16, 1.6.1)
+source=main.df

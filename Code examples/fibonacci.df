@@ -1,3 +1,4 @@
+import Root.IO
 fun int main(arr<string> args) {
   File output = File("fibonacci.txt")
   u64 limit = 0

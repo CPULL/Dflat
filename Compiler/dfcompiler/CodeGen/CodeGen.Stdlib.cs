@@ -29,6 +29,29 @@ public sealed partial class CodeGen {
 
   static readonly Dictionary<string, List<StdFun>> Stdlib = BuildStdlib();
 
+  // every name of the standard library with its full path (Root.Console.log, Root.IO.File ...), for the imports (spec 16.1)
+  public static HashSet<string> StdlibPaths() {
+    var paths = new HashSet<string>(Stdlib.Keys.Where(path => !path.Contains(".Native.")));
+    foreach (string name in IoLibraryNames) {
+      paths.Add("Root.IO." + name);
+    }
+    foreach (string name in ConsoleKeys.Keys) {
+      paths.Add("Root.Console." + name);
+    }
+    foreach (string name in MathConsts.Keys) {
+      paths.Add("Root.Math." + name);
+      paths.Add("Root.Math32." + name);
+    }
+    foreach (string name in IoPathFunctions) {
+      paths.Add("Root.IO." + name);
+    }
+    foreach (string name in ExecFunctions) {
+      paths.Add("Root.ExecProcess." + name);
+    }
+    paths.UnionWith(new[] { "Root.Console.Color", "Root.Console.setColors", "Root.ExecProcess.RunResult" });
+    return paths;
+  }
+
   static Dictionary<string, List<StdFun>> BuildStdlib() {
     var table = new Dictionary<string, List<StdFun>>();
     void Add(string path, StdFun fun) {

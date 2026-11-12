@@ -213,10 +213,10 @@ public static class Program {
       Directory.CreateDirectory(Path.GetDirectoryName(cPath)!);
       File.WriteAllText(cPath, c);
     } catch (DfException ex) {
-      Console.Error.WriteLine($"{SourceMap.Where(ex.Line, ex.Col)}: error: {ex.Message}");
+      Console.Error.WriteLine($"{SourceMap.Where(ex.Line, ex.Col)}: error: {SourceMap.ShowNames(ex.Message)}");
       return 1;
     } catch (CompileException ex) {
-      Console.Error.WriteLine($"{SourceMap.Where(ex.Line)}: error: {ex.Message}");
+      Console.Error.WriteLine($"{SourceMap.Where(ex.Line)}: error: {SourceMap.ShowNames(ex.Message)}");
       return 1;
     } catch (SourceException ex) {
       Console.Error.WriteLine(ex.Message);

@@ -1,0 +1,21 @@
+// ex.stackTrace (spec 15.2): the calls copied when the exception was raised, innermost first, as arr<DebugLine>
+namespace stacktracecatch
+import Root
+fun i32 inner(i32 b) {
+  return 10 / b
+}
+fun i32 outer(i32 b) {
+  return inner(b)
+}
+fun show() {
+  outer(0)
+  catch Exception ex {
+    Console.log($"line {ex.line}")
+    var trace = ex.stackTrace
+    Console.log(trace.len)
+    for var item in trace {
+      Console.log($"{item.file} ({item.lineNum}) {item.function}")
+    }
+  }
+}
+show()

@@ -1,5 +1,5 @@
 namespace app
-import mylib
+import app.left
+import app.right
 
-fun i32 one() { 2 }
 Root.Console.log(one())

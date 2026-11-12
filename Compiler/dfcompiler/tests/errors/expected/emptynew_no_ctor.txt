@@ -1,0 +1,1 @@
+emptynew_no_ctor.df(3): error: () calls the constructor without parameters, and P has none: write P(...) with its arguments

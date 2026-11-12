@@ -1,5 +1,6 @@
 // Console.setColors and Console.Color (stdlib 2). The test runs without a console: setColors does nothing, the output stays plain
 namespace consolecolors
+import Root
 alias Root as r
 
 r.Console.setColors(r.Console.Color.Yellow, r.Console.Color.Black)

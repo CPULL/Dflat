@@ -18,5 +18,7 @@ caught Division By Zero Exception
 caught Division By Zero Exception
 -2
 Division By Zero Exception
+classes2.df (56) Divider(i32)
+classes2.df (88) Main()
 Panic -1000
 ---- exit code -1000 ----

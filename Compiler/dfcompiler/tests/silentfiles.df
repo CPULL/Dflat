@@ -1,6 +1,6 @@
 namespace silentfiles
 import Root.IO
-alias Root as r
+import Root
 alias Root.IO as fs
 
 // the silent exceptions of the file library reach the function that calls the library function and catches them
@@ -17,27 +17,27 @@ fun ->string tryDelete(string path) {
   return $"deleted: {done}"
   catch DirectoryNotEmptyException e { return "DirectoryNotEmptyException (silent, id " + e.id + ")" }
 }
-r.Console.log(tryDelete(File.combinePaths(base, "inner")))     // DirectoryNotEmptyException (silent, id 28)
-r.Console.log(tryDelete(File.combinePaths(base, "missing")))   // deleted: false
+Console.log(tryDelete(File.combinePaths(base, "inner")))     // DirectoryNotEmptyException (silent, id 28)
+Console.log(tryDelete(File.combinePaths(base, "missing")))   // deleted: false
 
 fun bool plainDelete(string path) {
   return File.delete(path)                                      // no catch: the silent exception is ignored, delete returns false
 }
-r.Console.log(plainDelete(File.combinePaths(base, "inner")))   // false
+Console.log(plainDelete(File.combinePaths(base, "inner")))   // false
 
 fun ->string tryCreate(string path) {
   File made = File.createDirectory(path)
   return "created " + made.name
   catch FileNameAlreadyExistsException e { return "FileNameAlreadyExistsException (silent, id " + e.id + ")" }
 }
-r.Console.log(tryCreate(File.combinePaths(base, "inner")))     // FileNameAlreadyExistsException (silent, id 29)
-r.Console.log(tryCreate(File.combinePaths(base, "fresh")))     // created fresh
+Console.log(tryCreate(File.combinePaths(base, "inner")))     // FileNameAlreadyExistsException (silent, id 29)
+Console.log(tryCreate(File.combinePaths(base, "fresh")))     // created fresh
 
 fun ->string viaObject(File directory) {
   return "deleted " + directory.delete()
   catch DirectoryNotEmptyException e { return "through the object, id " + e.id }
 }
-r.Console.log(viaObject(File(File.combinePaths(base, "inner"))))   // through the object, id 28
+Console.log(viaObject(File(File.combinePaths(base, "inner"))))   // through the object, id 28
 
 fun ->string copyTwice(File source, string target) {
   File first = source.copyTo(target)
@@ -45,7 +45,7 @@ fun ->string copyTwice(File source, string target) {
   return "second copy: " + (second == null ? { "skipped", "made" })
   catch FileNameAlreadyExistsException e { return "FileNameAlreadyExistsException on the second copy" }
 }
-r.Console.log(copyTwice(File(File.combinePaths(base, "inner/file.txt")), File.combinePaths(base, "copy.txt")))
+Console.log(copyTwice(File(File.combinePaths(base, "inner/file.txt")), File.combinePaths(base, "copy.txt")))
 // FileNameAlreadyExistsException on the second copy
 
 fun ->string copyIgnoring(File source, string target) {
@@ -53,7 +53,7 @@ fun ->string copyIgnoring(File source, string target) {
   File second = source.copyTo(target)                           // the name exists: silent, ignored here, the copy is skipped
   return "second copy: " + (second == null ? { "skipped", "made" })
 }
-r.Console.log(copyIgnoring(File(File.combinePaths(base, "inner/file.txt")), File.combinePaths(base, "copy2.txt")))   // second copy: skipped
+Console.log(copyIgnoring(File(File.combinePaths(base, "inner/file.txt")), File.combinePaths(base, "copy2.txt")))   // second copy: skipped
 
 // streams: a seek before the start
 fun ->string seekBack(&FileStream stream) {
@@ -66,8 +66,8 @@ fun ->string seekIgnored(&FileStream stream) {
   return $"position {at}"
 }
 FileStream s = FileStream(File.combinePaths(base, "inner/file.txt"), fs.StreamReadWriteAccessMode.Shared, fs.StreamReadWriteAccessMode.None, fs.StreamOpenMode.OpenExisting)
-r.Console.log(seekBack(&s))                                      // SeekBeforeBeginException (silent, id 32)
-r.Console.log(seekIgnored(&s))                                   // position 0
+Console.log(seekBack(&s))                                      // SeekBeforeBeginException (silent, id 32)
+Console.log(seekIgnored(&s))                                   // position 0
 s is atEnd.
 
 // the library errors that are not silent still go up on their own
@@ -75,6 +75,6 @@ fun ->string missing(string path) {
   return File(path).readAllText()
   catch FileNotFoundException e { return "FileNotFoundException id " + e.id }
 }
-r.Console.log(missing(File.combinePaths(base, "nothing.txt")))  // FileNotFoundException id 25
+Console.log(missing(File.combinePaths(base, "nothing.txt")))  // FileNotFoundException id 25
 
 File.delete(base, fs.DeleteOptions.Recursive)

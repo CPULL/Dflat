@@ -1,12 +1,12 @@
 namespace rw_enforce_timeout_no_lock
-alias Root as r
+import Root
 public class Player(string name) {
   public string name
 }
 fun f() {
   @Player reader = @Player("a")
   enforce reader timeout 5 {
-    r.Console.log(reader.name)
+    Console.log(reader.name)
   }
 }
 f()

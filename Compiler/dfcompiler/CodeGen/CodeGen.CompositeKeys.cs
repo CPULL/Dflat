@@ -4,7 +4,7 @@ using dfparser;
 namespace dfcompiler;
 
 // Tuples and structs as keys of map, set, hmap, hset (spec 6.2, 6.2.2, 6.8.4.1, 6.8.5.1). Built: tuples whose components are exact natives
-// (numbers, bool, char, enums, bitfields) or strings, and structs whose fields are exact natives, strings or objects of Keyable classes (no
+// (numbers, bool, char, enums, bitfields), strings or objects of Keyable classes (cloned into the key's copy), and structs whose fields are exact natives, strings or objects of Keyable classes (no
 // buffer). A struct with strings or objects owns them (11.1.5.3): the collection's copy is a clone (df_sclone_), dropped with the entry
 // (df_sdrop_). An object field is ordered by its hash (the default order of 6.2.2) and an hmap compares it with the equals of its class when
 // the class replaces it.
@@ -17,9 +17,18 @@ public sealed partial class CodeGen {
   readonly HashSet<string> compositeKeyHelpers = new();
 
   // the components of a tuple or a struct key: their C names and types
-  List<(string CName, string Type)> KeyComponents(string type) => IsTuple(type)
+  // a string1k key alone is a key of one component with no name (spec 4.5): Part reads it from the key itself
+  // a string? or string1k? key is its value then its flag (spec 7.1): null is the null slot of a map / set, and in an hmap / hset it hashes as
+  // "null".hash and differs from "" by the flag
+  List<(string CName, string Type)> KeyComponents(string type) => type == "string1k" ? new() { ("", "string1k") }
+    : type is "string?" or "string1k?" ? new() { ("val", BaseOf(type)), ("has", "bool") }
+    : IsTuple(type)
     ? TupleElems(type).Select((elem, index) => ($"e{index}", elem.Type)).ToList()
     : structs[type].Fields.Select(field => ($"f_{field.Name}", field.Type)).ToList();
+
+  // a component of a composite key read through a pointer (ptr->name) or from a value (value.name); the unnamed one of a string1k key is the key
+  static string Part(string pointer, string cname) => cname == "" ? $"(*{pointer})" : $"{pointer}->{cname}";
+  static string ValuePart(string value, string cname) => cname == "" ? value : $"{value}.{cname}";
 
   bool IsExactKeyPart(string type) {
     string plain = enums.TryGetValue(type, out var info) ? info.ValueType : type;
@@ -31,16 +40,17 @@ public sealed partial class CodeGen {
 
   // a tuple or a struct this version takes as a key
   bool IsCompositeKey(string type) =>
-    IsTuple(type) && TupleElems(type).All(elem => IsExactKeyPart(elem.Type) || elem.Type == "string")
+    type is "string1k" or "string?" or "string1k?"
+    || IsTuple(type) && TupleElems(type).All(elem => IsExactKeyPart(elem.Type) || elem.Type is "string" or "string1k" or "string?" or "string1k?" || IsObjectKeyPart(elem.Type))
     || IsStruct(type) && structs[type].Fields.Count > 0
-      && structs[type].Fields.All(field => field.Buffer == null && (IsExactKeyPart(field.Type) || field.Type == "string" || IsObjectKeyPart(field.Type)));
+      && structs[type].Fields.All(field => field.Buffer == null && (IsExactKeyPart(field.Type) || field.Type is "string" or "string1k" or "string?" or "string1k?" || IsObjectKeyPart(field.Type)));
 
   // a composite key of map / set (the B-tree) and of hmap / hset
   bool TKeyOf(string type) => !IsHmap(type) && IsCompositeKey(MapKey(type));
   bool HTKeyOf(string type) => IsHmap(type) && IsCompositeKey(MapKey(type));
 
   // the C helpers of a composite key type, emitted once: the copy the collection keeps, its end, the order, the hash, the equality
-  string CompositeKeyHelpers(string keyType) {
+  string CompositeKeyHelpers(string keyType, Node? at = null) {
     string name = SanitizeName(keyType);
     if (!compositeKeyHelpers.Add(keyType)) {
       return name;
@@ -50,12 +60,24 @@ public sealed partial class CodeGen {
     hashUsed = true;
     string ct = CType(keyType);
     var parts = KeyComponents(keyType);
+    if (parts.Any(part => part.Type is "string1k" or "string1k?")) {
+      NeedChunk("sort");   // df_cmp_s1k (RuntimeSort.cs)
+      S1kSortKeyHelper();
+    }
     if (IsStruct(keyType)) {
       foreach (var field in structs[keyType].Fields.Where(field => IsObjectKeyPart(field.Type))) {
         if (!traits.ContainsKey("Keyable") || !IsSubtype(field.Type, "Keyable")) {
           throw Error($"{DisplayName(field.Type)} is not Keyable: the field '{field.Name}' of {DisplayName(keyType)}, a key, holds it; a class used in a key implements the trait Keyable (spec 6.2, 11.2.1)", field.At);
         }
         CheckKeyable(field.Type, field.At);   // the helpers of the object keys
+      }
+    }
+    if (IsTuple(keyType)) {
+      foreach (var (index, elem) in TupleElems(keyType).Select((elem, index) => (index, elem)).Where(pair => IsObjectKeyPart(pair.elem.Type))) {
+        if (!traits.ContainsKey("Keyable") || !IsSubtype(elem.Type, "Keyable")) {
+          throw Error($"{DisplayName(elem.Type)} is not Keyable: the item {index} of {DisplayName(keyType)}, a key, holds it; a class used in a key implements the trait Keyable (spec 6.2, 11.2.1)", at!);
+        }
+        CheckKeyable(elem.Type, at!);
       }
     }
     bool owning = IsStruct(keyType) && StructHoldsObjects(keyType);
@@ -72,6 +94,13 @@ public sealed partial class CodeGen {
       foreach (var (cname, type) in parts.Where(part => part.Type == "string")) {
         sb.Append($"  box->{cname} = df_str_dup(v.{cname});\n");
       }
+      foreach (var (cname, type) in parts.Where(part => part.Type == "string?")) {
+        sb.Append($"  box->{cname} = df_opt_str_dup(v.{cname});\n");   // a string? part (spec 7.1)
+      }
+      foreach (var (cname, type) in parts.Where(part => IsObjectKeyPart(part.Type))) {
+        cloneUsed = true;
+        sb.Append($"  box->{cname} = {CloneValue($"v.{cname}", type, at!)};\n");   // the key is the collection's own: its objects are cloned (spec 3.2)
+      }
     }
     sb.Append("  return box;\n}\n\n");
     sb.Append($"static void df_tk_free_{name}(df_bt_kw w) {{\n  {ct}* box = ({ct}*)(uintptr_t)w;\n  if (box == NULL) {{\n    return;\n  }}\n");
@@ -80,6 +109,12 @@ public sealed partial class CodeGen {
     } else {
       foreach (var (cname, type) in parts.Where(part => part.Type == "string")) {
         sb.Append($"  df_str_free(box->{cname});\n");
+      }
+      foreach (var (cname, type) in parts.Where(part => part.Type == "string?")) {
+        sb.Append($"  df_str_free(box->{cname}.val);\n");
+      }
+      foreach (var (cname, type) in parts.Where(part => IsObjectKeyPart(part.Type))) {
+        sb.Append($"  df_drop((void*)box->{cname});\n");
       }
     }
     sb.Append("  free(box);\n}\n\n");
@@ -91,6 +126,15 @@ public sealed partial class CodeGen {
         sb.Append($"  {{\n    uint64_t p = (uint64_t)df_hash_obj((const void*)x->{cname}), q = (uint64_t)df_hash_obj((const void*)y->{cname});\n    if (p != q) {{\n      return p < q ? -1 : 1;\n    }}\n  }}\n");
       } else if (type == "string") {
         sb.Append($"  c = df_bt_cmp_str((df_bt_kw)(uintptr_t)x->{cname}, (df_bt_kw)(uintptr_t)y->{cname});\n  if (c != 0) {{\n    return c;\n  }}\n");
+      } else if (type is "string?" or "string1k?") {
+        // null first (6.2.2), then the values
+        sb.Append($"  if (x->{cname}.has != y->{cname}.has) {{\n    return x->{cname}.has ? 1 : -1;\n  }}\n  if (x->{cname}.has) {{\n");
+        sb.Append(type == "string?"
+          ? $"    c = df_bt_cmp_str((df_bt_kw)(uintptr_t)x->{cname}.val, (df_bt_kw)(uintptr_t)y->{cname}.val);\n"
+          : $"    c = df_cmp_s1k(&x->{cname}.val, &y->{cname}.val);\n");
+        sb.Append("    if (c != 0) {\n      return c;\n    }\n  }\n");
+      } else if (type == "string1k") {
+        sb.Append($"  c = df_cmp_s1k(&{Part("x", cname)}, &{Part("y", cname)});\n  if (c != 0) {{\n    return c;\n  }}\n");   // by bytes (6.2.2)
       } else {
         sb.Append($"  {{\n    uint64_t p = {SortKey(type, $"x->{cname}")}, q = {SortKey(type, $"y->{cname}")};\n    if (p != q) {{\n      return p < q ? -1 : 1;\n    }}\n  }}\n");
       }
@@ -141,9 +185,25 @@ public sealed partial class CodeGen {
     return name;
   }
 
+  // the sort key of a string1k: its first 8 bytes, as for a string (the bytes after the ending 0 are not read)
+  void S1kSortKeyHelper() {
+    if (arrayHelpers.Add("df_bt_key_s1k")) {
+      arrayCode.Append("static uint64_t df_bt_key_s1k(const df_s1k* s) {\n  uint64_t key = 0;\n  bool ended = false;\n  for (unsigned i = 0; i < 8; i++) {\n"
+        + "    ended = ended || s->b[i] == 0;\n    key = (key << 8) | (ended ? 0 : s->b[i]);\n  }\n  return key;\n}\n\n");
+    }
+  }
+
   // the sort key of a composite key held in key: the one of its first component (6.8.4.1)
   string CompositeSortKey(string keyType, string key) {
     var (cname, type) = KeyComponents(keyType)[0];
+    if (type == "string1k") {
+      return $"df_bt_key_s1k(&({ValuePart($"({key})", cname)}))";
+    }
+    if (type is "string?" or "string1k?") {
+      // null first: its sort key is 0, and a tie is decided by df_tk_cmp_ (the flag, then the value)
+      string part = ValuePart($"({key})", cname);
+      return type == "string?" ? $"({part}.has ? df_bt_key_str({part}.val) : (uint64_t)0)" : $"({part}.has ? df_bt_key_s1k(&{part}.val) : (uint64_t)0)";
+    }
     return type == "string" ? $"df_bt_key_str(({key}).{cname})" : IsObjectKeyPart(type) ? $"((uint64_t)df_hash_obj((const void*)({key}).{cname}))" : SortKey(type, $"({key}).{cname}");
   }
 }

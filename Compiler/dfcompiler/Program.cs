@@ -4,7 +4,7 @@ using dfparser;
 namespace dfcompiler;
 
 public static class Program {
-  public const string Version = "0.0.116alpha";
+  public const string Version = "0.0.126alpha";
 
   // the version of the specification this compiler was built for: the variable `version` of the preprocessor (spec 19.1)
   public const string LanguageVersion = "0.0.39";
@@ -51,6 +51,7 @@ public static class Program {
     public string? Glfw { get; set; }
     public Dictionary<string, int> Limits { get; } = new();
     public long? DoubleGrowLimit { get; set; }   // --double-grow-limit 8mb (spec 6.8.2)
+    public long? GrowStep { get; set; }          // --fixed-grow-step 64: a vec grows by this many items each time, for small targets (spec 6.8.2)
     public int? GrowExtra { get; set; }          // --further-grow-factor 1.25: what the capacity adds, in thousandths (250)   // --max-vec-copies 32, max-copies=8 ...: the limits of the generated copies (spec 11.3.12)
   }
 
@@ -206,7 +207,8 @@ public static class Program {
           Console.Error.WriteLine(warning);
         }
       }
-      var (c, genWarnings) = CodeGen.Compile(tree, build == "release", nativeInt, limits, cli.DoubleGrowLimit ?? project.DoubleGrowLimit ?? 4 * 1024 * 1024, cli.GrowExtra ?? project.GrowExtra ?? 500);
+      var (c, genWarnings) = CodeGen.Compile(tree, build == "release", nativeInt, limits, cli.DoubleGrowLimit ?? project.DoubleGrowLimit ?? 4 * 1024 * 1024, cli.GrowExtra ?? project.GrowExtra ?? 500,
+        cli.GrowStep ?? project.GrowStep ?? 0);
       foreach (var warning in genWarnings) {
         Console.Error.WriteLine(SourceMap.Fix(warning));
       }
@@ -366,6 +368,9 @@ public static class Program {
         case "--further-grow-factor":
           settings.GrowExtra = ParseGrowFactor(Value(ref i, option), option);
           break;
+        case "--fixed-grow-step":
+          settings.GrowStep = ParseGrowStep(Value(ref i, option), option);
+          break;
         default:
           if (LimitKey(option) is string limit) {
             settings.Limits[limit] = ParseLimit(Value(ref i, option), option);
@@ -418,6 +423,14 @@ public static class Program {
       throw new UsageException($"{option} takes a factor above 1 and at most 2 (as 1.5), not '{text}'");
     }
     return Math.Max(1, (int)Math.Round((factor - 1.0) * 1000));
+  }
+
+  // a number of items from 1 to 65536: a vec grows by it each time instead of doubling (small targets, spec 6.8.2)
+  static long ParseGrowStep(string text, string option) {
+    if (!long.TryParse(text.Trim(), out long step) || step < 1 || step > 65536) {
+      throw new UsageException($"{option} takes a number of items from 1 to 65536, not '{text}'");
+    }
+    return step;
   }
 
   static int ParseLimit(string text, string option) {
@@ -526,6 +539,9 @@ public static class Program {
             break;
           case "further-grow-factor":
             settings.GrowExtra = ParseGrowFactor(value, key);
+            break;
+          case "fixed-grow-step":
+            settings.GrowStep = ParseGrowStep(value, key);
             break;
           default:
             if (LimitKey("--" + key) is string limit) {

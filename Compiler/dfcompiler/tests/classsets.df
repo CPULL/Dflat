@@ -1,5 +1,5 @@
 // a Generic set declared inside a class (spec 11.3.6): a type of the class, Shop.Money from outside
-alias Root as r
+import Root
 class Shop {
   public Generic Money { i32, r64 }
   internal Generic Count { u8, u16 }
@@ -7,7 +7,7 @@ class Shop {
 fun r64 twice(Shop.Money m) { (r64)m * 2.0 }
 fun r64 half<T : Shop.Money>(T m) { (r64)m / 2.0 }
 fun u16 more(Shop.Count c) { (u16)c + 1 }
-r.Console.log(twice((i32)3))
-r.Console.log(twice(2.5))
-r.Console.log(half((i32)9))
-r.Console.log(more((u8)4))
+Console.log(twice((i32)3))
+Console.log(twice(2.5))
+Console.log(half((i32)9))
+Console.log(more((u8)4))

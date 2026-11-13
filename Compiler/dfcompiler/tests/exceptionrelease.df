@@ -1,6 +1,6 @@
 // Every exception record is released: caught, ignored (silent), replaced by another, left through return / break / continue.
 // Run with the environment variable DF_EXC_COUNT=1 to print how many records are alive at the end (it must be 0).
-alias Root as r
+import Root
 
 public class Notice(string text) : Exception, SilentException { }
 public class Trouble(string text) : Exception { }
@@ -51,10 +51,10 @@ while i < 1000 {
   trouble(0)
   i += 1
 }
-r.Console.log(total)
-r.Console.log(withVariable(1))
-r.Console.log(outerCatch(1))
-r.Console.log(rethrownCatch(1))
+Console.log(total)
+Console.log(withVariable(1))
+Console.log(outerCatch(1))
+Console.log(rethrownCatch(1))
 
 // break and continue out of a catch body
 i32 count = 0
@@ -68,4 +68,4 @@ while k < 10 {
     continue
   }
 }
-r.Console.log(count)
+Console.log(count)

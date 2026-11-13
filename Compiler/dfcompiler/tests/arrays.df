@@ -1,73 +1,73 @@
 // Arrays: the part of the collections the library needs (spec 6.7)
-alias Root as r
+import Root
 
 arr<i32> numbers = [3, 1, 2]
-r.Console.log(numbers)
-r.Console.log(numbers.len)
-r.Console.log(numbers[0] + numbers[2])
+Console.log(numbers)
+Console.log(numbers.len)
+Console.log(numbers[0] + numbers[2])
 numbers[1] = 10
 numbers[2] += 5
-r.Console.log(numbers)
+Console.log(numbers)
 
 arr<string> names = ["ann", "bob"]
-r.Console.log(names[1].toUpper())
+Console.log(names[1].toUpper())
 var buffer = arr<i32>[4]
-r.Console.log(buffer)
+Console.log(buffer)
 buffer.fill(7)
-r.Console.log(buffer)
+Console.log(buffer)
 buffer.clear()
-r.Console.log(buffer)
+Console.log(buffer)
 
 arr<r64> reals = [1, 2.5]
-r.Console.log(reals)
+Console.log(reals)
 arr floats = [1.5, 2.5]
-r.Console.log(floats[1])
+Console.log(floats[1])
 arr words = ["x", "y", "z"]
-r.Console.log(words)
+Console.log(words)
 
 arr<i32> list = [5, 6, 7, 8]
-r.Console.log(list.has(7))
-r.Console.log(list.has(9))
-r.Console.log(list.indexOf(8))
-r.Console.log(list.indexOf(1) == 0xFFFFFFFFFFFFFFFFu)
+Console.log(list.has(7))
+Console.log(list.has(9))
+Console.log(list.indexOf(8))
+Console.log(list.indexOf(1) == 0xFFFFFFFFFFFFFFFFu)
 list.reverse()
-r.Console.log(list)
+Console.log(list)
 
 i32 total = 0
 for i32 item in list { total += item }
-r.Console.log(total)
-for var name in names { r.Console.print(name + ";") }
-r.Console.log("")
-for char ch in "hé!" { r.Console.print("[" + ch + "]") }
-r.Console.log("")
+Console.log(total)
+for var name in names { Console.print(name + ";") }
+Console.log("")
+for char ch in "hé!" { Console.print("[" + ch + "]") }
+Console.log("")
 
 // jagged
 arr<arr<i32>> rows = [[1, 2], [3, 4, 5]]
-r.Console.log(rows[1][2])
-r.Console.log(rows.len)
-r.Console.log(rows)
+Console.log(rows[1][2])
+Console.log(rows.len)
+Console.log(rows)
 
 // null and identity
 arr<i32> none = null
 arr<i32> same = numbers
-r.Console.log(none == null)
-r.Console.log(numbers == null)
-r.Console.log(numbers == same)
+Console.log(none == null)
+Console.log(numbers == null)
+Console.log(numbers == same)
 arr<i32> copyOfValues = [3, 10, 7]
-r.Console.log(numbers == copyOfValues)
+Console.log(numbers == copyOfValues)
 arr<i32> empty = []
-r.Console.log(empty.len)
-r.Console.log(empty == null)
+Console.log(empty.len)
+Console.log(empty == null)
 
 // out of range
 fun i32 at(arr<i32> data, i32 position) {
   return data[position]
 }
-r.Console.log(at(numbers, 2))
+Console.log(at(numbers, 2))
 i32 caught = 0
 at(numbers, 3)
 catch IndexOutOfRangeException ex {
-  r.Console.log("caught: " + ex.message)
+  Console.log("caught: " + ex.message)
   caught += 1
 }
 numbers[7] = 1
@@ -83,25 +83,25 @@ catch IndexOutOfRangeException {
 catch IndexOutOfRangeException {
   caught += 1
 }
-r.Console.log(caught)
+Console.log(caught)
 
 // shuffle is deterministic with a seed
-r.Random.seed(7ul)
+Random.seed(7ul)
 arr<i32> deck = [1, 2, 3, 4, 5, 6, 7, 8]
-r.Random.shuffle(deck)
+Random.shuffle(deck)
 i32 sum = 0
 for i32 card in deck { sum += card }
-r.Console.log(sum)
-r.Console.log(deck.len)
-r.Random.seed(7ul)
+Console.log(sum)
+Console.log(deck.len)
+Random.seed(7ul)
 arr<i32> deck2 = [1, 2, 3, 4, 5, 6, 7, 8]
-r.Random.shuffle(deck2)
+Random.shuffle(deck2)
 bool equalOrder = true
 for i32 k = 0..8 {
   if deck[k] != deck2[k] { equalOrder = false }
 }
-r.Console.log(equalOrder)
+Console.log(equalOrder)
 string letters = "abcdef"
-r.Random.shuffle(letters)
-r.Console.log(letters.len)
-r.Console.log(letters.contains("a") && letters.contains("f"))
+Random.shuffle(letters)
+Console.log(letters.len)
+Console.log(letters.contains("a") && letters.contains("f"))

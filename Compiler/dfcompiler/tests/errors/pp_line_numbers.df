@@ -1,7 +1,7 @@
-alias Root as r
+import Root
 
 ##if build == release
-r.Console.log("removed")
-r.Console.log("removed")
+Console.log("removed")
+Console.log("removed")
 ##endif
 i32 broken = "text"

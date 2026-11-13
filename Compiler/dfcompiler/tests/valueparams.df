@@ -1,5 +1,5 @@
 // Value parameters of generics (11.3.3): constants that are part of the type
-alias Root as r
+import Root
 
 public class Grid<u64 Width, u64 Height, Cell>() {
   public arr<Cell> cells = arr<Cell>[Width * Height]
@@ -32,19 +32,19 @@ fun u64 gridCount<u64 N>(Grid<N, 3, i32> grid) { grid.Count() + N }
 
 Grid<4, 3, i32> g = Grid<4, 3, i32>()
 g.Set(1, 2, 42)
-r.Console.log(g.Get(1, 2))
-r.Console.log(g.Count())
+Console.log(g.Get(1, 2))
+Console.log(g.Count())
 Grid<2 + 2, 3, i32> same = Grid<4, 3, i32>()
-r.Console.log(same.Count())
+Console.log(same.Count())
 Grid<2, 2, string> names = Grid<2, 2, string>()
 names.Set(0, 1, "x")
-r.Console.log(names.Get(0, 1))
-r.Console.log(Flag<true>().Show())
-r.Console.log(Flag<false>().Show())
-r.Console.log(Wrapper<5>().Twice())
-r.Console.log(sizeOf<3>(0))
-r.Console.log(gridCount(g))
-r.Console.log(Offset<-5>().Apply(7))
-r.Console.log(g)
+Console.log(names.Get(0, 1))
+Console.log(Flag<true>().Show())
+Console.log(Flag<false>().Show())
+Console.log(Wrapper<5>().Twice())
+Console.log(sizeOf<3>(0))
+Console.log(gridCount(g))
+Console.log(Offset<-5>().Apply(7))
+Console.log(g)
 
 // Errors are in tests/errors: valueparam_*.df

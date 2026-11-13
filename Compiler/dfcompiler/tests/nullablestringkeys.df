@@ -1,0 +1,54 @@
+// string? and string1k? keys of map, hmap, set, hset (spec 7.1, 4.5, 6.8.4.1, 6.8.5.1): null is a key of its own, apart from "" (and
+// from "null" in an hmap, which has the same hash); a new string given as a key ends with the statement, the collection keeps a copy
+import Root
+fun ->string? maybe(i32 i) {
+  if i == 0 { return null }
+  return "k" + i.toStr()
+}
+fun f() {
+  map<string?, i32> m = []
+  string? none = null
+  m[none] = 0
+  m["b"] = 2
+  m[""] = 9
+  m["a"] = 1
+  m[maybe(3)] = 3
+  m[maybe(0)] += 10
+  Console.log($"{m.len} {m[none]} {m["a"]} {m[""]} {m.hasKey(none)} {m.hasKey("zz")}")
+  for var (k, v) in m {
+    Console.log($"  {k ?? "<null>"} = {v}")
+  }
+  m.removeAt(none)
+  Console.log($"{m} {m.hasKey(none)}")
+  hmap<string?, string> h = []
+  h[none] = "n"
+  h[""] = "e"
+  h["null"] = "word"
+  h["x"] = "x"
+  Console.log($"{h.len} {h[none]} {h[""]} {h["null"]} {h.hasKey(none)}")
+  h.removeAt(none)
+  Console.log($"{h.len} {h.hasKey(none)} {h.hasKey("")}")
+  set<string?> s = [null, "q", "p"]
+  hset<string?> hs = []
+  hs.add(none)
+  hs.add("w")
+  Console.log($"{s} {s.has(none)} {hs.len} {hs.has(none)} {hs.has("")}")
+  map<string1k?, i32> k1 = []
+  string1k? n1 = null
+  k1[n1] = 1
+  k1["abc"] = 2
+  k1[""] = 3
+  Console.log($"{k1.len} {k1[n1]} {k1["abc"]} {k1[""]}")
+  for var (k, v) in k1 {
+    Console.log($"  {k ?? "<null>"} = {v}")
+  }
+  hmap<string1k?, i32> hk = []
+  hk[n1] = 5
+  hk[""] = 6
+  Console.log($"{hk.len} {hk[n1]} {hk[""]}")
+  string x = "v"
+  m[x + "w"] = 4
+  Console.log($"{m[maybe(3)]} {m["vw"]}")
+}
+f()
+Console.log("done")

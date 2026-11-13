@@ -1,11 +1,11 @@
 // More array ownership (spec 6.8.1): an owned local assigned again frees its old block; ->a moves an array into a ->arr<T> parameter,
 // which ends with the function unless moved on; static array fields end with the program
-alias Root as r
+import Root
 
 public class Dog(string name) {
   public string name
 } atEnd {
-  r.Console.log("  end " + name)
+  Console.log("  end " + name)
 }
 
 public class Kennel {
@@ -15,20 +15,20 @@ public class Kennel {
     dogs = ->given                      // moved on: the kennel owns it now
   }
 } atEnd {
-  r.Console.log("  end kennel")
+  Console.log("  end kennel")
 }
 
 fun reassign() {
   arr<Dog> pack = [Dog("a1"), Dog("a2")]
   pack = [Dog("b1")]                    // the old block ends here, with its dogs
-  r.Console.log($"  now {pack[0].name}")
+  Console.log($"  now {pack[0].name}")
   arr<i32> numbers                      // no value yet: an empty array of this scope
   numbers = [1, 2, 3]
   numbers = arr<i32>[5]
-  r.Console.log($"  numbers {numbers.len}")
+  Console.log($"  numbers {numbers.len}")
   arr<Dog> other = [Dog("c1")]
   pack = ->other                        // b1 ends, pack takes c1, other is empty
-  r.Console.log($"  moved {pack[0].name}, left {other.len}")
+  Console.log($"  moved {pack[0].name}, left {other.len}")
 }
 
 fun uns count(->arr<Dog> given) {
@@ -39,21 +39,21 @@ fun ->arr<Dog> pass(->arr<Dog> given) {
   return given                          // moved on to the caller
 }
 
-r.Console.log("reassign")
+Console.log("reassign")
 reassign()
-r.Console.log("give")
+Console.log("give")
 fun give() {
   arr<Dog> pack = [Dog("d1"), Dog("d2")]
-  r.Console.log($"  copy counted {count(pack!)}, still {pack.len}")
-  r.Console.log($"  counted {count(->pack)}, left {pack.len}")
+  Console.log($"  copy counted {count(pack!)}, still {pack.len}")
+  Console.log($"  counted {count(->pack)}, left {pack.len}")
   arr<Dog> back = pass([Dog("e1")])     // back owns it: it ends with this function
-  r.Console.log("  back " + back[0].name)
+  Console.log("  back " + back[0].name)
   Kennel k = Kennel()
   arr<Dog> more = [Dog("f1")]
   k.keep(->more)
-  r.Console.log($"  kennel {k.dogs.len}, left {more.len}")
+  Console.log($"  kennel {k.dogs.len}, left {more.len}")
 }
 give()
-r.Console.log($"static {Kennel.shared.len}")
+Console.log($"static {Kennel.shared.len}")
 Kennel.shared = [Dog("static2")]
-r.Console.log("done")
+Console.log("done")

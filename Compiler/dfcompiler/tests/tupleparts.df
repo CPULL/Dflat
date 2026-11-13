@@ -1,0 +1,53 @@
+// One part of a tuple item written in place (spec 3.2): arr, vec, list items and map, hmap values; a replaced object or array ends.
+// Nested tuple items by number: t.0.1 is item 1 of item 0, never the real 0.1 (spec 3.2)
+import Root
+class Dog(string name) {
+  public string name
+} atEnd {
+  Console.log($"  {name} ends")
+}
+struct P { i32 x, i32 y }
+fun items() {
+  arr<(i32 n, string s)> a = [(1, "a"), (2, "b")]
+  a[0].s = "z"
+  a[1].n *= 4
+  list<(i32, string)> l = [(1, "a")]
+  l[0].1 = "q"
+  l[0].0++
+  map<string, (i32, string)> m = ["k": (1, "a")]
+  m["k"].0 = 9
+  m["k"].1 = "w"
+  hmap<i32, (i32, i32)> h = [1: (1, 1)]
+  h[1].1 += 5
+  Console.log($"{a} {l} {m} {h}")
+}
+fun owned() {
+  vec<(Dog, i32)> v = [(Dog("A"), 1)]
+  v[0].0 = Dog("B")
+  v[0].1 = 7
+  Dog c = Dog("C")
+  v[0].0 = c!
+  map<i32, (Dog, i32)> m = [1: (Dog("M"), 1)]
+  m[1].0 = Dog("N")
+  m[1].0.name = "NN"
+  vec<(arr<i32>, i32)> arrays = [([1, 2], 1)]
+  arrays[0].0 = [5, 6, 7]
+  arrays[0].0[1] = 9
+  Console.log($"{v} {m} {arrays}")
+  Console.log("end of owned")
+}
+fun nested() {
+  ((i32, i32), i32) t = ((1, 2), 3)
+  t.0.1 = 7
+  t.0.0 += 10
+  vec<((i32, i32), i32)> n = [((1, 2), 3)]
+  n[0].0.1 = 8
+  (((i32, i32), i32), i32) d = (((1, 2), 3), 4)
+  d.0.0.1 = 9
+  vec<(P, i32)> s = [(P(1, 2), 1)]
+  s[0].0.x = 5
+  Console.log($"{t} {t.0.1} {n[0].0.1} {d.0.0.1} {s} {1.5 + 0.25}")
+}
+items()
+owned()
+nested()

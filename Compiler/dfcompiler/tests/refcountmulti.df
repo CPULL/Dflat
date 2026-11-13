@@ -1,10 +1,10 @@
 // Counted values among several results (spec 12.7, 13.1.1): fun @Dog, i32 pick(); @Dog a, i32 n = pick(); a given ->Dog part starts counting
 namespace refcountmulti
-alias Root as r
+import Root
 class Dog(string name) {
   public string name
 } atEnd {
-  r.Console.log($"{name} ends")
+  Console.log($"{name} ends")
 }
 class Kennel {
   public @Dog boss = Dog("Boss")
@@ -14,23 +14,23 @@ fun @Dog, i32 pick() { return Dog("Picked"), 3 }
 fun @i32, @string pair() { return 7, "seven" }
 fun f() {
   @Dog a, i32 n = pick()
-  r.Console.log($"{a.name} {n} users {a.usersCount}")
+  Console.log($"{a.name} {n} users {a.usersCount}")
   Kennel k = Kennel()
   @Dog b, i32 m = k.lead()
-  r.Console.log($"{b.name} users {b.usersCount}")
+  Console.log($"{b.name} users {b.usersCount}")
   @i32 x, @string s = pair()
-  r.Console.log($"{x} {s}")
+  Console.log($"{x} {s}")
   pick()
   _, i32 only = pick()
-  r.Console.log($"only {only}")
+  Console.log($"only {only}")
   a, n = pick()
-  r.Console.log($"{a.name} again")
+  Console.log($"{a.name} again")
 }
 fun ->Dog, i32 make() { return Dog("Made"), 1 }
 fun g() {
   @Dog a, i32 n = make()
   @i32 c, @string t = 5, "five"
-  r.Console.log($"{a.name} {n} users {a.usersCount} {c} {t}")
+  Console.log($"{a.name} {n} users {a.usersCount} {c} {t}")
 }
 f()
 g()

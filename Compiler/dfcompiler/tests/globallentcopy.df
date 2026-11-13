@@ -1,0 +1,13 @@
+// a lent result of a method called on a global is copied while its lock is held (spec 18.3)
+class Dog(string name) {
+  public string name
+}
+class Shelf {
+  Dog d = Dog("rex")
+  unrestricted fun Dog first() { d }
+  public fun Dog second() { d }
+}
+global Shelf shelf = Shelf()
+Dog x = shelf.first()
+Dog y = shelf.second()!
+Root.Console.log(x.name + " " + y.name)

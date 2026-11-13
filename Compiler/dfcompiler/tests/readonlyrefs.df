@@ -1,6 +1,6 @@
 // Read-only references & (spec 1.6.2): through &Item o only the unrestricted functions can be called and the fields can be read; through &Item o
 // and an owned variable everything visible can be used. For the collections of the compiler a & reference can read, has, indexOf and loop
-alias Root as r
+import Root
 
 public class Counter(string name) {
   public string name
@@ -36,8 +36,8 @@ fun i32 sum(vec<i32> values, list<i32> more, arr<i32> fixed) {
 
 Counter c = Counter("c")
 change(&c)
-r.Console.log(look(c))
+Console.log(look(c))
 vec<i32> v = [1, 2]
 list<i32> l = [8, 9]
 arr<i32> a = [30]
-r.Console.log(sum(v, l, a))
+Console.log(sum(v, l, a))

@@ -1,6 +1,6 @@
 // &T results of values (spec 13.1.1): the address of the place; &i32 s = f() writes it, i32 x = f() copies, f() = v / += / ++ on the call
 namespace valuelends
-alias Root as r
+import Root
 class Board {
   public i32 score
   public string title = "board"
@@ -13,18 +13,18 @@ fun f() {
   Board board = Board()
   &i32 s = board.scoreRef()
   s += 10
-  r.Console.log($"score {board.score}")
+  Console.log($"score {board.score}")
   i32 copy = board.scoreRef()
   board.scoreRef()++
   board.scoreRef() += 5
   board.cell(3) = 7
-  r.Console.log($"copy {copy}, score {board.score}, cell 3 is {board.cells[3]}")
+  Console.log($"copy {copy}, score {board.score}, cell 3 is {board.cells[3]}")
   &string t = board.titleRef()
   t += "!"
-  r.Console.log(board.title)
+  Console.log(board.title)
   &i32 n = board.score
   n = 99
-  r.Console.log(board.score)
+  Console.log(board.score)
 }
 struct Vec2 { r64 x, r64 y }
 class Ship {
@@ -37,7 +37,7 @@ fun structs() {
   p.x = 3.0
   s.posRef().y += 2.0
   Vec2 copy = s.posRef()
-  r.Console.log($"{s.pos} {copy}")
+  Console.log($"{s.pos} {copy}")
 }
 fun counted() {
   &@Board shared = @Board()
@@ -45,7 +45,7 @@ fun counted() {
     &string t = shared.titleRef()
     t += "!"
   }
-  enforce shared { r.Console.log(shared.title) }
+  enforce shared { Console.log(shared.title) }
 }
 f()
 structs()

@@ -1,0 +1,2 @@
+vec<(i32, string)> pairs = [(1, "a")]
+for (&n, var s) in pairs { }

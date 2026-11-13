@@ -1,6 +1,6 @@
 // Trait constructors with parameters (spec 11.1.1, 11.2, step 3): a constructor of the class calls them in its chain,
 // : Trait(args); overloads; the property initializers of the trait run before its constructor body; order parent, traits, class
-alias Root as r
+import Root
 
 trait Named {
   string name
@@ -72,10 +72,10 @@ public class Amount : Positive {
   public Amount(i32 v) : Positive(v) { }
 }
 
-r.Console.log(Player("Ann").show())
-r.Console.log(Player("Bob", "Lee", 9).show())
-r.Console.log(Player().show())
-r.Console.log(Hero("Zed").show())
+Console.log(Player("Ann").show())
+Console.log(Player("Bob", "Lee", 9).show())
+Console.log(Player().show())
+Console.log(Hero("Zed").show())
 fun ->string tryAmount(i32 v) {
   Amount a = Amount(v)
   return "made " + a.value().toStr()
@@ -83,5 +83,5 @@ fun ->string tryAmount(i32 v) {
     return "failed: " + ex.message
   }
 }
-r.Console.log(tryAmount(4))
-r.Console.log(tryAmount(-4))
+Console.log(tryAmount(4))
+Console.log(tryAmount(-4))

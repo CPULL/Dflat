@@ -412,11 +412,17 @@ static void df_gl_exit(void) {
     int at = ancestors.Count - 2;   // the parent of hop
     var parent = ancestors[at];
     if (parent.Kind == "Call" && parent.Children[0] == hop) {
-      // g.m(...): the wrapper of the method takes the lock; a lent result is copied
+      // g.m(...): the wrapper of the method takes the lock; a lent result is copied while the lock is still held (spec 18.3): the call
+      // and its copy run under the lock of the global, which the wrapper takes again (reentrant)
       var methods = LookupMethods(ObjInfo(global.Type), hop.Text!);
-      if (methods.Count > 0 && methods.Any(LendsResult) && at >= 1 && ancestors[at - 1].Kind != "Copy") {
-        Replace(ancestors[at - 1], parent, Synthetic("Copy", parent, "global").Add(parent));
-        cloneUsed = true;   // the clone functions are emitted (UsesClone ran before this pass)
+      if (methods.Count > 0 && methods.Any(LendsResult) && at >= 1) {
+        var copy = ancestors[at - 1];
+        if (copy.Kind != "Copy") {
+          copy = Synthetic("Copy", parent, "global").Add(parent);
+          Replace(ancestors[at - 1], parent, copy);
+          cloneUsed = true;   // the clone functions are emitted (UsesClone ran before this pass)
+        }
+        globalReads[copy] = (global, methods.Any(LockWrites));
       }
       return;
     }

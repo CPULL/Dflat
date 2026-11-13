@@ -1,5 +1,5 @@
-alias Root as r
+import Root
 
 ##if os == windoes
-r.Console.log(1)
+Console.log(1)
 ##endif

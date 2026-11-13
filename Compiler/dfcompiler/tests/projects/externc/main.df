@@ -1,6 +1,6 @@
 // extern C functions (spec 15.9) with a C file given by csource= in the project
 namespace app
-alias Root as r
+import Root
 
 extern fun addr counter_create()
 extern fun counter_add(addr c, i32 n)
@@ -18,46 +18,46 @@ extern fun addr make_text(i32 n)
 addr c = counter_create()
 counter_add(c, 40)
 counter_add(c, 2)
-r.Console.log(counter_total(c))
-r.Console.log(c != null)
+Console.log(counter_total(c))
+Console.log(c != null)
 counter_free(c)
-r.Console.log(text_bytes("héllo"))
+Console.log(text_bytes("héllo"))
 arr<u8> data = [1, 2, 3, 250]
-r.Console.log(bytes_sum(data))
+Console.log(bytes_sum(data))
 bytes_fill(data, 7)
-r.Console.log(data[3])
-r.Console.log(halve(5.0))
-r.Console.log(is_even(10))
+Console.log(data[3])
+Console.log(halve(5.0))
+Console.log(is_even(10))
 addr none = nothing()
-r.Console.log(none == null)
+Console.log(none == null)
 addr empty = null
-r.Console.log(empty == none)
+Console.log(empty == none)
 
 // C strings (spec 4.4.4): string(addr) borrows the C text, string(->addr) takes it and frees it
 string g = string(greeting())
-r.Console.log($"{g} {g.len}")
+Console.log($"{g} {g.len}")
 addr t = make_text(5000)
 string big = string(->t)
-r.Console.log($"{big.len} {t == null}")
+Console.log($"{big.len} {t == null}")
 big += "!"
-r.Console.log(big.len)
+Console.log(big.len)
 string small = string(->make_text(3))
 small += "yz"
-r.Console.log(small)
-r.Console.log(string(nothing()) == "")
+Console.log(small)
+Console.log(string(nothing()) == "")
 string g2 = string(greeting())
 g2.clear()
 g2 += "abc"
-r.Console.log(g2)
+Console.log(g2)
 string g3 = string(->make_text(4))
 g3 = g3.toUpper()
-r.Console.log(g3)
+Console.log(g3)
 vec<string> v = []
 v.add(string(->make_text(2)))
 v.add(string(greeting()))
-r.Console.log(v)
+Console.log(v)
 string? noText = string(nothing())
 string? someText = string(greeting())
-r.Console.log($"{noText == null} {someText == null} {someText}")
+Console.log($"{noText == null} {someText == null} {someText}")
 string blank = string(nothing())
-r.Console.log($"[{blank}]")
+Console.log($"[{blank}]")

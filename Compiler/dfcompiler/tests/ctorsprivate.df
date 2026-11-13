@@ -1,6 +1,6 @@
 // Private constructors (spec 11.1.1, step 4): a constructor without 'public' is private; only the code of its class calls it
 // (its static functions, methods, other constructors); the public constructors of the class can chain to it
-alias Root as r
+import Root
 
 public class Token {
   public string text
@@ -38,10 +38,10 @@ public class Circle : Shape {
   public Circle() : Shape("circle") { }
 }
 
-r.Console.log(Token("plain").show())
-r.Console.log(Token.next("a").show())
-r.Console.log(Token.next("b").show())
-r.Console.log(Token.next("c").copy().show())
-r.Console.log(Config.debug().mode + " " + Config.release().mode)
-r.Console.log(Shape("square").kind)
-r.Console.log(Circle().kind)
+Console.log(Token("plain").show())
+Console.log(Token.next("a").show())
+Console.log(Token.next("b").show())
+Console.log(Token.next("c").copy().show())
+Console.log(Config.debug().mode + " " + Config.release().mode)
+Console.log(Shape("square").kind)
+Console.log(Circle().kind)

@@ -1,19 +1,19 @@
 // Maps with string keys and values (spec 6.8.4, 6.8.4.1), step 2: a string key is its sort key (the first 8 bytes) and a pointer to the
 // map's own copy; equal sort keys are compared on the full text. A string value is the map's own copy
-alias Root as r
+import Root
 
 map<string, i32> ages = []
 ages["bob"] = 30
 ages["alice"] = 25
 ages["Carol"] = 40
 ages[""] = 0
-r.Console.log(ages)                                // [: 0, Carol: 40, alice: 25, bob: 30]: by bytes, "" first
-r.Console.log(ages["alice"])                       // 25
-r.Console.log(ages["nobody"])                      // 0
+Console.log(ages)                                // [: 0, Carol: 40, alice: 25, bob: 30]: by bytes, "" first
+Console.log(ages["alice"])                       // 25
+Console.log(ages["nobody"])                      // 0
 string none = null
-r.Console.log(ages[none])                          // 0: a null string is ""
-r.Console.log(ages.hasKey("Carol"))                // true
-r.Console.log(ages.hasKey("carol"))                // false
+Console.log(ages[none])                          // 0: a null string is ""
+Console.log(ages.hasKey("Carol"))                // true
+Console.log(ages.hasKey("carol"))                // false
 
 // keys that share their first 8 bytes: the full text decides
 map<string, i32> long = []
@@ -22,17 +22,17 @@ long["prefix12"] = 0
 long["prefix12-a"] = 1
 long["prefix12-a-longer"] = 3
 long["prefix1"] = -1
-r.Console.log(long)                                // [prefix1: -1, prefix12: 0, prefix12-a: 1, prefix12-a-longer: 3, prefix12-b: 2]
+Console.log(long)                                // [prefix1: -1, prefix12: 0, prefix12-a: 1, prefix12-a-longer: 3, prefix12-b: 2]
 long.removeAt("prefix12-a")
-r.Console.log(long)                                // [prefix1: -1, prefix12: 0, prefix12-a-longer: 3, prefix12-b: 2]
-r.Console.log(long["prefix12-a-longer"])           // 3
+Console.log(long)                                // [prefix1: -1, prefix12: 0, prefix12-a-longer: 3, prefix12-b: 2]
+Console.log(long["prefix12-a-longer"])           // 3
 
 // the key is the map's own copy: changing the variable later does not change the map
 string name = "dave"
 ages[name] = 50
 name += "!"
-r.Console.log(ages.hasKey("dave"))                 // true
-r.Console.log(ages.hasKey("dave!"))                // false
+Console.log(ages.hasKey("dave"))                 // true
+Console.log(ages.hasKey("dave!"))                // false
 
 // string values: replaced values are freed, reads borrow
 map<i32, string> words = []
@@ -41,16 +41,16 @@ words[1] = "one"
 words[3] = "three"
 words[2] = "TWO"
 words[1] += "!"
-r.Console.log(words)                               // [1: one!, 2: TWO, 3: three]
-r.Console.log(words[9] == "")                      // true: a missing key reads as ""
+Console.log(words)                               // [1: one!, 2: TWO, 3: three]
+Console.log(words[9] == "")                      // true: a missing key reads as ""
 bool hasThree, string got = words.tryGet(3)
-r.Console.log(hasThree)                            // true
-r.Console.log(got)                                 // three
-r.Console.log(words.has("TWO"))                    // true
-r.Console.log(words.keyOf("three"))                // 3
+Console.log(hasThree)                            // true
+Console.log(got)                                 // three
+Console.log(words.has("TWO"))                    // true
+Console.log(words.keyOf("three"))                // 3
 string out = ->words[3]
-r.Console.log(out)                                 // three
-r.Console.log(words)                               // [1: one!, 2: TWO]
+Console.log(out)                                 // three
+Console.log(words)                               // [1: one!, 2: TWO]
 
 // both strings, remove and removeAll by value
 map<string, string> colors = []
@@ -58,14 +58,14 @@ colors["sky"] = "blue"
 colors["sea"] = "blue"
 colors["grass"] = "green"
 colors["snow"] = "white"
-r.Console.log(colors.add("sun", "yellow"))         // true
-r.Console.log(colors.add("sun", "gold"))           // false: replaced
-r.Console.log(colors.keyOf("blue"))                // sea
-r.Console.log(colors.remove("green"))              // true
-r.Console.log(colors.removeAll("blue"))            // 2
-r.Console.log(colors)                              // [snow: white, sun: gold]
+Console.log(colors.add("sun", "yellow"))         // true
+Console.log(colors.add("sun", "gold"))           // false: replaced
+Console.log(colors.keyOf("blue"))                // sea
+Console.log(colors.remove("green"))              // true
+Console.log(colors.removeAll("blue"))            // 2
+Console.log(colors)                              // [snow: white, sun: gold]
 colors.clear()
-r.Console.log(colors.len)                          // 0
+Console.log(colors.len)                          // 0
 
 // a long key (a block string) and a key built at run time
 string big = ""
@@ -78,10 +78,10 @@ map<string, i32> sizes = []
 sizes[big] = 6000
 sizes[big + "x"] = 6001
 sizes["0123"] = 4
-r.Console.log(sizes.len)                           // 3
-r.Console.log(sizes[big])                          // 6000
-r.Console.log(sizes[big + "x"])                    // 6001
-r.Console.log(sizes.keyOf(4))                      // 0123
+Console.log(sizes.len)                           // 3
+Console.log(sizes[big])                          // 6000
+Console.log(sizes[big + "x"])                    // 6001
+Console.log(sizes.keyOf(4))                      // 0123
 
 // many string keys, random inserts and removals checked against an array, and the key order
 map<string, i32> tree = []
@@ -124,8 +124,8 @@ while n < 2000 {
   n += 1
 }
 expected += "]"
-r.Console.log(wrong)                               // 0
-r.Console.log(tree.len == expectedLen)             // true
+Console.log(wrong)                               // 0
+Console.log(tree.len == expectedLen)             // true
 string walked = "["
 for (walkedKey, walkedValue) in tree {
   if walked.len > 1 {
@@ -134,14 +134,14 @@ for (walkedKey, walkedValue) in tree {
   walked += $"{walkedKey}: {walkedValue}"
 }
 walked += "]"
-r.Console.log(walked == expected)               // true
-r.Console.log(tree.removeAll(7) <= 1u)             // true
+Console.log(walked == expected)               // true
+Console.log(tree.removeAll(7) <= 1u)             // true
 n = 0
 while n < 2000 {
   tree.removeAt($"k{(n * 7919u) % 2000u + 10000u}")
   n += 1
 }
-r.Console.log(tree.len)                            // 0
+Console.log(tree.len)                            // 0
 
 // every key has the same first 8 bytes: all the comparisons go to the text, the separators of the branches point to keys
 map<string, i32> same = []
@@ -180,7 +180,7 @@ while n < 1500 {
   n += 1
 }
 expected += "]"
-r.Console.log(wrong)                               // 0
+Console.log(wrong)                               // 0
 string walkedSame = "["
 for (walkedSameKey, walkedSameValue) in same {
   if walkedSame.len > 1 {
@@ -189,10 +189,10 @@ for (walkedSameKey, walkedSameValue) in same {
   walkedSame += $"{walkedSameKey}: {walkedSameValue}"
 }
 walkedSame += "]"
-r.Console.log(walkedSame == expected)           // true
+Console.log(walkedSame == expected)           // true
 n = 0
 while n < 1500 {
   same.removeAt($"samefirst{(n * 7919u) % 1500u + 10000u}")
   n += 1
 }
-r.Console.log(same.len)                            // 0
+Console.log(same.len)                            // 0

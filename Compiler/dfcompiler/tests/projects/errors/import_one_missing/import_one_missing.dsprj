@@ -1,0 +1,2 @@
+; an import names a namespace or one of its declarations (spec 16.2)
+source=main.df

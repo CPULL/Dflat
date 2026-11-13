@@ -1,0 +1,12 @@
+total 39
+neg -3
+neg -4
+x 2.5
+loud 9
+loud str
+3.5 q
+left 1
+left t
+right 2.5
+2
+---- exit code 0 ----

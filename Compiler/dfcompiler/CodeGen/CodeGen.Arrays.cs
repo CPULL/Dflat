@@ -749,9 +749,9 @@ public sealed partial class CodeGen {
       string shown = IsTuple(elem) ? "(" + string.Join(", ", TupleElems(elem).Select(e => DisplayName(e.Type))) + ")" : DisplayName(elem);
       throw Error($"the items of this collection have {parts.Count} parts ({shown}): write {parts.Count} names, not {names.Count}", s);
     }
-    if (names.FirstOrDefault(name => name.Kind == "WritableVar") is Node writable) {
-      throw NotSupported("&name in for a, b over a collection of tuples or structs", writable);
-    }
+    // &T a on a part (spec 6.4): the item is walked as a read/write borrow (for &var __item) and the part is a &T local on its place
+    bool anyWritable = names.Any(name => name.Kind == "WritableVar");
+    var partTypes = IsTuple(elem) ? TupleElems(elem).Select(e => e.Type).ToList() : structs[elem].Fields.Select(field => field.Type).ToList();
     string item = "__item" + ++tempCounter;
     var body = Synthetic("Block", s);
     for (int index = 0; index < parts.Count; index++) {
@@ -760,16 +760,53 @@ public sealed partial class CodeGen {
         read = Synthetic("Member", s, part).Add(read);
       }
       var type = names[index].Children.FirstOrDefault() ?? Synthetic("Type", s, "var");
-      body.Add(Synthetic("Decl", names[index], names[index].Text).Add(type).Add(Synthetic("Init", s).Add(read)));
+      var decl = Synthetic("Decl", names[index], names[index].Text);
+      if (names[index].Kind == "WritableVar") {
+        CheckWritableLoopItem(partTypes[index], names[index], s, "these parts");
+        if (IsTuple(elem) && (partTypes[index] is "string" or "string?" || IsFunType(partTypes[index]) || StructHoldsObjects(partTypes[index]))) {
+          // the strings inside a tuple item are not owned by the collection yet: they cannot be replaced through a borrow
+          throw NotSupported($"&{names[index].Text} on a {DisplayName(partTypes[index])} part of a tuple item (struct fields and the other parts have it)", names[index]);
+        }
+        if (type is { Kind: "Type", Text: "var" }) {
+          throw Error($"&{names[index].Text}: a read/write part needs its type, &{DisplayName(partTypes[index])} {names[index].Text} (spec 6.4)", names[index]);
+        }
+        if (ResolveType(type) != partTypes[index]) {
+          throw Error($"&{ResolveType(type)} {names[index].Text}: this part is {DisplayName(partTypes[index])}; a read/write borrow has its exact type (spec 6.4)", names[index]);
+        }
+        if (!LendsAsAddress(partTypes[index])) {
+          // an object or an array part: a pointer to its place, so that d = Dog("x") replaces it in the item
+          body.Add(Synthetic("PartRef", names[index], names[index].Text).Add(Synthetic("Type", s, partTypes[index])).Add(read));
+          continue;
+        }
+        decl.Add(type).Add(Synthetic("ReadWrite", names[index]));
+      } else {
+        decl.Add(type);
+      }
+      body.Add(decl.Add(Synthetic("Init", s).Add(read)));
     }
     foreach (var statement in s.Children.Last().Children) {
       body.Add(statement);
     }
-    var loop = Synthetic("For", s).Add(Synthetic("Var", s, item));
+    var loop = Synthetic("For", s).Add(Synthetic(anyWritable ? "WritableVar" : "Var", s, item));
     foreach (var child in s.Children.Skip(1).Take(s.Children.Count - 2)) {
       loop.Add(child);
     }
     return Synthetic("Block", s).Add(loop.Add(body));
+  }
+
+  // & on a loop variable (spec 6.4): the item is written where it is; items whose place is not a plain C value are not built yet
+  void CheckWritableLoopItem(string itemType, Node name, Node s, string what) {
+    if (IsCountedType(itemType) || BoxInner(itemType) != null) {
+      throw Error($"for &{name.Text}: {what} are counted (@T); a read/write usage is declared on the collection, list<&@T> (spec 12.7)", name);
+    }
+    // a string value of a map lives inside the entry (64 bytes, df_bt_sval): it has no df_string place to point to
+    if (itemType == "string" && what.StartsWith("the values of")) {
+      throw NotSupported($"for (k, &string {name.Text}) in m: the string values of a map (string items of arr, vec and list have it)", name);
+    }
+    // the strings inside a tuple item are not owned by the collection yet: they cannot be replaced through a borrow
+    if (IsTuple(itemType) && TupleElems(itemType).Any(elem => elem.Type is "string" or "string?" || IsFunType(elem.Type) || IsCountedType(elem.Type) || StructHoldsObjects(elem.Type) || IsTuple(elem.Type))) {
+      throw NotSupported($"for &{name.Text} on {DisplayName(itemType)} items (tuples of numbers, objects, arrays and plain structs have it; write & on a part)", name);
+    }
   }
 
   // the for loops over a vec or a list being compiled: the C variable that points to the counter of open iterators, and the collection
@@ -895,11 +932,23 @@ public sealed partial class CodeGen {
         throw Error("the keys of a map are read-only: & on the key is not allowed (spec 6.4); to change a key, remove the entry and add it again", s);
       }
       if (names[1].Kind == "WritableVar") {
-        throw Error("for (k, &V v) in m is not built yet (writable values come with a later step)", s);
+        CheckWritableLoopItem(MapValue(collection.Type), names[1], s, "the values of this map");
       }
       loopVars.Add((names[0], "", MapKey(collection.Type)));
       loopVars.Add((names[1], "", BoxInner(MapValue(collection.Type)) ?? MapValue(collection.Type)));   // map<K, @T>: the object or the value of each box
     } else {
+      if (varNode.Kind == "WritableVar") {
+        if (collection.Type == "string" || mapPart == "keys") {
+          throw Error(collection.Type == "string" ? "the characters of a string are copies: & is not allowed in for c in text (spec 6.4)"
+            : "the keys of a map are read-only: & on the key is not allowed (spec 6.4)", s);
+        }
+        if (overView || customElem != null) {
+          throw NotSupported("for &T x over a view or a custom collection (arr, vec, list and the values of a map have it)", s);
+        }
+        if (!varNode.Text!.StartsWith("__item")) {   // the hidden item of for (&T a, b) in c: each part is checked on its own
+          CheckWritableLoopItem(boxedElem ?? elem, varNode, s, mapPart == "values" ? "the values of this map" : "the items of this collection");
+        }
+      }
       loopVars.Add((varNode, "", elem));
     }
     var innerScope = new Scope(scope);
@@ -918,7 +967,22 @@ public sealed partial class CodeGen {
       if (overMap && index == 1 && node.Text == loopVars[0].Node.Text) {
         throw Error($"the key and the value cannot both be called '{node.Text}'", s);
       }
-      innerScope.Vars[node.Text!] = new VarInfo(declared, "v_" + node.Text, false) { ReadOnlyString = IsStrItem(declared) };
+      if (node.Kind == "WritableVar") {
+        if (declared != itemType) {
+          throw Error($"for &{DisplayName(declared)} {node.Text}: the items are {DisplayName(itemType)}; a read/write borrow has their exact type (spec 6.4)", s);
+        }
+        // &T x: x is the place of the item, written in place (spec 6.4); what it owns ends when x is assigned, as with a & parameter (13.1)
+        innerScope.Vars[node.Text!] = new VarInfo(declared, $"(*l_{node.Text})", false) {
+          RefSlot = IsClass(declared) || IsArr(declared) || declared == "string", OwnsTuple = TupleHoldsArrays(declared),
+          OwnsStruct = StructHoldsObjects(declared), IsWritable = true
+        };
+      } else {
+        // for x in c: a read-only lend of the item, as a plain parameter (spec 6.4, 13.1): no field writes, only unrestricted methods; &x writes
+        innerScope.Vars[node.Text!] = new VarInfo(declared, "v_" + node.Text, false) {
+          ReadOnlyString = IsStrItem(declared), ReadOnlyRef = !LibraryCode && (IsClass(declared) || IsArr(declared)), ReadOnlyStruct = !LibraryCode && IsStruct(declared),
+          LoopVar = true
+        };
+      }
       loopVars[index] = (node, declared, itemType);
     }
     string type = loopVars[0].Type;
@@ -1001,12 +1065,20 @@ public sealed partial class CodeGen {
           ? CellRead($"(({itemCode}) != NULL ? ({itemCode})->{BoxField(boxedElem)} : NULL)", elem)   // a counted value item; an empty slot reads as zero (spec 12.7)
           : $"DF_RC_OBJ({CType(elem)}, ({itemCode})->{BoxField(boxedElem)})";
       }
-      sb.Append($"{innerPad}  {CType(type)} {cname} = {Convert(new Expr(itemCode, elem), type, s)};\n");
+      if (loopVars[0].Node.Kind == "WritableVar") {
+        sb.Append($"{innerPad}  {CType(type)}* l_{loopVars[0].Node.Text} = &({itemCode});\n");   // for &T x in c: the place of the item (spec 6.4)
+      } else {
+        sb.Append($"{innerPad}  {CType(type)} {cname} = {Convert(new Expr(itemCode, elem), type, s)};\n");
+      }
     }
     if (overMap && mapPart == null) {
       var (valueNode, valueType, valueElem) = loopVars[1];
       var slotValue = UnboxRead(new Expr(ReadSlot(collection.Type, CursorValue(whole, collection.Type, position)), MapValue(collection.Type)));   // spec 12.7
-      sb.Append($"{innerPad}  {CType(valueType)} v_{valueNode.Text} = {Convert(new Expr(slotValue.Code, valueElem), valueType, s)};\n");
+      if (valueNode.Kind == "WritableVar") {
+        sb.Append($"{innerPad}  {CType(valueType)}* l_{valueNode.Text} = &({ReadSlot(collection.Type, CursorValue(whole, collection.Type, position))});\n");   // spec 6.4
+      } else {
+        sb.Append($"{innerPad}  {CType(valueType)} v_{valueNode.Text} = {Convert(new Expr(slotValue.Code, valueElem), valueType, s)};\n");
+      }
     }
     var before = assign.Clone();
     loopDepth++;

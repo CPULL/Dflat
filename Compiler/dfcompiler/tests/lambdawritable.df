@@ -1,9 +1,9 @@
 // &s and &a of strings and arrays in a lambda (spec 13.3.1): the lambda can change and replace them, as a & parameter can; also &field in a method
-alias Root as r
+import Root
 public class Dog(string name) {
   public string name
 } atEnd {
-  r.Console.log("  end " + name)
+  Console.log("  end " + name)
 }
 public class Box {
   string label = "box"
@@ -11,7 +11,7 @@ public class Box {
     fun() f = (; &label) { label = label + "!" }
     f()
     f()
-    r.Console.log("  " + label)
+    Console.log("  " + label)
   }
 }
 fun strings() {
@@ -21,11 +21,11 @@ fun strings() {
   }
   grow()
   grow()
-  r.Console.log("  " + s)
+  Console.log("  " + s)
   string lit = "x"
   fun() swap = (; &lit) { lit = "new " + lit }
   swap()
-  r.Console.log("  " + lit)
+  Console.log("  " + lit)
 }
 fun arrays() {
   arr<Dog> a = [Dog("a1")]
@@ -34,15 +34,15 @@ fun arrays() {
     a = [Dog("a2"), Dog("a3")]
   }
   replace()
-  r.Console.log($"  {a.len} {a[0].name}")
+  Console.log($"  {a.len} {a[0].name}")
   arr<i32> n = [1, 2]
   fun() bump = (; &n) { n[0] += 10 }
   bump()
-  r.Console.log($"  {n[0]}")
-  r.Console.log("  end of arrays")
+  Console.log($"  {n[0]}")
+  Console.log("  end of arrays")
 }
 fun main() {
-  r.Console.log("strings"); strings()
-  r.Console.log("arrays"); arrays()
-  r.Console.log("fields"); Box().relabel()
+  Console.log("strings"); strings()
+  Console.log("arrays"); arrays()
+  Console.log("fields"); Box().relabel()
 }

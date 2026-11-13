@@ -1,6 +1,6 @@
 // structs that hold strings and objects as keys (spec 6.2, 6.2.2, 11.1.5.3): the collection keeps a clone (its strings and objects) and
 // ends it with the entry; an object field is ordered by its hash and an hmap compares it with the equals of its class
-alias Root as r
+import Root
 
 class Tag(string name) : Keyable {
   public string name
@@ -28,39 +28,39 @@ names[Named("b", 1)] = "b1"
 names[Named("a", 2)] = "a2"
 names[Named("a", 1)] = "a1"
 names[Named("a", 1)] = "A1"                       // the same key: the value changes
-r.Console.log(names.len)
+Console.log(names.len)
 for (Named k, string v) in names {
-  r.Console.log($"  {k.name} {k.n} {v}")
+  Console.log($"  {k.name} {k.n} {v}")
 }
 Named look = Named("b", 1)
-r.Console.log($"{names[look]} {names.hasKey(Named("c", 1))}")
+Console.log($"{names[look]} {names.hasKey(Named("c", 1))}")
 names.removeAt(Named("a", 2))
-r.Console.log(names.len)
+Console.log(names.len)
 
 hmap<Named, i32> counts = []
 counts[Named("x", 1)] = 10
 counts[Named("x", 2)] = 20
 counts[Named("x", 1)] += 5
-r.Console.log($"{counts.len} {counts[Named("x", 1)]} {counts.hasKey(Named("y", 1))}")
+Console.log($"{counts.len} {counts[Named("x", 1)]} {counts.hasKey(Named("y", 1))}")
 counts.removeAt(Named("x", 2))
-r.Console.log(counts.len)
+Console.log(counts.len)
 
 hmap<Tagged, i32> tags = []
 tags[Tagged(Tag("a"), 1)] = 1
 tags[Tagged(Tag("b"), 1)] = 2                     // same hash, equals says different: two keys
 tags[Tagged(Tag("a"), 1)] += 10
-r.Console.log($"{tags.len} {tags[Tagged(Tag("a"), 1)]} {tags[Tagged(Tag("b"), 1)]} {tags.hasKey(Tagged(Tag("c"), 1))}")
+Console.log($"{tags.len} {tags[Tagged(Tag("a"), 1)]} {tags[Tagged(Tag("b"), 1)]} {tags.hasKey(Tagged(Tag("c"), 1))}")
 
 set<Tagged> ordered = []
 ordered.add(Tagged(Tag("a"), 2))
 ordered.add(Tagged(Tag("a"), 1))
-r.Console.log(ordered.len)
+Console.log(ordered.len)
 for Tagged t in ordered {
-  r.Console.log($"  {t.tag.name} {t.n}")
+  Console.log($"  {t.tag.name} {t.n}")
 }
 ordered.remove(Tagged(Tag("a"), 2))
-r.Console.log(ordered.len)
+Console.log(ordered.len)
 
 string prefix = "long-prefix-"
 names[Named(prefix + "z", 9)] = "z9"             // a computed string: the map keeps its own copy
-r.Console.log($"{names[Named("long-prefix-z", 9)]} {names.len}")
+Console.log($"{names[Named("long-prefix-z", 9)]} {names.len}")

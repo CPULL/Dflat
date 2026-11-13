@@ -24,10 +24,10 @@ public sealed partial class CodeGen {
       throw Error($"a collection cannot be an item of a set (spec 6.2): {DisplayName(args[0])}", at);
     }
     if (hashed && !HmapKeyBuilt(args[0])) {
-      throw Error($"hset items of type {DisplayName(args[0])} are not built yet (this version: integers, bool, char, enums, reals, date, time, clock, lapse, string, tuples of them and strings, structs of exact natives, strings and Keyable objects, sets of exact natives, Keyable classes)", at);
+      throw Error($"hset items of type {DisplayName(args[0])} are not built yet (this version: integers, bool, char, enums, reals, date, time, clock, lapse, string, string?, string1k, string1k?, tuples of them, strings and Keyable objects, structs of exact natives, strings and Keyable objects, sets of exact natives, Keyable classes)", at);
     }
     if (!hashed && !MapKeyBuilt(args[0])) {
-      throw Error($"set items of type {DisplayName(args[0])} are not built yet (this version: integers, bool, char, enums, reals, date, time, string, tuples of them and strings, structs of exact natives, strings and Keyable objects, sets of exact natives, Keyable classes)", at);
+      throw Error($"set items of type {DisplayName(args[0])} are not built yet (this version: integers, bool, char, enums, reals, date, time, string, string?, string1k, string1k?, tuples of them, strings and Keyable objects, structs of exact natives, strings and Keyable objects, sets of exact natives, Keyable classes)", at);
     }
     if (IsSetValue(args[0])) {
       SetKeyHelpers(args[0], at);   // the C helpers of set value keys (CodeGen.SetValueKeys.cs)
@@ -36,7 +36,7 @@ public sealed partial class CodeGen {
       CheckKeyable(args[0], at);   // spec 6.2, 11.2.1
     }
     if (IsCompositeKey(args[0])) {
-      CompositeKeyHelpers(args[0]);
+      CompositeKeyHelpers(args[0], at);
     }
   }
 

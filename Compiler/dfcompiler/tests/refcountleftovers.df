@@ -1,6 +1,6 @@
 // Static counted values, list<&@T> of values (= writes the shared cell), &@T among several results (spec 12.7, 13.1.1)
 namespace refcountleftovers
-alias Root as r
+import Root
 class Stats {
   public static &@i32 total = 10
   public static @string name = "stats"
@@ -10,7 +10,7 @@ class Stats {
 fun statics() {
   &@i32 t = Stats.total
   enforce t { Stats.add(5) }
-  r.Console.log($"{Stats.total} {Stats.name} {Stats.empty} users {t.usersCount}")
+  Console.log($"{Stats.total} {Stats.name} {Stats.empty} users {t.usersCount}")
 }
 fun bump(list<&@i32> team) {
   team[1] += 1
@@ -21,21 +21,21 @@ fun items() {
   team.add(&@shared)
   @i32 reader = shared
   enforce shared { team[1] = 10 }
-  r.Console.log($"{team} reader {reader}")
+  Console.log($"{team} reader {reader}")
   enforce shared { team[1]++ }
-  r.Console.log($"reader {reader}")
+  Console.log($"reader {reader}")
   for p in team { enforce p { p += 100 } }
-  r.Console.log($"{team} reader {reader}")
+  Console.log($"{team} reader {reader}")
   vec<&@string> notes = ["a"]
   &@string n0 = notes[0]
   enforce n0 { notes[0] += "!" }
-  enforce n0 { r.Console.log(n0) }
+  enforce n0 { Console.log(n0) }
   bump(team)
 }
 class Dog(string name) {
   public string name
 } atEnd {
-  r.Console.log($"{name} ends")
+  Console.log($"{name} ends")
 }
 class Board {
   public &@i32 score
@@ -48,16 +48,16 @@ fun results() {
   Board b = Board()
   &@i32 s, bool ok = b.scoreCell()
   enforce s { s = 42 }
-  r.Console.log($"{b.score} {ok} users {s.usersCount}")
+  Console.log($"{b.score} {ok} users {s.usersCount}")
   @string copy, i32 one = b.titleCell()
   &@string shared, i32 two = b.titleCell()
   enforce shared { shared += "!" }
-  r.Console.log($"copy {copy}, users {shared.usersCount}")
+  Console.log($"copy {copy}, users {shared.usersCount}")
   &@Dog d, i32 n = fresh()
   enforce d { d.name = "Renamed" }
-  r.Console.log($"{d.name} {n}")
+  Console.log($"{d.name} {n}")
 }
 statics()
 results()
 items()
-catch WritingOnRefCountWithoutLockingException { r.Console.log("item write without the lock") }
+catch WritingOnRefCountWithoutLockingException { Console.log("item write without the lock") }

@@ -1,15 +1,15 @@
 // Program entry and arguments (spec 14.1, 17.1)
-alias Root as r
+import Root
 
 fun int main(string args...) {
-  arr<string> same = r.getArgs()
-  r.Console.log(args.len == same.len)
-  r.Console.log(args == same)
-  r.Console.log(args.len)
+  arr<string> same = getArgs()
+  Console.log(args.len == same.len)
+  Console.log(args == same)
+  Console.log(args.len)
   i32 count = (i32)args.len
   for i32 index = 1..count {
-    r.Console.log($"arg {index}: {args[index]}")
+    Console.log($"arg {index}: {args[index]}")
   }
-  r.Console.log(args[0].contains("args"))
+  Console.log(args[0].contains("args"))
   return count
 }

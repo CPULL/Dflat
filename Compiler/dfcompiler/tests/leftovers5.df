@@ -1,5 +1,5 @@
 // static properties (spec 11.1.4, 11.1.2), ??= on a property (7.1), m.add(->other) and s.add(->other) (6.6)
-alias Root as r
+import Root
 alias Root.Console as c
 
 class Counter {
@@ -24,16 +24,16 @@ c.log(Counter.count)
 Box b = Box()
 b.level ??= 5                                      // null: the setter runs
 b.level ??= 9                                      // not null: the setter does not run
-r.Console.log($"{b.level} {b.written()}")
+Console.log($"{b.level} {b.written()}")
 
 map<string, i32> a = ["x": 1]
 map<string, i32> other = ["y": 2]
 a.add(->other)
-r.Console.log($"{a} {other == null}")
+Console.log($"{a} {other == null}")
 map<string, i32> more = ["z": 3]
 a += ->more
-r.Console.log($"{a} {more == null}")
+Console.log($"{a} {more == null}")
 set<i32> s = [1]
 set<i32> t = [2, 3]
 s.add(->t)
-r.Console.log($"{s} {t == null}")
+Console.log($"{s} {t == null}")

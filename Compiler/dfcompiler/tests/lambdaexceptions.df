@@ -1,6 +1,6 @@
 // exceptions leaving a lambda (spec 13.3.6): through a direct call, a parameter, sort, filter, map, reduce; a silent one is ignored by the caller
 namespace lambdaexceptions
-alias Root as r
+import Root
 
 public class Bad(string what) : Exception { }
 public class Quiet(string what) : Exception, SilentException { }
@@ -91,11 +91,11 @@ fun ->string outer() {
   catch DivisionByZeroException { return "passed up to the caller of the caller" }
 }
 
-r.Console.log(direct())
-r.Console.log(throughParam())
-r.Console.log(inSort())
-r.Console.log(inFilter())
-r.Console.log(inMap())
-r.Console.log(inReduce())
-r.Console.log(silentOne())
-r.Console.log(outer())
+Console.log(direct())
+Console.log(throughParam())
+Console.log(inSort())
+Console.log(inFilter())
+Console.log(inMap())
+Console.log(inReduce())
+Console.log(silentOne())
+Console.log(outer())

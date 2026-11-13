@@ -1,12 +1,12 @@
 // Globals of a program of several files (spec 18): declared in the root file, used from every file
 namespace app
 import app.parts
-alias Root as r
+import Root
 
 global Log log = Log()
 global Tally tally = Tally(100)
 
 record("a")
 record("b")
-r.Console.log(tally.total())
-r.Console.log(log.count())
+Console.log(tally.total())
+Console.log(log.count())

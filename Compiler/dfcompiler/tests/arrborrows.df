@@ -2,11 +2,11 @@
 // still ends with its scope when the borrower is declared where b lives and never gives the array away; return a of a local that may
 // borrow (a = b) moves its own array or gives a copy of the borrowed one; v.pop(&a) on such a local; a new array lent to a call ends with
 // the statement. Cases that stay safe by not freeing: a borrower declared outside, a lender replaced while borrowed, a borrower returned
-alias Root as r
+import Root
 public class Dog(string name) {
   public string name
 } atEnd {
-  r.Console.log("  end " + name)
+  Console.log("  end " + name)
 }
 fun ->arr<Dog> mixedReturn(bool flip) {
   arr<Dog> b = [Dog("m-b")]
@@ -29,8 +29,8 @@ fun replacedLender() {
   arr<Dog> a = [Dog("r-a")]
   a = b
   b = [Dog("r-b2")]
-  r.Console.log($"  a {a[0].name}")
-  r.Console.log("  end of replacedLender")
+  Console.log($"  a {a[0].name}")
+  Console.log("  end of replacedLender")
 }
 fun outerBorrower() {
   arr<Dog> outer = [Dog("o-outer")]
@@ -38,8 +38,8 @@ fun outerBorrower() {
     arr<Dog> b = [Dog("o-b")]
     outer = b
   }
-  r.Console.log($"  outer {outer.len}")
-  r.Console.log("  end of outerBorrower")
+  Console.log($"  outer {outer.len}")
+  Console.log("  end of outerBorrower")
 }
 fun ->arr<Dog> declBorrowerReturned() {
   arr<Dog> b = [Dog("d-b")]
@@ -52,15 +52,15 @@ fun uns readsCopy(arr<Dog> p) {
 }
 fun paramBorrow() {
   arr<Dog> d = [Dog("p-d")]
-  r.Console.log($"  len {readsCopy(d)}")
-  r.Console.log("  end of paramBorrow")
+  Console.log($"  len {readsCopy(d)}")
+  Console.log("  end of paramBorrow")
 }
 fun arr<Dog> lend(arr<Dog> p) {
   return p
 }
 fun tempLend() {
-  r.Console.log($"  lent {lend([Dog("tl")]).len}")
-  r.Console.log("  end of tempLend")
+  Console.log($"  lent {lend([Dog("tl")]).len}")
+  Console.log("  end of tempLend")
 }
 fun mixedPop() {
   vec<arr<Dog>> v = [[Dog("mp-v")]]
@@ -68,14 +68,14 @@ fun mixedPop() {
   arr<Dog> c = [Dog("mp-c")]
   c = b
   v.pop(&c)
-  r.Console.log($"  c {c[0].name}")
-  r.Console.log("  end of mixedPop")
+  Console.log($"  c {c[0].name}")
+  Console.log("  end of mixedPop")
 }
 fun plainItems() {
   arr<i32> b = [1, 2, 3]
   arr<i32> c = b
   var w = b[1..3]
-  r.Console.log($"  {c.len} {w.len}")
+  Console.log($"  {c.len} {w.len}")
 }
 fun uns count(arr<Dog> a) {
   return a.len
@@ -83,49 +83,49 @@ fun uns count(arr<Dog> a) {
 fun lender() {
   arr<Dog> b = [Dog("b1")]
   arr<Dog> c = b
-  r.Console.log($"  c {c[0].name}")
-  r.Console.log("  end of lender")
+  Console.log($"  c {c[0].name}")
+  Console.log("  end of lender")
 }
 fun lender2() {
   arr<Dog> b = [Dog("b2")]
   arr<Dog> a = [Dog("a2")]
   a = b
-  r.Console.log($"  a {a[0].name}")
-  r.Console.log("  end of lender2")
+  Console.log($"  a {a[0].name}")
+  Console.log("  end of lender2")
 }
 fun keptView() {
   arr<Dog> a = [Dog("v1"), Dog("v2")]
   var v = a[0..1]
-  r.Console.log($"  v {v.len}")
-  r.Console.log("  end of keptView")
+  Console.log($"  v {v.len}")
+  Console.log("  end of keptView")
 }
 fun tempArg() {
-  r.Console.log($"  count {count([Dog("t1")])}")
-  r.Console.log("  end of tempArg")
+  Console.log($"  count {count([Dog("t1")])}")
+  Console.log("  end of tempArg")
 }
 fun main() {
-  r.Console.log("lender"); lender()
-  r.Console.log("lender2"); lender2()
-  r.Console.log("keptView"); keptView()
-  r.Console.log("tempArg"); tempArg()
-  r.Console.log("mixedReturn false")
+  Console.log("lender"); lender()
+  Console.log("lender2"); lender2()
+  Console.log("keptView"); keptView()
+  Console.log("tempArg"); tempArg()
+  Console.log("mixedReturn false")
   arr<Dog> w = mixedReturn(false)
-  r.Console.log($"  got {w[0].name}")
-  r.Console.log("mixedReturn true")
+  Console.log($"  got {w[0].name}")
+  Console.log("mixedReturn true")
   arr<Dog> x = mixedReturn(true)
-  r.Console.log($"  got {x[0].name}")
-  r.Console.log("mixedMulti false/true")
+  Console.log($"  got {x[0].name}")
+  Console.log("mixedMulti false/true")
   arr<Dog> y, uns n = mixedMulti(false)
   arr<Dog> z, uns m = mixedMulti(true)
-  r.Console.log($"  got {y[0].name} {z[0].name}")
-  r.Console.log("replacedLender"); replacedLender()
-  r.Console.log("outerBorrower"); outerBorrower()
-  r.Console.log("declBorrowerReturned")
+  Console.log($"  got {y[0].name} {z[0].name}")
+  Console.log("replacedLender"); replacedLender()
+  Console.log("outerBorrower"); outerBorrower()
+  Console.log("declBorrowerReturned")
   arr<Dog> q = declBorrowerReturned()
-  r.Console.log($"  got {q[0].name}")
-  r.Console.log("paramBorrow"); paramBorrow()
-  r.Console.log("tempLend"); tempLend()
-  r.Console.log("mixedPop"); mixedPop()
-  r.Console.log("plainItems"); plainItems()
-  r.Console.log("end of main")
+  Console.log($"  got {q[0].name}")
+  Console.log("paramBorrow"); paramBorrow()
+  Console.log("tempLend"); tempLend()
+  Console.log("mixedPop"); mixedPop()
+  Console.log("plainItems"); plainItems()
+  Console.log("end of main")
 }

@@ -1,5 +1,5 @@
 namespace structs
-alias Root as r
+import Root
 
 // spec 11.1.5, step 1: declaration, creation, start values, fields, locals, parameters, results
 
@@ -37,60 +37,60 @@ class Holder {
 
 // creation by name: the other fields take their start value or zero
 var s = Vec3(x: 2.0)
-r.Console.log($"{s.x} {s.y} {s.z}")
+Console.log($"{s.x} {s.y} {s.z}")
 Vec3 zero = Vec3()
-r.Console.log(zero)
+Console.log(zero)
 // creation by position: all the fields, in order
 Vec3 t = Vec3(1.0, 2.0, 3.0)
-r.Console.log(t)
+Console.log(t)
 
 // parameters and results by value
 var u = add(s, t)
-r.Console.log(u)
-r.Console.log(sum(u))
+Console.log(u)
+Console.log(sum(u))
 
 // = copies
 Vec3 c = u
 c.x = 100.0
-r.Console.log($"{u.x} {c.x}")
+Console.log($"{u.x} {c.x}")
 
 // & parameter changes the caller's struct
 grow(&c)
-r.Console.log($"{c.x} {c.z}")
+Console.log($"{c.x} {c.z}")
 
 // structs inside structs are stored inline
 var b = Box()
-r.Console.log($"{b.id} {b.on} {b.min.z} {b.max.x}")
+Console.log($"{b.id} {b.on} {b.min.z} {b.max.x}")
 b.max.y += 5.0
 b.min = Vec3(z: 9.0)
-r.Console.log(b)
+Console.log(b)
 
 // a struct field of a class
 var h = Holder()
-r.Console.log(h.p.z)
+Console.log(h.p.z)
 h.p.x = 4.0
-r.Console.log(h)
+Console.log(h)
 
 // arrays and vecs of structs: the items take the start values
 arr<Vec3>[3] points
 points[1].y = 6.0
 points[2] = Vec3(7.0, 8.0, 9.0)
-r.Console.log(points)
+Console.log(points)
 var v = vec<Vec3>()
 v.add(Vec3(x: 1.0))
 v[0].z += 10.0
-r.Console.log(v)
+Console.log(v)
 var literal = [Vec3(y: 1.0), Vec3(y: 2.0)]
-r.Console.log(literal[1].y)
+Console.log(literal[1].y)
 
 // printing: the first 3 fields, then ...
-r.Console.log(Big(1, 2, 3, 4).toStr())
-r.Console.log(Stamp(count: 3))
+Console.log(Big(1, 2, 3, 4).toStr())
+Console.log(Stamp(count: 3))
 
 // == field by field
-r.Console.log($"{Vec3(1.0, 2.0, 3.0) == t} {Vec3(x: 1.0) == t} {b == b}")
+Console.log($"{Vec3(1.0, 2.0, 3.0) == t} {Vec3(x: 1.0) == t} {b == b}")
 
 // the values are computed in the order they are written
 i32 calls = 0
 var ordered = Big(d: bump(&calls), a: bump(&calls))
-r.Console.log($"{ordered.a} {ordered.d}")
+Console.log($"{ordered.a} {ordered.d}")

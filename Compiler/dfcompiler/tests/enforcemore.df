@@ -1,29 +1,29 @@
 // A declaration with its own atEnd (spec 14.2): Some a = Some() atEnd { } is atEnd of a, not run when a is null; the last atEnd of an
 // enforce raising with nothing pending bubbles up (spec 7.2.3); enforce expressions in assignments, arguments, var and if conditions
 // (spec 7.2.6)
-alias Root as r
+import Root
 
 public class Trouble(string text) : Exception { }
 
 public class Res(string name) {
   public string name
-  public fun release() { r.Console.log("  release " + name) }
+  public fun release() { Console.log("  release " + name) }
   unrestricted fun i32 size() { (i32)name.len }
 }
 
 fun declared() {
   Res a = Res("a") atEnd { a.release() }
-  Res none = null atEnd { r.Console.log("  wrong: none is null") }
-  i32 n, Res b = 3, Res("bb") atEnd { r.Console.log($"  multiple {n} {b.name}") }
-  r.Console.log("  body")
+  Res none = null atEnd { Console.log("  wrong: none is null") }
+  i32 n, Res b = 3, Res("bb") atEnd { Console.log($"  multiple {n} {b.name}") }
+  Console.log("  body")
 }
 
 fun finallyRaises(i32? v) {
   enforce v {
-    r.Console.log("  block")
+    Console.log("  block")
   }
   atEnd {
-    r.Console.log("  last atEnd raises")
+    Console.log("  last atEnd raises")
     throw Trouble("from the last atEnd")
   }
 }
@@ -33,29 +33,29 @@ fun i32 twice(i32 x) { x * 2 }
 fun expressions(Res f) {
   i32 x = 1
   x = enforce f.size() default { -1 }
-  r.Console.log($"  assigned {x}")
-  r.Console.log($"  argument {twice(enforce f.size() default { -5 })}")
+  Console.log($"  assigned {x}")
+  Console.log($"  argument {twice(enforce f.size() default { -5 })}")
   var v = enforce f.size() default { 0 }
-  r.Console.log($"  var {v}")
+  Console.log($"  var {v}")
 }
 
 fun sized(Res f) {
   if enforce f.size() default { 0 } > 2 {
-    r.Console.log("  big")
+    Console.log("  big")
   } else {
-    r.Console.log("  small or none")
+    Console.log("  small or none")
   }
 }
 
-r.Console.log("declaration atEnd")
+Console.log("declaration atEnd")
 declared()
-r.Console.log("last atEnd raising")
+Console.log("last atEnd raising")
 finallyRaises(1)
-catch Trouble ex { r.Console.log("  caught outside: " + ex.message) }
-r.Console.log("expressions")
+catch Trouble ex { Console.log("  caught outside: " + ex.message) }
+Console.log("expressions")
 expressions(Res("four"))
 expressions(null)
-r.Console.log("if condition")
+Console.log("if condition")
 sized(Res("four"))
 sized(null)
-r.Console.log("done")
+Console.log("done")

@@ -1,0 +1,1 @@
+for_writable_tuple_string.df(3): error: feature not supported: &s on a string part of a tuple item (struct fields and the other parts have it)

@@ -130,6 +130,9 @@ public sealed partial class CodeGen {
     if (simple != null) {
       return simple;
     }
+    if (BoxInner(elem) is string counted) {
+      return CountedCompareFunction(elem, counted);   // sort() of list<@T>, vec<@T>, arr<@T> (spec 12.7, 6.2.2)
+    }
     if (IsClass(elem) && !IsArr(elem) && !IsCountedType(elem) && !IsWeakType(elem) && !boxInner.ContainsKey(elem)) {
       return "df_cmp_objp";
     }
@@ -143,6 +146,33 @@ public sealed partial class CodeGen {
     if (arrayHelpers.Add(name)) {
       arrayCode.Append($"static int {name}(const void* a, const void* b) {{\n  const {CType(elem)}* x = (const {CType(elem)}*)a;\n  const {CType(elem)}* y = (const {CType(elem)}*)b;\n  return {body};\n}}\n\n");
     }
+    return name;
+  }
+
+  // the comparer of the items of a collection of counted objects or values: the boxes are opened and what they hold is compared with the
+  // default order of its type (objects: compareTo of a Comparable class, else type name and address; a null box is first)
+  string? CountedCompareFunction(string box, string counted) {
+    string name = "df_cmprc_" + System.Text.RegularExpressions.Regex.Replace(Mangle(box), @"[^A-Za-z0-9_]", "_");
+    if (arrayHelpers.Contains(name)) {
+      return name;
+    }
+    string item = CType(box);
+    string field = BoxField(box);
+    string body;
+    if (IsCountedValueType(counted)) {
+      string? inner = CompareFunction(counted);
+      if (inner == null) {
+        return null;
+      }
+      string Read(string p) => CellRead($"(*({item}*){p} != NULL ? (*({item}*){p})->{field} : NULL)", counted).Replace(MapBorrowMark, "");
+      body = $"  {CType(counted)} x = {Read("a")};\n  {CType(counted)} y = {Read("b")};\n  return {inner}(&x, &y);\n";
+    } else {
+      string obj = CType(counted);
+      string Read(string p) => $"(*({item}*){p} != NULL ? (void*)DF_RC_OBJ({obj}, (*({item}*){p})->{field}) : NULL)";
+      body = $"  return df_obj_cmp({Read("a")}, {Read("b")});\n";
+    }
+    arrayHelpers.Add(name);
+    arrayCode.Append($"static int {name}(const void* a, const void* b) {{\n{body}}}\n\n");
     return name;
   }
 

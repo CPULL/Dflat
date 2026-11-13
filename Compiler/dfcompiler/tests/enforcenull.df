@@ -1,50 +1,50 @@
 // enforce, step 2 (spec 7.2.1, 7.2.2): the checks of T?, objects, counted objects and weak references in the order written; when one fails
 // the first null clause that names it (or names none) runs, the else branch in the short form, or nothing when no clause matches
-alias Root as r
+import Root
 
 public class Dog(string name) {
   public string name
 } atEnd {
-  r.Console.log("  end " + name)
+  Console.log("  end " + name)
 }
 
 fun check(i32? a, Dog b, i32? c) {
   enforce a, b, c {
-    r.Console.log($"  all there: {a + c} {b.name}")
+    Console.log($"  all there: {a + c} {b.name}")
   }
-  null on a { r.Console.log("  no a") }
-  null on b, c { r.Console.log("  no b or c") }
+  null on a { Console.log("  no a") }
+  null on b, c { Console.log("  no b or c") }
 }
 
 fun firstClause(i32? a, i32? b) {
   enforce a, b {
-    r.Console.log("  both")
+    Console.log("  both")
   }
-  null on b { r.Console.log("  b missing (named)") }
-  null { r.Console.log("  something missing (any)") }
+  null on b { Console.log("  b missing (named)") }
+  null { Console.log("  something missing (any)") }
 }
 
 fun quiet(i32? a) {
   enforce a {
-    r.Console.log("  a is there")
+    Console.log("  a is there")
   }
   null on a { }
-  r.Console.log("  goes on")
+  Console.log("  goes on")
 }
 
 fun noClause(i32? a, i32? b) {
   enforce a, b {
-    r.Console.log("  both there")
+    Console.log("  both there")
   }
-  null on a { r.Console.log("  no a") }
-  r.Console.log("  after")                 // b missing: no clause for it, the enforce is skipped quietly
+  null on a { Console.log("  no a") }
+  Console.log("  after")                 // b missing: no clause for it, the enforce is skipped quietly
 }
 
 fun shortForm(i32? a) {
   enforce a {
-    r.Console.log($"  value {a}")
+    Console.log($"  value {a}")
   } else {
-    r.Console.log("  else")
+    Console.log("  else")
   }
 }
 
@@ -52,49 +52,49 @@ fun weak() {
   @Dog first = Dog("rex")
   %Dog w = %first
   enforce w {
-    r.Console.log("  alive: " + w.name)
+    Console.log("  alive: " + w.name)
   }
-  null on w { r.Console.log("  gone") }
+  null on w { Console.log("  gone") }
   first is done.
   enforce w {
-    r.Console.log("  alive: " + w.name)
+    Console.log("  alive: " + w.name)
   }
-  null on w { r.Console.log("  gone") }
+  null on w { Console.log("  gone") }
 }
 
 fun counted() {
   @Dog d = Dog("max")
   enforce d {
-    r.Console.log("  counted: " + d.name)
+    Console.log("  counted: " + d.name)
   }
   d is done.
   enforce d {
-    r.Console.log("  counted: " + d.name)
+    Console.log("  counted: " + d.name)
   }
-  null { r.Console.log("  counted released") }
+  null { Console.log("  counted released") }
 }
 
-r.Console.log("all three")
+Console.log("all three")
 check(1, Dog("a"), 2)
-r.Console.log("a null")
+Console.log("a null")
 check(null, Dog("b"), 2)
-r.Console.log("b null")
+Console.log("b null")
 check(1, null, 2)
-r.Console.log("c null")
+Console.log("c null")
 check(1, Dog("c"), null)
-r.Console.log("first clause")
+Console.log("first clause")
 firstClause(1, null)
 firstClause(null, 1)
-r.Console.log("quiet")
+Console.log("quiet")
 quiet(null)
-r.Console.log("no clause")
+Console.log("no clause")
 noClause(1, null)
 noClause(null, 1)
-r.Console.log("short form")
+Console.log("short form")
 shortForm(3)
 shortForm(null)
-r.Console.log("weak")
+Console.log("weak")
 weak()
-r.Console.log("counted")
+Console.log("counted")
 counted()
-r.Console.log("done")
+Console.log("done")

@@ -1,11 +1,11 @@
 // Read/write counted objects (spec 7.2, 12.7): &@T and &%T take the lock of their object in enforce (timeout from the enforce or the
 // default of @T() timeout); a busy lock goes to lockfail; a write through a &@T without the lock raises WritingOnRefCountWithoutLockingException
-alias Root as r
+import Root
 public class Player(string name) {
   public string name
   public i32 score
 } atEnd {
-  r.Console.log("  end " + name)
+  Console.log("  end " + name)
 }
 fun addScore(&@Player p, i32 n) {
   enforce p {
@@ -14,11 +14,11 @@ fun addScore(&@Player p, i32 n) {
 }
 fun nested(&@Player p) {
   enforce p {
-    r.Console.log("  outer holds the lock")
+    Console.log("  outer holds the lock")
     enforce p timeout 50 {
-      r.Console.log("  never")
+      Console.log("  never")
     }
-    lockfail on p { r.Console.log("  inner: lockfail") }
+    lockfail on p { Console.log("  inner: lockfail") }
   }
 }
 fun unlocked(&@Player p) {
@@ -26,9 +26,9 @@ fun unlocked(&@Player p) {
 }
 fun tryUnlocked(&@Player p) {
   unlocked(&@p)
-  r.Console.log("  never printed")
+  Console.log("  never printed")
   catch WritingOnRefCountWithoutLockingException {
-    r.Console.log("  caught: write without the lock")
+    Console.log("  caught: write without the lock")
   }
 }
 fun run() {
@@ -37,22 +37,22 @@ fun run() {
     player.score = 10
     player.score++
   }
-  atEnd { r.Console.log($"  score {player.score}") }
+  atEnd { Console.log($"  score {player.score}") }
   addScore(&@player, 5)
-  r.Console.log($"  after add {player.score}")
+  Console.log($"  after add {player.score}")
   nested(&@player)
   &%Player watcher = %player
   enforce watcher timeout 0 {
     watcher.name = "bob"
   }
-  r.Console.log($"  name {player.name}")
+  Console.log($"  name {player.name}")
   @Player reader = player
-  r.Console.log($"  reader {reader.name}")
+  Console.log($"  reader {reader.name}")
   tryUnlocked(&@player)
   enforce player {
     unlocked(&@player)
-    r.Console.log($"  locked write {player.score}")
+    Console.log($"  locked write {player.score}")
   }
-  r.Console.log("  end of main")
+  Console.log("  end of main")
 }
 run()

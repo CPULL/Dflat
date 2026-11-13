@@ -1,35 +1,35 @@
 // A new object that nothing keeps ends when its statement ends (point 85): an argument to a borrowing parameter, the receiver of a call or
 // of a field read. One kept by a variable, a field or a ->T parameter is not a temporary
-alias Root as r
+import Root
 
 public class Dog(string name) {
   public string name
   public fun ->string bark() { name + " barks" }
   public fun Dog same() { this }
 } atEnd {
-  r.Console.log("  end " + name)
+  Console.log("  end " + name)
 }
 
 fun ->string show(Dog d) { "show " + d.name }
 fun ->string both(Dog a, Dog b) { a.name + " and " + b.name }
 fun ->Dog make(string name) { Dog(name) }
-fun keep(->Dog d) { r.Console.log("  kept " + d.name) }
+fun keep(->Dog d) { Console.log("  kept " + d.name) }
 
-r.Console.log("argument")
-r.Console.log(show(Dog("a")))
-r.Console.log("two arguments")
-r.Console.log(both(Dog("b"), make("c")))
-r.Console.log("receiver of a call")
-r.Console.log(make("d").bark())
-r.Console.log("receiver of a field")
-r.Console.log(Dog("e").name)
-r.Console.log("borrowed result used in the same statement")
-r.Console.log(Dog("f").same().bark())
-r.Console.log("in a loop")
+Console.log("argument")
+Console.log(show(Dog("a")))
+Console.log("two arguments")
+Console.log(both(Dog("b"), make("c")))
+Console.log("receiver of a call")
+Console.log(make("d").bark())
+Console.log("receiver of a field")
+Console.log(Dog("e").name)
+Console.log("borrowed result used in the same statement")
+Console.log(Dog("f").same().bark())
+Console.log("in a loop")
 for i32 i = 0..2 {
-  r.Console.log(show(Dog($"loop {i}")))
+  Console.log(show(Dog($"loop {i}")))
 }
-r.Console.log("kept, not a temporary")
+Console.log("kept, not a temporary")
 Dog g = Dog("g")
 keep(Dog("h"))
-r.Console.log("done")
+Console.log("done")

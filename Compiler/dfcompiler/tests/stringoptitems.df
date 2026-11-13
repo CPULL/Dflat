@@ -1,6 +1,6 @@
 // string? (spec 7.1) in fields and in the items of arr, vec and list: each owns its string; the end of the object or collection frees it
 namespace stringoptitems
-alias Root as r
+import Root
 
 public class Person(string name) {
   public string name
@@ -16,17 +16,17 @@ fun keep(&Person p, string text) {
 
 fun fields() {
   Person a = Person("ann")
-  r.Console.log(a.show())
+  Console.log(a.show())
   a.nick = "annie"
   a.rename(null)
-  r.Console.log($"{a.nick == null} {a.show()}")
+  Console.log($"{a.nick == null} {a.show()}")
   a.note = ""
-  r.Console.log($"[{a.note}] {a.note == null}")
+  Console.log($"[{a.note}] {a.note == null}")
   keep(&a, "x")
   Person b = a!
   b.nick = "copy"
-  r.Console.log($"{a.show()} / {b.show()}")
-  r.Console.log(a)
+  Console.log($"{a.show()} / {b.show()}")
+  Console.log(a)
 }
 
 fun arrays() {
@@ -36,19 +36,19 @@ fun arrays() {
   a[0] = "y".toUpper()
   a[1] = own
   a[2] = null
-  r.Console.log($"{a} {a[0] == "Y"} {a[2] == null}")
+  Console.log($"{a} {a[0] == "Y"} {a[2] == null}")
   for string? s in a {
-    r.Console.print($"{s ?? "_"};")
+    Console.print($"{s ?? "_"};")
   }
-  r.Console.log("")
+  Console.log("")
   arr<string?> b = a!
   b[0] = "z"
-  r.Console.log($"{a[0]} {b[0]}")
+  Console.log($"{a[0]} {b[0]}")
   a.fill("f")
   a.clear()
   arr<string?> c = [null, "q"]
   b.copyFrom(0, c, 0, 2)
-  r.Console.log($"{a} {b} {b.has(null)} {b.indexOf("q")}")
+  Console.log($"{a} {b} {b.has(null)} {b.indexOf("q")}")
 }
 
 fun vecs() {
@@ -64,7 +64,7 @@ fun vecs() {
   v.removeAt(0)
   vec<string?> w = v.clone()
   w.add(null)
-  r.Console.log($"{last} {v} {w.len} {w.filter((string? s) { s != null })}")
+  Console.log($"{last} {v} {w.len} {w.filter((string? s) { s != null })}")
 }
 
 fun lists() {
@@ -79,7 +79,7 @@ fun lists() {
   l.fill("f")
   arr<string?> dest = [null, null]
   dest.copyFrom(0, m, 0, 2)
-  r.Console.log($"{l} {m} {dest} {m.map<string>((string? s) { s ?? "-" })}")
+  Console.log($"{l} {m} {dest} {m.map<string>((string? s) { s ?? "-" })}")
 }
 
 fields()

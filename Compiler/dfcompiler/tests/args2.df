@@ -1,4 +1,4 @@
-alias Root as r
+import Root
 fun main(arr<string> args) {
-  r.Console.log("no int: " + args.len.toStr())
+  Console.log("no int: " + args.len.toStr())
 }

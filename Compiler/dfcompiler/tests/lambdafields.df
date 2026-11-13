@@ -1,13 +1,13 @@
 // lambdas in methods (fields by their bare names) and captures that own objects and arrays: a!, ->a (spec 13.3.1)
 namespace lambdafields
-alias Root as r
+import Root
 
 public class Dog(string name, i32 age) {
   public string name
   public i32 age
   unrestricted fun ->string bark() { name + "!" }
 } atEnd {
-  r.Console.log("end " + name)
+  Console.log("end " + name)
 }
 
 public class Kennel {
@@ -46,10 +46,10 @@ fun ->fun u64() withArrayCopy() {
 }
 
 Kennel k = Kennel()
-r.Console.log(k.describe())
+Console.log(k.describe())
 string() kept = k.keeper()
-r.Console.log(kept())
-r.Console.log(withDog()())
-r.Console.log(withArray()())
-r.Console.log(withArrayCopy()())
-r.Console.log("done")
+Console.log(kept())
+Console.log(withDog()())
+Console.log(withArray()())
+Console.log(withArrayCopy()())
+Console.log("done")

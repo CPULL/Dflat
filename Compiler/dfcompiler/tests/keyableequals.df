@@ -1,6 +1,6 @@
 // hmap keys of a class that replaces equals (spec 6.8.5.1, 6.2): the same hash is not enough, equals decides; .hash of a Keyable object
 // runs the check of 11.2.1; a Keyable class with a collection field gets a level 1 warning
-alias Root as r
+import Root
 
 class Tag(string name) : Keyable {
   public string name
@@ -22,9 +22,9 @@ hmap<Tag, i32> counts = []
 counts[Tag("a")] = 1
 counts[Tag("b")] = 2                               // same hash, equals says different: two keys
 counts[Tag("a")] += 10
-r.Console.log($"{counts.len} {counts[Tag("a")]} {counts[Tag("b")]}")
-r.Console.log(counts.hasKey(Tag("c")))
+Console.log($"{counts.len} {counts[Tag("a")]} {counts[Tag("b")]}")
+Console.log(counts.hasKey(Tag("c")))
 Tag t = Tag("x")
-r.Console.log(t.hash)
+Console.log(t.hash)
 Bag b = Bag("one")
-r.Console.log(b.label)
+Console.log(b.label)

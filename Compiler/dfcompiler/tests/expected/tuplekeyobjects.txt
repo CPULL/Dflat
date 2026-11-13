@@ -1,0 +1,40 @@
+  A ends
+  B ends
+3 a1 true false
+  A ends
+A 1 a1
+B 2 b2
+A 3 a3
+  B ends
+  B ends
+after remove 2 A
+  H ends
+  H ends
+1 2
+  H ends
+1 true
+  S0 ends
+  S1 ends
+[(0, Dog { name: S0 }), (1, Dog { name: S1 })]
+end of keys
+  S0 ends
+  S1 ends
+  cat C ends
+  cat C ends
+  H ends
+  A ends
+  A ends
+  A ends
+show New 1
+  New ends
+show Rex 2
+end of lent Rex
+  Rex ends
+  V1 ends
+[1: (Dog { name: V3 }, 3)] V2
+2
+end of values
+  V3 ends
+  V2 ends
+done
+---- exit code 0 ----

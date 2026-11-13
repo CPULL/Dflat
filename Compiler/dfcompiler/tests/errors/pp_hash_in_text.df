@@ -1,4 +1,4 @@
-alias Root as r
+import Root
 
 ##region parts #2#
 ##endregion

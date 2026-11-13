@@ -1,4 +1,4 @@
-alias Root as r
+import Root
 
 Generic Narrow { i16, u32 }
 
@@ -7,4 +7,4 @@ public class Box<Item>(->Item value) {
   public static i32 count = 0
 }
 
-r.Console.log(Box<Narrow>.count)
+Console.log(Box<Narrow>.count)

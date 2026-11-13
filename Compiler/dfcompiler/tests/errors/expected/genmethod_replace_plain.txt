@@ -1,0 +1,1 @@
+genmethod_replace_plain.df(5): error: 'm' is a generic method of P: the replacing method is generic too, and replaces it for every type (spec 11.3.1)

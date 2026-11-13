@@ -1,8 +1,8 @@
-alias Root as r
+import Root
 
 public class Dog(string name) {
   public string name
 }
 
 vec<i32> numbers = [1, 2]
-r.Console.log(numbers.hasKey(1))
+Console.log(numbers.hasKey(1))

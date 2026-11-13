@@ -1,43 +1,43 @@
-alias Root as r
+import Root
 
 // hmap step 2 (spec 6.8.5.1): string keys (the full hash and a pointer to the hmap's own copy) and string values (inline up to 59 bytes)
 hmap<string, i32> ages = ["alice": 25, "bob": 30, "": 0]
 string name = "car"
 name += "ol"
 ages[name] = 40
-r.Console.log($"{ages["alice"]} {ages["carol"]} {ages[""]} {ages["nobody"]} {ages.len}")
-r.Console.log($"{ages.hasKey("bob")} {ages.hasKey("bo")} {ages.keyOf(30)}")
+Console.log($"{ages["alice"]} {ages["carol"]} {ages[""]} {ages["nobody"]} {ages.len}")
+Console.log($"{ages.hasKey("bob")} {ages.hasKey("bo")} {ages.keyOf(30)}")
 name = "changed"                                 // the hmap has its own copy of "carol"
-r.Console.log(ages.hasKey("carol"))
+Console.log(ages.hasKey("carol"))
 string long = "a key that is longer than sixteen bytes, and then longer than one hundred and twelve bytes, to take every path of rapidhash"
 ages[long] = 7
-r.Console.log($"{ages[long]} {ages.hasKey(long + "!")}")
-r.Console.log(ages.add("alice", 26))             // false: replaced
+Console.log($"{ages[long]} {ages.hasKey(long + "!")}")
+Console.log(ages.add("alice", 26))             // false: replaced
 ages.removeAt("bob")
-r.Console.log($"{ages.hasKey("bob")} {ages.len}")
+Console.log($"{ages.hasKey("bob")} {ages.len}")
 i32 sum = 0
 for (string k, i32 v) in ages {
   sum += v
 }
-r.Console.log(sum)                               // 26 + 40 + 0 + 7
+Console.log(sum)                               // 26 + 40 + 0 + 7
 
 hmap<i32, string> words = [1: "one", 2: "two"]
 words[3] = "a value of more than fifty-nine bytes, so the slot points to it instead of holding it"
 string kept = words[3]                           // a copy
 words[3] = "short"
-r.Console.log($"{kept.len} {words[3]}")
+Console.log($"{kept.len} {words[3]}")
 string out = ->words[1]
-r.Console.log($"{out} {words.len} {words.hasKey(1)}")
+Console.log($"{out} {words.len} {words.hasKey(1)}")
 words[4] = "two"
-r.Console.log($"{words.removeAll("two")} {words.len}")
-r.Console.log(words)
+Console.log($"{words.removeAll("two")} {words.len}")
+Console.log(words)
 words.clear()
-r.Console.log(words.len)
+Console.log(words.len)
 
 hmap<string, string> pairs = ["k": "v"]
 pairs["k"] += "alue"
-r.Console.log(pairs["k"])
-r.Console.log(pairs.remove("value"))
+Console.log(pairs["k"])
+Console.log(pairs.remove("value"))
 
 // many string keys, checked against arrays
 hmap<string, u32> table = []
@@ -72,7 +72,7 @@ while n < 2000 {
   }
   n += 1
 }
-r.Console.log($"{wrong} {table.len == count}")
-r.Console.log(table.removeAll(5u) <= 1u)
+Console.log($"{wrong} {table.len == count}")
+Console.log(table.removeAll(5u) <= 1u)
 table.clear()
-r.Console.log(table.len)
+Console.log(table.len)

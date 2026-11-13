@@ -1,4 +1,4 @@
-alias Root as r
+import Root
 
 ##if build == debug
 ##emiterror "stop here"

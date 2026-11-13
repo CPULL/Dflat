@@ -1,0 +1,9 @@
+namespace growstep
+vec<u8> v = []
+v.add(1b)
+Root.Console.log(v.capacity)
+for i32 i in 0..250 { v.add(1b) }
+Root.Console.log(v.capacity)
+vec<i32> w = []
+w.reserve(150)
+Root.Console.log(w.capacity)

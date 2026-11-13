@@ -1,4 +1,4 @@
-alias Root as r
+import Root
 
 trait Sequence {
   placeholder Item
@@ -13,4 +13,4 @@ fun r64 sum<Source : Sequence>(Source items) where Source.Item : Numeric {
   return 0.0
 }
 
-r.Console.log(sum(Names()))
+Console.log(sum(Names()))

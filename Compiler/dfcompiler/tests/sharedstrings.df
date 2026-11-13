@@ -1,6 +1,6 @@
 // a field shares the string it is given (spec 4): k.label = a is the same string, a change through a is seen through the field, and when
 // a ends the field keeps the text (level 3 warning). A borrowed string (a parameter), or an object of an inner scope, gets a copy.
-alias Root as r
+import Root
 
 class Kennel {
   public string label
@@ -20,9 +20,9 @@ fun copyParam(&Kennel k, string s) {
 fun rebind(&Kennel k) {
   string a = "first " + 1.toStr()
   k.label = a
-  r.Console.log(k.label)
+  Console.log(k.label)
   a = "second " + 2.toStr()        // a gets a new string; the field keeps the first
-  r.Console.log($"{a} / {k.label}")
+  Console.log($"{a} / {k.label}")
 }
 
 fun inner(&Kennel k) {
@@ -31,23 +31,23 @@ fun inner(&Kennel k) {
     Kennel local = Kennel()
     local.label = a                // local ends first: it takes a copy
     a += "?"
-    r.Console.log(local.label)
+    Console.log(local.label)
   }
-  r.Console.log(a)
+  Console.log(a)
 }
 
 Kennel k = Kennel()
 string a = "top " + 0.toStr()
 k.label = a
 a += " changed"
-r.Console.log(k.label)             // top 0 changed
+Console.log(k.label)             // top 0 changed
 fill(&k, 5)
-r.Console.log(k.label)             // box 5!
+Console.log(k.label)             // box 5!
 string given = "given " + 9.toStr()
 copyParam(&k, given)
 given += "!"
-r.Console.log(k.other)             // given 9
+Console.log(k.other)             // given 9
 rebind(&k)
 inner(&k)
 k.label = "literal"
-r.Console.log(k.label)
+Console.log(k.label)

@@ -1,15 +1,15 @@
 // A local array made in its scope ends with the scope (spec 6.8.1, point 20): its objects end, its strings and its block are freed. It can
 // be read as a[i], a.member, in a for, given to a function that only reads it, or returned (it moves to the caller, which then owns it).
 // One assigned, moved with ->, viewed or kept by a function is left as before (not freed)
-alias Root as r
+import Root
 
 public class Dog(string name) {
   public string name
 } atEnd {
-  r.Console.log("  end " + name)
+  Console.log("  end " + name)
 }
 
-fun show(arr<Dog> dogs) { r.Console.log($"  {dogs.len} dogs") }
+fun show(arr<Dog> dogs) { Console.log($"  {dogs.len} dogs") }
 fun i32 count(arr<Dog> dogs) {
   show(dogs)                          // passed on to another reader
   (i32)dogs.len
@@ -26,46 +26,46 @@ public class Keeper {
 
 fun objects() {
   arr<Dog> dogs = [Dog("a"), Dog("b")]
-  r.Console.log("  first " + dogs[0].name)
+  Console.log("  first " + dogs[0].name)
   for var d in dogs {
-    r.Console.log("  loop " + d.name)
+    Console.log("  loop " + d.name)
   }
 }
 
 fun strings() {
   arr<string> words = ["one", "two"]
   words[1] = "two" + "!"
-  r.Console.log($"  {words[0]} {words[1]} {words.len}")
+  Console.log($"  {words[0]} {words[1]} {words.len}")
 }
 
 fun nested() {
   arr<arr<Dog>> rows = [[Dog("r1")], [Dog("r2"), Dog("r3")]]
-  r.Console.log($"  rows {rows.len}")
+  Console.log($"  rows {rows.len}")
 }
 
 fun sized() {
   arr<Dog> slots = arr<Dog>[3]
   slots[1] = Dog("slot")
   slots.fill(null)
-  r.Console.log("  filled")
+  Console.log("  filled")
 }
 
 fun inLoop() {
   for i32 i = 0..2 {
     arr<Dog> pass = [Dog($"pass {i}")]
-    r.Console.log("  " + pass[0].name)
+    Console.log("  " + pass[0].name)
   }
 }
 
 fun given() {
   arr<Dog> read = [Dog("read")]
-  r.Console.log($"  count {count(read)}")   // the function only reads it: still freed here
+  Console.log($"  count {count(read)}")   // the function only reads it: still freed here
 }
 
 fun returned() {
   arr<Dog> mine = pack("p")
   arr<Dog> other = direct()
-  r.Console.log("  got " + mine[1].name + " " + other[0].name)
+  Console.log("  got " + mine[1].name + " " + other[0].name)
 }
 
 fun kept(&Keeper k) {
@@ -73,23 +73,23 @@ fun kept(&Keeper k) {
   k.keep(held)                        // the function clones it: held is still freed here
 }
 
-r.Console.log("objects")
+Console.log("objects")
 objects()
-r.Console.log("strings")
+Console.log("strings")
 strings()
-r.Console.log("nested")
+Console.log("nested")
 nested()
-r.Console.log("sized")
+Console.log("sized")
 sized()
-r.Console.log("in a loop")
+Console.log("in a loop")
 inLoop()
-r.Console.log("given to a reader")
+Console.log("given to a reader")
 given()
-r.Console.log("returned")
+Console.log("returned")
 returned()
-r.Console.log("kept")
+Console.log("kept")
 {
   Keeper keeper = Keeper()
   kept(&keeper)
 }
-r.Console.log("done")
+Console.log("done")

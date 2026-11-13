@@ -1,38 +1,38 @@
-alias Root as r
+import Root
 list<i32> l = [1, 2, 3]
 l.clear()
-r.Console.log(l.len)
+Console.log(l.len)
 l.add(4)
-r.Console.log(l)
+Console.log(l)
 vec<i32> v = [1, 2, 3]
 v.clear()
-r.Console.log(v)
+Console.log(v)
 arr<i32> a = [5, 6]
 a.clear()
-r.Console.log(a)
+Console.log(a)
 list<string> words = ["a", "b"]
 fun string clearWords(&list<string> words) {
   for string w in words { words.clear() }
   return "cleared"
   catch ModifyingIteratedCollectionException { return "list iterated" }
 }
-r.Console.log(clearWords(&words))
-r.Console.log(words.len)
+Console.log(clearWords(&words))
+Console.log(words.len)
 map<string, i32> m = ["a": 1, "b": 2]
 fun string clearMap(&map<string, i32> m) {
   for (string k, i32 n) in m { m.clear() }
   return "cleared"
   catch ModifyingIteratedCollectionException { return "map iterated" }
 }
-r.Console.log(clearMap(&m))
+Console.log(clearMap(&m))
 m.clear()
-r.Console.log(m.len)
+Console.log(m.len)
 hset<i32> s = [1, 2]
 fun string clearSet(&hset<i32> s) {
   for i32 x in s { s.clear() }
   return "cleared"
   catch ModifyingIteratedCollectionException { return "set iterated" }
 }
-r.Console.log(clearSet(&s))
+Console.log(clearSet(&s))
 s.clear()
-r.Console.log(s.len)
+Console.log(s.len)

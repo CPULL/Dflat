@@ -1,12 +1,12 @@
 // Arrays in collections (spec 6.8.1): a collection owns its arrays like a field (a new array as it is, ->a moved, plain items copied);
 // c[i] borrows the array in place; removed and replaced arrays end, takeAt / replace / pop hand them to the caller, the rest end with the
 // collection
-alias Root as r
+import Root
 
 public class Dog(string name) {
   public string name
 } atEnd {
-  r.Console.log("  end " + name)
+  Console.log("  end " + name)
 }
 fun vecs() {
   vec<arr<Dog>> v = []
@@ -14,37 +14,37 @@ fun vecs() {
   v.add([Dog("b")])
   v.add([Dog("c")])
   v.add([Dog("d")])
-  r.Console.log("removeAt 0")
+  Console.log("removeAt 0")
   v.removeAt(0)
-  r.Console.log("replace 0")
+  Console.log("replace 0")
   v[0] = [Dog("b2")]
-  r.Console.log("pop")
+  Console.log("pop")
   arr<Dog> got
   v.pop(&got)
-  r.Console.log("  took " + got[0].name)
-  r.Console.log("replace 0 with result")
+  Console.log("  took " + got[0].name)
+  Console.log("replace 0 with result")
   arr<Dog> old = v.replace(0, [Dog("b3")])
-  r.Console.log("  old " + old[0].name)
-  r.Console.log("end of vecs")
+  Console.log("  old " + old[0].name)
+  Console.log("end of vecs")
 }
 fun lists() {
   list<arr<Dog>> l = []
   l.add([Dog("la")])
   l.add([Dog("lb")])
   l.add([Dog("lc")])
-  r.Console.log("removeAt 0")
+  Console.log("removeAt 0")
   l.removeAt(0)
-  r.Console.log("replace 0")
+  Console.log("replace 0")
   l[0] = [Dog("lb2")]
-  r.Console.log("takeAt 0")
+  Console.log("takeAt 0")
   arr<Dog> got = l.takeAt(0)
-  r.Console.log("end of lists")
+  Console.log("end of lists")
 }
 fun arrays() {
   arr<arr<Dog>> aa = [[Dog("x")], [Dog("y")]]
-  r.Console.log("replace 0")
+  Console.log("replace 0")
   aa[0] = [Dog("x2")]
-  r.Console.log("end of arrays")
+  Console.log("end of arrays")
 }
 fun inPlace() {
   list<arr<i32>> l = [[1, 2], [3]]
@@ -54,15 +54,15 @@ fun inPlace() {
   arr<i32> a = [7, 8]
   l.add(a)                              // plain items: the list gets a copy
   a[0] = 70
-  r.Console.log($"  {l[1][0]} {l[0][1]} {l[2][0]} {a[0]}")
+  Console.log($"  {l[1][0]} {l[0][1]} {l[2][0]} {a[0]}")
   vec<arr<Dog>> v = []
   arr<Dog> pack = [Dog("p")]
   v.add(->pack)                         // objects: moved in
-  r.Console.log($"  moved {v.len}, left {pack.len}")
+  Console.log($"  moved {v.len}, left {pack.len}")
 }
 vecs()
 lists()
 arrays()
-r.Console.log("in place")
+Console.log("in place")
 inPlace()
-r.Console.log("done")
+Console.log("done")

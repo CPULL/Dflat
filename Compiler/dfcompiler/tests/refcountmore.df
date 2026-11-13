@@ -1,10 +1,10 @@
 namespace refcountmore
-alias Root as r
+import Root
 
 public class Dog(string name) {
   public string name
 } atEnd {
-  r.Console.log("  end " + name)
+  Console.log("  end " + name)
 }
 
 class Kennel {
@@ -16,49 +16,49 @@ class Kennel {
 class Walker {
   public Walker(@Dog d) {
     @Dog spare = Dog("spare")
-    r.Console.log("walker made")
+    Console.log("walker made")
   } atEnd {
-    r.Console.log("fragment sees " + d.name + " and " + spare.name)
+    Console.log("fragment sees " + d.name + " and " + spare.name)
   }
 }
 
-fun take(@Dog d) { r.Console.log($"take {d.name} {d.usersCount}") }
+fun take(@Dog d) { Console.log($"take {d.name} {d.usersCount}") }
 
-r.Console.log("1 move out of a field")
+Console.log("1 move out of a field")
 var k = Kennel()
 k.boss = @Dog("rex")
 take(->k.boss)
-r.Console.log(k.boss == null)
+Console.log(k.boss == null)
 k.boss = @Dog("max")
 @Dog moved = ->k.boss
-r.Console.log($"{moved.name} {moved.usersCount} {k.boss == null}")
+Console.log($"{moved.name} {moved.usersCount} {k.boss == null}")
 
-r.Console.log("2 multiple assignment")
+Console.log("2 multiple assignment")
 @Dog a, @Dog b = @Dog("a"), @Dog("b")
-r.Console.log($"{a.name} {b.name}")
+Console.log($"{a.name} {b.name}")
 a, b = b, a
-r.Console.log($"{a.name} {b.name} {a.usersCount} {b.usersCount}")
+Console.log($"{a.name} {b.name} {a.usersCount} {b.usersCount}")
 @Dog c, i32 n = a, 3
-r.Console.log($"{c.name} {c.usersCount} {n}")
+Console.log($"{c.name} {c.usersCount} {n}")
 
-r.Console.log("3 counted in atEnd")
+Console.log("3 counted in atEnd")
 {
   atEnd {
     @Dog late = Dog("late")
-    r.Console.log("atEnd has " + late.name)
+    Console.log("atEnd has " + late.name)
   }
-  r.Console.log("block")
+  Console.log("block")
 }
 
-r.Console.log("4 destructor fragment")
+Console.log("4 destructor fragment")
 {
   @Dog walked = Dog("walked")
   var w = Walker(@walked)
-  r.Console.log($"walked users {walked.usersCount}")
+  Console.log($"walked users {walked.usersCount}")
 }
 
-r.Console.log("5 static counted field")
+Console.log("5 static counted field")
 Kennel.shared = @Dog("shared")
 @Dog s = Kennel.shared
-r.Console.log($"{s.name} {s.usersCount}")
-r.Console.log("end")
+Console.log($"{s.name} {s.usersCount}")
+Console.log("end")

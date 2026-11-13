@@ -1,5 +1,5 @@
 namespace structtuples
-alias Root as r
+import Root
 
 struct Vec2 { r32 x, r32 y }
 struct Flip { r32 b, r32 a }
@@ -19,28 +19,28 @@ fun Vec2 make() { Vec2(5.0, 6.0) }
 
 var s = Sprite()
 s.pos = Vec2(12.5, 5.0)
-r.Console.log($"{s.pos.x} {s.pos.y}")
+Console.log($"{s.pos.x} {s.pos.y}")
 var f = Flip(1.0, 2.0)
 s.pos = f
-r.Console.log($"{s.pos.x} {s.pos.y}")
+Console.log($"{s.pos.x} {s.pos.y}")
 s.pos = make()
-r.Console.log($"{s.pos.x} {s.pos.y}")
+Console.log($"{s.pos.x} {s.pos.y}")
 (r32 x, r32 y) t = Vec2(7.0, 8.0)
-r.Console.log(t)
+Console.log(t)
 r32 a, r32 b = f
-r.Console.log($"{a} {b}")
+Console.log($"{a} {b}")
 i32 w, i32 h = bounds()
-r.Console.log($"{w} {h}")
+Console.log($"{w} {h}")
 var p = person()
-r.Console.log(p)
+Console.log(p)
 Named n = Named(name: "bob", age: 4)
 string who, i32 age = n
 n.name = "changed"
-r.Console.log($"{who} {age} {n.name}")
-r.Console.log(Vec2(1.0, 2.0).hash == Vec2(1.0, 2.0).hash)
-r.Console.log(Vec2(1.0, 2.0).hash == Vec2(2.0, 1.0).hash)
-r.Console.log(n.hash == Named(name: "changed", age: 4).hash)
+Console.log($"{who} {age} {n.name}")
+Console.log(Vec2(1.0, 2.0).hash == Vec2(1.0, 2.0).hash)
+Console.log(Vec2(1.0, 2.0).hash == Vec2(2.0, 1.0).hash)
+Console.log(n.hash == Named(name: "changed", age: 4).hash)
 var g = Grid(cells: [1b, 2b, 3b])
 var g2 = g
 g2.cells[2] = 9b
-r.Console.log(g.hash == g2.hash)
+Console.log(g.hash == g2.hash)

@@ -1,0 +1,72 @@
+// Generic methods of classes and traits (spec 11.3.1): fun addSize<T>(T t) and fun neg(Ints x) inside a class make one copy per type list,
+// inferred or written (s.addSize<i32>(5)), also called without a receiver inside the class; a replacing method is generic too and
+// replaces every copy; a generic method of a trait is replaced by the classes. A written type argument is not inferred again (same<u64>(2))
+import Root
+Generic Ints { i32, i16, i64 }
+class SizeChecker {
+  public uns total = 0
+
+  public fun addSize<T>(T t) {
+    total += t is ? {
+      i32: 4, u64: 8,
+      default: t.sizeof
+    }
+  }
+
+  public fun neg(Ints integer) {
+    Console.log($"neg {-integer}")
+  }
+
+  public fun T same<T>(T x) { x }
+
+  public fun inside() {
+    addSize(1)
+    addSize<i32>(1)
+    this.addSize<u64>(2)
+  }
+}
+class Loud : SizeChecker {
+  replace fun addSize<T>(T t) {
+    Console.log($"loud {t}")
+  }
+}
+class Pair<A> {
+  public A first
+  public fun B mapped<B>(B other) { other }
+}
+trait Shower {
+  public fun show<T>(T x)
+}
+class Left : Shower {
+  replace fun show<T>(T x) { Console.log($"left {x}") }
+}
+class Right : Shower {
+  replace fun show<T>(T x) { Console.log($"right {x}") }
+}
+fun T same<T>(T x) { x }
+fun f() {
+  var s = SizeChecker()
+  s.addSize(5)
+  u64 seven = 7
+  s.addSize(seven)
+  s.addSize<i16>(5)
+  s.addSize(true)
+  s.inside()
+  Console.log($"total {s.total}")
+  s.neg(3)
+  i64 four = 4
+  s.neg(four)
+  Console.log($"{s.same("x")} {s.same(2.5)}")
+  SizeChecker l = Loud()
+  l.addSize(9)
+  l.addSize("str")
+  var p = Pair<string>()
+  Console.log($"{p.mapped(3.5)} {p.mapped<string>("q")}")
+  Shower a = Left()
+  a.show(1)
+  a.show("t")
+  Shower b = Right()
+  b.show(2.5)
+  Console.log($"{same<u64>(2)}")
+}
+f()

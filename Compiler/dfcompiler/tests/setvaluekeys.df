@@ -1,44 +1,44 @@
 // set values as keys and their hash (spec 11.3.6.1, 6.8.4.1, 6.8.5.1): map and set keep the keys ordered by tag, then by value;
 // hmap and hset hash the tag XOR the value; .hash of a set value is tag $ the hash of the value
-alias Root as r
+import Root
 Generic Nums { i32, u64, u8 }
 
 Nums a = (i32)5
 Nums b = 5ul
 Nums c = (i32)5
-r.Console.log(a.hash == c.hash)                          // true: same tag, same value
-r.Console.log(a.hash == b.hash)                          // false: another tag
-r.Console.log(a.hash == "i32".hash)                      // false: the value is part of it
+Console.log(a.hash == c.hash)                          // true: same tag, same value
+Console.log(a.hash == b.hash)                          // false: another tag
+Console.log(a.hash == "i32".hash)                      // false: the value is part of it
 
 map<Nums, string> names = [5b: "small five", 5ul: "big five"]
 names[(i32)5] = "int five"
 names[(i32)-3] = "int minus three"
-r.Console.log(names.len)
-r.Console.log(names[5ul])
-r.Console.log(names[(i32)5])
-r.Console.log(names.hasKey(5b))
+Console.log(names.len)
+Console.log(names[5ul])
+Console.log(names[(i32)5])
+Console.log(names.hasKey(5b))
 for (Nums k, string v) in names {
   string kind = k is ? { i32 x: $"i32 {x}", u64 x: $"u64 {x}", u8 x: $"u8 {x}" }
-  r.Console.log($"{kind}: {v}")
+  Console.log($"{kind}: {v}")
 }
 names.removeAt((i32)5)
-r.Console.log(names.hasKey((i32)5))
+Console.log(names.hasKey((i32)5))
 
 hmap<Nums, i32> counts = []
 counts[1b] = 10
 counts[1ul] = 20
 counts[(i32)1] = 30
 counts[1b] += 1
-r.Console.log($"{counts[1b]} {counts[1ul]} {counts[(i32)1]} {counts.len}")
+Console.log($"{counts[1b]} {counts[1ul]} {counts[(i32)1]} {counts.len}")
 counts.removeAt(1ul)
-r.Console.log(counts.hasKey(1ul))
+Console.log(counts.hasKey(1ul))
 
 set<Nums> seen = []
 seen.add(7b)
 seen.add((i32)7)
 seen.add(7b)
-r.Console.log(seen.len)
+Console.log(seen.len)
 hset<Nums> hs = []
 hs.add(9ul)
-r.Console.log(hs.has(9ul))
-r.Console.log(hs.has((i32)9))
+Console.log(hs.has(9ul))
+Console.log(hs.has((i32)9))

@@ -1,5 +1,5 @@
 // Placeholders (11.3.4): a trait leaves a type open and each implementing class fixes it with 'with (Item is type)'
-alias Root as r
+import Root
 
 trait Sequence {
   placeholder Item
@@ -46,7 +46,7 @@ fun i32 count<Source : Sequence>(->Source items) {
   return n
 }
 
-r.Console.log(sum(Countdown(4)))
-r.Console.log(count(Countdown(3)))
-r.Console.log(count(Evens()))
-r.Console.log(sum(Evens()))
+Console.log(sum(Countdown(4)))
+Console.log(count(Countdown(3)))
+Console.log(count(Evens()))
+Console.log(sum(Evens()))

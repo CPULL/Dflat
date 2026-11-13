@@ -1,0 +1,13 @@
+5 null-1 again empty-1 false
+  <null> 1 = null-1 again
+   1 = empty-1
+  a 9 = a-9
+  b 2 = b-2
+  s3 3 = s3-3
+4
+3 1 2 3
+[Name { first: null, n: 1 }, Name { first: a, n: 1 }, Name { first: z, n: 1 }] true
+2
+2 1 2 2 7
+done
+---- exit code 0 ----

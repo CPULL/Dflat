@@ -1,5 +1,5 @@
 namespace switches
-alias Root as r
+import Root
 
 enum Color { Red, Green, Blue }
 
@@ -16,7 +16,7 @@ fun ->string classify(i32 value) {
 }
 
 for i32 i = 0..7 {
-  r.Console.log($"classify({i}) = {classify(i)}")
+  Console.log($"classify({i}) = {classify(i)}")
 }
 
 // jumps between cases, by value and to default
@@ -38,30 +38,30 @@ fun ->string walk(i32 start) {
   }
   return path
 }
-r.Console.log("walk(1) = " + walk(1))
-r.Console.log("walk(2) = " + walk(2))
+Console.log("walk(1) = " + walk(1))
+Console.log("walk(2) = " + walk(2))
 
 // enum subject: entries without the enum name, jump by entry name
 Color paint = Color.Green
 switch paint {
-  Red: r.Console.log("red")
+  Red: Console.log("red")
   Green: {
-    r.Console.log("green, then...")
+    Console.log("green, then...")
     jump Blue
   }
-  Blue: r.Console.log("blue")
+  Blue: Console.log("blue")
 }
 
 // strings, labels out of a switch, break of the enclosing loop
 string word = "beta"
 switch word {
-  "alpha": r.Console.log("first")
+  "alpha": Console.log("first")
   "beta": jump #after#
-  default: r.Console.log("unknown")
+  default: Console.log("unknown")
 }
-r.Console.log("not printed")
+Console.log("not printed")
 #after#
-r.Console.log("jumped to #after#")
+Console.log("jumped to #after#")
 
 i32 seen = 0
 for i32 n = 0..10 {
@@ -70,29 +70,29 @@ for i32 n = 0..10 {
     default: seen++
   }
 }
-r.Console.log($"loop stopped at 4, seen = {seen}")
+Console.log($"loop stopped at 4, seen = {seen}")
 
 // the subject is evaluated once
 i32 calls = 0
 fun i32 next(i32 value) { value + 1 }
 switch next(calls) {
-  1: r.Console.log("next(0) is 1")
+  1: Console.log("next(0) is 1")
 }
 
 // switch expressions
 for i32 i = 0..4 {
   bool odd = i ? { 1, 3: true, default: false }
   string name = i ? { 0: "zero", 1: "one", default: "many" }
-  r.Console.log($"{i}: odd = {odd}, name = {name}")
+  Console.log($"{i}: odd = {odd}, name = {name}")
 }
 bool flag = true
 string yesNo = flag ? { "yes", "no" }
-r.Console.log($"flag ? yes/no = {yesNo}")
+Console.log($"flag ? yes/no = {yesNo}")
 i32 count = 0
-r.Console.log($"count ? = {count ? { "some", "none" }}")
+Console.log($"count ? = {count ? { "some", "none" }}")
 string hue = paint ? { Red: "warm", Green: "natural", Blue: "cold" }
-r.Console.log($"hue = {hue}")
+Console.log($"hue = {hue}")
 i64 wide = flag ? { 1, 2l }
-r.Console.log($"wide = {wide}")
+Console.log($"wide = {wide}")
 r64 mixed = flag ? { 1, 2.5 }
-r.Console.log($"mixed = {mixed}")
+Console.log($"mixed = {mixed}")

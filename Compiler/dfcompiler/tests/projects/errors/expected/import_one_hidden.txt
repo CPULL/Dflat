@@ -1,0 +1,1 @@
+main.df(2): error: 'Square' of app.shapes is not public: it cannot be imported (spec 16.1, 16.2)

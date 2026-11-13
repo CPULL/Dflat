@@ -1,0 +1,1 @@
+genmethod_without_replace.df(5): error: 'm' is a generic method of P: write replace fun to replace it (for every type, spec 11.3.1)

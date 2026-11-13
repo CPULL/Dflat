@@ -1,0 +1,18 @@
+10 2 4 true false
+al 4
+alpha 10
+alphabet 3
+beta 2
+3
+5 6 false
+true false 2
+true
+one
+abcdefgh 0
+abcdefghX 1
+abcdefghY 2
+Tag { name: a, id: 1 }
+Tag { name: a, id: 2 }
+Tag { name: b, id: 1 }
+false
+---- exit code 0 ----

@@ -1,9 +1,9 @@
 namespace borrow_readonly_field
-alias Root as r
+import Root
 class Dog(string name) {
   public string name
   public i32 hunger = 5
-  unrestricted fun bark() { r.Console.log($"{name}: woof") }
+  unrestricted fun bark() { Console.log($"{name}: woof") }
   public fun eat(i32 amount) { hunger -= amount }
 }
 class Kennel {

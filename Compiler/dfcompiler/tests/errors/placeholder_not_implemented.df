@@ -1,4 +1,4 @@
-alias Root as r
+import Root
 
 trait Sequence {
   placeholder Item
@@ -10,4 +10,4 @@ public class Other {
 
 fun i32 count<Source : Sequence>(Source items) { 1 }
 
-r.Console.log(count(Other()))
+Console.log(count(Other()))

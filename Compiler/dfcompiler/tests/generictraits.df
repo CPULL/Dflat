@@ -1,5 +1,5 @@
 // Generic traits (11.3.2): one trait made per list of type arguments
-alias Root as r
+import Root
 
 trait Container<Item> {
   unrestricted fun Item Get(u64 index)
@@ -29,12 +29,12 @@ fun u64 sizeOf<Source : Container<i32>>(Source source) { source.Size() }
 Names n = Names()
 Numbers m = Numbers()
 Container<string> viaTrait = n
-r.Console.log(viaTrait.Get(0))
-r.Console.log(first(n))
-r.Console.log(m.Get(2))
-r.Console.log(sizeOf(m))
+Console.log(viaTrait.Get(0))
+Console.log(first(n))
+Console.log(m.Get(2))
+Console.log(sizeOf(m))
 Wrapper<i32> w = Wrapper<i32>(7)
-r.Console.log(sizeOf(w))
-r.Console.log(w.Get(0))
+Console.log(sizeOf(w))
+Console.log(w.Get(0))
 Container<i32> asNumbers = w
-r.Console.log(asNumbers.Get(0))
+Console.log(asNumbers.Get(0))

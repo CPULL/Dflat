@@ -1,11 +1,11 @@
 // var x = f() owns the object a function gives (->T), also a trait object: it ends with the scope, and it can be passed as &x
 namespace varresult
-alias Root as r
+import Root
 
 public class Dog(string name) {
   public string name
 } atEnd {
-  r.Console.log("end " + name)
+  Console.log("end " + name)
 }
 
 fun ->Dog make() { Dog("rex") }
@@ -24,10 +24,10 @@ fun ->string tryNext(&IndexIterator<i32> iterator) {
 
 fun f() {
   var d = make()
-  r.Console.log(d.name)
+  Console.log(d.name)
 }
 
 f()
-r.Console.log("after f")
+Console.log("after f")
 var lost = orphan()
-r.Console.log(tryNext(&lost))
+Console.log(tryNext(&lost))

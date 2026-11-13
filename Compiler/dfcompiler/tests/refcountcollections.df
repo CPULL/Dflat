@@ -1,55 +1,55 @@
 namespace refcountcollections
-alias Root as r
+import Root
 
 public class Dog(string name, i32 age) {
   public string name
   public i32 age
 } atEnd {
-  r.Console.log("  end " + name)
+  Console.log("  end " + name)
 }
 
-r.Console.log("1 arr<@Dog>")
+Console.log("1 arr<@Dog>")
 @Dog rex = Dog("rex", 5)
 arr<@Dog> pack = [@rex, Dog("bo", 2), Dog("max", 9)]
-r.Console.log($"{pack[0].name} {pack[1].name} {rex.usersCount}")
+Console.log($"{pack[0].name} {pack[1].name} {rex.usersCount}")
 pack[1] = Dog("new", 1)
 arr<@Dog>[2] empty
-r.Console.log(empty[0] == null)
+Console.log(empty[0] == null)
 empty[1] = @rex
-r.Console.log($"{empty[1].name} {rex.usersCount}")
+Console.log($"{empty[1].name} {rex.usersCount}")
 for Dog d in pack {
-  r.Console.log("loop " + d.name)
+  Console.log("loop " + d.name)
 }
 @Dog first = pack[0]
-r.Console.log(first.usersCount)
+Console.log(first.usersCount)
 
-r.Console.log("2 sort")
+Console.log("2 sort")
 pack.sort((Dog a, Dog b) { a.age - b.age })
-r.Console.log($"{pack[0].name} {pack[1].name} {pack[2].name}")
+Console.log($"{pack[0].name} {pack[1].name} {pack[2].name}")
 var team = vec<@Dog>()
 team.add(Dog("c", 3))
 team.add(Dog("a", 1))
 team.add(@rex)
 team.sort((Dog a, Dog b) { a.age - b.age })
-r.Console.log($"{team[0].name} {team[1].name} {team[2].name}")
+Console.log($"{team[0].name} {team[1].name} {team[2].name}")
 
-r.Console.log("3 resize, fillAtCapacity, fill")
+Console.log("3 resize, fillAtCapacity, fill")
 team.resize(5, @rex)
-r.Console.log($"{team.len} {team[4].name} {rex.usersCount}")
+Console.log($"{team.len} {team[4].name} {rex.usersCount}")
 team.resize(2, null)
-r.Console.log($"{team.len} {rex.usersCount}")
+Console.log($"{team.len} {rex.usersCount}")
 empty.fill(@rex)
-r.Console.log(rex.usersCount)
+Console.log(rex.usersCount)
 
-r.Console.log("4 iterator")
+Console.log("4 iterator")
 var it = team.getIterator()
 var got = it.next()
-r.Console.log($"{got.value.name} {got.isValid}")
+Console.log($"{got.value.name} {got.isValid}")
 
-r.Console.log("5 view")
+Console.log("5 view")
 var middle = team[0..2]
-r.Console.log(middle[1].name)
+Console.log(middle[1].name)
 for Dog v in middle {
-  r.Console.log("view " + v.name)
+  Console.log("view " + v.name)
 }
-r.Console.log("end")
+Console.log("end")

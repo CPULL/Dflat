@@ -1,6 +1,6 @@
 // for (k, v) in m (spec 6.4), step 3: the entries of a map in key order, the null key first. The loop holds the counter of open iterators:
 // a new key or a removal raises ModifyingIteratedCollectionException; changing the value of an existing key is allowed
-alias Root as r
+import Root
 
 map<string, i32> ages = []
 ages["bob"] = 30
@@ -8,25 +8,25 @@ ages["alice"] = 25
 ages["carol"] = 40
 
 for (string name, i32 age) in ages {
-  r.Console.log($"{name} is {age}")             // alice is 25, bob is 30, carol is 40
+  Console.log($"{name} is {age}")             // alice is 25, bob is 30, carol is 40
 }
 i32 total = 0
 for (var name, var age) in ages {
   total += age
 }
-r.Console.log(total)                             // 95
+Console.log(total)                             // 95
 for var (name, age) in ages {
-  r.Console.log(name.len + (u64)age)             // 30, 33, 45
+  Console.log(name.len + (u64)age)             // 30, 33, 45
 }
 for (name, age) in ages {
-  r.Console.log($"{name}={age}")                 // alice=25, bob=30, carol=40
+  Console.log($"{name}={age}")                 // alice=25, bob=30, carol=40
 }
 
 // the value of an existing key can change while the map is iterated
 for (string name, i32 age) in ages {
   ages[name] = age + 1
 }
-r.Console.log(ages)                              // [alice: 26, bob: 31, carol: 41]
+Console.log(ages)                              // [alice: 26, bob: 31, carol: 41]
 
 // a new key or a removal while iterating raises the exception; the counter is given back after the loop
 fun bool addInLoop(&map<string, i32> m) {
@@ -36,7 +36,7 @@ fun bool addInLoop(&map<string, i32> m) {
   return true
   catch ModifyingIteratedCollectionException { return false }
 }
-r.Console.log(addInLoop(&ages))                   // false
+Console.log(addInLoop(&ages))                   // false
 fun bool removeInLoop(&map<string, i32> m) {
   for (string key, i32 value) in m {
     m.removeAt(key)
@@ -44,9 +44,9 @@ fun bool removeInLoop(&map<string, i32> m) {
   return true
   catch ModifyingIteratedCollectionException { return false }
 }
-r.Console.log(removeInLoop(&ages))                // false
+Console.log(removeInLoop(&ages))                // false
 ages["dave"] = 50                                // the loops ended: the map can change again
-r.Console.log(ages.len)                          // 4
+Console.log(ages.len)                          // 4
 
 // break, continue and return leave the loop and give the counter back
 for (string name, i32 age) in ages {
@@ -56,7 +56,7 @@ for (string name, i32 age) in ages {
   if name == "carol" {
     break
   }
-  r.Console.log(name)                            // alice
+  Console.log(name)                            // alice
 }
 fun string firstOver(map<string, i32> m, i32 limit) {
   for (string name, i32 age) in m {
@@ -66,9 +66,9 @@ fun string firstOver(map<string, i32> m, i32 limit) {
   }
   return ""
 }
-r.Console.log(firstOver(ages, 30))               // bob
+Console.log(firstOver(ages, 30))               // bob
 ages.removeAt("dave")
-r.Console.log(ages.len)                          // 3
+Console.log(ages.len)                          // 3
 
 // nullable keys: null comes first; native keys in their order
 map<i32?, string> slots = []
@@ -76,13 +76,13 @@ slots[3] = "three"
 slots[null] = "none"
 slots[-7] = "minus seven"
 for (i32? key, string text) in slots {
-  r.Console.log($"{key}: {text}")                // null: none, -7: minus seven, 3: three
+  Console.log($"{key}: {text}")                // null: none, -7: minus seven, 3: three
 }
 
 // an empty map, nested loops over the same map
 map<i32, i32> empty = []
 for (i32 k, i32 v) in empty {
-  r.Console.log("never")
+  Console.log("never")
 }
 map<i32, i32> small = []
 small[1] = 10
@@ -93,7 +93,7 @@ for (i32 a, i32 x) in small {
     pairs += x * y
   }
 }
-r.Console.log(pairs)                             // 900
+Console.log(pairs)                             // 900
 
 // many entries: the loop walks the leaves in order
 map<u32, u32> squares = []
@@ -112,5 +112,5 @@ for (u32 k, u32 v) in squares {
   previous = k
   sum += (u64)v
 }
-r.Console.log(sorted)                            // true
-r.Console.log(sum)                               // 41791750
+Console.log(sorted)                            // true
+Console.log(sum)                               // 41791750

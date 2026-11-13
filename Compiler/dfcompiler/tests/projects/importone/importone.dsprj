@@ -1,0 +1,2 @@
+; import of one declaration of a namespace (spec 16.2): import app.shapes.Circle gives Circle only
+source=main.df

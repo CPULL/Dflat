@@ -1,5 +1,5 @@
 // enforce timeout <ms> <expression> (spec 7.2.6): one wait for every lock of the expression form; a busy lock gives the lockfail value
-alias Root as r
+import Root
 public class Player(string name) {
   public i32 score
   public fun i32 bump(i32 n) { score += n; score }
@@ -14,10 +14,10 @@ fun i32 inside(&@Player p) {
 fun run() {
   &@Player player = @Player("ann")
   i32 first = enforce timeout 500 player.bump(5) lockfail { -1 }
-  r.Console.log(first)
+  Console.log(first)
   i32 wait = 10
   i32 second = enforce timeout wait player.bump(2) lockfail { -1 }
-  r.Console.log(second)
-  r.Console.log(inside(&@player))
+  Console.log(second)
+  Console.log(inside(&@player))
 }
 run()

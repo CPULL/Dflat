@@ -167,7 +167,7 @@ public sealed partial class CodeGen {
     }
     if (hashed) {
       if (!HmapKeyBuilt(args[0])) {
-        throw Error($"hmap keys of type {DisplayName(args[0])} are not built yet (this version: integers, bool, char, enums, reals, date, time, clock, lapse, string, tuples of them and strings, structs of exact natives, strings and Keyable objects, sets of exact natives, Keyable classes)", at);
+        throw Error($"hmap keys of type {DisplayName(args[0])} are not built yet (this version: integers, bool, char, enums, reals, date, time, clock, lapse, string, string?, string1k, string1k?, tuples of them, strings and Keyable objects, structs of exact natives, strings and Keyable objects, sets of exact natives, Keyable classes)", at);
       }
       if (IsSetValue(args[0])) {
         SetKeyHelpers(args[0], at);
@@ -176,7 +176,7 @@ public sealed partial class CodeGen {
         CheckKeyable(args[0], at);   // spec 6.2, 11.2.1
       }
       if (IsCompositeKey(args[0])) {
-        CompositeKeyHelpers(args[0]);
+        CompositeKeyHelpers(args[0], at);
       }
       if (!HmapValueBuilt(args[1])) {
         throw Error($"hmap values of type {DisplayName(args[1])} are not built yet (this version: the native types, string, objects, arrays, tuples and structs)", at);
@@ -184,7 +184,7 @@ public sealed partial class CodeGen {
       return;
     }
     if (!MapKeyBuilt(args[0])) {
-      throw Error($"map keys of type {DisplayName(args[0])} are not built yet (this version: integers, bool, char, enums, reals, date, time, string, tuples of them and strings, structs of exact natives, strings and Keyable objects, sets of exact natives, Keyable classes)", at);
+      throw Error($"map keys of type {DisplayName(args[0])} are not built yet (this version: integers, bool, char, enums, reals, date, time, string, string?, string1k, string1k?, tuples of them, strings and Keyable objects, structs of exact natives, strings and Keyable objects, sets of exact natives, Keyable classes)", at);
     }
     if (IsSetValue(args[0])) {
       SetKeyHelpers(args[0], at);
@@ -193,7 +193,7 @@ public sealed partial class CodeGen {
       CheckKeyable(args[0], at);   // spec 6.2, 11.2.1
     }
     if (IsCompositeKey(args[0])) {
-      CompositeKeyHelpers(args[0]);
+      CompositeKeyHelpers(args[0], at);
     }
     if (!MapValueBuilt(args[1])) {
       throw Error($"map values of type {DisplayName(args[1])} are not built yet (this version: the native types, string, objects, arrays, tuples and structs)", at);
@@ -326,10 +326,44 @@ public sealed partial class CodeGen {
         : $"the key of this map is {DisplayName(keyType)}, not {DisplayName(key.Type)}", node);
     }
     string converted = Convert(key, keyType, node);
+    if (IsTuple(keyType) && IsCompositeKey(keyType)) {
+      converted = TempTupleKey(converted, key, node, keyType, scope);
+    }
+    if (keyType == "string?" && key.Fresh && !LibraryCode && !IsStaticStr(key.Code)) {
+      converted = TempBoxCode(keyType, converted, "df_str_free((*t).val);");   // m[f()]: the map keeps its own copy, the new string ends with the statement
+    }
     if (keyType == "string") {
       converted = StrRead(new Expr(converted, "string", FreshCode(key, converted) == "true" && !IsStaticStr(converted)));
     }
     return $"{CType(keyType)} {variable} = {converted}; ";
+  }
+
+  // a tuple key with objects (spec 6.2): the collection keeps a clone (df_tk_box_), so the new objects of the key ((Dog("a"), 1), ->d, d!,
+  // or all of them for a new tuple given by a function) end with the statement; a borrowed one ((rex, 1)) stays with its owner
+  string TempTupleKey(string converted, Expr key, Node node, string keyType, Scope scope) {
+    var elems = TupleElems(keyType);
+    if (LibraryCode || !elems.Any(elem => IsObjectKeyPart(elem.Type) || elem.Type is "string" or "string?")) {
+      return converted;
+    }
+    var fresh = node.Kind == "Tuple" ? NewTupleParts(node, keyType)
+      : key.Fresh ? Enumerable.Range(0, elems.Count).Where(index => IsObjectKeyPart(elems[index].Type)).ToList() : new List<int>();
+    // the new strings of a tuple literal key (("a" + x, 1), (f(), 2)): the collection keeps its own copy, they end with the statement
+    var strings = new List<int>();
+    if (node.Kind == "Tuple") {
+      for (int index = 0; index < elems.Count && index < node.Children.Count; index++) {
+        var item = TupleItemNode(node.Children[index]);
+        if (elems[index].Type is "string" or "string?" && (item.Kind is "Binary" or "Interp" or "Copy"
+            || item.Kind == "Call" && ExprOf(item, scope) is { Fresh: true } made && made.Type is "string" or "string?" && !IsStaticStr(made.Code))) {
+          strings.Add(index);
+        }
+      }
+    }
+    if (strings.Count == 0) {
+      return TempTupleParts(converted, keyType, fresh);
+    }
+    string drop = string.Concat(fresh.Select(index => TuplePartDrop(elems[index].Type, $"(*t).e{index}")))
+      + string.Concat(strings.Select(index => elems[index].Type == "string" ? $"df_str_free((*t).e{index}); " : $"df_str_free((*t).e{index}.val); "));
+    return TempBoxCode(keyType, converted, drop, "_k" + string.Join("_", fresh) + "_s" + string.Join("_", strings));
   }
 
   // a value for a map whose values are valueType
@@ -517,7 +551,8 @@ public sealed partial class CodeGen {
   string CursorKey(string type, string cursor) => IsHmap(type)
     ? HmapKeyFromSlot(type, $"df_ht_cur_key(&{cursor}, {HmapShape(type)})")
     : TKeyOf(type)
-    ? $"(*({CType(MapKey(type))}*)(uintptr_t)df_bt_cur_ptr(&{cursor}))"
+    ? (IsNullable(MapKey(type)) ? $"({cursor}.on_null ? {NullKeyValue(MapKey(type))} : (*({CType(MapKey(type))}*)(uintptr_t)df_bt_cur_ptr(&{cursor})))"
+      : $"(*({CType(MapKey(type))}*)(uintptr_t)df_bt_cur_ptr(&{cursor}))")
     : ObjKeyOf(type)
     ? $"({cursor}.on_null ? NULL : (({CType(MapKey(type))})(uintptr_t)df_bt_cur_ptr(&{cursor})))"
     : SetKeyOf(type)
@@ -781,6 +816,27 @@ public sealed partial class CodeGen {
         string value = NewTemp();
         return new Expr(head + MapKeyArg(args[0], scope, keyType, key, taking: true) + $"{valueC} {value} = {MapValueItem(args[1], scope, valueType)}; "
           + MapSlot(m, type, key, slot, false) + StoreValue(valueType, slot, value) + "})", "void");
+      }
+      case "tree_swap": {
+        // both keys: the value slots exchange their bytes (what they own goes with them); one key: its value leaves its entry and goes into
+        // a new entry of the other key (spec 6.6)
+        string key2 = NewTemp();
+        string s1 = NewTemp();
+        string s2 = NewTemp();
+        string tmp = NewTemp();
+        string size = MapValueSize(type);
+        string moveCode(string from, string to) {
+          string buffer = NewTemp();
+          string added = NewTemp();
+          lastKeyGiven = false;   // the library's key is a borrow: an object key is cloned when it is added
+          return $"{{ _Alignas(16) uint8_t {buffer}[{size}]; memset({buffer}, 0, sizeof {buffer}); (void){MapRemove(m, type, from, buffer)}; "
+            + MapSlot(m, type, to, added, false) + $"memcpy((void*){added}, {buffer}, sizeof {buffer}); }}";
+        }
+        return new Expr(head + MapKeyArg(args[0], scope, keyType, key) + MapKeyArg(args[1], scope, keyType, key2)
+          + $"{slotC}* {s1} = ({slotC}*){MapFind(m, type, key)}; {slotC}* {s2} = ({slotC}*){MapFind(m, type, key2)}; "
+          + $"if ({s1} != NULL && {s2} != NULL) {{ if ({s1} != {s2}) {{ _Alignas(16) uint8_t {tmp}[{size}]; memcpy({tmp}, (void*){s1}, sizeof {tmp}); "
+          + $"memcpy((void*){s1}, (void*){s2}, sizeof {tmp}); memcpy((void*){s2}, {tmp}, sizeof {tmp}); }} }} "
+          + $"else if ({s1} != NULL) {moveCode(key, key2)} else if ({s2} != NULL) {moveCode(key2, key)} }})", "void");
       }
       case "tree_take": {
         // the value leaves with its entry and goes to the caller; the key ends

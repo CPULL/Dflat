@@ -1,4 +1,4 @@
-alias Root as r
+import Root
 
 fun string kind<Item>(Item value) {
   value is ? {
@@ -7,4 +7,4 @@ fun string kind<Item>(Item value) {
   }
 }
 
-r.Console.log(kind("text"))
+Console.log(kind("text"))

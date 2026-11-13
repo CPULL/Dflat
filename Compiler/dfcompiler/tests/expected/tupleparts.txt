@@ -1,0 +1,11 @@
+[(1, z), (8, b)] [(2, q)] [k: (9, w)] [1: (1, 6)]
+  A ends
+  B ends
+  M ends
+[(Dog { name: C }, 7)] [1: (Dog { name: NN }, 1)] [([5, 9, 7], 1)]
+end of owned
+  NN ends
+  C ends
+  C ends
+((11, 7), 3) 7 8 9 [(P { x: 5, y: 2 }, 1)] 1.75
+---- exit code 0 ----

@@ -1,0 +1,47 @@
+// string? and string1k? inside tuple and struct keys (spec 7.1, 6.2.2, 6.8.4.1): null first, apart from "" (and from "null" in an hmap);
+// the new strings of a tuple key end with the statement, the collection keeps its own copy
+import Root
+struct Name { string? first, i32 n }
+struct Code { string1k? c, bool b }
+fun ->string? maybe(i32 i) {
+  if i == 0 { return null }
+  return "s" + i.toStr()
+}
+fun f() {
+  string? none = null
+  map<(string?, i32), string> m = []
+  m[(none, 1)] = "null-1"
+  m[("", 1)] = "empty-1"
+  m[("b", 2)] = "b-2"
+  m[("a", 9)] = "a-9"
+  m[(maybe(3), 3)] = "s3-3"
+  m[(none, 1)] = "null-1 again"
+  Console.log($"{m.len} {m[(none, 1)]} {m[("", 1)]} {m.hasKey((none, 2))}")
+  for var (k, v) in m {
+    Console.log($"  {k.0 ?? "<null>"} {k.1} = {v}")
+  }
+  m.removeAt((none, 1))
+  Console.log($"{m.len}")
+  hmap<(i32, string?), i32> h = []
+  h[(1, none)] = 1
+  h[(1, "")] = 2
+  h[(1, "null")] = 3
+  Console.log($"{h.len} {h[(1, none)]} {h[(1, "")]} {h[(1, "null")]}")
+  set<Name> names = [Name(null, 1), Name("z", 1), Name("a", 1)]
+  Console.log($"{names} {names.has(Name(null, 1))}")
+  hset<Name> hn = []
+  hn.add(Name(none, 5))
+  hn.add(Name(none, 5))
+  hn.add(Name("x", 5))
+  Console.log($"{hn.len}")
+  string1k? n1 = null
+  map<(string1k?, i32), i32> k1 = []
+  k1[(n1, 1)] = 1
+  k1[("abc", 1)] = 2
+  hmap<Code, i32> hc = []
+  hc[Code(n1, true)] = 7
+  hc[Code("q", true)] = 8
+  Console.log($"{k1.len} {k1[(n1, 1)]} {k1[("abc", 1)]} {hc.len} {hc[Code(n1, true)]}")
+}
+f()
+Console.log("done")

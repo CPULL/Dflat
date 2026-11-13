@@ -1,6 +1,6 @@
 // enforce, step 5 (spec 7.2.1, 7.2.6): default, the catch-all of an enforce; the expression form, T r = enforce E clauses: the variables of E
 // are enforced, each clause gives the value (a single expression, or return in a longer block), nothing handled gives zero or null
-alias Root as r
+import Root
 
 public class Trouble(string text) : Exception { }
 
@@ -19,10 +19,10 @@ public class Box(i32 size) {
 // statement form with default
 fun statement(i32? a, Box b, bool fail) {
   enforce a, b {
-    r.Console.log($"  value {a + b.test(fail)}")
+    Console.log($"  value {a + b.test(fail)}")
   }
-  null on a { r.Console.log("  no a") }
-  default { r.Console.log("  default") }      // b null, or an exception no catch takes
+  null on a { Console.log("  no a") }
+  default { Console.log("  default") }      // b null, or an exception no catch takes
 }
 
 fun i32 plain(Box b) {
@@ -66,17 +66,17 @@ fun ->string text(Box b) {
 }
 
 Box box = Box(3)
-r.Console.log("statement form")
+Console.log("statement form")
 statement(1, box, false)
 statement(null, box, false)
 statement(1, null, false)
 statement(1, box, true)
-r.Console.log("expression form")
-r.Console.log($"  plain {plain(box)} {plain(null)}")
-r.Console.log($"  default {withDefault(box)} {withDefault(null)}")
-r.Console.log($"  clauses {clauses(box, false)} {clauses(null, false)} {clauses(box, true)}")
-r.Console.log($"  null clause {nullClause(2, box)} {nullClause(null, box)} {nullClause(2, null)}")
-r.Console.log($"  returned {returned(box)} {returned(null)}")
-r.Console.log($"  last expression {lastExpression(box)} {lastExpression(null)}")
-r.Console.log("  text " + text(box) + ", " + text(null))
-r.Console.log("done")
+Console.log("expression form")
+Console.log($"  plain {plain(box)} {plain(null)}")
+Console.log($"  default {withDefault(box)} {withDefault(null)}")
+Console.log($"  clauses {clauses(box, false)} {clauses(null, false)} {clauses(box, true)}")
+Console.log($"  null clause {nullClause(2, box)} {nullClause(null, box)} {nullClause(2, null)}")
+Console.log($"  returned {returned(box)} {returned(null)}")
+Console.log($"  last expression {lastExpression(box)} {lastExpression(null)}")
+Console.log("  text " + text(box) + ", " + text(null))
+Console.log("done")

@@ -1,0 +1,7 @@
+class P {
+  public fun m<T>(T x) { }
+}
+class C : P {
+  replace fun m(i64 x) { }
+}
+C().m(1)

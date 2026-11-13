@@ -1,0 +1,7 @@
+  d1 ends
+  d3 ends
+[a!?, b!?] [keep] [null, was null] 30 [Pet { name: p3+, dog: Dog{} }]
+end of f
+  d4 ends
+done
+---- exit code 0 ----

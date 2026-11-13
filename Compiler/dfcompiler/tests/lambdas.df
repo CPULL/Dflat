@@ -1,12 +1,12 @@
 // Lambdas and function types (spec 13.3): captures, function values as variables, parameters and results, calls of null ones
 namespace lambdas
-alias Root as r
+import Root
 
 public class Dog(string name) {
   public string name
   unrestricted fun ->string bark() { name + "!" }
 } atEnd {
-  r.Console.log("end " + name)
+  Console.log("end " + name)
 }
 
 fun i32 apply(i32(i32) f, i32 v) {
@@ -42,49 +42,49 @@ fun ->string callNullAsNullPointer() {
 
 fun owners() {
   string() b = barker("rex")
-  r.Console.log(b())
+  Console.log(b())
   string() b2 = b
-  r.Console.log(b2())
+  Console.log(b2())
   string(string) pre = prefixer("x")
   for u32 i in 0..3 {
-    r.Console.log(pre(i.toStr()))
+    Console.log(pre(i.toStr()))
   }
   string word = "outer"
   fun() show = () {
-    fun() inner = () { r.Console.log("inner " + word) }
+    fun() inner = () { Console.log("inner " + word) }
     inner()
   }
   show()
-  r.Console.log(barker("max")())
+  Console.log(barker("max")())
 }
 
 i32 base = 10
 i32(i32) twice = (i32 x) { x * 2 }
-r.Console.log(twice(21))
-r.Console.log(apply(twice, 5))
-r.Console.log(apply((i32 x) { x + base }, 5))
-fun(string) greet = (string who) { r.Console.log("hello " + who) }
+Console.log(twice(21))
+Console.log(apply(twice, 5))
+Console.log(apply((i32 x) { x + base }, 5))
+fun(string) greet = (string who) { Console.log("hello " + who) }
 greet("rex")
-(i32 a) { r.Console.log(a) }(42)
+(i32 a) { Console.log(a) }(42)
 i32 counter = 0
 fun() bump = (; &counter) { counter++ }
 bump()
 bump()
-r.Console.log(counter)
+Console.log(counter)
 i32(i32) add5 = adder(5)
-r.Console.log(add5(1))
-r.Console.log(adder(7)(1))
+Console.log(add5(1))
+Console.log(adder(7)(1))
 fun(i32) nothing = null
-r.Console.log($"{nothing == null} {twice != null}")
+Console.log($"{nothing == null} {twice != null}")
 string tag = "t"
 string(string) wrap = (string s; tag!) { tag + s + tag }
-r.Console.log(wrap("x"))
+Console.log(wrap("x"))
 i32 total = 0
-fun() acc = (; total!) { total += 1; r.Console.log(total) }
+fun() acc = (; total!) { total += 1; Console.log(total) }
 acc()
 acc()
-r.Console.log(total)
-r.Console.log(callNull())
-r.Console.log(callNullAsNullPointer())
+Console.log(total)
+Console.log(callNull())
+Console.log(callNullAsNullPointer())
 owners()
-r.Console.log("done")
+Console.log("done")

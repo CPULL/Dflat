@@ -1,0 +1,5 @@
+class Dog(string name) {
+  public string name
+}
+vec<Dog> dogs = [Dog("a")]
+for Dog g in dogs { g.name = "z" }

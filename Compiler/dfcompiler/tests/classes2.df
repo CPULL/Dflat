@@ -1,5 +1,5 @@
 // Classes: static initialization order, exceptions, linked objects, enums and tuples in classes
-alias Root as r
+import Root
 
 public class A {
   public static i32 a = B.b + 1
@@ -15,11 +15,11 @@ public class C {
   public static const i32 base = 21
 }
 
-r.Console.log(A.a)
-r.Console.log(A.plain)
-r.Console.log(A.when == null)
-r.Console.log(A.text)
-r.Console.log(B.LIMIT)
+Console.log(A.a)
+Console.log(A.plain)
+Console.log(A.when == null)
+Console.log(A.text)
+Console.log(B.LIMIT)
 
 enum Color { Red, Green, Blue }
 
@@ -42,14 +42,14 @@ public class Node(i32 value) {
 
 Node head = Node(1)
 head.Add(2).Add(3).Add(4)
-r.Console.log(head.Sum())
-r.Console.log(head.Length())
-r.Console.log(head.next.next.color)
-r.Console.log(head.range.high)
+Console.log(head.Sum())
+Console.log(head.Length())
+Console.log(head.next.next.color)
+Console.log(head.range.high)
 head.color = Color.Blue
-r.Console.log(head.color)
+Console.log(head.color)
 head.range = (3, 4)
-r.Console.log(head.range.low)
+Console.log(head.range.low)
 
 // exceptions: in a constructor initializer, in a method, through a virtual call
 public class Divider(i32 by) {
@@ -69,21 +69,21 @@ fun i32 tryDivider(i32 by) {
     return -1
   }
 }
-r.Console.log(tryDivider(5))
-r.Console.log(tryDivider(0))
+Console.log(tryDivider(5))
+Console.log(tryDivider(0))
 
 fun i32 viaParent(Base b, i32 n) {
   return b.Run(n)
   catch DivisionByZeroException ex {
-    r.Console.log("caught " + ex.message)
+    Console.log("caught " + ex.message)
     return -2
   }
 }
-r.Console.log(viaParent(Base(), 5))
-r.Console.log(viaParent(Derived(), 5))
-r.Console.log(viaParent(Derived(), 0))
-r.Console.log(viaParent(Base(), 0))
+Console.log(viaParent(Base(), 5))
+Console.log(viaParent(Derived(), 5))
+Console.log(viaParent(Derived(), 0))
+Console.log(viaParent(Base(), 0))
 
 // an unhandled exception from a constructor
 Divider bad = Divider(0)
-r.Console.log("not reached")
+Console.log("not reached")

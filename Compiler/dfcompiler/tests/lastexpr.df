@@ -1,14 +1,14 @@
 // The last expression of a function body is its result (spec 13), also after other statements; an object it makes moves to the caller
-alias Root as r
+import Root
 
 public class R(string name) {
   public string name
   public fun ->R copyNamed() { R("copy of " + name) }
 } atEnd {
-  r.Console.log("  end " + name)
+  Console.log("  end " + name)
 }
 
-fun one() { r.Console.log("  one") }
+fun one() { Console.log("  one") }
 fun i32 alone() { 5 }
 fun i32 afterDecl() {
   i32 x = 1
@@ -43,22 +43,22 @@ fun bool check(i32 v) {
   v > limit
 }
 
-r.Console.log($"alone {alone()}, afterDecl {afterDecl()}, afterCall {afterCall()}")
-r.Console.log("text " + text())
-r.Console.log($"check {check(2)} {check(4)}")
+Console.log($"alone {alone()}, afterDecl {afterDecl()}, afterCall {afterCall()}")
+Console.log("text " + text())
+Console.log($"check {check(2)} {check(4)}")
 fun useAll() {
   R a = single()
-  r.Console.log("got " + a.name)
+  Console.log("got " + a.name)
   R b = make()
-  r.Console.log("got " + b.name)
+  Console.log("got " + b.name)
   R c = pick(true)
   R d = pick(false)
-  r.Console.log("got " + c.name + " " + d.name)
+  Console.log("got " + c.name + " " + d.name)
 }
 useAll()
 fun holder() {
   Holder h = Holder()
-  r.Console.log("holder " + h.a.name + ", " + h.c.name)
+  Console.log("holder " + h.a.name + ", " + h.c.name)
 }
 holder()
-r.Console.log("done")
+Console.log("done")

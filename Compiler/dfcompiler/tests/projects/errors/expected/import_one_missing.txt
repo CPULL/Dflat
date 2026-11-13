@@ -1,0 +1,1 @@
+main.df(2): error: cannot find 'app.shapes.Triangle': an import names a namespace or one declaration of a namespace (spec 16.2)

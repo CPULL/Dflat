@@ -1,4 +1,4 @@
-alias Root as r
+import Root
 public class Dog(string name) {
   public string name
 }
@@ -10,6 +10,6 @@ fun f() {
   arr<Dog> pack = [Dog("a")]
   Dog first = pack[0]
   pack[0] = Dog("b")
-  r.Console.log(first.name)
+  Console.log(first.name)
 }
 f()

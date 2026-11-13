@@ -263,6 +263,11 @@ public sealed class Lexer {
     }
 
     ReadDigits(char.IsDigit);
+    // t.0.1: after a member '.' the number is a tuple item, never a real; the next '.' is another member (spec 3.2)
+    if (tokens.Count > 0 && tokens[^1] is { Kind: TokenKind.Op, Text: "." }) {
+      Add(kind, src[start..pos], l, c);
+      return;
+    }
     // "0..10" is a range, "1.5" is a real
     if (Cur == '.' && char.IsDigit(At(1))) {
       kind = TokenKind.Real;

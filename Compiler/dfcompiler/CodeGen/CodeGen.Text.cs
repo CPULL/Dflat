@@ -500,7 +500,8 @@ public sealed partial class CodeGen {
       // UNS_NONE is the largest uns of the target ("not found"); VEC_DOUBLE_LIMIT is the block size up to which a vec doubles (spec 6.8.2)
       string prelude = (VecPrelude + HmapPrelude).Replace("UNS_NONE", NativeUns == "u32" ? "4294967295" : "18446744073709551615")
         .Replace("VEC_DOUBLE_LIMIT", VecDoubleGrowLimit.ToString())
-        .Replace("VEC_GROW_EXTRA", VecGrowExtra.ToString());
+        .Replace("VEC_GROW_EXTRA", VecGrowExtra.ToString())
+        .Replace("VEC_GROW_STEP", VecGrowStep.ToString());
       var vecLibrary = new Parser(new Lexer(prelude, LibraryLine).Tokenize()).ParseProgram();
       program.Children.InsertRange(0, vecLibrary.Children);
       vecPrelude = true;

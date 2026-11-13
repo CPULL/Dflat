@@ -1,6 +1,6 @@
 // Moving counted usages and read-only @T (spec 12.7): ->pack[i] into a counted receiver, methods through @T and &@T
 namespace refcountmoves
-alias Root as r
+import Root
 
 class Dog(string name) {
   public string name
@@ -8,41 +8,41 @@ class Dog(string name) {
   public fun birthday() { age++ }                 // writes: needs a &@Dog, holding the lock
   unrestricted fun i32 years() { age }            // reads: callable through @Dog
 } atEnd {
-  r.Console.log($"{name} ends")
+  Console.log($"{name} ends")
 }
 
-fun keep(@Dog d) { r.Console.log($"keep {d.name}, users {d.usersCount}") }
+fun keep(@Dog d) { Console.log($"keep {d.name}, users {d.usersCount}") }
 
 fun items() {
   list<@Dog> pack = []
   pack.add(Dog("a"))
   pack.add(Dog("b"))
   @Dog first = ->pack[0]                         // the list loses the node, the usage moves
-  r.Console.log($"{first.name}: list len {pack.len}, users {first.usersCount}")
+  Console.log($"{first.name}: list len {pack.len}, users {first.usersCount}")
   first = ->pack[0]                              // a ends: first held its last usage
-  r.Console.log($"{first.name}: list len {pack.len}")
+  Console.log($"{first.name}: list len {pack.len}")
 
   vec<@Dog> v = [Dog("c"), Dog("d")]
   @Dog second = ->v[1]                           // the slot keeps null
-  r.Console.log($"{second.name}: vec len {v.len}, slot null {v[1] == null}")
+  Console.log($"{second.name}: vec len {v.len}, slot null {v[1] == null}")
 
   arr<@Dog> a = [Dog("x"), Dog("y")]
   @Dog third = ->a[0]
-  r.Console.log($"{third.name}: arr slot null {a[0] == null}, users {third.usersCount}")
+  Console.log($"{third.name}: arr slot null {a[0] == null}, users {third.usersCount}")
   keep(->a[1])                                   // into a @T parameter: y ends when keep returns
-  r.Console.log($"arr slot null {a[1] == null}")
+  Console.log($"arr slot null {a[1] == null}")
 }
 
 fun locks() {
   @Dog reader = Dog("Reader")
-  r.Console.log($"years {reader.years()}")       // unrestricted through @Dog
+  Console.log($"years {reader.years()}")       // unrestricted through @Dog
   &@Dog writer = Dog("Writer")
   enforce writer { writer.birthday() }
-  r.Console.log($"years {writer.years()}")
+  Console.log($"years {writer.years()}")
   writer.birthday()                              // no lock: raises
-  r.Console.log("not reached")
+  Console.log("not reached")
 }
 
 items()
 locks()
-catch WritingOnRefCountWithoutLockingException { r.Console.log("birthday without the lock") }
+catch WritingOnRefCountWithoutLockingException { Console.log("birthday without the lock") }

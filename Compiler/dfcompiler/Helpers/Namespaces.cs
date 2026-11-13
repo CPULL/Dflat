@@ -160,6 +160,7 @@ sealed partial class SourceLoader {
     foreach (var decl in nsDecls.Values.SelectMany(list => list)) {
       SourceMap.AddDecl(decl.Internal, decl.Ns);
     }
+    CheckImports();
     foreach (var file in order) {
       foreach (var statement in file.Tree.Children.ToList()) {
         if (statement.Kind is "Namespace" or "NamespaceLocal" or "Import") {
@@ -175,6 +176,39 @@ sealed partial class SourceLoader {
         }
         Walk(statement, scope);
         Rename(statement);
+      }
+    }
+  }
+
+  // every import names a namespace or one visible declaration of a namespace (spec 16.2); a namespace and a declaration of its parent
+  // namespace cannot have the same name, so a path is never both
+  void CheckImports() {
+    foreach (string known in knownNamespaces.Where(known => known.Contains('.'))) {
+      int dot = known.LastIndexOf('.');
+      string parent = known[..dot];
+      string last = known[(dot + 1)..];
+      var clash = nsDecls.Where(pair => string.Equals(pair.Key, last, StringComparison.OrdinalIgnoreCase)).SelectMany(pair => pair.Value).FirstOrDefault(decl => decl.Ns == parent);
+      if (clash != null) {
+        throw new CompileException($"'{clash.Name}' has the name of the namespace {known}: a declaration and a namespace inside the same namespace need different names (spec 16.2)", clash.Node.Line);
+      }
+    }
+    foreach (var file in order) {
+      foreach (var import in file.Tree.Children.Where(statement => statement.Kind == "Import" && statement.Text != null)) {
+        string path = import.Text!.ToLowerInvariant();
+        if (path == "root" || path.StartsWith("root.") || knownNamespaces.Contains(path)) {
+          continue;   // the stdlib is checked by its own imports (StdSingleImports)
+        }
+        int dot = path.LastIndexOf('.');
+        string parent = dot < 0 ? "" : path[..dot];
+        string name = dot < 0 ? path : import.Text![(dot + 1)..];
+        var decl = dot < 0 || !knownNamespaces.Contains(parent) || !nsDecls.TryGetValue(name, out var list) ? null : list.FirstOrDefault(d => d.Ns == parent);
+        if (decl == null) {
+          throw new CompileException($"cannot find '{import.Text}': an import names a namespace or one declaration of a namespace (spec 16.2)", import.Line);
+        }
+        bool visible = decl.Vis == NsVis.Public || decl.Vis != NsVis.Namespace && Encloses(decl.Ns, file.Namespace) || decl.Ns == file.Namespace;
+        if (!visible) {
+          throw new CompileException($"'{decl.Name}' of {decl.Ns} is not public: it cannot be imported (spec 16.1, 16.2)", import.Line);
+        }
       }
     }
   }
@@ -414,17 +448,40 @@ sealed partial class SourceLoader {
     return children;
   }
 
+  // the namespaces of the stdlib; Console, Math, Random, ExecProcess ... are classes of Root, so importing them gives one name (spec 16.2)
+  static readonly HashSet<string> StdNamespaces = new() { "root", "root.io" };
+
   // the stdlib namespaces a file imports: import Root, import Root.IO ...
   static List<string> StdImports(SourceFile file) =>
-    file.Tree.Children.Where(statement => statement.Kind == "Import" && statement.Text != null && StdChildren.ContainsKey(statement.Text.ToLowerInvariant()))
+    file.Tree.Children.Where(statement => statement.Kind == "Import" && statement.Text != null && StdNamespaces.Contains(statement.Text.ToLowerInvariant()))
       .Select(statement => statement.Text!.ToLowerInvariant()).Distinct().ToList();
+
+  // the single names of the stdlib a file imports (import Root.Console): the name and the namespace that declares it
+  static List<(string Name, string Ns)> StdSingleImports(SourceFile file) {
+    var found = new List<(string, string)>();
+    foreach (var statement in file.Tree.Children.Where(statement => statement.Kind == "Import" && statement.Text != null)) {
+      string path = statement.Text!;
+      if (!path.StartsWith("Root.", StringComparison.OrdinalIgnoreCase) || StdNamespaces.Contains(path.ToLowerInvariant())) {
+        continue;
+      }
+      int dot = path.LastIndexOf('.');
+      string parent = path[..dot].ToLowerInvariant();
+      string name = path[(dot + 1)..];
+      if (!StdNamespaces.Contains(parent) || !StdChildren.TryGetValue(parent, out var names) || !names.TryGetValue(name, out var written)) {
+        throw new CompileException($"'{path}' is not a namespace or a name of the standard library: import Root, Root.IO, or one name of them (Root.Console, Root.IO.File)", statement.Line);
+      }
+      found.Add((name, written));
+    }
+    return found;
+  }
 
   // the stdlib namespace a bare name comes from in this file, or null; without the import, a name of the stdlib is an error
   string? StdlibNamespace(string name, NameScope scope, int line) {
     if (nsAliases.ContainsKey(name) || name == "Root") {
       return null;
     }
-    var found = StdImports(scope.File).Where(ns => StdChildren[ns].ContainsKey(name)).Select(ns => StdChildren[ns][name]).Distinct().ToList();
+    var found = StdImports(scope.File).Where(ns => StdChildren[ns].ContainsKey(name)).Select(ns => StdChildren[ns][name])
+      .Concat(StdSingleImports(scope.File).Where(single => single.Name == name).Select(single => single.Ns)).Distinct().ToList();
     if (found.Count > 1) {
       throw new CompileException($"'{name}' is in the imported namespaces {string.Join(" and ", found)}: write which one ({string.Join(" or ", found.Select(ns => ns + "." + name))})", line);
     }
@@ -529,7 +586,7 @@ sealed partial class SourceLoader {
       return enclosing;
     }
     var imports = ImportsOf(scope.File);
-    var imported = list.Where(decl => decl.Vis == NsVis.Public && imports.Contains(decl.Ns)).ToList();
+    var imported = list.Where(decl => decl.Vis == NsVis.Public && (imports.Contains(decl.Ns) || imports.Contains(decl.Ns + "." + name.ToLowerInvariant()))).ToList();
     var namespaces = imported.Select(decl => decl.Ns).Distinct().ToList();
     if (namespaces.Count > 1) {
       throw new CompileException($"'{name}' is declared in the imported namespaces {string.Join(" and ", namespaces.Select(ns => $"'{ns}'"))}: "

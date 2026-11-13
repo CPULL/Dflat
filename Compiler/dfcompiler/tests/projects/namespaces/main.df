@@ -2,7 +2,7 @@
 namespace app
 import app.zoo
 alias app.farm as farm
-alias Root as r
+import Root
 
 internal class Keeper {        // internal: app.zoo and app.zoo.small (sub-namespaces) see it
   public string name = "Kim"
@@ -10,15 +10,15 @@ internal class Keeper {        // internal: app.zoo and app.zoo.small (sub-names
 
 fun i32 one() { 1 }            // app.zoo has a public one() too: the own namespace wins
 
-r.Console.log(one())
-r.Console.log(app.zoo.one())
+Console.log(one())
+Console.log(app.zoo.one())
 var lion = Dog("Leo")          // app.zoo.Dog (imported); app.farm.Dog is not imported
-r.Console.log(lion.describe())
-r.Console.log(lion)
+Console.log(lion.describe())
+Console.log(lion)
 farm.Dog cow = farm.Dog("Rex", 3)
-r.Console.log(cow.legs)
-r.Console.log(app.farm.Dog("Max", 5).legs)
+Console.log(cow.legs)
+Console.log(app.farm.Dog("Max", 5).legs)
 app.tools.Hammer h = Hammer()  // not imported: the qualified type brings its namespace in, the bare constructor follows it
-r.Console.log(h.hit())
-r.Console.log(app.zoo.small.Mouse().greet())
-r.Console.log(app.zoo.Color.Blue)
+Console.log(h.hit())
+Console.log(app.zoo.small.Mouse().greet())
+Console.log(app.zoo.Color.Blue)

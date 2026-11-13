@@ -62,6 +62,8 @@ public sealed partial class CodeGen {
     switch (ReadOnlyPlace(place, scope)) {
       case (string name, ReadOnlyKind.This):
         throw Error($"an unrestricted method only reads its struct: it cannot write the field '{fieldName}' of {name} (spec 11.1.5.2)", at);
+      case (string name, ReadOnlyKind.Param) when LoopVarMessage(name, scope, $"its fields cannot be written ('{fieldName}')") is string loopMessage:
+        throw Error(loopMessage, at);
       case (string name, ReadOnlyKind.Param):
         throw Error($"'{name}' is a read-only parameter: its fields cannot be written; declare it &{scope.Find(name)!.Type} {name} to change it (spec 13.1, 11.1.5.2)", at);
       case (string name, ReadOnlyKind.Reference):

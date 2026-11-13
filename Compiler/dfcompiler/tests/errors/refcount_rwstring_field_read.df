@@ -1,10 +1,10 @@
 namespace refcount_rwstring_field_read
-alias Root as r
+import Root
 class Note {
   public &@string text = "a"
 }
 fun f() {
   Note n = Note()
-  r.Console.log(n.text)
+  Console.log(n.text)
 }
 f()

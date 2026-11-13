@@ -1,5 +1,5 @@
 namespace nullables
-alias Root as r
+import Root
 
 fun i32? find(i32 key) {
   if key > 0 then return key * 10
@@ -10,79 +10,79 @@ fun i32? half(i32? value) { value / 2 }
 
 i32? empty
 i32? some = 5
-r.Console.log($"empty = {empty}, some = {some}")
-r.Console.log($"empty == null: {empty == null}, some is null: {some is null}, some == 5: {some == 5}")
+Console.log($"empty = {empty}, some = {some}")
+Console.log($"empty == null: {empty == null}, some is null: {some is null}, some == 5: {some == 5}")
 
 // null propagates in arithmetic
 i32? sum = some + 1
 i32? none = empty + 1
-r.Console.log($"some + 1 = {sum}, empty + 1 = {none}, -some = {-some}")
-r.Console.log($"half(some) = {half(some)}, half(null) = {half(null)}")
+Console.log($"some + 1 = {sum}, empty + 1 = {none}, -some = {-some}")
+Console.log($"half(some) = {half(some)}, half(null) = {half(null)}")
 
 // ?? unwraps
 i32 plain = empty ?? 7
 i8 small = 3
 i8? maybeSmall = null
 i8 unwrapped = maybeSmall ?? 0
-r.Console.log($"empty ?? 7 = {plain}, maybeSmall ?? 0 = {unwrapped}, find(2) ?? 0 = {find(2) ?? 0}, find(-1) ?? -1 = {find(-1) ?? -1}")
+Console.log($"empty ?? 7 = {plain}, maybeSmall ?? 0 = {unwrapped}, find(2) ?? 0 = {find(2) ?? 0}, find(-1) ?? -1 = {find(-1) ?? -1}")
 i32? chain = empty ?? find(-5) ?? find(3)
-r.Console.log($"chain = {chain}")
+Console.log($"chain = {chain}")
 
 // ??= assigns only when null
 empty ??= 42
 some ??= 99
-r.Console.log($"after ??=: empty = {empty}, some = {some}")
+Console.log($"after ??=: empty = {empty}, some = {some}")
 
 // enforce
 i32? first = find(1)
 i32? second = find(0)
 enforce first {
   i32 doubled = first * 2
-  r.Console.log($"first is {first}, doubled {doubled}")
+  Console.log($"first is {first}, doubled {doubled}")
 } else {
-  r.Console.log("first is null")
+  Console.log("first is null")
 }
 enforce first, second {
-  r.Console.log("both set")
+  Console.log("both set")
 } else {
-  r.Console.log("second is null")
+  Console.log("second is null")
 }
 
 // null sorts first
 i32? nothing = null
-r.Console.log($"null < 1: {nothing < 1}, 1 < null: {1 < nothing}, null <= null: {nothing <= nothing}, 2 > 1: {some > 1}")
+Console.log($"null < 1: {nothing < 1}, 1 < null: {1 < nothing}, null <= null: {nothing <= nothing}, 2 > 1: {some > 1}")
 
 // to bool
 if nothing {
-  r.Console.log("wrong")
+  Console.log("wrong")
 } else {
-  r.Console.log("null is false")
+  Console.log("null is false")
 }
-if some then r.Console.log("some is true")
+if some then Console.log("some is true")
 
 // ?. on strings and nullables
 string text = "héllo"
 string blank = null
 u64? textLen = text?.len
 u64? blankLen = blank?.len
-r.Console.log($"text?.len = {textLen}, blank?.len = {blankLen}, blank == null: {blank == null}")
-r.Console.log($"some?.toStr() = {some?.toStr()}, nothing?.toStr() = '{nothing?.toStr()}'")
+Console.log($"text?.len = {textLen}, blank?.len = {blankLen}, blank == null: {blank == null}")
+Console.log($"some?.toStr() = {some?.toStr()}, nothing?.toStr() = '{nothing?.toStr()}'")
 string named = blank ?? "anonymous"
-r.Console.log("blank ?? anonymous = " + named)
+Console.log("blank ?? anonymous = " + named)
 
 // casts keep null
 i64? wider = some
 u8? narrowed = (u8?)some
-r.Console.log($"wider = {wider}, narrowed = {narrowed}, (i64)nothing = {(i64)nothing}")
+Console.log($"wider = {wider}, narrowed = {narrowed}, (i64)nothing = {(i64)nothing}")
 
 // nullable enum
 enum Mode { Off, On }
 Mode? mode
-r.Console.log($"mode = {mode}")
+Console.log($"mode = {mode}")
 mode = Mode.On
-r.Console.log($"mode = {mode}, is On: {mode == Mode.On}")
+Console.log($"mode = {mode}, is On: {mode == Mode.On}")
 switch mode {
-  null: r.Console.log("no mode")
-  On: r.Console.log("mode on")
-  Off: r.Console.log("mode off")
+  null: Console.log("no mode")
+  On: Console.log("mode on")
+  Off: Console.log("mode off")
 }

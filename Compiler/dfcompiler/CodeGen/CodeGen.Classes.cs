@@ -577,6 +577,7 @@ public sealed partial class CodeGen {
       cls.Vtable.AddRange(cls.Parent.Vtable);
     }
     var body = cls.Node.Children.First(child => child.Kind == "Block");
+    ExpandGenericMethods(cls, body);   // generic methods: their copies are registered as methods (CodeGen.GenericMethods.cs)
     foreach (var member in body.Children) {
       if (member.Kind == "FunVar") {
         throw NotSupported("Lambdas", member);
@@ -1270,6 +1271,12 @@ public sealed partial class CodeGen {
   // the parent reference when it is read-only &, or null
   FieldInfo? ReadOnlyParent(string code) => ParentReceiver(code) is { ReadOnlyRef: true } parent ? parent : null;
 
+  // the message for a plain loop variable written through (spec 6.4): it names the & form of the loop; null for any other variable
+  string? LoopVarMessage(string? name, Scope scope, string what) =>
+    name != null && scope.Find(name) is { LoopVar: true } loopVar
+      ? $"'{name}' is a read-only loop variable: {what}; write for &{DisplayName(loopVar.Type)} {name} in ... to change the item (spec 6.4)"
+      : null;
+
   // the variable a receiver names when it is a read-only reference (&Item o, &arr<T> a), or null
   VarInfo? ReadOnlyVariable(Node receiverNode, Scope scope) =>
     receiverNode.Kind == "Name" && scope.Find(receiverNode.Text!) is { ReadOnlyRef: true } variable ? variable : null;
@@ -1317,12 +1324,12 @@ public sealed partial class CodeGen {
       allowed = methods.Count == 0 || methods.All(f => f.IsUnrestricted || f.IsStatic) || name == "getIterator";   // iterating reads (6.7)
     }
     if (!allowed) {
-      throw Error(library
+      throw Error(LoopVarMessage(what, scope, $"'{name}' can change it (mark it unrestricted)") ?? (library
         ? $"'{what}' is a read-only reference: '{name}' can change it, so it needs an owned or writable reference (take &{what})"
         : scope.Find(what) is { IsLocal: true, IsParam: false }
         ? $"'{what}' is a read-only borrow: '{name}' needs a read/write one (mark it unrestricted, or declare &{DisplayName(receiver.Type)} {what})"
         : $"'{what}' is a read-only reference: '{name}' needs an owned or writable reference (mark it unrestricted, or take &{what})"
-          + DefinedAt(LookupMethods(ObjInfo(receiver.Type), name), name), at);
+          + DefinedAt(LookupMethods(ObjInfo(receiver.Type), name), name)), at);
     }
   }
 
@@ -1486,7 +1493,8 @@ public sealed partial class CodeGen {
       throw Error($"'{readOnly.Name}' is a read-only reference: its fields cannot be assigned", target);
     }
     if (ReadOnlyVariable(target.Children[0], scope) is not null) {
-      throw Error($"'{target.Children[0].Text}' is a read-only reference: its fields cannot be assigned", target);
+      throw Error(LoopVarMessage(target.Children[0].Text, scope, "its fields cannot be assigned")
+        ?? $"'{target.Children[0].Text}' is a read-only reference: its fields cannot be assigned", target);
     }
     if (ReadOnlyCounted(target.Children[0], scope) is CountedRefInfo readOnlyCounted) {
       throw Error($"'{readOnlyCounted.Name}' is a read-only counted object (@{readOnlyCounted.Type}): its fields are written through a &@{readOnlyCounted.Type} (spec 12.7)", target);
@@ -1798,12 +1806,19 @@ public sealed partial class CodeGen {
       // f([Dog("a")]): a new array lent to the call ends with the statement, as a new object does (spec 6.8.1, 12)
       return TempBoxCode(param.Type, Convert(value, param.Type, arg), $"{ArrDropHelper(param.Type)}(*t);");
     }
+    if (!param.IsGift && !LibraryCode && arg.Kind == "Tuple" && TupleHoldsArrays(param.Type)) {
+      // g((Dog("a"), 1)): the new parts of a tuple lent to the call end with the statement (spec 3.2)
+      return TempTupleParts(Convert(value, param.Type, arg), param.Type, NewTupleParts(arg, param.Type));
+    }
     return Convert(value, param.Type, arg);
   }
 
   // cls.name(args): a static function (receiver null) or a function of an object
   // direct: no virtual dispatch (parent.name())
-  Expr MethodCall(ClassInfo cls, string name, string? receiver, bool direct, List<Node> args, Scope scope, Node at) {
+  Expr MethodCall(ClassInfo cls, string name, string? receiver, bool direct, List<Node> args, Scope scope, Node at, List<Node>? typeArgs = null) {
+    if ((typeArgs is { Count: > 0 } || LookupMethods(cls, name).Count == 0) && GenericMethodCallName(cls, name, typeArgs ?? new List<Node>(), args, scope, at) is string copyName) {
+      name = copyName;   // a generic method: its copy for these types (spec 11.3.1)
+    }
     CheckCountedItemsMember(cls, name, at);
     var all = LookupMethods(cls, name);
     if (all.Count == 0) {
@@ -1882,6 +1897,10 @@ public sealed partial class CodeGen {
       return null;
     }
     var found = LookupMethods(currentClass, name);
+    if (found.Count == 0 && GenericMethodOf(currentClass, name) != null && scope.Find("this") != null) {
+      // addSize(1) inside the class: this.addSize(1), a generic method (spec 11.3.1)
+      return ObjectCall(ExprOf(Synthetic("Name", at, "this"), scope), name, args, scope, at);
+    }
     if (found.Count == 0) {
       return null;
     }

@@ -1,4 +1,4 @@
-alias Root as r
+import Root
 
 trait Container<Item> {
   unrestricted fun Item Get(u64 index)
@@ -11,4 +11,4 @@ public class Names : Container<string> {
 fun i32 first(Container<i32> source) { source.Get(0) }
 
 Names n = Names()
-r.Console.log(first(n))
+Console.log(first(n))

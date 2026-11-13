@@ -1,7 +1,7 @@
 // Top-level const (spec 1.5): set at program start, seen by every function and method;
 // a list literal in a for loop takes the type of the loop variable
 namespace globalconsts
-alias Root as r
+import Root
 
 const i32 WIDTH = 10
 const i32 AREA = WIDTH * 2
@@ -15,15 +15,15 @@ class Board {
 
 fun i32 total() { WIDTH + AREA + KICKS[1] }
 
-r.Console.log(Board().doubled())
-r.Console.log(total())
-r.Console.log(Board.cells)
-r.Console.log(TITLE.toUpper())
-r.Console.log($"{TITLE} {KICKS.len}")
+Console.log(Board().doubled())
+Console.log(total())
+Console.log(Board.cells)
+Console.log(TITLE.toUpper())
+Console.log($"{TITLE} {KICKS.len}")
 
-for i32 k in [0, -1, 1] { r.Console.print($"{k} ") }
-r.Console.log("")
-for var s in ["a", "b"] { r.Console.print(s) }
-r.Console.log("")
-for r64 x in [1, 2.5] { r.Console.print($"{x} ") }
-r.Console.log("")
+for i32 k in [0, -1, 1] { Console.print($"{k} ") }
+Console.log("")
+for var s in ["a", "b"] { Console.print(s) }
+Console.log("")
+for r64 x in [1, 2.5] { Console.print($"{x} ") }
+Console.log("")

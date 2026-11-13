@@ -1,5 +1,5 @@
 namespace tuples
-alias Root as r
+import Root
 
 fun i32, string getUser() { return 1, "ada" }
 
@@ -13,41 +13,41 @@ fun i64, r64, bool stats(i32 count) {
 
 // multiple return values
 i32 id, string name = getUser()
-r.Console.log($"getUser: {id} {name}")
+Console.log($"getUser: {id} {name}")
 i32 otherId, _ = forward()
-r.Console.log($"forward id: {otherId}")
+Console.log($"forward id: {otherId}")
 i64 doubled, r64 halved, bool big = stats(5)
-r.Console.log($"stats(5): {doubled} {halved} {big}")
+Console.log($"stats(5): {doubled} {halved} {big}")
 id, name = getUser()
 _, name, i32 level = 7, "carl", 3
-r.Console.log($"name = {name}, level = {level}")
+Console.log($"name = {name}, level = {level}")
 
 // swap: the right side is evaluated first
 i32 x = 1
 i32 y = 2
 x, y = y, x
-r.Console.log($"after swap: x = {x}, y = {y}")
+Console.log($"after swap: x = {x}, y = {y}")
 
 // tuples
 (i32 id, string name) pair = getPair()
-r.Console.log($"pair = {pair}, pair.id = {pair.id}, pair.name = {pair.name}, pair.1 = {pair.1}")
+Console.log($"pair = {pair}, pair.id = {pair.id}, pair.name = {pair.name}, pair.1 = {pair.1}")
 pair.id = 20
 pair.name += "!"
-r.Console.log($"changed pair = {pair}")
+Console.log($"changed pair = {pair}")
 (i32, string) plain = pair
-r.Console.log($"plain = {plain}, equal: {plain == pair}")
+Console.log($"plain = {plain}, equal: {plain == pair}")
 (i64, r64) widened = (3, 1.5)
-r.Console.log($"widened = {widened}")
+Console.log($"widened = {widened}")
 (i32 count, (bool flag, char letter) inner) nested = (1, (true, 'z'))
-r.Console.log($"nested = {nested}, nested.inner.letter = {nested.inner.letter}")
+Console.log($"nested = {nested}, nested.inner.letter = {nested.inner.letter}")
 (i32 a, i32 b) zero
-r.Console.log($"zero = {zero}")
+Console.log($"zero = {zero}")
 bool literalEqual = (1, "a") == (1, "a")
 bool different = (1, 2) != (1, 3)
-r.Console.log($"literal equal: {literalEqual}, different: {different}")
+Console.log($"literal equal: {literalEqual}, different: {different}")
 
 // nullable tuple
 (i32, i32)? maybePair
-r.Console.log($"maybePair = {maybePair}")
+Console.log($"maybePair = {maybePair}")
 maybePair = (4, 5)
-r.Console.log($"maybePair = {maybePair}, first = {maybePair?.0}")
+Console.log($"maybePair = {maybePair}, first = {maybePair?.0}")

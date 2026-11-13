@@ -1,0 +1,3 @@
+; fixed-grow-step (spec 6.8.2): a vec grows by 100 items each time instead of doubling (small targets)
+source=main.df
+fixed-grow-step=100

@@ -1,6 +1,6 @@
 // Constructor chains (spec 11.1.1, step 2): : Foo(...) to another constructor of the class (primary or body),
 // : Parent(...) to a constructor of the parent, the parent's constructor without parameters when none is named
-alias Root as r
+import Root
 
 // a primary constructor reached by every other constructor, directly or through another one
 public class Foo(i32 bar, string baz) {
@@ -100,21 +100,21 @@ public class Strict {
   public Strict(string s) : Strict((i32)s.len - 3) { }
 }
 
-r.Console.log(Foo(1, "a").show())
-r.Console.log(Foo(2).show())
-r.Console.log(Foo().show())
-r.Console.log(Foo("word").show())
-r.Console.log(Range(3, 4).show())
-r.Console.log(Range(8).show())
-r.Console.log(Range().show())
-r.Console.log(Animal().show())
-r.Console.log(Bird("Tweety").all())
-r.Console.log(Bird("Pingu", false).all())
-r.Console.log(Bird().all())
+Console.log(Foo(1, "a").show())
+Console.log(Foo(2).show())
+Console.log(Foo().show())
+Console.log(Foo("word").show())
+Console.log(Range(3, 4).show())
+Console.log(Range(8).show())
+Console.log(Range().show())
+Console.log(Animal().show())
+Console.log(Bird("Tweety").all())
+Console.log(Bird("Pingu", false).all())
+Console.log(Bird().all())
 Dog d = Dog("Rex")
-r.Console.log(d.show() + " " + d.nick)
+Console.log(d.show() + " " + d.nick)
 Square sq = Square(3)
-r.Console.log(sq.kind + " " + sq.side.toStr())
+Console.log(sq.kind + " " + sq.side.toStr())
 fun ->string tryStrict(string s) {
   Strict x = Strict(s)
   return "made " + x.v.toStr()
@@ -122,5 +122,5 @@ fun ->string tryStrict(string s) {
     return "failed: " + ex.message
   }
 }
-r.Console.log(tryStrict("hello"))
-r.Console.log(tryStrict("hi"))
+Console.log(tryStrict("hello"))
+Console.log(tryStrict("hi"))

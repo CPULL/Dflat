@@ -1,1 +1,1 @@
-map_loop_writable_value.df(2): error: for (k, &V v) in m is not built yet (writable values come with a later step)
+map_loop_writable_value.df(3): error: feature not supported: for (k, &string v) in m: the string values of a map (string items of arr, vec and list have it)

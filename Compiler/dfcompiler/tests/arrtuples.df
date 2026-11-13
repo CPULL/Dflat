@@ -1,15 +1,15 @@
 // Tuples that hold arrays (spec 6.8.1): a tuple carries its own copy of its arrays (also when it is returned); a typed local, a field or a
 // static of such a tuple ends its arrays with it, or when it is replaced; t.0 = a follows the rule of an array field
-alias Root as r
+import Root
 public class Dog(string name) {
   public string name
 } atEnd {
-  r.Console.log("  end " + name)
+  Console.log("  end " + name)
 }
 public class Holder {
   public (arr<Dog>, i32) pair
 } atEnd {
-  r.Console.log("  end holder")
+  Console.log("  end holder")
 }
 fun (arr<i32>, i32) make() {
   arr<i32> numbers = [1, 2, 3]
@@ -21,25 +21,25 @@ fun tuples() {
   a[0] = 70
   (arr<i32>, i32) t2 = t
   t2.0[0] = 5
-  r.Console.log($"  a {a[0]}, t {t.0[0]}, t2 {t2.0[0]}")
+  Console.log($"  a {a[0]}, t {t.0[0]}, t2 {t2.0[0]}")
   (arr<i32>, i32) m = make()
-  r.Console.log($"  made {m.0.len}")
+  Console.log($"  made {m.0.len}")
   t = ([4], 1)
   t.0 = [9, 9]
-  r.Console.log($"  t {t.0[0]} {t.0.len}")
+  Console.log($"  t {t.0[0]} {t.0.len}")
   (arr<Dog>, i32) dogs = ([Dog("d1")], 1)
   dogs = ([Dog("d2")], 2)
-  r.Console.log("  end of tuples")
+  Console.log("  end of tuples")
 }
-r.Console.log("tuples")
+Console.log("tuples")
 tuples()
-r.Console.log("holder")
+Console.log("holder")
 fun holder() {
   Holder h = Holder()
   h.pair = ([Dog("h1")], 1)
   h.pair = ([Dog("h2")], 2)
   h.pair.0 = [Dog("h3")]
-  r.Console.log("  end of holder")
+  Console.log("  end of holder")
 }
 holder()
-r.Console.log("done")
+Console.log("done")

@@ -1,0 +1,6 @@
+class P {
+  public fun m<T>(T x) { }
+}
+class C : P {
+  public fun m<T>(T x) { }
+}

@@ -1,5 +1,5 @@
 // A constructor whose field initializers raise: the half-built object ends and the caller gets nothing but the exception (spec 15.7.6)
-alias Root as r
+import Root
 
 public class Notice(string text) : Exception, SilentException { }
 
@@ -42,11 +42,11 @@ fun ->string buildDerived() {
   return $"derived with ratio {d.ratio}"
   catch DivisionByZeroException { return "derived construction failed" }
 }
-r.Console.log(build(5))
-r.Console.log(build(0))
-r.Console.log(buildDerived())
+Console.log(build(5))
+Console.log(build(0))
+Console.log(buildDerived())
 Quiet q = Quiet(1)
-r.Console.log(q.value)
+Console.log(q.value)
 
 i32 failures = 0
 i32 i = 0
@@ -54,4 +54,4 @@ while i < 1000 {
   if build(0).len > 0 then failures += 1
   i += 1
 }
-r.Console.log(failures)
+Console.log(failures)

@@ -1,0 +1,4 @@
+class P {
+  public fun m<T : Numeric>(T x) { }
+}
+P().m("s")

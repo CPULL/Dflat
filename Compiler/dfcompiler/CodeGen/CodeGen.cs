@@ -125,6 +125,7 @@ sealed class VarInfo {
   public long? KnownLength { get; set; }   // an array that starts from a literal or arr<T>[n] and is never assigned again: its length is known
   public string? OwnFlag { get; set; }     // a string variable: the C flag that says whether it owns its string (CodeGen.Strings.cs)
   public bool ReadOnlyString { get; set; } // a string parameter or loop variable: a read-only borrow, never changed in place (spec 4.1)
+  public bool LoopVar { get; set; }        // the plain variable of a for loop: a read-only lend of each item (spec 6.4)
   public VarInfo? AliasOf { get; set; }    // string b = a: b is known to be the same string as a (spec 4.1, in place through an alias)
   public bool FnWrites { get; set; }       // a function value with a & capture (spec 13.3.3)
   public bool FnBorrows { get; set; }      // a function value that may borrow (a lambda with a borrowed capture, or a parameter): it is not
@@ -817,6 +818,17 @@ public sealed partial class CodeGen {
         sb.Append(pad).Append(s.Text).Append('\n');   // C made by the compiler (the release of a loop's counter, EmitForEach)
         return;
 
+      case "PartRef": {
+        // for (&Dog d, i32 n) in c: d is the place of the part, as for &Dog d in c (spec 6.4); assigning it ends what it held (13.1)
+        var place = LValue(s.Children[1], scope);
+        string type = s.Children[0].Text!;
+        CheckNotShadowing(s.Text!, scope, s);
+        string pointer = $"l_{s.Text}_{++tempCounter}";
+        sb.Append(pad).Append($"{CType(type)}* {pointer} = &({place.Code});\n");
+        scope.Vars[s.Text!] = new VarInfo(type, $"(*{pointer})", false) { RefSlot = true, OwnsTuple = TupleHoldsArrays(type), IsWritable = true };
+        return;
+      }
+
       case "Assign":
         if (CollectionOperator(s, scope) is Node written) {
           EmitStmt(written, sb, scope, indent);   // m += x, s -= x ...: the calls of the members (spec 6.6)
@@ -1210,6 +1222,9 @@ public sealed partial class CodeGen {
     if (source.Kind == "In" && source.Children[0].Kind != "Range") {
       EmitForEach(s, sb, scope, indent);
       return;
+    }
+    if (varNode.Kind == "WritableVar") {
+      throw Error($"for &{varNode.Text}: a counting loop has no items to borrow; & is for the items of a collection (spec 6.4)", s);
     }
     if (varNode.Children.Count == 0) {
       throw Error($"the 'for' variable '{varNode.Text}' needs a type", s);
@@ -2571,6 +2586,16 @@ public sealed partial class CodeGen {
         }
         return TransformTo(transform.Children[0], callee.Children.Skip(1).ToList(), args, scope, n);
       }
+      var typeArgs = callee.Children.Skip(1).ToList();
+      if (callee.Children[0] is { Kind: "Member" } methodRef && ExprOf(methodRef.Children[0], scope) is var receiver && IsClass(receiver.Type)) {
+        // obj.addSize<i32>(5): the copy of the generic method for the types written (spec 11.3.1)
+        return MethodCall(ObjInfo(receiver.Type), methodRef.Text!, TempObject(receiver).Code, false, args, scope, n, typeArgs);
+      }
+      if (callee.Children[0] is { Kind: "Name" } bareRef && currentClass != null && GenericMethodOf(currentClass, bareRef.Text!) != null && scope.Find("this") != null) {
+        // addSize<i32>(5) inside the class: this.addSize<i32>(5)
+        var self = ExprOf(Synthetic("Name", n, "this"), scope);
+        return MethodCall(ObjInfo(self.Type), bareRef.Text!, self.Code, false, args, scope, n, typeArgs);
+      }
       if (callee.Children[0] is not { Kind: "Name" } genericName) {
         throw NotSupported("Generics", callee);
       }
@@ -2701,7 +2726,9 @@ public sealed partial class CodeGen {
         return UserCall(ResolveOverload(siblings, args, scope, n), args, scope, n);
       }
     }
-    throw Error($"unknown function '{path ?? callee.Kind}'", n);
+    // log(...) where the stdlib has Root.Console.log: the member is reached through its class (spec 16.2)
+    string? member = path != null && !path.Contains('.') ? StdlibPaths().Where(full => full.EndsWith("." + path) && full.Count(c => c == '.') == 2).OrderBy(full => full).FirstOrDefault() : null;
+    throw Error($"unknown function '{path ?? callee.Kind}'" + (member != null ? $": the standard library has {member}, written {member[5..]} with import Root or import {member[..member.LastIndexOf('.')]}" : ""), n);
   }
 
   // positional arguments in order, named ones anywhere, defaults for the rest
@@ -2757,6 +2784,9 @@ public sealed partial class CodeGen {
         return new Expr($"({v32}f)", "r32");
       }
       string[] parts = path.Split('.');
+      if (parts.Length == 2 && parts[1] == "hash" && IsKnownType(parts[0]) && !(classes.TryGetValue(parts[0], out var hashOwner) && FindField(hashOwner, "hash") != null)) {
+        return TypeHash(Normalize(parts[0]));   // i32.hash, Dog.hash: the hash of the type (spec 6.2.1)
+      }
       if (parts.Length == 2 && classes.TryGetValue(parts[0], out var staticOwner)) {
         return StaticField(staticOwner, parts[1], n, scope);
       }
@@ -2832,6 +2862,10 @@ public sealed partial class CodeGen {
     }
     if (IsArr(obj.Type) && n.Text == "sizeof") {
       return CollectionSizeof(obj);
+    }
+    if (n.Text == "sizeof" && (IsInt(obj.Type) || obj.Type is "r32" or "r64" or "bool" or "char" || IsEnum(obj.Type))) {
+      // the bytes of a native value (spec 6.6): its C size; the value itself is not read
+      return new Expr($"((uint64_t)sizeof({CType(obj.Type)}))", "u64");
     }
     throw Error($"member '{n.Text}' of {obj.Type} is not supported yet", n);
   }

@@ -1,19 +1,19 @@
 // Globals (spec 18), part 1: declaration, creation in declaration order, destruction in reverse order, use from functions and
 // methods, field reads and writes, copies with !, names that hide a global
-alias Root as r
+import Root
 
 class Logger(string prefix) {
   vec<string> lines = vec<string>()
   public fun write(string text) { lines.add(prefix + text) }
   unrestricted fun u64 count() { lines.len }
-} atEnd { r.Console.log($"logger end {lines.len}") }
+} atEnd { Console.log($"logger end {lines.len}") }
 
 class Cache(u64 start) {
   u64 hits = start
   public string name = "cache"
   public fun u64 getOrAdd(u64 k) { hits += k; log.write($"add {k}"); hits }
   unrestricted fun string label() { name }
-} atEnd { r.Console.log($"cache end {hits}") }
+} atEnd { Console.log($"cache end {hits}") }
 
 global Logger log = Logger("> ")
 global Cache cache1 = Cache(10)
@@ -22,21 +22,21 @@ global Cache cache2 = Cache(log.count() + 100)
 fun bump() { cache1.getOrAdd(5) }
 
 bump()
-r.Console.log(cache1.getOrAdd(1))
-r.Console.log(cache2.getOrAdd(2))
+Console.log(cache1.getOrAdd(1))
+Console.log(cache2.getOrAdd(2))
 cache1.name = "first"
-r.Console.log(cache1.name)
+Console.log(cache1.name)
 string copied = cache1.label()!
-r.Console.log(copied)
+Console.log(copied)
 Cache c = cache2!
-r.Console.log(c.getOrAdd(0))
-r.Console.log(log.count())
+Console.log(c.getOrAdd(0))
+Console.log(log.count())
 
 // a local, a parameter or a field with the same name hides the global
 class Item(i32 v) {
   public i32 value = v
 }
-fun show(Item it) { r.Console.log(it.value) }
+fun show(Item it) { Console.log(it.value) }
 class Holder {
   Item item = Item(7)
   public fun print() { show(item) }
@@ -50,4 +50,4 @@ global Item item = Item(1)
 local()
 param(Item(4))
 Holder().print()
-r.Console.log(item.value)
+Console.log(item.value)

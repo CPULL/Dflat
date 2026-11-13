@@ -1,4 +1,4 @@
-alias Root as r
+import Root
 
 public class Grid<u64 Width, Cell>() {
   public fun u64 Count() { Width }

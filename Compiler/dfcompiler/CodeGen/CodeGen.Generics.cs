@@ -50,6 +50,7 @@ sealed class GenericClass {
 // the instances of generic classes the program needs; they survive from one attempt to the next (see Compile)
 sealed class GenericSeeds {
   public List<(GenericClassKey Template, List<string> Args)> Classes { get; } = new();
+  public List<(string Root, string Name, List<string> Args)> Methods { get; } = new();   // the copies of generic methods (CodeGen.GenericMethods.cs)
 }
 
 readonly record struct GenericClassKey(string Name);
@@ -111,10 +112,11 @@ public sealed partial class CodeGen {
   // Compiles the tree. A generic class instance that the code needs and the attempt has not made (found while resolving
   // a type) is added to the seeds and the whole compilation starts again from a fresh copy of the tree.
   public static (string C, IReadOnlyList<string> Warnings) Compile(Node tree, bool release = false, int nativeBits = 64, IReadOnlyDictionary<string, int>? copyLimits = null,
-      long doubleGrowLimit = 4 * 1024 * 1024, int growExtraThousandths = 500) {
+      long doubleGrowLimit = 4 * 1024 * 1024, int growExtraThousandths = 500, long growStep = 0) {
     ReleaseBuild = release;
     VecDoubleGrowLimit = doubleGrowLimit;   // double-grow-limit and further-grow-factor (spec 6.8.2)
     VecGrowExtra = growExtraThousandths;
+    VecGrowStep = growStep;   // fixed-grow-step: 0 = off
     limits = copyLimits ?? new Dictionary<string, int>();
     NativeInt = nativeBits >= 64 ? "i64" : "i32";
     NativeUns = nativeBits >= 64 ? "u64" : "u32";
@@ -148,7 +150,7 @@ public sealed partial class CodeGen {
     return name + "__" + string.Join("_", args.Select(SanitizeName));
   }
 
-  string DisplayName(string type) => displayNames.TryGetValue(type, out var shown) ? shown : type.StartsWith('#') ? type[1..] : type.StartsWith('_') ? "%" + type[1..]
+  string DisplayName(string type) => displayNames.TryGetValue(type, out var shown) ? shown : boxInner.TryGetValue(type, out var boxed) ? "@" + DisplayName(boxed) : type.StartsWith('#') ? type[1..] : type.StartsWith('_') ? "%" + type[1..]
     : IsFunType(type) ? FunDisplay(type) : type;
 
   bool IsSetName(string name) => PredefinedSets.ContainsKey(name) || genericSets.ContainsKey(name);
@@ -355,23 +357,7 @@ public sealed partial class CodeGen {
     if (classes.ContainsKey(name) || genericClasses.ContainsKey(name)) {
       throw Error($"a function cannot be named like the class '{name}'", fun);
     }
-    var ps = fun.Children.Any(child => child.Kind == "GenericParams") ? ReadTypeParams(fun, name) : new List<TypeParam>();
-    var paramsNode = fun.Children.First(child => child.Kind == "Params");
-    var implicitNames = new Dictionary<Node, string>();
-    foreach (var param in paramsNode.Children) {
-      if (param.Children.Count > 0 && param.Children[0] is { Kind: "Type", Children.Count: 0 } type && IsSetName(type.Text!)) {
-        string implicitName = "_" + param.Text;
-        var typeParam = new TypeParam(implicitName, param);
-        typeParam.Constraints.Add(type);
-        ps.Add(typeParam);
-        implicitNames[type] = implicitName;
-      }
-    }
-    var template = CloneNode(fun, node => implicitNames.TryGetValue(node, out var implicitName)
-      ? new Node("Type", new Token(TokenKind.Ident, "", node.Line, 0), implicitName)
-      : null);
-    template.Children.RemoveAll(child => child.Kind == "Where");
-    genericFuns[name] = new GenericFun(name, template, ps);
+    genericFuns[name] = MakeGenericTemplate(fun, name);
   }
 
   // the tree of a copy: every use of a type parameter becomes the concrete type
@@ -856,6 +842,11 @@ public sealed partial class CodeGen {
 
   // name<u8>(args) or name(args): the type arguments written, then the ones the arguments tell
   FunSig InstantiateForCall(GenericFun generic, List<Node> written, List<Node> args, Scope scope, Node at) {
+    return InstantiateFun(generic, InferTypeArgs(generic, written, args, scope, at), at);
+  }
+
+  // the type arguments of a call: the ones written, then the ones the arguments tell
+  List<string> InferTypeArgs(GenericFun generic, List<Node> written, List<Node> args, Scope scope, Node at) {
     var bound = new Dictionary<string, string>();
     if (written.Count > generic.Params.Count) {
       throw Error($"{generic.Name} takes {generic.Params.Count} type argument(s), not {written.Count}", at);
@@ -864,7 +855,7 @@ public sealed partial class CodeGen {
     for (int index = 0; index < writtenTypes.Count; index++) {
       bound[generic.Params[index].Name] = writtenTypes[index];
     }
-    var names = generic.Params.Select(p => p.Name).ToHashSet();
+    var names = generic.Params.Select(p => p.Name).Where(name => !bound.ContainsKey(name)).ToHashSet();   // a type argument written is not inferred again: same<u64>(2) converts 2
     foreach (var (pattern, argument) in PatternPairs(generic, args)) {
       if (!MentionsParam(pattern, names)) {
         continue;
@@ -883,7 +874,7 @@ public sealed partial class CodeGen {
       }
       inferred.Add(type);
     }
-    return InstantiateFun(generic, inferred, at);
+    return inferred;
   }
 
   // the declared type of each parameter next to the argument given to it (positional, named and variadic)

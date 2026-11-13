@@ -1,0 +1,8 @@
+namespace local
+public class Circle(r64 radius) {
+  public r64 radius
+}
+public class Square(r64 side) {
+  public r64 side
+}
+public fun r64 twice(r64 x) { x * 2.0 }

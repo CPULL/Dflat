@@ -1,11 +1,11 @@
 // Read/write counted results and collections (spec 12.7): fun &@T gives a read/write usage (also to var), list<&@T> holds read/write
 // items: the loop variable is enforced for its lock, takeAt hands out a read/write usage, a write without the lock raises
-alias Root as r
+import Root
 public class Player(string name) {
   public string name
   public i32 score
 } atEnd {
-  r.Console.log("  end " + name)
+  Console.log("  end " + name)
 }
 fun &@Player make(string n) {
   return Player(n)
@@ -21,7 +21,7 @@ fun run() {
     b.score = 2
   }
   &@Player c = pass(&@a)
-  r.Console.log($"  users of ann {a.usersCount}")
+  Console.log($"  users of ann {a.usersCount}")
   list<&@Player> team = []
   team.add(&@a)
   team.add(&@b)
@@ -30,20 +30,20 @@ fun run() {
     enforce p {
       p.score += 10
     }
-    r.Console.log($"  {p.name} {p.score}")
+    Console.log($"  {p.name} {p.score}")
   }
   &@Player taken = team.takeAt(2)
   enforce taken { taken.name = "cid2" }
-  r.Console.log($"  taken {taken.name}")
+  Console.log($"  taken {taken.name}")
   @Player view = team[1]
-  r.Console.log($"  view {view.name}")
+  Console.log($"  view {view.name}")
   for p in team {
     p.score = 0
   }
-  r.Console.log("  never printed")
+  Console.log("  never printed")
   catch WritingOnRefCountWithoutLockingException {
-    r.Console.log("  caught: loop write without the lock")
+    Console.log("  caught: loop write without the lock")
   }
-  r.Console.log("  end of run")
+  Console.log("  end of run")
 }
 run()

@@ -1,0 +1,68 @@
+// Tuples with objects of Keyable classes as keys of map, hmap, set, hset (spec 6.2, 6.8.4.1, 6.8.5.1): the collection keeps a clone of the
+// key, the new objects of a key given to it end with the statement, a borrowed one stays with its owner; an hmap compares with equals.
+// A tuple literal lent to a call: its new parts end with the statement (spec 3.2). Map values that are tuples with objects or arrays
+
+import Root
+class Dog(string name) : Keyable {
+  public string name
+  replace fun uns get_hash() { 7u }                 // every dog has the same hash: equals decides in the hmap
+  replace fun bool equals(T other) {
+    if T is Dog {
+      return name == other.name
+    }
+    return false
+  }
+} atEnd {
+  Console.log($"  {name} ends")
+}
+class Cat(string name) : Keyable {
+  public string name
+} atEnd {
+  Console.log($"  cat {name} ends")
+}
+fun show((Dog, i32) t) { Console.log($"show {t.0.name} {t.1}") }
+fun keys() {
+  map<(Dog, i32), string> m = []
+  m[(Dog("A"), 1)] = "a1"
+  m[(Dog("B"), 2)] = "b2"
+  Dog a = Dog("A")
+  m[(a, 3)] = "a3"
+  Console.log($"{m.len} {m[(Dog("A"), 1)]} {m.hasKey((a, 3))} {m.hasKey((a, 9))}")
+  for var (k, v) in m {
+    Console.log($"{k.0.name} {k.1} {v}")
+  }
+  m.removeAt((Dog("B"), 2))
+  Console.log($"after remove {m.len} {a.name}")
+  hmap<(string, Dog), i32> h = []
+  h[("x", Dog("H"))] = 1
+  h[("x", Dog("H"))] = 2
+  Console.log($"{h.len} {h[("x", Dog("H"))]}")
+  hset<(Cat, i32)> s = []
+  Cat c = Cat("C")
+  s.add((c, 1))
+  Console.log($"{s.len} {s.has((c, 1))}")
+  set<(i32, Dog)> ordered = [(1, Dog("S1")), (0, Dog("S0"))]
+  Console.log($"{ordered}")
+  Console.log("end of keys")
+}
+fun lent() {
+  Dog rex = Dog("Rex")
+  show((Dog("New"), 1))
+  show((rex, 2))
+  Console.log($"end of lent {rex.name}")
+}
+fun values() {
+  map<i32, (Dog, i32)> m = [1: (Dog("V1"), 1)]
+  m[2] = (Dog("V2"), 2)
+  m[1] = (Dog("V3"), 3)
+  (Dog, i32) taken = ->m[2]
+  Console.log($"{m} {taken.0.name}")
+  hmap<string, (arr<i32>, i32)> h = []
+  h["a"] = ([1, 2], 2)
+  Console.log($"{h["a"].0[1]}")
+  Console.log("end of values")
+}
+keys()
+lent()
+values()
+Console.log("done")

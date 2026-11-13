@@ -1,0 +1,1 @@
+for_plain_struct_write.df(3): error: 'p' is a read-only loop variable: its fields cannot be written ('x'); write for &P p in ... to change the item (spec 6.4)

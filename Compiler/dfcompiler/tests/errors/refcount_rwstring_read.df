@@ -1,7 +1,7 @@
 namespace refcount_rwstring_read
-alias Root as r
+import Root
 fun f() {
   &@string s = "a"
-  r.Console.log(s)
+  Console.log(s)
 }
 f()

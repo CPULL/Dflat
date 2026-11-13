@@ -1,17 +1,17 @@
 // A library global (spec 18): created before the program's globals, destroyed after them, ranked below them
 namespace app
 import stats
-alias Root as r
+import Root
 
 class Shop {
   i32 sold = 0
   public fun sell(i32 n) { sold += n; record(n) }
   unrestricted fun i32 count() { sold }
-} atEnd { r.Console.log($"shop ends at {sold}") }
+} atEnd { Console.log($"shop ends at {sold}") }
 
 global Shop shop = Shop()
 
 shop.sell(3)
 shop.sell(4)
-r.Console.log(shop.count())
-r.Console.log(recorded())
+Console.log(shop.count())
+Console.log(recorded())

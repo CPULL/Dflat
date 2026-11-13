@@ -1,0 +1,3 @@
+struct P { i32 x, i32 y }
+vec<P> ps = [P(1, 2)]
+for P p in ps { p.x = 5 }

@@ -1,5 +1,5 @@
 // Properties and the parent in a lambda (spec 13.3.1): read through the object (unlisted: read-only), &prop writes through W:, prop! copies the value read at creation
-alias Root as r
+import Root
 public class Library(string name) {
   public string name
   unrestricted fun ->string label() { "library " + name }
@@ -9,18 +9,18 @@ public class Reader(Library library as parent, string who) {
   public i32 level { R: { field + 1 } W: { field = value * 2 } } = 3
   public string tag { R: { "tag-" + who } }
   public fun show() {
-    fun() f = () { r.Console.log($"  {who} level {level} tag {tag} in {library.label()}") }
+    fun() f = () { Console.log($"  {who} level {level} tag {tag} in {library.label()}") }
     f()
     fun() up = (; &level) { level = 10 }
     up()
     f()
-    fun() snap = (; level!, tag!) { r.Console.log($"  snap {level} {tag}") }
+    fun() snap = (; level!, tag!) { Console.log($"  snap {level} {tag}") }
     level = 20
     snap()
     f()
   }
   public fun ->fun() keep() {
-    return (; level!) { r.Console.log($"  kept {level}") }
+    return (; level!) { Console.log($"  kept {level}") }
   }
 }
 fun main() {

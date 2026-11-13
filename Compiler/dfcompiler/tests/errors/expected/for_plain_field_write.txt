@@ -1,0 +1,1 @@
+for_plain_field_write.df(5): error: 'g' is a read-only loop variable: its fields cannot be assigned; write for &Dog g in ... to change the item (spec 6.4)

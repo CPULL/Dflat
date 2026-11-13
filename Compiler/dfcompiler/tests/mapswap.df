@@ -1,0 +1,50 @@
+// map.swap(key1, key2) (spec 6.6): the values of the two keys are exchanged; one missing key takes the value of the other, which goes;
+// both missing: nothing. Strings, objects, tuples, object keys (the added key is a clone) and string? keys
+
+import Root
+class Dog(string name) {
+  public string name
+} atEnd {
+  Console.log($"  {name} ends")
+}
+class Key(string k) : Keyable {
+  public string k
+} atEnd {
+  Console.log($"  key {k} ends")
+}
+fun f() {
+  map<i32, char> m = [1: 'a', 2: 'b']
+  m.swap(1, 2)
+  Console.log($"{m}")
+  m.swap(1, 5)
+  Console.log($"{m}")
+  m.swap(7, 8)
+  m.swap(2, 2)
+  Console.log($"{m}")
+  map<string, string> s = ["x": "long text that does not fit in the slot inline at all, really", "y": "short"]
+  s.swap("x", "y")
+  Console.log($"{s}")
+  s.swap("y", "z")
+  Console.log($"{s}")
+  hmap<string, Dog> h = []
+  h["a"] = Dog("A")
+  h["b"] = Dog("B")
+  h.swap("a", "b")
+  Console.log($"{h["a"].name} {h["b"].name}")
+  h.swap("a", "c")
+  Console.log($"{h.len} {h["c"].name} {h.hasKey("a")}")
+  hmap<i32, (Dog, i32)> t = [1: (Dog("T"), 1)]
+  t.swap(1, 2)
+  Console.log($"{t}")
+  map<Key, i32> ok = []
+  ok[Key("p")] = 1
+  Key q = Key("q")
+  ok.swap(Key("p"), q)
+  Console.log($"{ok.len} {ok[q]}")
+  map<string?, i32> n = [null: 1]
+  n.swap(null, "w")
+  Console.log($"{n}")
+  Console.log("end of f")
+}
+f()
+Console.log("done")

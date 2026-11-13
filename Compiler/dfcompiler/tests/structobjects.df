@@ -1,10 +1,10 @@
 namespace structobjects
-alias Root as r
+import Root
 
 public class Dog(string name) {
   public string name
 } atEnd {
-  r.Console.log("  end " + name)
+  Console.log("  end " + name)
 }
 
 struct Pet {
@@ -25,43 +25,43 @@ class Home {
 
 fun Pet make(string n) { Pet(label: n, dog: Dog(n)) }
 
-fun show(Pet p) { r.Console.log("show " + p.label) }
+fun show(Pet p) { Console.log("show " + p.label) }
 
-fun keep(->Pet p) { r.Console.log("keep " + p.label) }
+fun keep(->Pet p) { Console.log("keep " + p.label) }
 
 fun Pet back(Pet p) { p }
 
-r.Console.log("1 creation")
+Console.log("1 creation")
 Pet a = Pet(label: "a", dog: Dog("rex"))
-r.Console.log(a)
-r.Console.log("2 copy clones")
+Console.log(a)
+Console.log("2 copy clones")
 Pet b = a
 b.label = "b"
 b.dog.name = "rex2"
-r.Console.log($"{a.label} {a.dog.name} {b.label} {b.dog.name}")
-r.Console.log("3 assign drops the old")
+Console.log($"{a.label} {a.dog.name} {b.label} {b.dog.name}")
+Console.log("3 assign drops the old")
 b = make("max")
-r.Console.log(b.describe())
-r.Console.log("4 field replaced")
+Console.log(b.describe())
+Console.log("4 field replaced")
 b.dog = Dog("bo")
-r.Console.log("5 lend and temporaries")
+Console.log("5 lend and temporaries")
 show(a)
 show(make("tmp"))
-r.Console.log(make("tmp2").label)
-r.Console.log(make("tmp3").describe())
+Console.log(make("tmp2").label)
+Console.log(make("tmp3").describe())
 make("dropped")
-r.Console.log("6 move")
+Console.log("6 move")
 keep(->b)
-r.Console.log($"b after move: {b.label} {b.dog == null}")
+Console.log($"b after move: {b.label} {b.dog == null}")
 keep(a!)
-r.Console.log("7 nested and class field")
+Console.log("7 nested and class field")
 Owner o = Owner(who: "ann", pet: make("nest"))
 o.pet.rename("nest2")
-r.Console.log(o)
+Console.log(o)
 var h = Home()
 h.pet = make("home")
 Pet c = back(a)
-r.Console.log(c.label)
-r.Console.log("8 static")
-r.Console.log(Pet.kind())
-r.Console.log("9 end of program")
+Console.log(c.label)
+Console.log("8 static")
+Console.log(Pet.kind())
+Console.log("9 end of program")

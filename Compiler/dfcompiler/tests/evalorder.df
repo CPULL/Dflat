@@ -1,6 +1,6 @@
 // Left-to-right order (spec 2.5): the operands of an operator and the arguments of a call run from left to right, so a part that changes
 // a variable (a & argument, an assignment, ++) is seen by the parts after it
-alias Root as r
+import Root
 fun i32 bump(&i32 n) {
   n += 10
   n
@@ -17,18 +17,18 @@ public class Calc {
 }
 fun main() {
   string t = "ab"
-  r.Console.log("1 " + twice(&t) + " " + t)
+  Console.log("1 " + twice(&t) + " " + t)
   i32 k = 1
-  r.Console.log($"2 {bump(&k) + k}")
+  Console.log($"2 {bump(&k) + k}")
   i32 j = 1
-  r.Console.log($"3 {pair(bump(&j), j)}")
+  Console.log($"3 {pair(bump(&j), j)}")
   i32 m = 1
-  r.Console.log($"4 {pair(m, bump(&m))}")
+  Console.log($"4 {pair(m, bump(&m))}")
   i32 c = 1
-  r.Console.log($"5 {Calc().pair(bump(&c), c)}")
+  Console.log($"5 {Calc().pair(bump(&c), c)}")
   i32 q = 1
   i32(i32, i32) f = (i32 a, i32 b) { a * 100 + b }
-  r.Console.log($"6 {f(bump(&q), q)}")
+  Console.log($"6 {f(bump(&q), q)}")
   i32 w = 1
-  r.Console.log($"7 {bump(&w)} {w}")
+  Console.log($"7 {bump(&w)} {w}")
 }

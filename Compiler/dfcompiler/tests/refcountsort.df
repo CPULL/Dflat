@@ -1,0 +1,36 @@
+// sort() without a lambda on collections of counted objects and values (spec 12.7, 6.2.2): the boxes are opened, null first
+import Root
+class Dog(string name) : Comparable {
+  public string name
+  replace fun int compareTo(Dog other) {
+    if other == null { return 1 }
+    if name < other.name { return -1 }
+    if name > other.name { return 1 }
+    return 0
+  }
+} atEnd {
+  Root.Console.log("end " + name)
+}
+var v = vec<@Dog>()
+v.add(@Dog("b"))
+v.add(null)
+v.add(@Dog("c"))
+v.add(@Dog("a"))
+v.sort()
+for var d in v { Root.Console.log(d?.name ?? "null") }
+v.sort(SortDirection.DESC)
+Root.Console.log(v[0].name)
+var l = list<@Dog>()
+l.add(@Dog("y"))
+l.add(@Dog("x"))
+l.sort()
+Root.Console.log(l[0].name)
+arr<@Dog> a = [@Dog("q"), @Dog("p")]
+a.sort()
+Root.Console.log(a[0].name)
+vec<@i32> n = [3, 1, 2]
+n.sort()
+Root.Console.log($"{n[0]} {n[1]} {n[2]}")
+list<@string> s = ["zz", "aa"]
+s.sort()
+Root.Console.log(s[0])

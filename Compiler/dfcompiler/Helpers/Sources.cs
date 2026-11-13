@@ -304,7 +304,12 @@ sealed partial class SourceLoader {
     }
     CheckFile(file);
     foreach (var import in file.Tree.Children.Where(statement => statement.Kind == "Import")) {
-      foreach (var imported in Resolve(import.Text!, import.Line, multiFile)!) {
+      string path = import.Text!;
+      // a path that is not a folder may name one declaration of the namespace above it (import gfx.Context, spec 16.2): its folder is loaded
+      var files = Resolve(path, import.Line, multiFile, quiet: path.Contains('.'))
+        ?? Resolve(path[..path.LastIndexOf('.')], import.Line, multiFile, quiet: true)
+        ?? throw NotFound(path, import.Line, multiFile);
+      foreach (var imported in files) {
         Visit(imported, multiFile);
       }
     }

@@ -1,5 +1,5 @@
 // Private state in traits, sub-traits, asparent in traits, executeBefore / executeAfter and the counter of Collection (spec 11.2, 6.4)
-alias Root as r
+import Root
 
 // a private member of a trait is seen only by the code of the trait
 trait Counter {
@@ -38,7 +38,7 @@ public class Thing : LoudCounter, Tagged, Started {
 }
 
 Thing t = Thing()
-r.Console.log($"{t.count()} {t.twice()} {t.count()} {t.tag()} {t.begin()} {t.hits}")
+Console.log($"{t.count()} {t.twice()} {t.count()} {t.tag()} {t.begin()} {t.hits}")
 
 // asparent in a trait: the children of the object call it through their parent reference
 trait Visited {
@@ -56,16 +56,16 @@ Home home = Home()
 Guest guest = Guest(home)
 guest.visit()
 guest.visit()
-r.Console.log($"visits {home.visits}")
+Console.log($"visits {home.visits}")
 
 // executeBefore and executeAfter: they run around the implementation of the class, on every call
 trait Logged {
   public fun i32 work(i32 n)
     executeBefore {
-      r.Console.log($"before {n}")
+      Console.log($"before {n}")
     }
     executeAfter {
-      r.Console.log($"after {n} -> {work.result}")
+      Console.log($"after {n} -> {work.result}")
     }
 }
 
@@ -91,11 +91,11 @@ fun ->string attempt(&Worker job, i32 n) {
 }
 
 Worker worker = Worker()
-r.Console.log(worker.work(3))
-r.Console.log(attempt(&worker, 4))
-r.Console.log(attempt(&worker, -1))
+Console.log(worker.work(3))
+Console.log(attempt(&worker, 4))
+Console.log(attempt(&worker, -1))
 Lazy lazy = Lazy()
-r.Console.log(lazy.work(5))
+Console.log(lazy.work(5))
 
 // a custom collection gets the counter of open iterators from Collection: getIterator() adds one (executeAfter of IndexCollection),
 // releaseIterator() takes one back (executeAfter of Collection), whatever the class writes
@@ -112,7 +112,7 @@ public class Bag : IndexCollection<i32> {
   }
 
   replace fun releaseIterator() {
-    r.Console.log("released")
+    Console.log("released")
   }
 
   public fun string releaseAgain() {
@@ -141,19 +141,19 @@ public class BagIterator(Bag collection as parent) : IndexIterator<i32> {
 }
 
 Bag bag = Bag()
-r.Console.log(bag.releaseAgain())
+Console.log(bag.releaseAgain())
 fun walk(Bag source) {
   var iterator = source.getIterator()
   var got = iterator.next()
-  r.Console.log($"first {got.value}")
+  Console.log($"first {got.value}")
 }
 walk(bag)
-r.Console.log(bag.releaseAgain())
+Console.log(bag.releaseAgain())
 for i32 x in bag {
-  r.Console.print($"{x};")
+  Console.print($"{x};")
 }
-r.Console.log("")
-r.Console.log(bag.releaseAgain())
+Console.log("")
+Console.log(bag.releaseAgain())
 
 // a break ends the iterator of the loop too
 for i32 x in bag {
@@ -161,4 +161,4 @@ for i32 x in bag {
     break
   }
 }
-r.Console.log(bag.releaseAgain())
+Console.log(bag.releaseAgain())

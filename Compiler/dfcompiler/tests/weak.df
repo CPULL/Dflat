@@ -1,12 +1,12 @@
 // Weak references (spec 12.7): only on counted objects, made with %x; fields, header parameters, parameters, variables; enforce gives a
 // temporary usage; the holder does not keep the object alive
 namespace weak
-alias Root as r
+import Root
 
 class Context {
   public i32 id = 7
 } atEnd {
-  r.Console.log($"context {id} ends")
+  Console.log($"context {id} ends")
 }
 
 class Handle(%Context context) {
@@ -29,30 +29,30 @@ fun string probe(%Context c) {
 
 @Context ctx = Context()
 var h = Handle(%ctx)
-r.Console.log(h.read())
-r.Console.log(h.hasOther())
+Console.log(h.read())
+Console.log(h.hasOther())
 h.link(%ctx)
-r.Console.log(h.hasOther())
-r.Console.log($"weak references {ctx.weakrefsCount}")
+Console.log(h.hasOther())
+Console.log($"weak references {ctx.weakrefsCount}")
 %Context w
-r.Console.log(probe(%ctx))
+Console.log(probe(%ctx))
 w = %ctx
 enforce w {
-  r.Console.log($"{w.id}, users inside enforce {ctx.usersCount}")
+  Console.log($"{w.id}, users inside enforce {ctx.usersCount}")
 } else {
-  r.Console.log("none")
+  Console.log("none")
 }
-r.Console.log($"users after enforce {ctx.usersCount}")
+Console.log($"users after enforce {ctx.usersCount}")
 %Context copy = w                           // a weak reference copied into another
-r.Console.log($"weak references {ctx.weakrefsCount}")
-enforce copy { r.Console.log("copy ok") } else { r.Console.log("copy none") }
+Console.log($"weak references {ctx.weakrefsCount}")
+enforce copy { Console.log("copy ok") } else { Console.log("copy none") }
 ctx is done.                                // the last user: the object ends, the weak references see it gone
-r.Console.log(h.read())
-r.Console.log(h.hasOther())
-enforce w { r.Console.log(w.id) } else { r.Console.log("w gone") }
-r.Console.log(probe(%copy))
+Console.log(h.read())
+Console.log(h.hasOther())
+enforce w { Console.log(w.id) } else { Console.log("w gone") }
+Console.log(probe(%copy))
 copy is done.
-r.Console.log(h)
+Console.log(h)
 
 // a weak field does not end with its holder
 Context plain8 = Context()
@@ -60,8 +60,8 @@ plain8.id = 8                                // set before it is counted: a @T i
 @Context ctx2 = @plain8
 var h2 = Handle(%ctx2)
 h2 is atEnd.
-r.Console.log($"{ctx2.id}, weak references {ctx2.weakrefsCount}")
-r.Console.log(probe(%ctx2))
+Console.log($"{ctx2.id}, weak references {ctx2.weakrefsCount}")
+Console.log(probe(%ctx2))
 
 // the temporary usage of enforce keeps the object alive while the block runs, and is released on every way out
 fun i32 early(%Context c) {
@@ -71,5 +71,5 @@ fun i32 early(%Context c) {
   }
   return 0
 }
-r.Console.log(early(%ctx2))
-r.Console.log($"users after early {ctx2.usersCount}")
+Console.log(early(%ctx2))
+Console.log($"users after early {ctx2.usersCount}")

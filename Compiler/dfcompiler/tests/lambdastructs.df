@@ -1,9 +1,9 @@
 // Function values in struct fields (spec 13.3.3): a struct copy copies them with !, a replaced one ends, an unassigned one raises UnassignedFunctionCallException
-alias Root as r
+import Root
 public class Dog(string name) {
   public string name
 } atEnd {
-  r.Console.log("  end " + name)
+  Console.log("  end " + name)
 }
 struct Button {
   string label,
@@ -11,7 +11,7 @@ struct Button {
 }
 fun ->fun(i32) handler(string n) {
   Dog d = Dog(n)
-  return (i32 x; ->d) { r.Console.log($"  {d.name} clicked {x}") }
+  return (i32 x; ->d) { Console.log($"  {d.name} clicked {x}") }
 }
 fun main() {
   Button b = Button(label: "ok", onClick: handler("h1"))
@@ -23,6 +23,6 @@ fun main() {
   c.onClick(4)
   Button e = Button(label: "none")
   e.onClick(5)
-  catch UnassignedFunctionCallException { r.Console.log("  unassigned") }
-  r.Console.log("end of main")
+  catch UnassignedFunctionCallException { Console.log("  unassigned") }
+  Console.log("end of main")
 }

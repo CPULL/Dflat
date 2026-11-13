@@ -1,25 +1,25 @@
 // set values with nullable members (spec 11.3.6.1, 11.3.8): T? of a native and the natives nullable by default (date, time, clock, lapse, addr)
-alias Root as r
+import Root
 Generic Maybe { i16?, u8 }
 Generic When { date, i32 }
 
 Maybe a = (i16?)null
-r.Console.log(a)                                          // null: the null of i16?
-r.Console.log(a == null)                                  // true
+Console.log(a)                                          // null: the null of i16?
+Console.log(a == null)                                  // true
 Maybe b = 7b
-r.Console.log(b == null)                                  // false: u8 is not nullable
+Console.log(b == null)                                  // false: u8 is not nullable
 a = null                                                  // the only nullable member, i16?, takes it
-r.Console.log(a is i16?)
+Console.log(a is i16?)
 a = (i16?)300
-if a is i16? s { r.Console.log(s) }
+if a is i16? s { Console.log(s) }
 Maybe same = (i16?)300
-r.Console.log(a == same)
+Console.log(a == same)
 Maybe never
-r.Console.log(never == null)                              // false: the generic null is not the null of a member
+Console.log(never == null)                              // false: the generic null is not the null of a member
 
 When w = date("2024-02-02")
-r.Console.log(w)
+Console.log(w)
 date empty
 When e = empty
-r.Console.log(e == null)                                  // true: a null date
-r.Console.log(w is ? { date d: "a date", i32 x: "a number" })
+Console.log(e == null)                                  // true: a null date
+Console.log(w is ? { date d: "a date", i32 x: "a number" })

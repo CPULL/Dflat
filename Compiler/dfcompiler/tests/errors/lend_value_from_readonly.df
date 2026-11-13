@@ -1,5 +1,5 @@
 namespace lend_value_from_readonly
-alias Root as r
+import Root
 class Board {
   public i32 score
   public string title = "board"

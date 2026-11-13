@@ -1,0 +1,19 @@
+[a: 6]
+  a! ends
+  b! ends
+  t ends
+[11, 12] [3, 5] [0, 0] [Dog { name: new }, Dog { name: new }] [P { x: 9, y: 2 }] [(Dog { name: t2 }, 6)] [a: 101, b: 102] [1: Dog { name: hh }]
+end of f
+  hh ends
+  t2 ends
+  new ends
+  new ends
+[(3, a), (6, b)]
+[P { x: 2, y: 2 }, P { x: 4, y: 4 }]
+[(Dog { name: z }, 42)]
+  z ends
+[(Dog { name: w }, 42)] [(1, true)]
+end of f
+  w ends
+done
+---- exit code 0 ----

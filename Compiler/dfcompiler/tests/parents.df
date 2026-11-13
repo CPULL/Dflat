@@ -1,7 +1,7 @@
 // Parent and child objects (spec 12.5): a child declares its parent with `as parent`; asparent and unrestricted functions; a child moved with -> is an
 // adopted child: its parent knows it and nulls its reference when it ends, and the next call of the child runs its atEnd and raises
 // UsageOfDestroyedObjectException
-alias Root as r
+import Root
 
 public class Library(string name) {
   public string name
@@ -12,7 +12,7 @@ public class Library(string name) {
   unrestricted fun ->string label() { "library " + name }
   public fun reopen() { open() }       // the object itself uses its asparent function too
 } atEnd {
-  r.Console.log($"{name} ends")
+  Console.log($"{name} ends")
 }
 
 // a read-only parent &: only asparent and unrestricted functions are called through it
@@ -22,7 +22,7 @@ public class Reader(Library library as parent, string who) {
   public fun start() { library.open() }
   public fun stop() { library.close() }
 } atEnd {
-  r.Console.log($"reader {who} ends")
+  Console.log($"reader {who} ends")
 }
 
 // a writable parent (&): its public functions and fields too
@@ -40,15 +40,15 @@ fun ->string tryRead(Reader reader) {
 Library city = Library("city")
 Reader ann = Reader(city, "ann")
 ann.start()
-r.Console.log($"{ann.read()} {city.opened}")
+Console.log($"{ann.read()} {city.opened}")
 ann.stop()
-r.Console.log(city.opened)
+Console.log(city.opened)
 Keeper keeper = Keeper(&city)
 keeper.rename("town")
-r.Console.log(keeper.shown())
-r.Console.log(ann)
+Console.log(keeper.shown())
+Console.log(ann)
 city.reopen()
-r.Console.log(city.opened)
+Console.log(city.opened)
 
 // an adopted child that outlives its parent
 fun ->Reader adoptOne() {
@@ -58,8 +58,8 @@ fun ->Reader adoptOne() {
   return ->reader
 }
 Reader orphan = adoptOne()
-r.Console.log(tryRead(orphan))
-r.Console.log(tryRead(orphan))
+Console.log(tryRead(orphan))
+Console.log(tryRead(orphan))
 
 // adopted children that end before their parent leave its list; the parent nulls the ones still there
 Library hall = Library("hall")
@@ -71,10 +71,10 @@ Reader movedSecond = ->second
 Reader movedThird = ->third
 movedFirst.start()
 movedFirst is atEnd.
-r.Console.log(tryRead(movedThird))
+Console.log(tryRead(movedThird))
 hall is atEnd.
-r.Console.log(tryRead(movedSecond))
-r.Console.log(tryRead(movedThird))
+Console.log(tryRead(movedSecond))
+Console.log(tryRead(movedThird))
 
 // a child changes owner also when it is returned (a return always moves), put into a field or put into a collection
 fun ->Reader plainReturn() {
@@ -83,7 +83,7 @@ fun ->Reader plainReturn() {
   return reader
 }
 Reader returned = plainReturn()
-r.Console.log(tryRead(returned))
+Console.log(tryRead(returned))
 public class Shelf {
   public Reader kept
 }
@@ -94,7 +94,7 @@ fun ->Shelf shelved() {
   return shelf
 }
 Shelf shelf = shelved()
-r.Console.log(tryRead(shelf.kept))
+Console.log(tryRead(shelf.kept))
 fun ->vec<Reader> stacked() {
   Library local = Library("stack")
   vec<Reader> all = []
@@ -102,5 +102,5 @@ fun ->vec<Reader> stacked() {
   return all
 }
 vec<Reader> stack = stacked()
-r.Console.log(tryRead(stack[0]))
-r.Console.log("end")
+Console.log(tryRead(stack[0]))
+Console.log("end")

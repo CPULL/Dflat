@@ -1,19 +1,19 @@
 namespace errors
-alias Root as r
+import Root
 
 fun i32 divide(i32 total, i32 parts) { total / parts }
 
 fun i32 safeDivide(i32 total, i32 parts) {
   i32 result = divide(total, parts)
   catch DivisionByZeroException ex {
-    r.Console.log($"caught: {ex.message} | id {ex.id} | in {ex.function} | line {ex.line}")
+    Console.log($"caught: {ex.message} | id {ex.id} | in {ex.function} | line {ex.line}")
     return -1
   }
   return result
 }
 
-r.Console.log($"safeDivide(10, 2) = {safeDivide(10, 2)}")
-r.Console.log($"safeDivide(10, 0) = {safeDivide(10, 0)}")
+Console.log($"safeDivide(10, 2) = {safeDivide(10, 2)}")
+Console.log($"safeDivide(10, 0) = {safeDivide(10, 0)}")
 
 // catches in order: the first one that handles the type runs
 fun check(i32 mode) {
@@ -22,12 +22,12 @@ fun check(i32 mode) {
   i32 zero = 0
   i32 boom = 1 / zero
   catch DivisionByZeroException {
-    r.Console.log($"  mode {mode}: division by zero catch")
+    Console.log($"  mode {mode}: division by zero catch")
   }
   catch Exception ex {
-    r.Console.log($"  mode {mode}: generic catch, message '{ex.message}'")
+    Console.log($"  mode {mode}: generic catch, message '{ex.message}'")
   }
-  r.Console.log($"  mode {mode}: code after the catches runs")
+  Console.log($"  mode {mode}: code after the catches runs")
 }
 check(1)
 check(2)
@@ -40,56 +40,56 @@ fun fail(string message) {
 fun relay() {
   fail("from fail()")
   catch Exception ex {
-    r.Console.log("relay saw: " + ex.message)
+    Console.log("relay saw: " + ex.message)
     throw ex
   }
 }
 relay()
 catch all ex {
-  r.Console.log($"top level got it again: {ex.message}, thrown in {ex.function}")
+  Console.log($"top level got it again: {ex.message}, thrown in {ex.function}")
 }
 
 // a catch only covers the code above it
 {
-  r.Console.log("before")
+  Console.log("before")
   catch all {
-    r.Console.log("never runs")
+    Console.log("never runs")
   }
   fail("below the catch")
   catch Exception ex {
-    r.Console.log("second catch: " + ex.message)
+    Console.log("second catch: " + ex.message)
   }
 }
 
 // atEnd: whole scope, every exit, last to first
 fun i32 cleanup(i32 mode) {
-  atEnd { r.Console.log($"  first atEnd, mode {mode}") }
-  atEnd { r.Console.log($"  second atEnd, mode {mode}") }
+  atEnd { Console.log($"  first atEnd, mode {mode}") }
+  atEnd { Console.log($"  second atEnd, mode {mode}") }
   if mode == 1 then return 10
   if mode == 2 then fail("failing in cleanup")
   return 20
 }
-r.Console.log($"cleanup(1) = {cleanup(1)}")
-r.Console.log($"cleanup(3) = {cleanup(3)}")
+Console.log($"cleanup(1) = {cleanup(1)}")
+Console.log($"cleanup(3) = {cleanup(3)}")
 i32 failed = cleanup(2)
 catch Exception ex {
-  r.Console.log("cleanup(2) raised: " + ex.message)
+  Console.log("cleanup(2) raised: " + ex.message)
 }
 
 // the return value is computed first; a return inside atEnd overrides it
 fun i32 counter() {
   i32 count = 1
   atEnd {
-    r.Console.log($"  atEnd sees count = {count}")
+    Console.log($"  atEnd sees count = {count}")
     return count * 100
   }
   return count++
 }
-r.Console.log($"counter() = {counter()}")
+Console.log($"counter() = {counter()}")
 
 // variables declared after atEnd have their default value when the scope ends before them
 fun early(bool leave) {
-  atEnd { r.Console.log($"  early({leave}): total = {total}") }
+  atEnd { Console.log($"  early({leave}): total = {total}") }
   if leave then return
   i32 total = 5
 }
@@ -98,17 +98,17 @@ early(false)
 
 // loop body atEnd: once, after the loop ends, only if the body ran
 for i32 i = 0..3 {
-  atEnd { r.Console.log($"loop atEnd after the loop, i = {i}") }
-  r.Console.log($"iteration {i}")
+  atEnd { Console.log($"loop atEnd after the loop, i = {i}") }
+  Console.log($"iteration {i}")
 }
 i32 none = 0
 while none > 0 {
-  atEnd { r.Console.log("never: the body never ran") }
+  atEnd { Console.log("never: the body never ran") }
   none--
 }
 i32 turns = 0
 while true {
-  atEnd { r.Console.log($"break: atEnd once, turns = {turns}") }
+  atEnd { Console.log($"break: atEnd once, turns = {turns}") }
   turns++
   if turns == 2 then continue
   if turns == 4 then break
@@ -117,21 +117,21 @@ while true {
 // leaving nested scopes with jump and break
 for i32 outer = 0..3 {
   {
-    atEnd { r.Console.log($"inner block atEnd, outer = {outer}") }
+    atEnd { Console.log($"inner block atEnd, outer = {outer}") }
     if outer == 1 then jump #done#
   }
 }
 #done#
-r.Console.log("after #done#")
+Console.log("after #done#")
 
 // a catch that leaves the scope runs the atEnd
 fun leaving() {
-  atEnd { r.Console.log("  leaving(): atEnd") }
+  atEnd { Console.log("  leaving(): atEnd") }
   fail("x")
   catch {
-    r.Console.log("  leaving(): catch returns")
+    Console.log("  leaving(): catch returns")
     return
   }
 }
 leaving()
-r.Console.log("done")
+Console.log("done")

@@ -1,8 +1,8 @@
 // the members of an exception are id, message, function and line (spec 15.2): the old Message is an error that names message
-alias Root as r
+import Root
 fun i32 divide(i32 a, i32 b) { a / b }
 fun ->string test() {
   return $"{divide(1, 0)}"
   catch DivisionByZeroException ex { return ex.Message }
 }
-r.Console.log(test())
+Console.log(test())

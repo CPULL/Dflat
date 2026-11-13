@@ -1,6 +1,6 @@
 // enforce, step 3 (spec 7.2.3, 7.2.5): the catch and atEnd clauses read from top to bottom; a pending exception skips the atEnd clauses
 // until a catch handles it; the last atEnd always runs, like a finally; the temporary usage of a weak reference ends after it
-alias Root as r
+import Root
 
 public class E1(string text) : Exception { }
 public class E2(string text) : Exception { }
@@ -9,7 +9,7 @@ public class E3(string text) : Exception { }
 public class Dog(string name) {
   public string name
 } atEnd {
-  r.Console.log("  end " + name)
+  Console.log("  end " + name)
 }
 
 fun raise(i32 which) {
@@ -21,38 +21,38 @@ fun raise(i32 which) {
 // block raises in the block, a1 in atEnd 1, a3 in atEnd 3
 fun sequence(i32? value, i32 block, i32 a1, i32 a3) {
   enforce value {
-    r.Console.log("  block")
+    Console.log("  block")
     raise(block)
   }
   atEnd {
-    r.Console.log("  atEnd 1")
+    Console.log("  atEnd 1")
     raise(a1)
   }
-  catch E1 { r.Console.log("  catch E1") }
+  catch E1 { Console.log("  catch E1") }
   atEnd {
-    r.Console.log("  atEnd 3")
+    Console.log("  atEnd 3")
     raise(a3)
   }
-  catch E2 { r.Console.log("  catch E2") }
-  atEnd { r.Console.log("  atEnd 5") }
-  catch E3 { r.Console.log("  catch E3") }
-  atEnd { r.Console.log("  atEnd 7") }
+  catch E2 { Console.log("  catch E2") }
+  atEnd { Console.log("  atEnd 5") }
+  catch E3 { Console.log("  catch E3") }
+  atEnd { Console.log("  atEnd 7") }
 }
 
 fun bubbles(i32? value) {
   enforce value {
     raise(3)
   }
-  atEnd { r.Console.log("  success atEnd") }
-  catch E1 { r.Console.log("  catch E1") }
-  atEnd { r.Console.log("  finally") }
+  atEnd { Console.log("  success atEnd") }
+  catch E1 { Console.log("  catch E1") }
+  atEnd { Console.log("  finally") }
 }
 
 fun i32 early(i32? value) {
   enforce value {
     return value * 2
   }
-  atEnd { r.Console.log("  finally after return") }
+  atEnd { Console.log("  finally after return") }
   return 0
 }
 
@@ -61,27 +61,27 @@ fun weakUsage() {
   %Dog w = %first
   enforce w {
     first is done.                       // the enforce still holds a usage
-    r.Console.log("  in block: " + w.name)
+    Console.log("  in block: " + w.name)
   }
-  atEnd { r.Console.log("  atEnd: " + w.name) }
-  r.Console.log("  after the enforce")
+  atEnd { Console.log("  atEnd: " + w.name) }
+  Console.log("  after the enforce")
 }
 
-r.Console.log("nothing fails")
+Console.log("nothing fails")
 sequence(1, 0, 0, 0)
-r.Console.log("atEnd 1 raises E2")
+Console.log("atEnd 1 raises E2")
 sequence(1, 0, 2, 0)
-r.Console.log("atEnd 3 raises E2")
+Console.log("atEnd 3 raises E2")
 sequence(1, 0, 0, 2)
-r.Console.log("block raises E1")
+Console.log("block raises E1")
 sequence(1, 1, 0, 0)
-r.Console.log("null: nothing runs")
+Console.log("null: nothing runs")
 sequence(null, 1, 1, 1)
-r.Console.log("no catch matches")
+Console.log("no catch matches")
 bubbles(1)
-catch E3 { r.Console.log("  caught outside") }
-r.Console.log("return")
-r.Console.log($"  {early(4)}")
-r.Console.log("weak usage")
+catch E3 { Console.log("  caught outside") }
+Console.log("return")
+Console.log($"  {early(4)}")
+Console.log("weak usage")
 weakUsage()
-r.Console.log("done")
+Console.log("done")

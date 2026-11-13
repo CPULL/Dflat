@@ -1,0 +1,54 @@
+// for &T x in c (spec 6.4): a read/write borrow of each item of arr, vec, list and of each value of a map, written in place; an object
+// or a tuple assigned through it replaces the item (the old one ends). & on a part of for (a, b) in c: the part is written in the item
+import Root
+class Dog(string name) {
+  public string name
+} atEnd {
+  Console.log($"  {name} ends")
+}
+struct P { i32 x, i32 y }
+fun f() {
+  vec<i32> v = [1, 2]
+  for &i32 x in v { x += 10 }
+  arr<r64> a = [1.5, 2.5]
+  for &r64 y in a { y *= 2.0 }
+  list<i32> l = [7, 8]
+  for &i32 z in l { z = 0 }
+  vec<Dog> d = [Dog("a"), Dog("b")]
+  for &Dog g in d { g.name = g.name + "!" }
+  for &Dog g in d { g = Dog("new") }
+  vec<P> ps = [P(1, 2)]
+  for &P p in ps { p.x = 9 }
+  vec<(Dog, i32)> t = [(Dog("t"), 1)]
+  for &(Dog, i32) e in t { e.1 = 5 }
+  for &(Dog, i32) e in t { e = (Dog("t2"), 6) }
+  map<string, i32> ages = ["a": 1, "b": 2]
+  for (string k, &i32 n) in ages { n += 100 }
+  hmap<i32, Dog> hd = [1: Dog("h")]
+  for (var k, &Dog hv) in hd { hv.name = "hh" }
+  Console.log($"{v} {a} {l} {d} {ps} {t} {ages} {hd}")
+  Console.log("end of f")
+}
+
+fun g() {
+  vec<(i32, string)> v = [(1, "a"), (2, "b")]
+  for (&i32 n, string s) in v { n *= 3 }
+  Console.log($"{v}")
+  vec<P> ps = [P(1, 2), P(3, 4)]
+  for &i32 x, i32 y in ps { x = y }
+  Console.log($"{ps}")
+  list<(Dog, i32)> dogs = [(Dog("a"), 1)]
+  for (&Dog d, &i32 n) in dogs { d.name = "z"; n = 42 }
+  Console.log($"{dogs}")
+  for (&Dog d, i32 n) in dogs { d = Dog("w") }
+  arr<(r64, bool)> a = [(1.0, false)]
+  for (r64 q, &bool b) in a { b = q > 0.5 }
+  Console.log($"{dogs} {a}")
+  Console.log("end of f")
+}
+map<string, i32> totals = ["a": 1]
+for &i32 x in totals.values { x += 5 }
+Console.log($"{totals}")
+f()
+g()
+Console.log("done")

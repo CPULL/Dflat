@@ -1,12 +1,12 @@
 // Destructor fragments (spec 11.4, step 5): the atEnd after a constructor runs when the object dies; it sees the class members and
 // the locals and parameters of its constructor; the fragments run in reverse order of registration, then the class atEnd
-alias Root as r
+import Root
 
 class Res {
   public string name
   public Res(string name) { this.name = name }
 } atEnd {
-  r.Console.log("  Res " + name + " ends")
+  Console.log("  Res " + name + " ends")
 }
 
 public class Foo {
@@ -18,28 +18,28 @@ public class Foo {
     a = n
     log += "two"
   } atEnd {
-    r.Console.log($"  fragment Foo(string, i32): {res.name} {n} {a}")
+    Console.log($"  fragment Foo(string, i32): {res.name} {n} {a}")
     res is atEnd.
   }
   public Foo(i32 n) : Foo("chained", n * 10) {
     i32 local = n + 1
     log += ">one"
   } atEnd {
-    r.Console.log($"  fragment Foo(i32): local {local}")
+    Console.log($"  fragment Foo(i32): local {local}")
   }
   public Foo() {
     log = "plain"
   }
 } atEnd {
-  r.Console.log("  class atEnd of Foo, log " + log)
+  Console.log("  class atEnd of Foo, log " + log)
 }
 
 // a parameter taken with -> lives in the object until the fragment
 public class Holder {
   public Holder(->Res keep) {
-    r.Console.log("  holding " + keep.name)
+    Console.log("  holding " + keep.name)
   } atEnd {
-    r.Console.log("  fragment Holder: " + keep.name)
+    Console.log("  fragment Holder: " + keep.name)
   }
 }
 
@@ -50,29 +50,29 @@ public class Partial {
     if v < 0 then throw Exception("negative")
     Res second = Res("second")
   } atEnd {
-    r.Console.log("  fragment Partial")
+    Console.log("  fragment Partial")
     first is atEnd.
     second is atEnd.
   }
 }
 
 fun scope1() {
-  r.Console.log("Foo(\"p\", 3):")
+  Console.log("Foo(\"p\", 3):")
   Foo x = Foo("p", 3)
 }
 fun scope2() {
-  r.Console.log("Foo(4):")
+  Console.log("Foo(4):")
   Foo y = Foo(4)
 }
 fun scope3() {
-  r.Console.log("Foo():")
+  Console.log("Foo():")
   Foo z = Foo()
 }
 fun scope4() {
-  r.Console.log("Holder:")
+  Console.log("Holder:")
   Res res = Res("kept")
   Holder h = Holder(->res)
-  r.Console.log("  after the constructor")
+  Console.log("  after the constructor")
 }
 fun ->string scope5(i32 v) {
   Partial p = Partial(v)
@@ -85,7 +85,7 @@ scope1()
 scope2()
 scope3()
 scope4()
-r.Console.log("Partial(1):")
-r.Console.log(scope5(1))
-r.Console.log("Partial(-1):")
-r.Console.log(scope5(-1))
+Console.log("Partial(1):")
+Console.log(scope5(1))
+Console.log("Partial(-1):")
+Console.log(scope5(-1))

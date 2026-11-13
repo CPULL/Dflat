@@ -1,5 +1,5 @@
 namespace rw_weak_from_readonly
-alias Root as r
+import Root
 public class Player(string name) {
   public string name
 }

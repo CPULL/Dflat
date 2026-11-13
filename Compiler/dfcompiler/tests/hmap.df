@@ -1,45 +1,45 @@
-alias Root as r
+import Root
 
 enum Color { Red, Green, Blue }
 
 // hmap step 1 (spec 6.8.5, 6.8.5.1): native keys and values
 hmap<i32, i32> ages = []
-r.Console.log(ages.len)                          // 0
-r.Console.log(ages.add(1, 10))                   // true: a new key
-r.Console.log(ages.add(1, 11))                   // false: the value was replaced
+Console.log(ages.len)                          // 0
+Console.log(ages.add(1, 10))                   // true: a new key
+Console.log(ages.add(1, 11))                   // false: the value was replaced
 ages[2] = 20
 ages[-3] = 30
 ages[2] += 5
-r.Console.log($"{ages[1]} {ages[2]} {ages[-3]} {ages[99]}")   // 11 25 30 0
-r.Console.log($"{ages.hasKey(2)} {ages.hasKey(99)} {ages.has(30)} {ages.has(31)}")
+Console.log($"{ages[1]} {ages[2]} {ages[-3]} {ages[99]}")   // 11 25 30 0
+Console.log($"{ages.hasKey(2)} {ages.hasKey(99)} {ages.has(30)} {ages.has(31)}")
 bool hit, i32 found = ages.tryGet(2)
-r.Console.log($"{hit} {found}")
+Console.log($"{hit} {found}")
 hit, found = ages.tryGet(7, -1)
-r.Console.log($"{hit} {found}")
-r.Console.log(ages.keyOf(30))                    // -3
-r.Console.log(ages.len)                          // 3
-r.Console.log(ages)
+Console.log($"{hit} {found}")
+Console.log(ages.keyOf(30))                    // -3
+Console.log(ages.len)                          // 3
+Console.log(ages)
 i32 taken = ->ages[2]
-r.Console.log($"taken {taken}, left {ages.len}, has 2: {ages.hasKey(2)}")
+Console.log($"taken {taken}, left {ages.len}, has 2: {ages.hasKey(2)}")
 ages.removeAt(-3)
-r.Console.log(ages)
-r.Console.log(ages.remove(11))                   // true
-r.Console.log(ages.len)                          // 0
+Console.log(ages)
+Console.log(ages.remove(11))                   // true
+Console.log(ages.len)                          // 0
 
 // the same value under several keys
 hmap<u8, bool> flags = [1: true, 2: false, 3: true, 4: true]
-r.Console.log(flags.removeAll(true))             // 3
-r.Console.log(flags)
+Console.log(flags.removeAll(true))             // 3
+Console.log(flags)
 flags.clear()
-r.Console.log(flags.len)
+Console.log(flags.len)
 
 // null is a key; a full-width nullable keeps it in a second word
 hmap<i16?, i32> small = [null: 1, 0: 2, -1: 3]
-r.Console.log($"{small[null]} {small[0]} {small[-1]} {small.len}")
+Console.log($"{small[null]} {small[0]} {small[-1]} {small.len}")
 hmap<i64?, i32> big = [null: 7, 0: 8]
-r.Console.log($"{big[null]} {big[0]} {big.hasKey(5)}")
+Console.log($"{big[null]} {big[0]} {big.hasKey(5)}")
 big.removeAt(null)
-r.Console.log($"{big.hasKey(null)} {big.len}")
+Console.log($"{big.hasKey(null)} {big.len}")
 
 // reals: -0.0 is 0.0, every NaN is one key
 hmap<r64, i32> reals = []
@@ -48,13 +48,13 @@ reals[0.0] = 1
 reals[-0.0] = 2
 reals[zero / zero] = 3
 reals[-(zero / zero)] = 4
-r.Console.log($"{reals.len} {reals[0.0]} {reals[zero / zero]}")
+Console.log($"{reals.len} {reals[0.0]} {reals[zero / zero]}")
 
 // other native keys
 hmap<Color, char> colors = [Color.Red: 'r', Color.Blue: 'b']
-r.Console.log($"{colors[Color.Blue]} {colors.hasKey(Color.Green)}")
+Console.log($"{colors[Color.Blue]} {colors.hasKey(Color.Green)}")
 hmap<bool, i32> truth = [true: 1, false: 0]
-r.Console.log(truth[false])
+Console.log(truth[false])
 
 // many keys: splits, doublings, merges and shrinks, checked against an array
 hmap<u32, u32> table = []
@@ -89,8 +89,8 @@ while key < 3000 {
   }
   key += 1
 }
-r.Console.log(wrong)                             // 0
-r.Console.log(table.len == count)                // true
+Console.log(wrong)                             // 0
+Console.log(table.len == count)                // true
 u64 walked = 0
 u64 sum = 0
 for (u32 k, u32 v) in table {
@@ -99,14 +99,14 @@ for (u32 k, u32 v) in table {
     wrong += 1
   }
 }
-r.Console.log($"{walked == count} {wrong}")      // true 0
-r.Console.log(table.sizeof > 0u)
+Console.log($"{walked == count} {wrong}")      // true 0
+Console.log(table.sizeof > 0u)
 key = 0
 while key < 3000 {
   table.removeAt(key)
   key += 1
 }
-r.Console.log($"{table.len} {table.sizeof}")
+Console.log($"{table.len} {table.sizeof}")
 
 // a new key while the map is walked
 hmap<i32, i32> locked = [1: 1, 2: 2]
@@ -115,8 +115,8 @@ fun tryAdd(&hmap<i32, i32> m) {
     m[k + 100] = v
   }
   catch ModifyingIteratedCollectionException {
-    r.Console.log("cannot add while walking")
+    Console.log("cannot add while walking")
   }
 }
 tryAdd(&locked)
-r.Console.log(locked.len)
+Console.log(locked.len)

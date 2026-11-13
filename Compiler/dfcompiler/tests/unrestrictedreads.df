@@ -13,9 +13,9 @@ class Kennel {
   string label = "k"
   unrestricted fun bool f() { boss.bark(); i32 local = visits; local++; dogs.has(boss) || local == 1 }
 }
-alias Root as r
+import Root
 fun f() {
   Kennel k = Kennel()
-  r.Console.log(k.f())
+  Console.log(k.f())
 }
 f()

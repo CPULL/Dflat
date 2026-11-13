@@ -1,6 +1,6 @@
 // Globals (spec 18.3): fields read and written from outside under the lock (g.f = v, g.f += v, g.f++), a lent result copied
 // (g.first() gives a copy of the object), a field that holds an object or a string copied when it is read
-alias Root as r
+import Root
 
 class Point(i32 px) {
   public i32 x = px
@@ -25,19 +25,19 @@ global Store st = Store()
 st.count = 3
 st.count += 2
 st.count++
-r.Console.log(st.count)
+Console.log(st.count)
 st.name = "main"
 string n = st.name
-r.Console.log(n)
+Console.log(n)
 string l = st.label()
-r.Console.log(l)
+Console.log(l)
 Point p = st.first()
 p.x = 99
-r.Console.log(st.origin.x)
-r.Console.log(p.x)
+Console.log(st.origin.x)
+Console.log(p.x)
 Point q = st.origin
 q.x = 50
-r.Console.log(st.origin.x)
-r.Console.log(Reader().read())
+Console.log(st.origin.x)
+Console.log(Reader().read())
 st.add(4)
-r.Console.log(st.count)
+Console.log(st.count)

@@ -1,6 +1,6 @@
 // Silent operations of the language (spec 15.4): overflow and a cast that does not fit are raised only where a catch of the same function handles them;
 // without one the fallback applies in place (the result wraps, the cast saturates) and nothing is raised
-alias Root as r
+import Root
 
 fun ->string addCaught(i8 a, i8 b) {
   i8 sum = a + b
@@ -36,18 +36,18 @@ fun ->string compoundCaught(i16 a) {
   return $"compound {b}"
   catch OverflowException { return "compound overflow caught" }
 }
-r.Console.log(addCaught(100, 20))
-r.Console.log(addCaught(100, 30))
-r.Console.log(addPlain(100, 30))
-r.Console.log(mulCaught(1000, 1000))
-r.Console.log(mulCaught(100000, 100000))
-r.Console.log(subCaught(5, 3))
-r.Console.log(subCaught(3, 5))
-r.Console.log(negateCaught(5))
-r.Console.log(negateCaught(-128))
-r.Console.log(stepCaught(10))
-r.Console.log(stepCaught(127))
-r.Console.log(compoundCaught(1))
+Console.log(addCaught(100, 20))
+Console.log(addCaught(100, 30))
+Console.log(addPlain(100, 30))
+Console.log(mulCaught(1000, 1000))
+Console.log(mulCaught(100000, 100000))
+Console.log(subCaught(5, 3))
+Console.log(subCaught(3, 5))
+Console.log(negateCaught(5))
+Console.log(negateCaught(-128))
+Console.log(stepCaught(10))
+Console.log(stepCaught(127))
+Console.log(compoundCaught(1))
 
 // which catches see it: catch Exception does not (the sum wraps), catch SilentException and catch all do
 fun ->string byException(i8 a) {
@@ -65,9 +65,9 @@ fun ->string byAll(i8 a) {
   return $"All: {sum}"
   catch all { return "all caught it" }
 }
-r.Console.log(byException(100))
-r.Console.log(bySilent(100))
-r.Console.log(byAll(100))
+Console.log(byException(100))
+Console.log(bySilent(100))
+Console.log(byAll(100))
 
 // the overflow of a called function is not seen by the caller's catch: it stays in the function that does the operation
 fun i8 wrapper(i8 a) { a + 100 }
@@ -76,7 +76,7 @@ fun ->string callerCatches(i8 a) {
   return $"callee wrapped to {sum}"
   catch OverflowException { return "caller saw it" }
 }
-r.Console.log(callerCatches(100))
+Console.log(callerCatches(100))
 
 // casts that do not fit
 fun ->string castCaught(i32 a) {
@@ -90,9 +90,9 @@ fun ->string castReal(r64 a) {
   return $"real cast {small}"
   catch OutOfRangeCastException { return "real cast out of range" }
 }
-r.Console.log(castCaught(100))
-r.Console.log(castCaught(1000))
-r.Console.log(castPlain(1000))
-r.Console.log(castReal(12.7))
-r.Console.log(castReal(300.5))
-r.Console.log(castReal(-3.5))
+Console.log(castCaught(100))
+Console.log(castCaught(1000))
+Console.log(castPlain(1000))
+Console.log(castReal(12.7))
+Console.log(castReal(300.5))
+Console.log(castReal(-3.5))

@@ -219,11 +219,13 @@ public class vec<T> : IndexCollection<T> {
   }
 
   // the growth policy (spec 6.8.2): 16 items first, then the capacity doubles until the block reaches VEC_DOUBLE_LIMIT bytes, then it grows by
-  // VEC_GROW_EXTRA thousandths (further-grow-factor).
+  // VEC_GROW_EXTRA thousandths (further-grow-factor). With fixed-grow-step (VEC_GROW_STEP above 0) it grows by that many items each time.
   // The .sizeof of an arr is its header plus the block, so the block is what an empty arr does not have
   fun grow(uns needed) {
     uns newCapacity = 16
-    if items.len > 0 {
+    if VEC_GROW_STEP > 0 {
+      newCapacity = items.len + VEC_GROW_STEP
+    } else if items.len > 0 {
       arr<T> empty
       if items.sizeof - empty.sizeof < VEC_DOUBLE_LIMIT {
         newCapacity = items.len * 2
@@ -567,6 +569,15 @@ public class map<K, V> : MapCollection<K, V> {
   public fun removeAt(K key) {
     checkUnlocked()
     this.tree_remove(key)
+  }
+
+  // the values of two keys exchanged (spec 6.6); when only one key exists its value moves to the other, which is added, and the first
+  // entry goes; when neither exists nothing happens. Only that case adds and removes an entry: it is checked against open iterators
+  public fun swap(K key1, K key2) {
+    if this.tree_hasKey(key1) != this.tree_hasKey(key2) {
+      checkUnlocked()
+    }
+    this.tree_swap(key1, key2)
   }
 
   // the first entry in key order that holds the value
@@ -1139,17 +1150,20 @@ public class set<T> : SetCollection<T> {
   // capacity (further-grow-factor 1.5: 500) (spec 6.8.2, Compiler_Options.md)
   static long VecDoubleGrowLimit = 4 * 1024 * 1024;
   static int VecGrowExtra = 500;
+  static long VecGrowStep;   // fixed-grow-step: a vec grows by this many items (0: the doubling above)
 
   // room for at least needed items (the C of grow in VecPrelude: 16 items first, double up to VecDoubleGrowLimit bytes, then by half, at least what is
-  // needed); the new slots are zero
+  // needed; with fixed-grow-step the step each time); the new slots are zero
   string VecReserve(string held, string type, string needed) {
     string elemType = CType(VecElem(type));
     string items = $"{held}->{VecField(type, "items")}";
     string want = NewTemp();
     string capacity = NewTemp();
     string bigger = NewTemp();
-    return $"df_uns {want} = {needed}; if ({want} > (df_uns)SIZE_MAX / sizeof({elemType})) {{ df_out_of_memory(); }} if ({want} > {items}.len) {{ df_uns {capacity} = {items}.len == 0 ? 16 "
-      + $": {items}.len * sizeof({elemType}) < {VecDoubleGrowLimit} ? {items}.len * 2 : {items}.len + {items}.len * {VecGrowExtra} / 1000; if ({capacity} < {want}) {{ {capacity} = {want}; }} "
+    string grown = VecGrowStep > 0 ? $"{items}.len + {VecGrowStep}"   // fixed-grow-step
+      : $"{items}.len == 0 ? 16 : {items}.len * sizeof({elemType}) < {VecDoubleGrowLimit} ? {items}.len * 2 : {items}.len + {items}.len * {VecGrowExtra} / 1000";
+    return $"df_uns {want} = {needed}; if ({want} > (df_uns)SIZE_MAX / sizeof({elemType})) {{ df_out_of_memory(); }} if ({want} > {items}.len) {{ df_uns {capacity} = {grown}; "
+      + $"if ({capacity} < {want}) {{ {capacity} = {want}; }} "
       + $"{elemType}* {bigger} = ({elemType}*)df_calloc({capacity}, sizeof({elemType})); if ({held}->{VecField(type, "count")} > 0) {{ memcpy({bigger}, {items}.p, {held}->{VecField(type, "count")} * sizeof({elemType})); }} "
       + $"free({items}.p); {items}.p = {bigger}; {items}.len = {capacity}; }} ";
   }

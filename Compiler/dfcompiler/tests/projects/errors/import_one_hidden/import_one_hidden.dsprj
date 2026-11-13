@@ -1,0 +1,2 @@
+; importing a declaration that is not public is an error (spec 16.2)
+source=main.df

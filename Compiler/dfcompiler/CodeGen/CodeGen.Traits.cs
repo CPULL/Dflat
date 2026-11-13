@@ -203,6 +203,7 @@ public sealed partial class CodeGen {
           throw Error($"'{member.Kind}' is not allowed in a trait", member);
       }
     }
+    ExpandGenericMethods(trait, body);   // a generic method of a trait: its copies, replaced by every class that implements it (spec 11.3.1)
     var members = body.Children.Where(member => member.Kind == "Fun").ToList();
     foreach (var member in members.ToList()) {
       if (member.Children.Any(child => child.Kind is "ExecuteBefore" or "ExecuteAfter")) {
@@ -385,7 +386,7 @@ public sealed partial class CodeGen {
         }
         if (implementation == null) {
           string shown = method.Name[(method.Name.IndexOf('.') + 1)..];
-          throw Error($"class '{cls.Name}' must implement {DisplayName(trait.Name)}.{(shown.StartsWith(ImplPrefix) ? shown[ImplPrefix.Length..] : shown)}", cls.Node);
+          throw Error($"class '{cls.Name}' must implement {DisplayName(trait.Name)}.{MethodCopyName(shown.StartsWith(ImplPrefix) ? shown[ImplPrefix.Length..] : shown)}", cls.Node);
         }
         methods.Add(implementation);
       }

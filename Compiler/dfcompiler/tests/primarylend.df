@@ -1,13 +1,13 @@
 // Plain object parameters of a primary constructor (spec 11.1.1): read during the construction only = a read-only lend, no field;
 // used as a field = given implicitly (level 1 warning), and the argument cannot be used after the call
 namespace primarylend
-alias Root as r
+import Root
 
 class Dog(string name) {
   public string name
   public i32 size = 3
 } atEnd {
-  r.Console.log($"{name} ends")
+  Console.log($"{name} ends")
 }
 
 class Kennel(Dog d) {                       // only read by the initializers: d stays the caller's
@@ -18,23 +18,23 @@ class Kennel(Dog d) {                       // only read by the initializers: d 
 class Home(Dog d) {                         // used by a method: the home owns the dog
   unrestricted fun ->string show() { $"home of {d.name}" }
 } atEnd {
-  r.Console.log("home ends")
+  Console.log("home ends")
 }
 
 fun f() {
   Dog rex = Dog("Rex")
   Kennel k = Kennel(rex)
-  r.Console.log($"{k.label}, size {k.size}, rex is still here: {rex.name}")
+  Console.log($"{k.label}, size {k.size}, rex is still here: {rex.name}")
   Kennel temp = Kennel(Dog("Temp"))          // a new object lent for the call: it ends with the statement
-  r.Console.log($"{temp.label}")
+  Console.log($"{temp.label}")
 
   Dog max = Dog("Max")
   Home h = Home(max)                         // max is given: using it afterwards is a compile error
-  r.Console.log(h.show())
+  Console.log(h.show())
   max = Dog("Other")                         // a new value: max is usable again
-  r.Console.log(max.name)
+  Console.log(max.name)
   Home fresh = Home(Dog("Fresh"))
-  r.Console.log(fresh.show())
+  Console.log(fresh.show())
 }
 
 f()

@@ -1,6 +1,6 @@
 // a weak header parameter redeclared as public readonly keeps the value given to the constructor (spec 12.7); an addr prints as hex (spec 2.3)
 namespace weakheader
-alias Root as r
+import Root
 
 class C {
   public i32 id = 9
@@ -16,6 +16,6 @@ class H(%C c) {
 
 @C ctx = C()
 var h = H(%ctx)
-r.Console.log(h.read())
+Console.log(h.read())
 addr a = null
-r.Console.log(a)
+Console.log(a)

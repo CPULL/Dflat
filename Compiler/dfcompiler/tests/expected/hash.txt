@@ -21,4 +21,6 @@ Named: 3889790532735864812, the vec is not hashed: true
 Named with a null field: 9222093803594291378
 Tagged id 5: 1005, SubTagged id 5: 1005, through a Tagged: 1006
 vec<i32>: 7188539618202767455, same for any content: true, arr<i32>: 17641627688806969582
+i32.hash: true, string.hash: true, byte.hash: true
+Point.hash: true, Color.hash: true, not a value: true
 ---- exit code 0 ----

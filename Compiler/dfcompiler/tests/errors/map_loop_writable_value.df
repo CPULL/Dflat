@@ -1,2 +1,3 @@
-map<i32, bool> flags = []
-for (i32 k, &bool v) in flags { }
+// & on a string value of a map is not built yet (numbers, objects, arrays, plain structs and tuples have it, spec 6.4)
+map<i32, string> names = []
+for (i32 k, &string v) in names { }

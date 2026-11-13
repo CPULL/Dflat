@@ -1,20 +1,20 @@
 // Maps map<K, V> (spec 6.8.4), alias bmap: sorted by key, a B+ tree (spec 6.8.4.1). Step 1: native keys and values
-alias Root as r
+import Root
 enum Color { red, green, blue }
 
 map<i32, bool> flags = []
-r.Console.log(flags.len)                         // 0
-r.Console.log(flags.add(3, true))                // true: a new key
-r.Console.log(flags.add(1, false))               // true
-r.Console.log(flags.add(3, false))               // false: the value was replaced
+Console.log(flags.len)                         // 0
+Console.log(flags.add(3, true))                // true: a new key
+Console.log(flags.add(1, false))               // true
+Console.log(flags.add(3, false))               // false: the value was replaced
 flags[2] = true
-r.Console.log(flags)                             // [1: false, 2: true, 3: false]
-r.Console.log(flags.len)                         // 3
-r.Console.log(flags[2])                          // true
-r.Console.log(flags[9])                          // false: a missing key reads as the zero value
-r.Console.log(flags.hasKey(9))                   // false
-r.Console.log(flags.has(true))                   // true: has searches the values
-r.Console.log(flags.keyOf(true))                 // 2
+Console.log(flags)                             // [1: false, 2: true, 3: false]
+Console.log(flags.len)                         // 3
+Console.log(flags[2])                          // true
+Console.log(flags[9])                          // false: a missing key reads as the zero value
+Console.log(flags.hasKey(9))                   // false
+Console.log(flags.has(true))                   // true: has searches the values
+Console.log(flags.keyOf(true))                 // 2
 
 // negative keys sort before the positive ones
 bmap<i64, i32> scores = []
@@ -22,28 +22,28 @@ scores[-5] = 50
 scores[10] = 100
 scores[0] = 0
 scores[-100] = 1
-r.Console.log(scores)                            // [-100: 1, -5: 50, 0: 0, 10: 100]
+Console.log(scores)                            // [-100: 1, -5: 50, 0: 0, 10: 100]
 scores[10] += 5
 scores[7] += 7                           // a missing key starts from 0
-r.Console.log(scores)                            // [-100: 1, -5: 50, 0: 0, 7: 7, 10: 105]
+Console.log(scores)                            // [-100: 1, -5: 50, 0: 0, 7: 7, 10: 105]
 
 // tryGet
 bool here, i32 found = scores.tryGet(-5)        // found, and the value (spec 6.6)
-r.Console.log(here)                              // true
-r.Console.log(found)                             // 50
+Console.log(here)                              // true
+Console.log(found)                             // 50
 here, found = scores.tryGet(4)
-r.Console.log(here)                              // false
-r.Console.log(found)                             // 0
+Console.log(here)                              // false
+Console.log(found)                             // 0
 here, found = scores.tryGet(4, -1)
-r.Console.log(here)                              // false
-r.Console.log(found)                             // -1
+Console.log(here)                              // false
+Console.log(found)                             // -1
 
 // ->m[k] takes the value out and removes the entry; removeAt removes by key
 i32 taken = ->scores[-100]
-r.Console.log(taken)                             // 1
+Console.log(taken)                             // 1
 scores.removeAt(0)
 scores.removeAt(1234)                    // a missing key: nothing happens
-r.Console.log(scores)                            // [-5: 50, 7: 7, 10: 105]
+Console.log(scores)                            // [-5: 50, 7: 7, 10: 105]
 
 // remove and removeAll work on the values
 map<u8, i32> marks = []
@@ -51,14 +51,14 @@ marks[1] = 5
 marks[2] = 6
 marks[3] = 5
 marks[4] = 5
-r.Console.log(marks.remove(5))                   // true: the first one in key order
-r.Console.log(marks)                             // [2: 6, 3: 5, 4: 5]
-r.Console.log(marks.removeAll(5))                // 2
-r.Console.log(marks)                             // [2: 6]
-r.Console.log(marks.remove(9))                   // false
+Console.log(marks.remove(5))                   // true: the first one in key order
+Console.log(marks)                             // [2: 6, 3: 5, 4: 5]
+Console.log(marks.removeAll(5))                // 2
+Console.log(marks)                             // [2: 6]
+Console.log(marks.remove(9))                   // false
 marks.clear()
-r.Console.log(marks.len)                         // 0
-r.Console.log(marks)                             // []
+Console.log(marks.len)                         // 0
+Console.log(marks)                             // []
 
 // reals: -0.0 and +0.0 are one key, NaN sorts last
 map<r64, i32> reals = []
@@ -66,30 +66,30 @@ reals[2.5] = 1
 reals[-1.5] = 2
 reals[0.0] = 3
 reals[-0.0] = 4
-r.Console.log(reals)                             // [-1.5: 2, 0: 4, 2.5: 1]
-r.Console.log(reals.len)                         // 3
+Console.log(reals)                             // [-1.5: 2, 0: 4, 2.5: 1]
+Console.log(reals.len)                         // 3
 
 // enum, char and bool keys
 map<Color, i32> paint = []
 paint[Color.blue] = 3
 paint[Color.red] = 1
-r.Console.log(paint)                             // [red: 1, blue: 3]
+Console.log(paint)                             // [red: 1, blue: 3]
 map<char, u32> letters = []
 letters['b'] = 2
 letters['a'] = 1
-r.Console.log(letters)                           // [a: 1, b: 2]
+Console.log(letters)                           // [a: 1, b: 2]
 
 // nullable keys: null is a valid key and sorts first (spec 6.2)
 map<i16?, i32> maybe = []
 maybe[5] = 50
 maybe[null] = 1
 maybe[-3] = 30
-r.Console.log(maybe)                             // [null: 1, -3: 30, 5: 50]
-r.Console.log(maybe[null])                       // 1
-r.Console.log(maybe.hasKey(null))                // true
+Console.log(maybe)                             // [null: 1, -3: 30, 5: 50]
+Console.log(maybe[null])                       // 1
+Console.log(maybe.hasKey(null))                // true
 maybe.removeAt(null)
-r.Console.log(maybe.hasKey(null))                // false
-r.Console.log(maybe.len)                         // 2
+Console.log(maybe.hasKey(null))                // false
+Console.log(maybe.len)                         // 2
 
 // many keys: splits, merges and the separators of the branches
 map<i32, i32> big = []
@@ -98,7 +98,7 @@ while i < 2000 {
   big[(i * 7919) % 2000] = i
   i += 1
 }
-r.Console.log(big.len)                           // 2000
+Console.log(big.len)                           // 2000
 i32 bad = 0
 i = 0
 while i < 2000 {
@@ -107,7 +107,7 @@ while i < 2000 {
   }
   i += 1
 }
-r.Console.log(bad)                               // 0
+Console.log(bad)                               // 0
 i = 0
 while i < 2000 {
   if i % 3 != 0 {
@@ -115,7 +115,7 @@ while i < 2000 {
   }
   i += 1
 }
-r.Console.log(big.len)                           // 667
+Console.log(big.len)                           // 667
 bad = 0
 i = 0
 while i < 2000 {
@@ -124,17 +124,17 @@ while i < 2000 {
   }
   i += 1
 }
-r.Console.log(bad)                               // 0
+Console.log(bad)                               // 0
 big[1] = -1
-r.Console.log(big.len)                           // 668
+Console.log(big.len)                           // 668
 i = 0
 while i < 2000 {
   big.removeAt(i)
   i += 1
 }
-r.Console.log(big.len)                           // 0
+Console.log(big.len)                           // 0
 big[42] = 42
-r.Console.log(big)                               // [42: 42]
+Console.log(big)                               // [42: 42]
 
 // removeAll on a big map: one pass, then the tree is built again
 map<i32, i32> parity = []
@@ -143,13 +143,13 @@ while i < 1000 {
   parity[i] = i % 2
   i += 1
 }
-r.Console.log(parity.removeAll(1))               // 500
-r.Console.log(parity.len)                        // 500
-r.Console.log(parity.keyOf(0))                   // 0
-r.Console.log(parity.hasKey(998))                // true
-r.Console.log(parity.hasKey(999))                // false
+Console.log(parity.removeAll(1))               // 500
+Console.log(parity.len)                        // 500
+Console.log(parity.keyOf(0))                   // 0
+Console.log(parity.hasKey(998))                // true
+Console.log(parity.hasKey(999))                // false
 parity[999] = 5
-r.Console.log(parity.len)                        // 501
+Console.log(parity.len)                        // 501
 
 // random inserts and removals checked against an array: deep trees, merges, shares and the key order
 map<u32, i32> tree = []
@@ -190,8 +190,8 @@ while key < 3000 {
   key += 1
 }
 expected += "]"
-r.Console.log(wrong)                     // 0
-r.Console.log(tree.len == expectedLen)   // true
+Console.log(wrong)                     // 0
+Console.log(tree.len == expectedLen)   // true
 string walked = "["
 for (walkedKey, walkedValue) in tree {
   if walked.len > 1 {
@@ -200,7 +200,7 @@ for (walkedKey, walkedValue) in tree {
   walked += $"{walkedKey}: {walkedValue}"
 }
 walked += "]"
-r.Console.log(walked == expected)        // true: the entries come in key order (a loop walks them all: printing shows the first 3)
+Console.log(walked == expected)        // true: the entries come in key order (a loop walks them all: printing shows the first 3)
 
 // every key goes, in a scattered order, checked on the way
 wrong = 0
@@ -220,6 +220,6 @@ while n < 3000 {
   }
   n += 1
 }
-r.Console.log(wrong)                     // 0
-r.Console.log(tree.len)                  // 0
-r.Console.log(tree)                      // []
+Console.log(wrong)                     // 0
+Console.log(tree.len)                  // 0
+Console.log(tree)                      // []

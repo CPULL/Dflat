@@ -1,16 +1,16 @@
 // Console.setColors and Console.Color (stdlib 2). The test runs without a console: setColors does nothing, the output stays plain
 namespace consolecolors
 import Root
-alias Root as r
 
-r.Console.setColors(r.Console.Color.Yellow, r.Console.Color.Black)
-r.Console.log("yellow on black")
+
+Console.setColors(Console.Color.Yellow, Console.Color.Black)
+Console.log("yellow on black")
 Console.Color? back = null
-r.Console.setColors(r.Console.Color.BrightWhite, back)
-back = r.Console.Color.Blue
-r.Console.setColors(null, back)
-r.Console.Color c = r.Console.Color.BrightCyan
-r.Console.log(c)
-r.Console.log(r.Console.Color.Gray)
-r.Console.setColors(null, null)
-r.Console.log("default")
+Console.setColors(Console.Color.BrightWhite, back)
+back = Console.Color.Blue
+Console.setColors(null, back)
+Console.Color c = Console.Color.BrightCyan
+Console.log(c)
+Console.log(Console.Color.Gray)
+Console.setColors(null, null)
+Console.log("default")

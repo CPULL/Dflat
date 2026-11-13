@@ -1,4 +1,4 @@
-alias Root as r
+import Root
 
 string text = "abc"
 var part = text[0..2]

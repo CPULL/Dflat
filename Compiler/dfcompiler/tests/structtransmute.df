@@ -1,5 +1,5 @@
 namespace structtransmute
-alias Root as r
+import Root
 
 struct Pair { i16 low, i16 high }
 struct Whole {
@@ -14,24 +14,24 @@ fun u32 asWhole(Pair p) { ([Whole]p).value }
 fun Pair make() { Pair(1, 1) }
 
 Pair pair = Pair(1, 2)
-r.Console.log(([Whole]pair).value)
+Console.log(([Whole]pair).value)
 ([Whole]pair).value = 5
-r.Console.log(pair)
+Console.log(pair)
 Whole copy = [Whole]pair
 copy.value = 7
-r.Console.log($"{pair.low} {copy.value}")
-r.Console.log(asWhole(pair))
+Console.log($"{pair.low} {copy.value}")
+Console.log(asWhole(pair))
 ([Whole]pair).clear()
-r.Console.log(pair)
+Console.log(pair)
 u32 bits = (u32)16909060
-r.Console.log([Rgba]bits)
+Console.log([Rgba]bits)
 ([Rgba]bits).a = 255
-r.Console.log(bits)
-r.Console.log([u32]Rgba(1, 0, 0, 0))
+Console.log(bits)
+Console.log([u32]Rgba(1, 0, 0, 0))
 var h = Holder(tag: 3)
 ([Whole]h.p).value = 65537
-r.Console.log(h)
-r.Console.log(([Whole]make()).value)
+Console.log(h)
+Console.log(([Whole]make()).value)
 arr<Pair>[2] pairs
 ([Whole]pairs[1]).value = 131074
-r.Console.log(pairs)
+Console.log(pairs)

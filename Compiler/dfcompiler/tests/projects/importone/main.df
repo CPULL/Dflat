@@ -1,0 +1,9 @@
+// import of one declaration (spec 16.2): import app.shapes.Circle, app.shapes.twice gives these two names only; Square is written in full;
+// import Root.Console gives Console only (Math is Root.Math)
+namespace app
+import app.shapes.Circle, app.shapes.twice
+import Root.Console
+
+var c = Circle(1.5)
+var s = app.shapes.Square(2.0)
+Console.log($"{c.radius} {s.side} {twice(c.radius)} {Root.Math.sqrt(16.0)}")

@@ -1,0 +1,1 @@
+for_plain_method_call.df(6): error: 'g' is a read-only loop variable: 'rename' can change it (mark it unrestricted); write for &Dog g in ... to change the item (spec 6.4)

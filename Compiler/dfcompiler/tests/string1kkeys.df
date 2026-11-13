@@ -1,0 +1,40 @@
+// string1k as the key of map, hmap, set, hset and inside tuple and struct keys (spec 4.5, 6.2.2): ordered by bytes, hashed as the same string
+map<string1k, i32> m = []
+string1k a = "alpha"
+m.add(a, 1)
+m.add("beta", 2)
+m.add("alphabet", 3)
+m.add("al", 4)
+m[a] = 10
+Root.Console.log($"{m[a]} {m["beta"]} {m.len} {m.hasKey("al")} {m.hasKey("zz")}")
+for var (k, v) in m { Root.Console.log($"{k} {v}") }
+m.removeAt("al")
+Root.Console.log(m.len)
+hmap<string1k, i32> h = []
+h.add(a, 5)
+h.add("x", 6)
+Root.Console.log($"{h[a]} {h["x"]} {h.hasKey("y")}")
+set<string1k> s = []
+s.add(a)
+s.add("b")
+Root.Console.log($"{s.has(a)} {s.has("c")} {s.len}")
+hset<string1k> hs = []
+hs.add(a)
+Root.Console.log(hs.has(a))
+map<(string1k, i32), string> t = []
+t.add(("k", 1), "one")
+Root.Console.log(t[("k", 1)])
+map<string1k, i32> long = []
+long.add("abcdefghY", 2)
+long.add("abcdefghX", 1)
+long.add("abcdefgh", 0)
+for var (k, v) in long { Root.Console.log($"{k} {v}") }
+struct Tag { string1k name, i32 id }
+set<Tag> tags = []
+tags.add(Tag("b", 1))
+tags.add(Tag("a", 2))
+tags.add(Tag("a", 1))
+for var tag in tags { Root.Console.log(tag) }
+string1k cut = "alpha"
+cut += "!"
+Root.Console.log(m.hasKey(cut))

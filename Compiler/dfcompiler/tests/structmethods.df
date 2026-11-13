@@ -1,5 +1,5 @@
 namespace structmethods
-alias Root as r
+import Root
 
 struct Vec2 {
   r32 x,
@@ -31,28 +31,28 @@ fun r32 measure(Vec2 v) { v.lenSq() }
 fun push(&Vec2 v) { v.double() }
 
 var p = Vec2(3.0, 4.0)
-r.Console.log(p.lenSq())
+Console.log(p.lenSq())
 p.scale(2.0)
-r.Console.log(p)
+Console.log(p)
 p.double()
-r.Console.log(p)
-r.Console.log(Vec2(1.0, 1.0).plus(p))
-r.Console.log(measure(p))
+Console.log(p)
+Console.log(Vec2(1.0, 1.0).plus(p))
+Console.log(measure(p))
 push(&p)
-r.Console.log(p)
+Console.log(p)
 p.reset()
-r.Console.log(p)
+Console.log(p)
 var s = Seg(b: Vec2(1.0, 2.0))
 s.stretch()
 s.a.scale(5.0)
-r.Console.log(s)
+Console.log(s)
 arr<Vec2>[2] items
 items[1] = Vec2(1.0, 1.0)
 items[1].scale(4.0)
-r.Console.log(items)
+Console.log(items)
 var ship = Ship()
 ship.pos = Vec2(2.0, 0.0)
 ship.pos.double()
-r.Console.log(ship.pos)
-r.Console.log(p.peek())
-r.Console.log(Vec2(2.0, 2.0).lenSq())
+Console.log(ship.pos)
+Console.log(p.peek())
+Console.log(Vec2(2.0, 2.0).lenSq())

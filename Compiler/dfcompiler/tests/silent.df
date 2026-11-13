@@ -1,64 +1,64 @@
 // Silent standard exceptions of the date and time constructors (spec 3.3, 15.4)
-alias Root as r
+import Root
 
 // no catch: the value falls back to null and nothing is raised
 fun nothingCaught() {
   date a = date("not a date")
-  r.Console.log(a == null)
+  Console.log(a == null)
   time none = time(-1)
-  r.Console.log(none == null)
+  Console.log(none == null)
   time big = (time)90000000
-  r.Console.log(big == null)
+  Console.log(big == null)
 }
 
 // a plain catch does not handle a silent exception
 fun plainCatch() {
   date b = date("bad")
-  r.Console.log(b == null)
+  Console.log(b == null)
   catch Exception ex {
-    r.Console.log("wrong: catch ex must not see a silent exception")
+    Console.log("wrong: catch ex must not see a silent exception")
   }
 }
 
 // a catch for its own type does (it covers the statements above it)
 fun ownType() {
   date c = date("still bad")
-  r.Console.log("not printed when raised")
+  Console.log("not printed when raised")
   catch InvalidDateTimeFormatException ex {
-    r.Console.log("caught: " + ex.message)
+    Console.log("caught: " + ex.message)
   }
 }
 
 fun otherType() {
   time late = time(90000000)
-  r.Console.log("not printed either")
+  Console.log("not printed either")
   catch OutOfRangeCastException ex {
-    r.Console.log("caught: " + ex.message)
+    Console.log("caught: " + ex.message)
   }
 }
 
 // the other silent exception is not handled by a catch for a different one
 fun wrongType() {
   date d = date("bad again")
-  r.Console.log(d == null)
+  Console.log(d == null)
   catch OutOfRangeCastException {
-    r.Console.log("wrong: different exception")
+    Console.log("wrong: different exception")
   }
 }
 
 fun catchAll() {
   time t = (time)(-3)
-  r.Console.log("skipped")
+  Console.log("skipped")
   catch all {
-    r.Console.log("catch all sees it")
+    Console.log("catch all sees it")
   }
 }
 
 fun valid() {
   date fine = date("2024-02-02")
-  r.Console.log(fine)
+  Console.log(fine)
   catch InvalidDateTimeFormatException {
-    r.Console.log("wrong: valid date")
+    Console.log("wrong: valid date")
   }
 }
 
@@ -77,5 +77,5 @@ otherType()
 wrongType()
 catchAll()
 valid()
-r.Console.log(safe("08:15"))
-r.Console.log(safe("garbage"))
+Console.log(safe("08:15"))
+Console.log(safe("garbage"))

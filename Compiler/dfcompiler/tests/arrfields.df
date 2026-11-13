@@ -1,12 +1,12 @@
 // Array fields are owned by their object (spec 6.8.1): a new array goes in as it is, ->a moves it, any other array of plain items is
 // copied; the object frees its arrays when it ends. Also: an array given to the runtime is a borrowed read, var x = [...] is owned by its
 // scope
-alias Root as r
+import Root
 
 public class Dog(string name) {
   public string name
 } atEnd {
-  r.Console.log("  end " + name)
+  Console.log("  end " + name)
 }
 
 public class Scores(arr<i32> start) {
@@ -14,7 +14,7 @@ public class Scores(arr<i32> start) {
   public arr<string> names = ["a", "b"]
   public arr<Dog> dogs
 } atEnd {
-  r.Console.log("  end scores")
+  Console.log("  end scores")
 }
 
 public class Board {
@@ -25,32 +25,32 @@ fun fill(&Scores s) {
   arr<i32> local = [7, 8, 9]
   s.start = local                     // plain items: the field gets a copy, local still ends with this scope
   local[0] = 70
-  r.Console.log($"  field {s.start[0]}, local {local[0]}")
+  Console.log($"  field {s.start[0]}, local {local[0]}")
   arr<Dog> pack = [Dog("rex"), Dog("max")]
   s.dogs = ->pack                     // objects: moved, pack is empty now
-  r.Console.log($"  moved {s.dogs.len}, left {pack.len}")
+  Console.log($"  moved {s.dogs.len}, left {pack.len}")
   s.dogs = [Dog("new")]               // the old array of the field is freed with its dogs
 }
 
 fun runtimeRead() {
   arr<i32> numbers = [1, 2, 3]
-  r.Console.log(numbers)              // a borrowed read: numbers still ends with the scope
+  Console.log(numbers)              // a borrowed read: numbers still ends with the scope
   var words = ["x", "y"]              // an arr owned by this scope
-  r.Console.log(words)
+  Console.log(words)
 }
 
-r.Console.log("fields")
+Console.log("fields")
 fun fields() {
   arr<i32> first = [1, 2]
   Scores s = Scores(first)
   first[0] = 100
-  r.Console.log($"  header copy {s.start[0]}, caller {first[0]}, names {s.names.len}")
+  Console.log($"  header copy {s.start[0]}, caller {first[0]}, names {s.names.len}")
   fill(&s)
-  r.Console.log("  " + s.dogs[0].name)
+  Console.log("  " + s.dogs[0].name)
 }
 fields()
 Board b = Board()
-r.Console.log($"board {b.mines.len}")
-r.Console.log("runtime read")
+Console.log($"board {b.mines.len}")
+Console.log("runtime read")
 runtimeRead()
-r.Console.log("done")
+Console.log("done")

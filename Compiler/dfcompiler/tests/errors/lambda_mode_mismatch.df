@@ -1,5 +1,5 @@
 namespace lambda_mode_mismatch
-alias Root as r
+import Root
 public class Dog(string name) {
   public string name
 }

@@ -1,0 +1,20 @@
+[1: b, 2: a]
+[2: a, 5: b]
+[2: a, 5: b]
+[x: short, y: long text that does not fit in the slot inline at all, really]
+[x: short, z: long text that does not fit in the slot inline at all, really]
+B A
+2 B false
+[2: (Dog { name: T }, 1)]
+  key p ends
+  key p ends
+1 1
+[w: 1]
+end of f
+  key q ends
+  key q ends
+  T ends
+  B ends
+  A ends
+done
+---- exit code 0 ----

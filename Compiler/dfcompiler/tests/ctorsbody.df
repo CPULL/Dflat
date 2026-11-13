@@ -1,6 +1,6 @@
 // Constructors written in the class body (spec 11.1.1, step 1): overloads, defaults, named arguments, bodies,
 // field initializers before the body, objects moved in, no default constructor
-alias Root as r
+import Root
 
 class Dog {
   public string name = "?"
@@ -64,27 +64,27 @@ public class Total {
   }
 }
 
-r.Console.log(Point().show())
-r.Console.log(Point(3).show())
-r.Console.log(Point(3, 4).show())
-r.Console.log(Point(y: 1, x: 2).show())
-r.Console.log(Point("p", 5).show())
-r.Console.log(Point("neg", -1).show())
+Console.log(Point().show())
+Console.log(Point(3).show())
+Console.log(Point(3, 4).show())
+Console.log(Point(y: 1, x: 2).show())
+Console.log(Point("p", 5).show())
+Console.log(Point("neg", -1).show())
 Point p = Point(10, 20)
 p.x++
-r.Console.log(p.show())
+Console.log(p.show())
 Dog rex = Dog()
 rex.name = "Rex"
 Kennel k = Kennel(->rex)
-r.Console.log(k.describe())
-r.Console.log(rex == null)
+Console.log(k.describe())
+Console.log(rex == null)
 i32 a = 5
-r.Console.log(Total(a, 6).sum)
-r.Console.log(Point(1, 1))
+Console.log(Total(a, 6).sum)
+Console.log(Point(1, 1))
 Checked good = Checked(3)
-r.Console.log(good.v + good.part.id)
+Console.log(good.v + good.part.id)
 catch Exception {
-  r.Console.log("never")
+  Console.log("never")
 }
 fun ->string tryChecked(i32 v) {
   Checked c = Checked(v)
@@ -93,5 +93,5 @@ fun ->string tryChecked(i32 v) {
     return "failed: " + ex.message
   }
 }
-r.Console.log(tryChecked(2))
-r.Console.log(tryChecked(-2))
+Console.log(tryChecked(2))
+Console.log(tryChecked(-2))

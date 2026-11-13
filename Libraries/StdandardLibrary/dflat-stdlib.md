@@ -1,6 +1,8 @@
 **Standard library**
 Version 0.0.11 2026/11/06 by CPU
 - Type members live on the types: `d.year`, `d.addDays(3)`, `s.split(",")`, `c.isDigit`, `list.sort()`.
+- The library is the namespace `Root` (spec 16). Its names are written in full (`Root.Console.log("x")`), or imported: `import Root` for all the names directly inside `Root` (`Console`, `Math`, `Random` ...), `import Root.IO` for files and streams, or one name alone (`import Root.Console`). The examples below write the full names.
+- Only what a program uses goes into its executable (spec 16.2.1): importing `Root` adds nothing, and a class or a function of the library that is not called is not there.
 
 # 1 Program
 

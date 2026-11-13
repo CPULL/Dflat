@@ -1,20 +1,20 @@
 // Use after a move (spec 12.4): a compile error when the move is certain; a move inside a branch is not; a new value makes the variable usable; x == null is allowed
 namespace moves
-alias Root as r
+import Root
 class Dog(string name) {
   public string name
 } atEnd {
-  r.Console.log($"{name} ends")
+  Console.log($"{name} ends")
 }
-fun take(->Dog d) { r.Console.log($"took {d.name}") }
+fun take(->Dog d) { Console.log($"took {d.name}") }
 fun f(bool c) {
   Dog d = Dog("A")
-  if c { take(->d) } else { r.Console.log(d.name) }
+  if c { take(->d) } else { Console.log(d.name) }
   Dog e = Dog("B")
   take(->e)
-  r.Console.log($"e is null: {e == null}")
+  Console.log($"e is null: {e == null}")
   e = Dog("C")
-  r.Console.log(e.name)
+  Console.log(e.name)
 }
 f(true)
 f(false)

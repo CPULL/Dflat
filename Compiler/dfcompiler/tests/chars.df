@@ -1,5 +1,5 @@
 // Char functions (spec 4.1)
-alias Root as r
+import Root
 
 fun ->string describe(char c) {
   string s = ""
@@ -17,27 +17,27 @@ fun ->string describe(char c) {
   return s.trim()
 }
 
-r.Console.log("a: " + describe('a'))
-r.Console.log("Z: " + describe('Z'))
-r.Console.log("7: " + describe('7'))
-r.Console.log("f: " + describe('f'))
-r.Console.log("g: " + describe('g'))
-r.Console.log("space: " + describe(' '))
-r.Console.log("!: " + describe('!'))
-r.Console.log("+: " + describe('+'))
-r.Console.log("$: " + describe('$'))
-r.Console.log("tab: " + describe('\t'))
-r.Console.log("é: " + describe('é'))
-r.Console.log("Ω: " + describe('Ω'))
-r.Console.log("٣: " + describe('٣'))
-r.Console.log("€: " + describe('€'))
-r.Console.log("nbsp: " + describe('\u{00A0}'))
-r.Console.log("中: " + describe('中'))
+Console.log("a: " + describe('a'))
+Console.log("Z: " + describe('Z'))
+Console.log("7: " + describe('7'))
+Console.log("f: " + describe('f'))
+Console.log("g: " + describe('g'))
+Console.log("space: " + describe(' '))
+Console.log("!: " + describe('!'))
+Console.log("+: " + describe('+'))
+Console.log("$: " + describe('$'))
+Console.log("tab: " + describe('\t'))
+Console.log("é: " + describe('é'))
+Console.log("Ω: " + describe('Ω'))
+Console.log("٣: " + describe('٣'))
+Console.log("€: " + describe('€'))
+Console.log("nbsp: " + describe('\u{00A0}'))
+Console.log("中: " + describe('中'))
 
-r.Console.log('a'.toUpper())
-r.Console.log('Q'.toLower())
-r.Console.log('é'.toUpper())
-r.Console.log('Σ'.toLower())
-r.Console.log('1'.toUpper())
+Console.log('a'.toUpper())
+Console.log('Q'.toLower())
+Console.log('é'.toUpper())
+Console.log('Σ'.toLower())
+Console.log('1'.toUpper())
 string word = "abc"
-r.Console.log(word[0].toUpper())
+Console.log(word[0].toUpper())

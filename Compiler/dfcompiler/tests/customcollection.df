@@ -1,7 +1,7 @@
 // A collection written in Dflat: it implements IndexCollection<T>, its iterator implements IndexIterator<T> (spec 6.12); for-in asks getIterator() once and calls next() until isValid is false
 // Collection<Item> (len, has, clear) is the parent of IndexCollection<Item>: a class that implements the child provides both
 // arr<T> has an iterator too
-alias Root as r
+import Root
 
 public class Evens(uns limit) : IndexCollection<u64> {
   replace fun uns get_len() { limit }
@@ -26,9 +26,9 @@ public class EvenIterator(u64 limit) : IndexIterator<u64> {
 
 Evens evens = Evens(4)
 for u64 n in evens {
-  r.Console.log(n)
+  Console.log(n)
 }
 arr<string> names = ["a", "b"]
 var iterator = names.getIterator()
 var taken = iterator.next()
-r.Console.log($"{taken.value} {taken.isValid}")
+Console.log($"{taken.value} {taken.isValid}")

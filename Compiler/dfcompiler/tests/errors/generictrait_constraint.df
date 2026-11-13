@@ -1,4 +1,4 @@
-alias Root as r
+import Root
 
 trait Container<Item> {
   public fun Item Get(u64 index)
@@ -10,4 +10,4 @@ public class Names : Container<string> {
 
 fun u64 sizeOf<Source : Container<i32>>(Source source) { 1 }
 
-r.Console.log(sizeOf(Names()))
+Console.log(sizeOf(Names()))

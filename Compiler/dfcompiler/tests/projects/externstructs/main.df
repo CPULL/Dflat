@@ -1,6 +1,6 @@
 // structs given to C (spec 11.1.5.6): struct<fixed> and struct<compact>, by value, by address (*S, &*S), as a result
 namespace app
-alias Root as r
+import Root
 
 struct<fixed> Vec2 { r32 x, r32 y }
 struct<fixed> Fixed { u8 kind, bool ready, r64 weight }
@@ -19,20 +19,20 @@ extern fun u64 offsets()
 extern fun u32 device_letters(*Device d)
 
 var v = Vec2(3.0, 4.0)
-r.Console.log(vec_len2(v))
+Console.log(vec_len2(v))
 vec_scale(&*v, 2.0)
-r.Console.log(v)
-r.Console.log(vec_sum(*v))
-r.Console.log(vec_make(1.5, 2.5))
+Console.log(v)
+Console.log(vec_sum(*v))
+Console.log(vec_make(1.5, 2.5))
 var f = Fixed(kind: 1, ready: true)
-r.Console.log(fixed_ready(f))
+Console.log(fixed_ready(f))
 f.ready = false
-r.Console.log(fixed_ready(f))
+Console.log(fixed_ready(f))
 fixed_set(&*f)
-r.Console.log($"{f.ready} {f.weight}")
-r.Console.log(header_size(Header(kind: 2, size: 40, last: true)))
-r.Console.log(sizes() == Vec2.sizeof * 1000000 + Fixed.sizeof * 10000 + Header.sizeof * 100 + Device.sizeof)
-r.Console.log(offsets() == f.offset(weight) * 10000 + Header.offset(size) * 100 + Device.offset(at))
-r.Console.log($"{Vec2.sizeof} {Fixed.sizeof} {Header.sizeof} {Device.sizeof}")
+Console.log($"{f.ready} {f.weight}")
+Console.log(header_size(Header(kind: 2, size: 40, last: true)))
+Console.log(sizes() == Vec2.sizeof * 1000000 + Fixed.sizeof * 10000 + Header.sizeof * 100 + Device.sizeof)
+Console.log(offsets() == f.offset(weight) * 10000 + Header.offset(size) * 100 + Device.offset(at))
+Console.log($"{Vec2.sizeof} {Fixed.sizeof} {Header.sizeof} {Device.sizeof}")
 var d = Device(id: 9, name: [68b, 102b, 108b, 97b, 116b, 0b, 0b, 0b])
-r.Console.log(device_letters(*d))
+Console.log(device_letters(*d))

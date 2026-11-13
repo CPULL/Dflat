@@ -1,4 +1,4 @@
-alias Root as r
+import Root
 
 trait Named {
   public fun string Name()

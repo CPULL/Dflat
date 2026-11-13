@@ -1,5 +1,5 @@
 namespace enums
-alias Root as r
+import Root
 
 enum Status { Active, Inactive, Pending: 10, Waiting, OnHold: Pending }
 
@@ -19,22 +19,22 @@ fun string describe(Status value) {
 
 Status current = Status.Pending
 Status fresh
-r.Console.log($"current = {current}, value {(i32)current}")
-r.Console.log($"fresh = {fresh}")
-r.Console.log($"Waiting = {(i32)Status.Waiting}")
-r.Console.log($"OnHold prints as {Status.OnHold}, equals Pending: {Status.OnHold == Status.Pending}")
-r.Console.log($"Active < Pending: {Status.Active < Status.Pending}")
-r.Console.log("describe(Inactive) = " + describe(Status.Inactive))
-r.Console.log("describe(OnHold) = " + describe(Status.OnHold))
+Console.log($"current = {current}, value {(i32)current}")
+Console.log($"fresh = {fresh}")
+Console.log($"Waiting = {(i32)Status.Waiting}")
+Console.log($"OnHold prints as {Status.OnHold}, equals Pending: {Status.OnHold == Status.Pending}")
+Console.log($"Active < Pending: {Status.Active < Status.Pending}")
+Console.log("describe(Inactive) = " + describe(Status.Inactive))
+Console.log("describe(OnHold) = " + describe(Status.OnHold))
 
 Level level = Level.Low
 level = Level.Next(level)
-r.Console.log($"next of Low = {level}, top = {Level.IsTop(level)}")
+Console.log($"next of Low = {level}, top = {Level.IsTop(level)}")
 level = Level.Next(level)
-r.Console.log($"next of Mid = {level}, top = {Level.IsTop(level)}")
+Console.log($"next of Mid = {level}, top = {Level.IsTop(level)}")
 
 Status fromNumber = (Status)11
 Status unknown = (Status)3
-r.Console.log($"(Status)11 = {fromNumber}, (Status)3 = {unknown}")
-r.Console.log($"Big: {Big.Min} {(i64)Big.Min} {Big.Max}")
-if current then r.Console.log("enum to bool: true")
+Console.log($"(Status)11 = {fromNumber}, (Status)3 = {unknown}")
+Console.log($"Big: {Big.Min} {(i64)Big.Min} {Big.Max}")
+if current then Console.log("enum to bool: true")

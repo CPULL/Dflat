@@ -1,5 +1,5 @@
 // Number formatting (spec 8.1, 8.2) and parsing (spec 9) for integers and reals
-alias Root as r
+import Root
 
 i32 n = 12345
 i32 neg = -42
@@ -8,112 +8,112 @@ r64 big = 1234.56
 r64 half = 2.5
 r64 tiny = -0.004
 
-r.Console.log("--- toStr(format) ---")
-r.Console.log(n.toStr("f0w10"))          // 0000012345
-r.Console.log(n.toStr("w10"))            //      12345
-r.Console.log(n.toStr("w10a<"))          // 12345
-r.Console.log(n.toStr("w10a^") + "|")    //   12345   |
-r.Console.log(neg.toStr("w6"))           //    -42
-r.Console.log(neg.toStr("S+w6f0"))       // 000-42  (the sign next to the digits)
-r.Console.log(neg.toStr("St-w6f0"))      // -00042
-r.Console.log(n.toStr("S+"))             // +12345
-r.Console.log(neg.toStr("S()"))          // (42)
-r.Console.log(n.toStr("bh"))             // 3039
-r.Console.log(n.toStr("bH"))             // 3039
-r.Console.log(255.toStr("bH"))           // FF
-r.Console.log(neg.toStr("bh"))           // ffffffd6
-r.Console.log(n.toStr("bb"))             // 11000000111001
-r.Console.log(n.toStr("bo"))             // 30071
-r.Console.log(n.toStr("g,3"))            // 12,345
-r.Console.log(1234567.toStr("g,3"))      // 1,234,567
-r.Console.log(1234567.toStr("g_3r"))     // 123_456_7
-r.Console.log(n.toStr("D,02"))           // 12345,00
-r.Console.log(pi.toStr("D2"))            // 3.14
-r.Console.log(pi.toStr("D02"))           // 3.14
-r.Console.log(half.toStr("D02"))         // 2.50
-r.Console.log(half.toStr("D2"))          // 2.5
-r.Console.log(half.toStr("D0"))          // 3
-r.Console.log(half.toStr("D0b"))         // 2
-r.Console.log(half.toStr("D0f"))         // 2
-r.Console.log(half.toStr("D0c"))         // 3
-r.Console.log(half.toStr("D0t"))         // 2
-r.Console.log(tiny.toStr("D2"))          // 0
-r.Console.log(tiny.toStr("D2f"))         // -0.01
-r.Console.log(big.toStr("D1"))           // 1234.6
-r.Console.log(big.toStr("g,3D,02"))      // 1,234,56   (the decimal symbol is the comma)
-r.Console.log(big.toStr("g,3D02"))       // 1,234.56
-r.Console.log(big.toStr("D01w12a."))     //
-r.Console.log(big.toStr("e[E+]02D2"))    // 1.23E+03
-r.Console.log(big.toStr("e[e^]02D2"))    // 1.23e^03
-r.Console.log(big.toStr("e[e-]#3D2"))    // 1.23e  3
-r.Console.log(big.toStr("e[x10^]D1"))    // 1.2x10^3
-r.Console.log(big.toStr("e"))            // 1.23456e+3
-r.Console.log(0.00012.toStr("e"))        // 1.2e-4
-r.Console.log(pi.toStr())                // 3.14159265
-r.Console.log(pi.toStr("w12f*a>"))       // **3.14159265
+Console.log("--- toStr(format) ---")
+Console.log(n.toStr("f0w10"))          // 0000012345
+Console.log(n.toStr("w10"))            //      12345
+Console.log(n.toStr("w10a<"))          // 12345
+Console.log(n.toStr("w10a^") + "|")    //   12345   |
+Console.log(neg.toStr("w6"))           //    -42
+Console.log(neg.toStr("S+w6f0"))       // 000-42  (the sign next to the digits)
+Console.log(neg.toStr("St-w6f0"))      // -00042
+Console.log(n.toStr("S+"))             // +12345
+Console.log(neg.toStr("S()"))          // (42)
+Console.log(n.toStr("bh"))             // 3039
+Console.log(n.toStr("bH"))             // 3039
+Console.log(255.toStr("bH"))           // FF
+Console.log(neg.toStr("bh"))           // ffffffd6
+Console.log(n.toStr("bb"))             // 11000000111001
+Console.log(n.toStr("bo"))             // 30071
+Console.log(n.toStr("g,3"))            // 12,345
+Console.log(1234567.toStr("g,3"))      // 1,234,567
+Console.log(1234567.toStr("g_3r"))     // 123_456_7
+Console.log(n.toStr("D,02"))           // 12345,00
+Console.log(pi.toStr("D2"))            // 3.14
+Console.log(pi.toStr("D02"))           // 3.14
+Console.log(half.toStr("D02"))         // 2.50
+Console.log(half.toStr("D2"))          // 2.5
+Console.log(half.toStr("D0"))          // 3
+Console.log(half.toStr("D0b"))         // 2
+Console.log(half.toStr("D0f"))         // 2
+Console.log(half.toStr("D0c"))         // 3
+Console.log(half.toStr("D0t"))         // 2
+Console.log(tiny.toStr("D2"))          // 0
+Console.log(tiny.toStr("D2f"))         // -0.01
+Console.log(big.toStr("D1"))           // 1234.6
+Console.log(big.toStr("g,3D,02"))      // 1,234,56   (the decimal symbol is the comma)
+Console.log(big.toStr("g,3D02"))       // 1,234.56
+Console.log(big.toStr("D01w12a."))     //
+Console.log(big.toStr("e[E+]02D2"))    // 1.23E+03
+Console.log(big.toStr("e[e^]02D2"))    // 1.23e^03
+Console.log(big.toStr("e[e-]#3D2"))    // 1.23e  3
+Console.log(big.toStr("e[x10^]D1"))    // 1.2x10^3
+Console.log(big.toStr("e"))            // 1.23456e+3
+Console.log(0.00012.toStr("e"))        // 1.2e-4
+Console.log(pi.toStr())                // 3.14159265
+Console.log(pi.toStr("w12f*a>"))       // **3.14159265
 i32? nothing = null
-r.Console.log(nothing.toStr("w6"))       //   null
+Console.log(nothing.toStr("w6"))       //   null
 
-r.Console.log("--- interpolation ---")
-r.Console.log($"[{n:g,3}] [{pi:D2}] [{neg:S()}] [{n:bh}] [{big:e}]")
-r.Console.log($"total {n:D,02} and {n:w8a<}|")
+Console.log("--- interpolation ---")
+Console.log($"[{n:g,3}] [{pi:D2}] [{neg:S()}] [{n:bh}] [{big:e}]")
+Console.log($"total {n:D,02} and {n:w8a<}|")
 
-r.Console.log("--- parse ---")
-r.Console.log(i32.parse("123"))              // 123
-r.Console.log(i32.parse("abc", 7))           // 7
-r.Console.log(i32.parse("x-12 and 5", 0))    // -12
-r.Console.log(i32.parse("  42abc"))          // 42
-r.Console.log(i32.parse("12.99"))            // 12
-r.Console.log(i32.parse("1,234"))            // 1
-r.Console.log(u8.parse("-5", 9))             // 0
-r.Console.log(i8.parse("300"))               // 127
-r.Console.log(i64.parse("9223372036854775808")) // 9223372036854775807
-r.Console.log(r64.parse("1.5e3"))            // 1500
-r.Console.log(r64.parse("1,234.5"))          // 1
-r.Console.log(r64.parse("1.234"))            // 1.234
-r.Console.log(r64.parse("NaN"))              // NaN
-r.Console.log(r64.parse("-INF"))             // -∞
-r.Console.log(r32.parse("2.25"))             // 2.25
-r.Console.log(i32.parse("0x3039", 0, "0x{bh}"))     // 12345
-r.Console.log(i32.parse("0x3039", 0, "0x{bH}"))     // 12345
-r.Console.log(i32.parse("ffffffd6", 0, "{bh}"))     // -42
-r.Console.log(i32.parse("-10", 0, "{S}{S()}"))      // -10
-r.Console.log(i32.parse("(10)", 0, "{S}{S()}"))     // -10
-r.Console.log(i32.parse(" 10", 5, "{S}"))           // 5 (strict: nothing skipped)
-r.Console.log(i32.parse("12,345", 0, "{g,3}"))      // 12345
-r.Console.log(r64.parse("12,5", 0.0, "{D,}"))       // 12.5
-r.Console.log(r64.parse("1.23E+03", 0.0, "{e[E+]02D2}")) // 1230
-r.Console.log(i32.parse("$12 USD", 0, "${S} USD"))  // 12
-r.Console.log(i32.parse("0000042", 0, "{f0w7}"))    // 42
-r.Console.log(i32.parse("12", 0, "{bd}x"))          // 0 (suffix does not match)
-r.Console.log(i32.parse(text: "77", format: "{S}")) // 77
+Console.log("--- parse ---")
+Console.log(i32.parse("123"))              // 123
+Console.log(i32.parse("abc", 7))           // 7
+Console.log(i32.parse("x-12 and 5", 0))    // -12
+Console.log(i32.parse("  42abc"))          // 42
+Console.log(i32.parse("12.99"))            // 12
+Console.log(i32.parse("1,234"))            // 1
+Console.log(u8.parse("-5", 9))             // 0
+Console.log(i8.parse("300"))               // 127
+Console.log(i64.parse("9223372036854775808")) // 9223372036854775807
+Console.log(r64.parse("1.5e3"))            // 1500
+Console.log(r64.parse("1,234.5"))          // 1
+Console.log(r64.parse("1.234"))            // 1.234
+Console.log(r64.parse("NaN"))              // NaN
+Console.log(r64.parse("-INF"))             // -∞
+Console.log(r32.parse("2.25"))             // 2.25
+Console.log(i32.parse("0x3039", 0, "0x{bh}"))     // 12345
+Console.log(i32.parse("0x3039", 0, "0x{bH}"))     // 12345
+Console.log(i32.parse("ffffffd6", 0, "{bh}"))     // -42
+Console.log(i32.parse("-10", 0, "{S}{S()}"))      // -10
+Console.log(i32.parse("(10)", 0, "{S}{S()}"))     // -10
+Console.log(i32.parse(" 10", 5, "{S}"))           // 5 (strict: nothing skipped)
+Console.log(i32.parse("12,345", 0, "{g,3}"))      // 12345
+Console.log(r64.parse("12,5", 0.0, "{D,}"))       // 12.5
+Console.log(r64.parse("1.23E+03", 0.0, "{e[E+]02D2}")) // 1230
+Console.log(i32.parse("$12 USD", 0, "${S} USD"))  // 12
+Console.log(i32.parse("0000042", 0, "{f0w7}"))    // 42
+Console.log(i32.parse("12", 0, "{bd}x"))          // 0 (suffix does not match)
+Console.log(i32.parse(text: "77", format: "{S}")) // 77
 
 // Errors (each one alone): n.toStr("q")  -> unknown option 'q'
 //   n.toStr("fx")  -> a letter cannot be the fill character
 //   i32.parse("1", 0, "{S}x{S}")  -> static text between placeholders
 
-r.Console.log("--- silent exceptions of parse ---")
+Console.log("--- silent exceptions of parse ---")
 fun rangeCaught() {
   i8 a = i8.parse("999")
-  r.Console.log(a)
+  Console.log(a)
   catch OutOfRangeCastException e {
-    r.Console.log("caught range")
+    Console.log("caught range")
   }
 }
 rangeCaught()
 fun overflowCaught() {
   u8 b = u8.parse("-3")
-  r.Console.log(b)
+  Console.log(b)
   catch OverflowException e {
-    r.Console.log("caught overflow")
+    Console.log("caught overflow")
   }
 }
 overflowCaught()
 fun otherCatch() {
   u8 b = u8.parse("-3")
-  r.Console.log("not raised: " + b)    // a catch for another exception does not see it
+  Console.log("not raised: " + b)    // a catch for another exception does not see it
   catch OutOfRangeCastException e {
-    r.Console.log("wrong")
+    Console.log("wrong")
   }
 }
 otherCatch()

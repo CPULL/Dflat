@@ -1,0 +1,6 @@
+class Dog(string name) {
+  public string name
+  public fun rename() { name = "x" }
+}
+vec<Dog> dogs = [Dog("a")]
+for var g in dogs { g.rename() }

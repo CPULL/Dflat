@@ -1,6 +1,23 @@
-Compiler version 0.0.116 alpha for version 0.0.39 of the specs 2026/11/13
+Compiler version 0.0.126 alpha for version 0.0.39 of the specs 2026/11/13
 
 Changes from the previous version -----------------------
+- imports of one declaration (spec 16.2): import Root.Console gives Console only (it gave its members before), import app.shapes.Circle, several paths in one line (import a, b); an unknown path, a name that is not public and a declaration named as a sibling namespace are errors; unknown function log says Console.log
+- the tests use import Root and Console.log instead of alias Root as r
+- the plain loop variable is read-only (spec 6.4): for Dog g in c cannot write g.name or call a method that is not unrestricted, for P p in c cannot write p.x; the error asks for for &Dog g in c (they were allowed)
+- generic methods of classes and traits (spec 11.3.1.1): fun addSize<T>(T t), fun neg(Ints x) with a set; one copy per type list, inferred or written (s.addSize<i32>(5)), called with or without this. inside the class; replace fun m<T> replaces every copy, a trait generic method is replaced by its classes
+- a written type argument is no longer inferred again: same<u64>(2) was an error (two types for T); .sizeof on numbers, bool, char and enums (spec 6.6)
+- for &T x on string, string?, function items and on structs that hold strings or objects (spec 6.4), and & on their string and object fields (for &string n, &Dog d in pets): written in place, the old value ends. Not yet: the string values of a map, string parts of tuple items
+- string? and string1k? inside tuple and struct keys (spec 7.1, 6.8.4.1): map<(string?, i32), V>, hset<Name> with a string? field; null first. Fixed: a new string inside a tuple key (m[(s + "x", 1)]) leaked
+- map.swap(key1, key2) (spec 6.6) on map and hmap: the values of the two keys exchanged; one missing key takes the value of the other, which goes (raises while the map is iterated); swap(key, new) removed from the spec
+- writable loop variables (spec 6.4): for &T x in c (arr, vec, list, m.values), for (k, &V v) in m, & on the parts of tuples and structs (for (&i32 n, string s) in pairs); written in place, an object or tuple assigned through them replaces the item (the old one ends). Not yet: string, function and counted items, views and custom collections
+- string? and string1k? keys (spec 7.1, 4.5, 6.8.4.1): map, hmap, set, hset; null is a key of its own, apart from "" (and from "null" in an hmap); a new string given as a key ends with the statement. Not yet: string? and string1k? inside tuple and struct keys
+- nested tuple items by position (spec 3.2): t.0.1, n[0].0.1 = 8, d.0.0.1 (0.1 after a dot was read as a real); writing one part of a tuple item in place (v[0].1 = 5) checked on arr, vec, list, map, hmap (test tupleparts)
+- tuples with objects of Keyable classes as keys (spec 6.2, 6.8.4.1): map<(Dog, i32), V>, hmap<(string, Dog), V>, set, hset; the collection keeps a clone of the key, the new objects of a key given to it end with the statement. Fixed: a tuple literal lent to a call (g((Dog("a"), 1))) leaked its new objects and arrays
+- string1k keys (spec 4.5, 6.8.4.1): map<string1k, V>, hmap, set, hset, and string1k inside tuple and struct keys; ordered by bytes, hashed as the same string. string1k? keys: not yet (as string?)
+- sort() without a lambda on vec<@T>, list<@T> and arr<@T> (spec 12.7, 6.2.2): the objects in the collection compared with the default order (compareTo of a Comparable class), null first; @i32, @string ... items by their values. Error messages show @Dog instead of the internal Rc__Dog
+- T.hash (spec 6.2.1): the hash of a type, i32.hash, string.hash, Dog.hash, Color.hash (the hash of its fully qualified name, known at compile time); byte, uns and int as their real type
+- a lent result of a method called on a global (spec 18.3) is now copied while the lock of the global is held (it was copied just after the release)
+- --fixed-grow-step <items> / fixed-grow-step= (spec 6.8.2, Compiler_Options.md): a vec grows by that many items each time instead of doubling, for small targets
 - tuple items by index (spec 3.2): t[1], t[SECOND] (a const), t[Slot.Second] (an enum value), read and assigned (t[0] = v, t[2] += x); nested (pairs[2][1]); a variable index or one out of range is a compile error (was "feature not supported: Collections")
 - no more "warning L3: read as a generic call" on calls like FixedSlot<64>("x"): when the name is not a generic, the error says that a<b>(c) is read as a generic call and how to write the comparisons
 - new passing markers (spec 13.1): &T and &x write (was (&)), the old read-only &T is written plain T (read-only only for as parent so far), &@T (was (@)T), %T and %x weak (was _T, _x), &%T (was (_)T), *x and &*x / &*T pointers (still not supported); the old markers give an error that names the new one

@@ -1,5 +1,5 @@
 // Vectors aligned with the spec 0.0.13: Collection<Item>, a change during an iteration, fill(null), swap, ->
-alias Root as r
+import Root
 
 public class Dog(string name) {
   public string name
@@ -10,13 +10,13 @@ fun u64 sizeOf(Collection<i32> items) { items.len }
 fun bool contains(Collection<string> items, string text) { items.has(text) }
 vec<i32> numbers = [3, 1, 2]
 vec<string> words = ["a", "b"]
-r.Console.log(sizeOf(numbers))
-r.Console.log(contains(words, "b"))
-r.Console.log(contains(words, "z"))
+Console.log(sizeOf(numbers))
+Console.log(contains(words, "b"))
+Console.log(contains(words, "z"))
 &IndexCollection<i32> indexed = numbers   // a read/write borrow: clear changes it
-r.Console.log(indexed.len)
+Console.log(indexed.len)
 indexed.clear()
-r.Console.log(numbers)             // clear keeps the size (spec 6.6)
+Console.log(numbers)             // clear keeps the size (spec 6.6)
 
 // changing the size or the order of a vec while it is iterated raises ModifyingIteratedCollectionException (a Panic in a release build);
 // replacing an item is allowed (spec 6.4)
@@ -50,18 +50,18 @@ fun ->string readOnly(vec<i32> source) {
   catch ModifyingIteratedCollectionException { return "never" }
 }
 vec<i32> values = [1, 2, 3]
-r.Console.log(readOnly(values))
-r.Console.log(addWhileLooping(&values))
-r.Console.log(replaceWhileLooping(&values))
-r.Console.log(sortWhileLooping(&values))
-r.Console.log(readOnly(values))
+Console.log(readOnly(values))
+Console.log(addWhileLooping(&values))
+Console.log(replaceWhileLooping(&values))
+Console.log(sortWhileLooping(&values))
+Console.log(readOnly(values))
 
 // swap exchanges two positions; replace puts a new item and gives back the old one
 vec<string> letters = ["x", "y", "z"]
 letters.swap(0, 2)
-r.Console.log(letters)
+Console.log(letters)
 string was = letters.replace(1, "Y")
-r.Console.log($"{was} {letters}")
+Console.log($"{was} {letters}")
 
 // objects: ->, fill(null) and resize with null end the objects the items held
 vec<Dog> kennel = [Dog("rex"), Dog("fido")]
@@ -70,9 +70,9 @@ kennel.add(->extra)
 kennel[0] = Dog("max")
 Dog spare = Dog("spare")
 kennel[1] = ->spare
-r.Console.log($"{kennel[0].name} {kennel[1].name} {kennel[2].name}")
+Console.log($"{kennel[0].name} {kennel[1].name} {kennel[2].name}")
 kennel.fill(null)
-r.Console.log($"{kennel.len} {kennel[0] == null} {kennel[2] == null}")
+Console.log($"{kennel.len} {kennel[0] == null} {kennel[2] == null}")
 kennel.resize(5, null)
-r.Console.log(kennel.len)
+Console.log(kennel.len)
 kennel.clear()

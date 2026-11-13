@@ -1,5 +1,5 @@
 // Classes with a main function; overloads, named arguments, defaults, statics calling statics
-alias Root as r
+import Root
 
 public class Box(i32 width, i32 height) {
   public i32 width
@@ -21,20 +21,20 @@ public class Wrapper {
 
 fun int main(string args...) {
   Box b = Box(2, 3)
-  r.Console.log(b.Area())
-  r.Console.log(b.Grow(1).Area())
-  r.Console.log(b.Grow(1, 2).Area())
-  r.Console.log(b.Grow(w: 2, h: 0).Area())
-  r.Console.log(b.Show())
-  r.Console.log(b.Show("x"))
-  r.Console.log(b.Show(times: 2))
-  r.Console.log(b.Show(times: 3, prefix: "y"))
+  Console.log(b.Area())
+  Console.log(b.Grow(1).Area())
+  Console.log(b.Grow(1, 2).Area())
+  Console.log(b.Grow(w: 2, h: 0).Area())
+  Console.log(b.Show())
+  Console.log(b.Show("x"))
+  Console.log(b.Show(times: 2))
+  Console.log(b.Show(times: 3, prefix: "y"))
   Box t = Box.Two()
-  r.Console.log(t.Area())
-  r.Console.log(Box.Count())
+  Console.log(t.Area())
+  Console.log(Box.Count())
   Wrapper w = Wrapper()
-  r.Console.log(w.Area())
-  r.Console.log(Box.made)
-  r.Console.log(args.len)
+  Console.log(w.Area())
+  Console.log(Box.made)
+  Console.log(args.len)
   return 7
 }

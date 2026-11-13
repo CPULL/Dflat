@@ -1,6 +1,6 @@
 // tuples and structs as keys (spec 6.2, 6.2.2, 6.8.4.1, 6.8.5.1): a map and a set order them item by item, left to right; the collection
 // keeps its own copy (with its strings); hmap and hset hash them ($ over the components) and compare them item by item
-alias Root as r
+import Root
 
 struct Cell {
   i32 x,
@@ -14,37 +14,37 @@ grid[("a", 1)] = "a1"
 grid[("prefix-long-1", 0)] = "p1"
 grid[("prefix-long-0", 0)] = "p0"                // the same first 8 bytes: the full text decides
 grid[("a", 1)] = "A1"                            // the same key: the value changes
-r.Console.log(grid.len)
+Console.log(grid.len)
 for ((string, i32) k, string v) in grid {
-  r.Console.log($"  {k} {v}")
+  Console.log($"  {k} {v}")
 }
 string name = "b"
-r.Console.log(grid[(name, 1)])
-r.Console.log(grid.hasKey(("a", 3)))
+Console.log(grid[(name, 1)])
+Console.log(grid.hasKey(("a", 3)))
 grid.removeAt(("a", 2))
-r.Console.log(grid.len)
+Console.log(grid.len)
 
 map<Cell, string> cells = []
 cells[Cell(2, 1)] = "two-one"
 cells[Cell(1, 5)] = "one-five"
 cells[Cell(1, -2)] = "one-minus-two"
 for (Cell c, string v) in cells {
-  r.Console.log($"  {c.x},{c.y} {v}")
+  Console.log($"  {c.x},{c.y} {v}")
 }
 
 hmap<(string, i32), i32> counts = []
 counts[("x", 1)] = 10
 counts[("x", 2)] = 20
 counts[("x", 1)] += 5
-r.Console.log($"{counts.len} {counts[("x", 1)]} {counts[("x", 2)]} {counts.hasKey(("y", 1))}")
+Console.log($"{counts.len} {counts[("x", 1)]} {counts[("x", 2)]} {counts.hasKey(("y", 1))}")
 counts.removeAt(("x", 2))
-r.Console.log(counts.len)
+Console.log(counts.len)
 
 set<(i32, i32)> pairs = []
 pairs.add((1, 2))
 pairs.add((1, 2))
 pairs.add((0, 9))
-r.Console.log(pairs)
+Console.log(pairs)
 hset<Cell> seen = []
 seen.add(Cell(3, 4))
-r.Console.log($"{seen.has(Cell(3, 4))} {seen.has(Cell(4, 3))}")
+Console.log($"{seen.has(Cell(3, 4))} {seen.has(Cell(4, 3))}")

@@ -1,0 +1,1 @@
+for_writable_part_untyped.df(2): error: &n: a read/write part needs its type, &i32 n (spec 6.4)

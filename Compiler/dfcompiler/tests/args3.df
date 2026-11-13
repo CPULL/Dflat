@@ -1,5 +1,5 @@
 // top-level code can read the arguments too
-alias Root as r
-arr<string> args = r.getArgs()
-r.Console.log(args.len)
-r.Console.log(args[0].endsWith("args3.exe"))
+import Root
+arr<string> args = getArgs()
+Console.log(args.len)
+Console.log(args[0].endsWith("args3.exe"))

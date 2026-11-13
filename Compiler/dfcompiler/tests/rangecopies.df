@@ -1,44 +1,44 @@
 namespace rangecopies
-alias Root as r
+import Root
 
 public class Dog(string name) {
   public string name
 } atEnd {
-  r.Console.log("  end " + name)
+  Console.log("  end " + name)
 }
 
 class Card {
   public (string title, arr<i32> marks) info = ("card", [1, 2, 3])
 }
 
-r.Console.log("1 range copies")
+Console.log("1 range copies")
 arr<i32> numbers = [1, 2, 3, 4, 5]
 arr<i32> middle = numbers[1..4]!
 middle[0] = 99
-r.Console.log($"{numbers} {middle}")
+Console.log($"{numbers} {middle}")
 var names = vec<string>()
 names.add("a")
 names.add("b")
 names.add("c")
 var tail = names[1..]!
 tail[0] = "changed"
-r.Console.log($"{names} {tail}")
+Console.log($"{names} {tail}")
 var dogs = list<Dog>()
 dogs.add(Dog("rex"))
 dogs.add(Dog("bo"))
 var copies = dogs[0..=0]!
 copies[0].name = "rex2"
-r.Console.log($"{dogs[0].name} {copies[0].name} {copies.len}")
+Console.log($"{dogs[0].name} {copies[0].name} {copies.len}")
 var pack = vec<@Dog>()
 @Dog max = Dog("max")
 pack.add(@max)
 var shared = pack[0..1]!
-r.Console.log($"{shared[0].name} {max.usersCount}")
+Console.log($"{shared[0].name} {max.usersCount}")
 
-r.Console.log("2 tuple field clone")
+Console.log("2 tuple field clone")
 var c = Card()
 var c2 = c!
 c2.info.title = "other"
 c2.info.marks[0] = 42
-r.Console.log($"{c.info.title} {c.info.marks[0]} {c2.info.title} {c2.info.marks[0]}")
-r.Console.log("end")
+Console.log($"{c.info.title} {c.info.marks[0]} {c2.info.title} {c2.info.marks[0]}")
+Console.log("end")

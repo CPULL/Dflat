@@ -1,9 +1,9 @@
 // & replaces the caller's value (spec 13.1): numbers, strings, arrays, collections and objects; the old value ends, the caller owns the new one
-alias Root as r
+import Root
 public class Dog(string name) {
   public string name
 } atEnd {
-  r.Console.log("  end " + name)
+  Console.log("  end " + name)
 }
 public class Box {
   public Dog pet = Dog("Boxed")
@@ -21,32 +21,32 @@ fun clearDog(&Dog d) { d = null }
 fun run() {
   i32 n = 1
   setNum(&n)
-  r.Console.log($"num {n}")
+  Console.log($"num {n}")
   string s = "old"
   setStr(&s)
-  r.Console.log($"str {s}")
+  Console.log($"str {s}")
   arr<i32> a = [1, 2]
   setArr(&a)
-  r.Console.log($"arr {a}")
+  Console.log($"arr {a}")
   vec<i32> v = [1]
   setVec(&v)
-  r.Console.log($"vec {v}")
+  Console.log($"vec {v}")
   Dog d = Dog("Rex")
   renameDog(&d)
-  r.Console.log($"dog {d.name}")
+  Console.log($"dog {d.name}")
   setDog(&d)
-  r.Console.log($"dog {d.name}")
+  Console.log($"dog {d.name}")
   passOn(&d)
-  r.Console.log($"dog again {d.name}")
+  Console.log($"dog again {d.name}")
   Box b = Box()
   setDog(&b.pet)
-  r.Console.log($"field {b.pet.name}")
+  Console.log($"field {b.pet.name}")
   arr<Dog> pack = [Dog("x")]
   setDogs(&pack)
-  r.Console.log($"pack {pack.len}")
+  Console.log($"pack {pack.len}")
   clearDog(&d)
-  r.Console.log($"cleared {d == null}")
-  r.Console.log("scope end")
+  Console.log($"cleared {d == null}")
+  Console.log("scope end")
 }
 run()
-r.Console.log("end")
+Console.log("end")

@@ -1,6 +1,6 @@
 // objects as keys (spec 6.2, 6.6, 11.2.1): the class implements Keyable; the collection owns its keys (a new object or ->x),
 // a lookup borrows the key; the default order is the hash, so two objects with the same content are the same key
-alias Root as r
+import Root
 
 class Person(string name, i32 age) : Keyable {
   public string name
@@ -11,34 +11,34 @@ map<Person, string> roles = []
 roles[Person("ann", 30)] = "admin"
 Person bob = Person("bob", 40)
 roles.add(->bob, "user")
-r.Console.log(roles.len)
+Console.log(roles.len)
 Person lookup = Person("ann", 30)
-r.Console.log(roles[lookup])                              // admin: same content, same hash
-r.Console.log(roles.hasKey(Person("bob", 40)))
+Console.log(roles[lookup])                              // admin: same content, same hash
+Console.log(roles.hasKey(Person("bob", 40)))
 roles[Person("ann", 30)] = "owner"                        // the key is already there: the new object ends
-r.Console.log($"{roles.len} {roles[lookup]}")
+Console.log($"{roles.len} {roles[lookup]}")
 for (Person p, string role) in roles {
-  r.Console.log($"{p.name} {p.age}: {role}")
+  Console.log($"{p.name} {p.age}: {role}")
 }
 roles.removeAt(lookup)
-r.Console.log(roles.len)
+Console.log(roles.len)
 
 hmap<Person, i32> scores = []
 scores[Person("cid", 20)] = 7
 scores[Person("cid", 20)] += 1
-r.Console.log(scores[Person("cid", 20)])
+Console.log(scores[Person("cid", 20)])
 
 set<Person> seen = []
 seen.add(Person("dan", 50))
 seen.add(Person("dan", 50))
-r.Console.log(seen.len)
+Console.log(seen.len)
 hset<Person> hs = []
 hs.add(Person("eve", 60))
-r.Console.log(hs.has(Person("eve", 60)))
+Console.log(hs.has(Person("eve", 60)))
 
 map<Person, i32> copy = []
 copy.add(roles2())
-r.Console.log(copy.len)
+Console.log(copy.len)
 
 fun ->map<Person, i32> roles2() {
   map<Person, i32> m = []

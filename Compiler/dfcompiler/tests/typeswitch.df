@@ -1,5 +1,5 @@
 // The type switch of generics (11.3.7): value is ? { type: expression, ... }
-alias Root as r
+import Root
 
 Generic Convertible { Numeric, char, string }
 
@@ -29,12 +29,12 @@ fun string kind<Item>(Item value) {
   }
 }
 
-r.Console.log(toReal(3))
-r.Console.log(toReal(2.5))
-r.Console.log(toReal('A'))
-r.Console.log(toReal("four"))
-r.Console.log(kind(1))
-r.Console.log(kind<i64>(1))
-r.Console.log(kind(1.5))
-r.Console.log(kind(Dog("rex")))
-r.Console.log(kind("text"))
+Console.log(toReal(3))
+Console.log(toReal(2.5))
+Console.log(toReal('A'))
+Console.log(toReal("four"))
+Console.log(kind(1))
+Console.log(kind<i64>(1))
+Console.log(kind(1.5))
+Console.log(kind(Dog("rex")))
+Console.log(kind("text"))

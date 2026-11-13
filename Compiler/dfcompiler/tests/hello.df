@@ -1,4 +1,4 @@
 namespace hello
-alias Root as r
+import Root
 
-r.Console.log("Hello world!")
+Console.log("Hello world!")

@@ -1,6 +1,6 @@
 // bitfield methods (spec 3.1.1): a call whose result is used gives a new value, a single call alone changes the variable,
 // a chain alone changes nothing; Flags? is a nullable bitfield (7.1)
-alias Root as r
+import Root
 
 bitfield8 Flags { One: 0, Two: 1, Three: 2 }
 
@@ -9,34 +9,34 @@ class Holder {
 }
 
 fun show(Flags f) {
-  r.Console.log($"lent: {f.set(Flags.Three)}, still {f}")
+  Console.log($"lent: {f.set(Flags.Three)}, still {f}")
 }
 
 Flags f = Flags.None
 Flags n = f.set(Flags.One)
-r.Console.log($"{n} / {f}")                // One / None
+Console.log($"{n} / {f}")                // One / None
 f.set(Flags.Two)
-r.Console.log(f)                           // Two
+Console.log(f)                           // Two
 f.toggle(Flags.One | Flags.Two)
-r.Console.log(f)                           // One
+Console.log(f)                           // One
 f.setAs(Flags.Three, true)
 f.clear(Flags.One)
-r.Console.log(f)                           // Three
+Console.log(f)                           // Three
 f.set(Flags.One).clear(Flags.Three)        // a chain alone: nothing changes
-r.Console.log(f)                           // Three
+Console.log(f)                           // Three
 show(f)
 Holder h = Holder()
 h.state.set(Flags.Two)
-r.Console.log(h.state)                     // Two
+Console.log(h.state)                     // Two
 arr<Flags> all = [Flags.None, Flags.None]
 all[1].set(Flags.One)
-r.Console.log(all)
+Console.log(all)
 const Flags fixed = Flags.Two
-r.Console.log(fixed.set(Flags.One))        // a new value from a const
+Console.log(fixed.set(Flags.One))        // a new value from a const
 
 Flags? maybe = null
-r.Console.log(maybe)
+Console.log(maybe)
 maybe = Flags.One
-r.Console.log(maybe ?? Flags.None)
+Console.log(maybe ?? Flags.None)
 Flags plain = maybe ?? Flags.None
-r.Console.log(plain.isSet(Flags.One))
+Console.log(plain.isSet(Flags.One))

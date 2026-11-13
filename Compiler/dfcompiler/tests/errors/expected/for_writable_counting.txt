@@ -1,0 +1,1 @@
+for_writable_counting.df(1): error: for &i: a counting loop has no items to borrow; & is for the items of a collection (spec 6.4)

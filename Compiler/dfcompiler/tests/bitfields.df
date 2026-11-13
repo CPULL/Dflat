@@ -1,41 +1,41 @@
 namespace bitfields
-alias Root as r
+import Root
 alias Root.IO as fs
 
 bitfield32 Flags { CanRead: 0, CanWrite: 1, CanSeek: 2, IsNetwork: 3, Top: 31 }
 
 Flags flag = Flags.None
-r.Console.log($"none = {flag}, all = {Flags.All}, all as number = {(u32)Flags.All}")
+Console.log($"none = {flag}, all = {Flags.All}, all as number = {(u32)Flags.All}")
 Flags updated = flag.set(Flags.CanRead).clear(Flags.CanSeek).toggle(Flags.IsNetwork)
-r.Console.log($"updated = {updated}")                                  // CanRead | IsNetwork
+Console.log($"updated = {updated}")                                  // CanRead | IsNetwork
 Flags both = flag.set(Flags.CanRead | Flags.CanWrite)
-r.Console.log($"both = {both}, number {(u32)both}")                    // 3
-r.Console.log($"isSet read+write: {both.isSet(Flags.CanRead | Flags.CanWrite)}")   // true
-r.Console.log($"isSet read+seek: {both.isSet(Flags.CanRead | Flags.CanSeek)}")      // false
-r.Console.log($"isAnySet read+seek: {both.isAnySet(Flags.CanRead | Flags.CanSeek)}") // true
-r.Console.log($"isAnySet seek: {both.isAnySet(Flags.CanSeek)}")                      // false
-r.Console.log($"setAs off: {both.setAs(Flags.CanRead, false)}, setAs on: {flag.setAs(Flags.CanSeek, true)}")
-r.Console.log($"Flags.None.set: {Flags.None.set(Flags.Top)}, number {(u32)Flags.Top}")   // 2147483648
-r.Console.log($"not CanRead = {~(Flags.CanRead)}")                       // CanWrite | CanSeek | IsNetwork | Top
-r.Console.log($"and = {both & Flags.CanWrite}, xor = {both ^ Flags.CanWrite}")
+Console.log($"both = {both}, number {(u32)both}")                    // 3
+Console.log($"isSet read+write: {both.isSet(Flags.CanRead | Flags.CanWrite)}")   // true
+Console.log($"isSet read+seek: {both.isSet(Flags.CanRead | Flags.CanSeek)}")      // false
+Console.log($"isAnySet read+seek: {both.isAnySet(Flags.CanRead | Flags.CanSeek)}") // true
+Console.log($"isAnySet seek: {both.isAnySet(Flags.CanSeek)}")                      // false
+Console.log($"setAs off: {both.setAs(Flags.CanRead, false)}, setAs on: {flag.setAs(Flags.CanSeek, true)}")
+Console.log($"Flags.None.set: {Flags.None.set(Flags.Top)}, number {(u32)Flags.Top}")   // 2147483648
+Console.log($"not CanRead = {~(Flags.CanRead)}")                       // CanWrite | CanSeek | IsNetwork | Top
+Console.log($"and = {both & Flags.CanWrite}, xor = {both ^ Flags.CanWrite}")
 Flags cast = (Flags)255                                                // masks the undefined bits: 15
-r.Console.log($"(Flags)255 = {cast}, number {(u32)cast}")
+Console.log($"(Flags)255 = {cast}, number {(u32)cast}")
 u32 raw = 255
 Flags transmuted = [Flags]raw
-r.Console.log($"transmute = {transmuted}")
-r.Console.log($"equal: {both == (Flags.CanRead | Flags.CanWrite)}")
+Console.log($"transmute = {transmuted}")
+Console.log($"equal: {both == (Flags.CanRead | Flags.CanWrite)}")
 Flags acc = Flags.None
 acc |= Flags.CanSeek
 acc |= Flags.IsNetwork
-r.Console.log($"acc = {acc}")
+Console.log($"acc = {acc}")
 
 // Root.IO enums
 fs.DeleteOptions options = fs.DeleteOptions.Recursive | fs.DeleteOptions.ForceDelete
-r.Console.log($"options = {options}, all = {fs.DeleteOptions.All}, recursive: {options.isSet(fs.DeleteOptions.Recursive)}")
+Console.log($"options = {options}, all = {fs.DeleteOptions.All}, recursive: {options.isSet(fs.DeleteOptions.Recursive)}")
 fs.StreamOpenMode mode = fs.StreamOpenMode.CreateOrAppend
-r.Console.log($"mode = {mode}, {fs.FileWriteMode.AppendOnly}, {Root.IO.StreamSeekOrigin.End}, {fs.FileSystemObjectsType.Both}")
+Console.log($"mode = {mode}, {fs.FileWriteMode.AppendOnly}, {Root.IO.StreamSeekOrigin.End}, {fs.FileSystemObjectsType.Both}")
 fs.StreamReadWriteAccessMode access = fs.StreamReadWriteAccessMode.Shared
-r.Console.log($"access = {access}, overwrite = {fs.OverwriteOptions.Overwrite}")
+Console.log($"access = {access}, overwrite = {fs.OverwriteOptions.Overwrite}")
 
 // the new exceptions
 fun ->string first() {
@@ -56,9 +56,9 @@ fun string third() {
   throw SeekBeforeBeginException("silent")
   return "silent: never reached, the throw returns the empty string"
 }
-r.Console.log(first())
-r.Console.log(second())
-r.Console.log(third())
+Console.log(first())
+Console.log(second())
+Console.log(third())
 
 // errors it should give (one at a time):
 // bitfield8 Bad { A: 8 }              bit position 8 is outside bitfield8

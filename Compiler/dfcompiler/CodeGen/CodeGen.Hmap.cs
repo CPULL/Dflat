@@ -82,6 +82,15 @@ public class hmap<K, V> : MapCollection<K, V> {
     this.tree_remove(key)
   }
 
+  // the values of two keys exchanged (spec 6.6); when only one key exists its value moves to the other, which is added, and the first
+  // entry goes; when neither exists nothing happens. Only that case adds and removes an entry: it is checked against open iterators
+  public fun swap(K key1, K key2) {
+    if this.tree_hasKey(key1) != this.tree_hasKey(key2) {
+      checkUnlocked()
+    }
+    this.tree_swap(key1, key2)
+  }
+
   // the first entry in the order of the table that holds the value
   public fun bool remove(V value) {
     checkUnlocked()

@@ -1,0 +1,2 @@
+map<string, i32> m = ["a": 1]
+for (&string k, i32 n) in m { }

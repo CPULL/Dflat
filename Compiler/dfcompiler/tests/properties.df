@@ -1,6 +1,6 @@
 // Properties with accessor blocks (spec 11.1.4): R: and W:, field and value, defaults, readwrite, readonly with W:, start values, field groups, ++ / += / multiple assignment
 namespace properties
-alias Root as r
+import Root
 
 class P {
   public i32 myFieldProperty = 3
@@ -16,30 +16,30 @@ class P {
 }
 
 var p = P()
-r.Console.log(p.mySecondProperty)
+Console.log(p.mySecondProperty)
 p.mySecondProperty = 10
-r.Console.log(p.mySecondProperty)
+Console.log(p.mySecondProperty)
 p.myProp = 4
-r.Console.log(p.myProp)
+Console.log(p.myProp)
 p.myProp += 1
-r.Console.log(p.myProp)
-r.Console.log(p.level)
+Console.log(p.myProp)
+Console.log(p.level)
 p.reset()
-r.Console.log(p.twiceLevel())
+Console.log(p.twiceLevel())
 p.pos.x++
-r.Console.log(p.pushes)
+Console.log(p.pushes)
 p.pos = (5.0, 6.0)
-r.Console.log(p.pushes)
+Console.log(p.pushes)
 p.pos.x += 2.5
-r.Console.log(p.pos.x)
-r.Console.log(p.pushes)
-r.Console.log(p.computed)
-r.Console.log(p.name)
+Console.log(p.pos.x)
+Console.log(p.pushes)
+Console.log(p.computed)
+Console.log(p.name)
 p.name = "  dflat  "
-r.Console.log(p.name)
+Console.log(p.name)
 i32 a, string b = 7, " multi "
 p.myProp, p.name = a, b
-r.Console.log(p.myProp)
-r.Console.log(p.name)
-r.Console.log(p.myProp++)
-r.Console.log(p.myProp)
+Console.log(p.myProp)
+Console.log(p.name)
+Console.log(p.myProp++)
+Console.log(p.myProp)

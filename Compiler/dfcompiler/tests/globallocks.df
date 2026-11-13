@@ -1,7 +1,7 @@
 // Globals (spec 18.4, 18.5): the rank order checked at run time (CallingGlobalDefinedAfterException), an object owned by a global
 // that calls it back (an internal call), an unrestricted method that calls back to write its global (it takes the write lock), field writes
 // and reads refused by the rank at run time (low) but not for a global of the same class declared later (low2); the locks are released after an exception
-alias Root as r
+import Root
 
 class D {
   i32 n = 0
@@ -12,7 +12,7 @@ class C {
   public fun i32 useD() {
     return d.bump()
     catch CallingGlobalDefinedAfterException ex {
-      r.Console.log($"refused: {ex.message}")
+      Console.log($"refused: {ex.message}")
       return -1
     }
   }
@@ -26,7 +26,7 @@ class A {
   list<B> bs = list<B>()
   i32 notes = 0
   public fun addObj(->B b) { bs.add(->b) }
-  public fun update() { for var b in bs { b.update() } }
+  public fun update() { for &B b in bs { b.update() } }
   public fun note(i32 id) { notes += id }
   unrestricted fun i32 total() { notes }
   unrestricted fun i32 sneaky() { poke(); notes }
@@ -40,21 +40,21 @@ global C c2 = C()
 global A a = A()
 
 fun tryPoke() {
-  r.Console.log(a.sneaky())
+  Console.log(a.sneaky())
   catch ReadLockBecameWriteLockException ex {
-    r.Console.log($"refused: {ex.message}")
+    Console.log($"refused: {ex.message}")
   }
 }
 
-r.Console.log(c2.useD())
-r.Console.log(c1.useD())
+Console.log(c2.useD())
+Console.log(c1.useD())
 a.addObj(B(1))
 a.addObj(B(2))
 a.update()
-r.Console.log(a.total())
+Console.log(a.total())
 tryPoke()
-r.Console.log(a.total())
-r.Console.log(c2.useD())
+Console.log(a.total())
+Console.log(c2.useD())
 
 // field writes and reads under the rank rule
 class Low {
@@ -70,18 +70,18 @@ global Low low2 = Low()   // after high: it can call it (low cannot)
 fun tryWrite() {
   low.poke()
   catch CallingGlobalDefinedAfterException ex {
-    r.Console.log("write refused")
+    Console.log("write refused")
   }
 }
 fun tryRead() {
-  r.Console.log(low.peek())
+  Console.log(low.peek())
   catch CallingGlobalDefinedAfterException ex {
-    r.Console.log("read refused")
+    Console.log("read refused")
   }
 }
 tryWrite()
 tryRead()
 high.count = 5
-r.Console.log(high.count)
+Console.log(high.count)
 low2.poke()
-r.Console.log(low2.peek())
+Console.log(low2.peek())

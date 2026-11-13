@@ -1,5 +1,5 @@
 namespace safety
-alias Root as r
+import Root
 
 // pure, safe and failing functions (EXCEPTIONS: THE MODEL, stage 1); the C signatures are checked by the test runner of the notes
 
@@ -56,7 +56,7 @@ fun nested(i64 a) {                                         // SAFE: the inner c
     x = 10 / a
     catch DivisionByZeroException { x = 7 }
   }
-  r.Console.log($"nested {a}: {x}")
+  Console.log($"nested {a}: {x}")
 }
 
 fun i64 userThrow(i64 a) {                                  // FAILING: throws a standard exception
@@ -69,20 +69,20 @@ fun ->string wrapped(i64 a) {                                 // SAFE: handles w
   catch Exception e { return "caught " + e.message }
 }
 
-r.Console.log(pureAdd(2, 3))                                // 5
-r.Console.log(safeDivide(10, 0))                            // 1
-r.Console.log(safeDivide(10, 2))                            // 5
-r.Console.log(sinkhole(1, 0))                               // -1
-r.Console.log(callsSafe(9, 3))                              // 4
-r.Console.log(callsSafe(9, 0))                              // 2
-r.Console.log(handlesCallee(8, 2))                          // 5
-r.Console.log(handlesCallee(8, 0))                          // 100
-r.Console.log(guardedIndex([1, 2, 3], 1))                   // 2
-r.Console.log(guardedIndex([1, 2, 3], 9))                   // -1
+Console.log(pureAdd(2, 3))                                // 5
+Console.log(safeDivide(10, 0))                            // 1
+Console.log(safeDivide(10, 2))                            // 5
+Console.log(sinkhole(1, 0))                               // -1
+Console.log(callsSafe(9, 3))                              // 4
+Console.log(callsSafe(9, 0))                              // 2
+Console.log(handlesCallee(8, 2))                          // 5
+Console.log(handlesCallee(8, 0))                          // 100
+Console.log(guardedIndex([1, 2, 3], 1))                   // 2
+Console.log(guardedIndex([1, 2, 3], 9))                   // -1
 nested(2)                                                   // nested 2: 5
 nested(0)                                                   // nested 0: 1
-r.Console.log(wrapped(5))                                   // ok 5
-r.Console.log(wrapped(-1))                                  // caught negative
+Console.log(wrapped(5))                                   // ok 5
+Console.log(wrapped(-1))                                  // caught negative
 
 fun ->string outer(i64 a, i64 b) {
   return "outer " + plainDivide(a, b)
@@ -96,8 +96,8 @@ fun ->string outer3(arr<i64> items) {
   return "outer3 " + partlyHandled(1, items)
   catch IndexOutOfRangeException ex { return "outer3 caught " + ex.message }
 }
-r.Console.log(outer(4, 2))                                  // outer 2
-r.Console.log(outer(4, 0))                                  // outer caught Division By Zero Exception
-r.Console.log(outer2(4, 0))                                 // outer2 caught Division By Zero Exception
-r.Console.log(outer3([5, 6]))                               // outer3 caught Index Out Of Range Exception
-r.Console.log(wrongCatch(1, 0))                             // never reached: the exception leaves wrongCatch
+Console.log(outer(4, 2))                                  // outer 2
+Console.log(outer(4, 0))                                  // outer caught Division By Zero Exception
+Console.log(outer2(4, 0))                                 // outer2 caught Division By Zero Exception
+Console.log(outer3([5, 6]))                               // outer3 caught Index Out Of Range Exception
+Console.log(wrongCatch(1, 0))                             // never reached: the exception leaves wrongCatch

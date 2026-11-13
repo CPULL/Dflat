@@ -1,5 +1,5 @@
 // Classes, phase 3: traits (properties, constructor, default methods, parent trait, dispatch)
-alias Root as r
+import Root
 
 trait Named {
   public string name = "unnamed"
@@ -46,40 +46,40 @@ fun string greet(Named n) { n.Hello() }
 
 Square sq = Square()
 Circle ci = Circle()
-r.Console.log(sq.Label())
-r.Console.log(sq.Hello())
-r.Console.log(sq.Info())
-r.Console.log(ci.Hello())
-r.Console.log(ci.Info())
-r.Console.log(sq.sides)
+Console.log(sq.Label())
+Console.log(sq.Hello())
+Console.log(sq.Info())
+Console.log(ci.Hello())
+Console.log(ci.Info())
+Console.log(sq.sides)
 sq.SetName("my square")
-r.Console.log(sq.name)
-r.Console.log(describe(sq))
-r.Console.log(describe(ci))
-r.Console.log(greet(sq))
-r.Console.log(greet(ci))
+Console.log(sq.name)
+Console.log(describe(sq))
+Console.log(describe(ci))
+Console.log(greet(sq))
+Console.log(greet(ci))
 
 // a class that gets the function from its parent class
 Derived d = Derived()
-r.Console.log(d.Hello())
-r.Console.log(greet(d))
-r.Console.log(d.name)
-r.Console.log(d.extra)
+Console.log(d.Hello())
+Console.log(greet(d))
+Console.log(d.name)
+Console.log(d.extra)
 
 // a subclass overriding a function that answers a trait
 Loud loud = Loud()
 loud.side = 3.0
-r.Console.log(describe(loud))
-r.Console.log(greet(loud))
+Console.log(describe(loud))
+Console.log(greet(loud))
 
 // properties through a trait-typed value
 &Shape s = ci                    // a read/write borrow: its properties are written
-r.Console.log(s.sides)
+Console.log(s.sides)
 s.sides = 8
-r.Console.log(ci.sides)
+Console.log(ci.sides)
 s.name = "renamed"
-r.Console.log(ci.name)
-r.Console.log(s.Hello())
+Console.log(ci.name)
+Console.log(s.Hello())
 
 // a mixed array of any shape
 Loud loud2 = Loud()
@@ -87,31 +87,31 @@ loud2.side = 3.0
 arr<Shape> shapes = [Square(), Circle(), ->loud2]   // an array owns its items: new objects, or moved in with ->
 r64 total = 0.0
 for Shape item in shapes { total += item.Area() }
-r.Console.log(total)
-for var item in shapes { r.Console.print(item.Label() + ";") }
-r.Console.log("")
+Console.log(total)
+for var item in shapes { Console.print(item.Label() + ";") }
+Console.log("")
 
 // a trait value assigned to the parent trait
 Named n = s
-r.Console.log(n.Label())
+Console.log(n.Label())
 n = d
-r.Console.log(n.Label())
+Console.log(n.Label())
 Named none = null
-r.Console.log(none == null)
+Console.log(none == null)
 
 // is: with a class, and with a trait
-r.Console.log(s is Circle)
-r.Console.log(s is Square)
-r.Console.log(sq is Shape)
-r.Console.log(d is Shape)
-r.Console.log(d is Named)
-r.Console.log(n is Base)
+Console.log(s is Circle)
+Console.log(s is Square)
+Console.log(sq is Shape)
+Console.log(d is Shape)
+Console.log(d is Named)
+Console.log(n is Base)
 arr<Named> mixed = [Square(), Derived(), Circle()]   // new objects: the variables keep theirs
 for Named item in mixed {
   if item is Shape sh {
-    r.Console.log("shape " + sh.Area())
+    Console.log("shape " + sh.Area())
   } else if item is Base b {
-    r.Console.log("base " + b.Label())
+    Console.log("base " + b.Label())
   }
 }
 
@@ -121,5 +121,5 @@ none.Hello()
 catch NullPointerException {
   caught += 1
 }
-r.Console.log(caught)
-r.Console.log(sq)
+Console.log(caught)
+Console.log(sq)

@@ -1,6 +1,6 @@
-alias Root as r
+import Root
 fun LogAll(string level, string messages...) {
-  for string message in messages { r.Console.log($"{level}: {message}") }
+  for string message in messages { Console.log($"{level}: {message}") }
 }
 fun i32 total(i32 first, i32 numbers...) {
   i32 sum = first
@@ -9,14 +9,14 @@ fun i32 total(i32 first, i32 numbers...) {
 }
 LogAll("info", "started", "ready")
 LogAll("warn")
-r.Console.log(total(1))
-r.Console.log(total(1, 2, 3))
+Console.log(total(1))
+Console.log(total(1, 2, 3))
 arr<i32> more = [10, 20]
-r.Console.log(total(5, more))
+Console.log(total(5, more))
 vec<i32> grown = [1, 2, 3]
-r.Console.log(total(0, grown))
-r.Console.log(total(0, more[1..]))
-r.Console.log(total(0, grown[..2]))
+Console.log(total(0, grown))
+Console.log(total(0, more[1..]))
+Console.log(total(0, grown[..2]))
 class Dog(string name) {
   unrestricted fun string label() { name }
 }
@@ -27,21 +27,21 @@ fun ->string names(Dog dogs...) {
 }
 Dog rex = Dog("rex")
 Dog fido = Dog("fido")
-r.Console.log(names(rex, fido))
-r.Console.log(names(Dog("max"), rex))
+Console.log(names(rex, fido))
+Console.log(names(Dog("max"), rex))
 fun string pick(i32 a, i32 b) { "plain" }
 fun string pick(i32 a, i32 rest...) { "variadic" }
-r.Console.log(pick(1, 2))
-r.Console.log(pick(1, 2, 3))
+Console.log(pick(1, 2))
+Console.log(pick(1, 2, 3))
 vec<i32> watched = [1, 2]
 fun u64 grow(&vec<i32> target, i32 values...) {
   target.add(9)
   return values.len
 }
 fun string tryGrow(&vec<i32> watched) {
-  r.Console.log(grow(&watched, watched))
+  Console.log(grow(&watched, watched))
   return "grown"
   catch ModifyingIteratedCollectionException { return "vec locked during the call" }
 }
-r.Console.log(tryGrow(&watched))
-r.Console.log(watched.len)
+Console.log(tryGrow(&watched))
+Console.log(watched.len)

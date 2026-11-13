@@ -1,0 +1,7 @@
+trait Shower {
+  public fun show<T>(T x)
+}
+class A : Shower {
+}
+Shower s = A()
+s.show(1)

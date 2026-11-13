@@ -203,9 +203,39 @@ public sealed partial class CodeGen {
     return e with { Code = TempBoxCode(e.Type, e.Code, TupleDropCode(e.Type, "(*t)")) };
   }
 
+  // the parts of a tuple literal that are new: objects made there (a creation, a call, x!, ->x), new arrays, lambdas, structs made there;
+  // a borrowed part ((rex, 1)) belongs to its owner
+  List<int> NewTupleParts(Node tuple, string type) {
+    var elems = TupleElems(type);
+    var fresh = new List<int>();
+    for (int index = 0; index < elems.Count && index < tuple.Children.Count; index++) {
+      var item = TupleItemNode(tuple.Children[index]);
+      string part = elems[index].Type;
+      bool isNew = IsArr(part) ? item.Kind != "Null" && GivesOwnArray(item)
+        : IsFunType(part) ? item is { Kind: "Lambda" or "Call" or "Copy" }
+        : IsCountedType(part) ? false
+        : IsClass(part) || StructHoldsObjects(part) ? item is { Kind: "Call" or "Copy" or "Gift" }
+        : false;
+      if (isNew) {
+        fresh.Add(index);
+      }
+    }
+    return fresh;
+  }
+
+  // a tuple whose new parts end with the statement (a tuple literal lent to a call, a key the collection clones)
+  string TempTupleParts(string converted, string type, List<int> fresh) {
+    if (fresh.Count == 0) {
+      return converted;
+    }
+    var elems = TupleElems(type);
+    string drop = string.Concat(fresh.Select(index => TuplePartDrop(elems[index].Type, $"(*t).e{index}")));
+    return TempBoxCode(type, converted, drop, "_k" + string.Join("_", fresh));
+  }
+
   // the value is kept in a block of its own on the temporaries of the statement; drop ends what it holds (t points to the value)
-  string TempBoxCode(string type, string code, string drop) {
-    string name = "df_tmpdrop_" + System.Text.RegularExpressions.Regex.Replace(type, @"[^A-Za-z0-9_]", "_");
+  string TempBoxCode(string type, string code, string drop, string suffix = "") {
+    string name = "df_tmpdrop_" + System.Text.RegularExpressions.Regex.Replace(type, @"[^A-Za-z0-9_]", "_") + suffix;
     if (tempDropHelpers.Add(name)) {
       classCode.Append($"static void {name}(void* p) {{\n  {CType(type)}* t = ({CType(type)}*)p;\n  {drop}\n  free(p);\n}}\n\n");
     }

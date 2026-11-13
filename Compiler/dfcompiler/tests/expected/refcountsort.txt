@@ -1,0 +1,17 @@
+null
+a
+b
+c
+c
+x
+p
+1 2 3
+aa
+end p
+end q
+end x
+end y
+end c
+end b
+end a
+---- exit code 0 ----

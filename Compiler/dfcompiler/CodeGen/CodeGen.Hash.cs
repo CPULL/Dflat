@@ -81,6 +81,9 @@ public sealed partial class CodeGen {
     return null;
   }
 
+  // T.hash: the hash of the fully qualified name of the type (spec 6.2.1), known at compile time
+  Expr TypeHash(string type) => new Expr(HashConst(QualifiedTypeName(type)), NativeUns);
+
   // x.hash
   Expr HashOf(Expr e, Node at) {
     hashUsed = true;

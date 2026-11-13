@@ -1,11 +1,11 @@
 // The ways a function returns (spec 13): one value (return, last expression, early return, every type kind), several values,
 // a tuple, objects (moved), strings, counted results, the ways the caller receives them
-alias Root as r
+import Root
 
 public class Box(string label) {
   public string label
 } atEnd {
-  r.Console.log("  end " + label)
+  Console.log("  end " + label)
 }
 
 // one value
@@ -47,12 +47,12 @@ fun ->Box moveOut() {
   return ->b
 }
 fun @Box counted() { Box("counted") }
-fun voidFun() { r.Console.log("  void") }
+fun voidFun() { Console.log("  void") }
 fun voidEarly(bool b) {
   if b {
     return
   }
-  r.Console.log("  not early")
+  Console.log("  not early")
 }
 
 // several values
@@ -70,35 +70,35 @@ fun vec<i32> listResult() {
 }
 fun map<string, i32> mapResult() { ["a": 1] }
 
-r.Console.log("one value")
-r.Console.log($"{explicitReturn()} {lastExpr()} {lastAfterStatements()} {early(-5)} {early(5)} {viaIf(true)} {viaIf(false)}")
-r.Console.log($"{flag(4)} {real()} {letter()} {text()} {literal()} {maybe(true) ?? 0} {maybe(false) ?? 0}")
+Console.log("one value")
+Console.log($"{explicitReturn()} {lastExpr()} {lastAfterStatements()} {early(-5)} {early(5)} {viaIf(true)} {viaIf(false)}")
+Console.log($"{flag(4)} {real()} {letter()} {text()} {literal()} {maybe(true) ?? 0} {maybe(false) ?? 0}")
 fun objects() {
   Box a = newBox("a")
   Box b = newBoxAfter("b")
   Box c = moveOut()
   @Box d = counted()
-  r.Console.log(a.label + ", " + b.label + ", " + c.label + ", " + d.label + $" ({d.usersCount} user)")
+  Console.log(a.label + ", " + b.label + ", " + c.label + ", " + d.label + $" ({d.usersCount} user)")
 }
 objects()
 voidFun()
 voidEarly(true)
 voidEarly(false)
 
-r.Console.log("several values")
+Console.log("several values")
 i32 n, string s = two()
-r.Console.log($"{n} {s}")
+Console.log($"{n} {s}")
 i32 n2, _ = forwardTwo()
-r.Console.log($"{n2}")
+Console.log($"{n2}")
 i64 doubled, r64 halved, bool big = three(5)
-r.Console.log($"{doubled} {halved} {big}")
+Console.log($"{doubled} {halved} {big}")
 n, s = two()
 string left, string right = strings()
-r.Console.log(left + " " + right)
+Console.log(left + " " + right)
 
-r.Console.log("tuples")
+Console.log("tuples")
 (i32 id, string name) p = pair()
-r.Console.log($"{p.id} {p.name}")
+Console.log($"{p.id} {p.name}")
 var q = plainPair()
-r.Console.log($"{q} {listResult()} {mapResult()}")
-r.Console.log("done")
+Console.log($"{q} {listResult()} {mapResult()}")
+Console.log("done")

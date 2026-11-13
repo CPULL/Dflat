@@ -1,4 +1,4 @@
-alias Root as r
+import Root
 public class Dog(string name) {
   public string name
 }
@@ -11,6 +11,6 @@ fun f() {
   Kennel k = Kennel()
   Dog d = k.leader()
   k.visits++
-  r.Console.log(d.name)
+  Console.log(d.name)
 }
 f()

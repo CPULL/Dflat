@@ -1,22 +1,22 @@
 // Function values as values of map and hmap (spec 13.3.3): each entry holds a usage; a replaced or removed value ends; clone copies them with !; printed as their type
-alias Root as r
+import Root
 public class Dog(string name) {
   public string name
 } atEnd {
-  r.Console.log("  end " + name)
+  Console.log("  end " + name)
 }
 fun ->fun() barker(string n) {
   Dog d = Dog(n)
-  return (; ->d) { r.Console.log("  bark " + d.name) }
+  return (; ->d) { Console.log("  bark " + d.name) }
 }
 fun run(bool hashed) {
-  map<string, fun(i32)> m = ["twice": (i32 x) { r.Console.log($"  {x * 2}") }]
-  m["plus"] = (i32 x) { r.Console.log($"  {x + 1}") }
+  map<string, fun(i32)> m = ["twice": (i32 x) { Console.log($"  {x * 2}") }]
+  m["plus"] = (i32 x) { Console.log($"  {x + 1}") }
   m["twice"](4)
   m["plus"](4)
   fun(i32) f = m["plus"]
   f(10)
-  r.Console.log($"  len {m.len} has {m.hasKey("plus")}")
+  Console.log($"  len {m.len} has {m.hasKey("plus")}")
   hmap<string, fun()> h = []
   h["a"] = barker("ha")
   h["b"] = barker("hb")
@@ -29,9 +29,9 @@ fun run(bool hashed) {
   for (k, v) in h {
     v()
   }
-  r.Console.log("  end of run")
+  Console.log("  end of run")
 }
 fun main() {
   run(true)
-  r.Console.log("end of main")
+  Console.log("end of main")
 }

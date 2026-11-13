@@ -1,0 +1,32 @@
+// for &T x on string, string?, function and struct-with-objects items (spec 6.4): written in place, the old value ends; & on the string
+// and object fields of a struct item
+import Root
+class Dog(string name) {
+  public string name
+} atEnd {
+  Console.log($"  {name} ends")
+}
+struct Pet { string name, Dog dog }
+fun f() {
+  vec<string> v = ["a", "b"]
+  string kept = "keep"
+  for &string s in v { s = s + "!" }
+  for &string s in v { s.append("?") }
+  list<string> l = ["x"]
+  for &string s in l { s = kept }
+  kept = "changed"
+  arr<string?> o = ["p", null]
+  for &string? s in o {
+    if s == null { s = "was null" } else { s = null }
+  }
+  vec<fun i32(i32)> fs = [(i32 x) { x + 1 }]
+  for &fun i32(i32) g in fs { g = (i32 x) { x * 10 } }
+  vec<Pet> pets = [Pet("p1", Dog("d1"))]
+  for &Pet p in pets { p.name = "p2" }
+  for &Pet p in pets { p = Pet("p3", Dog("d3")) }
+  for &string n, &Dog d in pets { n = n + "+"; d = Dog("d4") }
+  Console.log($"{v} {l} {o} {fs[0](3)} {pets}")
+  Console.log("end of f")
+}
+f()
+Console.log("done")

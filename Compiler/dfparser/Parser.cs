@@ -272,7 +272,14 @@ public sealed class Parser {
     var root = new Node("Program", Peek);
     SkipTerminators();
     while (!AtEnd) {
-      root.Add(ParseStatement());
+      var statement = ParseStatement();
+      if (statement.Kind == "ImportGroup") {
+        foreach (var import in statement.Children) {
+          root.Add(import);   // import a, b: the same as two lines
+        }
+      } else {
+        root.Add(statement);
+      }
       SkipTerminators();
     }
     CheckFinalizers(root, null);
@@ -534,11 +541,22 @@ public sealed class Parser {
     return new Node(name == "local" ? "NamespaceLocal" : "Namespace", t, name == "local" ? null : name);
   }
 
+  // import a.b.c   |   import Root.Console   |   import gfx, Root.Math (spec 16.2): one Import node per path
   Node ParseImport() {
     var t = Next();
-    var name = ParseQualifiedName();
+    var imports = new List<Node> { new Node("Import", t, ParseQualifiedName()) };
+    while (AcceptOp(",")) {
+      imports.Add(new Node("Import", t, ParseQualifiedName()));
+    }
     EndStatement(false);
-    return new Node("Import", t, name);
+    if (imports.Count == 1) {
+      return imports[0];
+    }
+    var group = new Node("ImportGroup", t);
+    foreach (var import in imports) {
+      group.Add(import);
+    }
+    return group;
   }
 
   // alias Root as r   |   alias u8 as byte8   |   alias Root.Console.Log as log
@@ -615,13 +633,16 @@ public sealed class Parser {
       // for key, value in m: names only, without the parentheses
       node.Add(ParseForDestructure(null, false));
     } else {
-      bool counted = IsCountedMarker();   // for @Dog dog in pack (spec 12.7): the same as for var dog in pack
+      CheckOldMarker();
+      // for &Task task in tasks: a read/write borrow of each item (spec 6.4)
+      bool writable = IsOp("&") && !PeekAt(1).Is("@") && !PeekAt(1).Is("%") && !PeekAt(1).Is("*") && AcceptOp("&");
+      bool counted = !writable && IsCountedMarker();   // for @Dog dog in pack (spec 12.7): the same as for var dog in pack
       if (counted) {
         Next();
       }
       var type = ParseType();
       var n = ExpectIdent();
-      var loopVar = new Node("Var", n, n.Text).Add(type);
+      var loopVar = new Node(writable ? "WritableVar" : "Var", n, n.Text).Add(type);
       if (!counted && IsOp(",")) {
         // for i32 a, string b in c: several variables without the parentheses, as with several results (spec 6.4)
         var list = new Node("Destructure", n).Add(loopVar);

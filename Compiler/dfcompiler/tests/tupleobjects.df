@@ -1,10 +1,10 @@
 // Objects in tuples (spec 3.2, as in structs 11.1.5.3): the tuple owns them, a copy clones them, a new tuple is taken as it is, they end with the tuple
 namespace tupleobjects
-alias Root as r
+import Root
 class Dog(string name) {
   public string name
 } atEnd {
-  r.Console.log($"{name} ends")
+  Console.log($"{name} ends")
 }
 class Box {
   public (Dog d, i32 n) pair = (Dog("InBox"), 1)
@@ -14,15 +14,15 @@ fun f() {
   (Dog d, i32 n) t = (Dog("A"), 1)
   Dog rex = Dog("Rex")
   (Dog d, i32 n) copy = (rex, 5)
-  r.Console.log($"{t.d.name} {copy.d.name} {rex.name}")
+  Console.log($"{t.d.name} {copy.d.name} {rex.name}")
   t = (Dog("B"), 2)
-  r.Console.log("replaced")
+  Console.log("replaced")
   var b = Box()
   var c = b!
-  r.Console.log($"{c.pair.d.name}")
+  Console.log($"{c.pair.d.name}")
   var m = make()
-  r.Console.log($"{m.d.name}")
+  Console.log($"{m.d.name}")
   make()
-  r.Console.log("end of f")
+  Console.log("end of f")
 }
 f()

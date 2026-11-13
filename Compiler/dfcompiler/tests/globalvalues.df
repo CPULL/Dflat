@@ -1,6 +1,6 @@
 // Globals (spec 18.5): the arguments of the calls in a chain and the value of g.f = v are evaluated before the lock of the global, so
 // they can call a global declared after it (box is declared before src)
-alias Root as r
+import Root
 
 class Box {
   public i32 value = 0
@@ -19,16 +19,16 @@ global Box box = Box()
 global Source src = Source(10)
 
 box.value = src.next()
-r.Console.log(box.value)
+Console.log(box.value)
 box.value += src.next()
-r.Console.log(box.value)
+Console.log(box.value)
 box.items.add(src.next())
 box.items.add(5)
-r.Console.log(box.items[0])
+Console.log(box.items[0])
 box.items[1] = src.next()
-r.Console.log(box.items[1])
+Console.log(box.items[1])
 box.items[0] += src.next()
-r.Console.log(box.items[0])
+Console.log(box.items[0])
 box.things.add(Item(src.next()))
-r.Console.log(box.things[0].n)
-r.Console.log(box.items.has(src.next()))
+Console.log(box.things[0].n)
+Console.log(box.items.has(src.next()))

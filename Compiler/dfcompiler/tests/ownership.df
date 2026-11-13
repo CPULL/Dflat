@@ -1,10 +1,10 @@
 // Classes, phase 4: ownership. Objects end with their owner; the class atEnd runs; ->, is atEnd., weak references
-alias Root as r
+import Root
 
 public class Res {
   public string name = "res"
 } atEnd {
-  r.Console.log("  end " + name)
+  Console.log("  end " + name)
 }
 
 public class Holder {
@@ -12,18 +12,18 @@ public class Holder {
   public Res inner = Res()
   public Res spare
 } atEnd {
-  r.Console.log("  end holder, inner is " + (inner == null ? { "null", "set" }))
+  Console.log("  end holder, inner is " + (inner == null ? { "null", "set" }))
 }
 
 public class Base {
   public string tag = "base"
 } atEnd {
-  r.Console.log("  end Base part")
+  Console.log("  end Base part")
 }
 public class Derived : Base {
   public Res part = Res()
 } atEnd {
-  r.Console.log("  end Derived part")
+  Console.log("  end Derived part")
 }
 
 fun ->Res make(string name) {
@@ -35,73 +35,73 @@ fun ->Res make(string name) {
 fun Res firstOf(Holder h) { h.inner }
 
 fun use(Res borrowed) {
-  r.Console.log("  using " + borrowed.name)
+  Console.log("  using " + borrowed.name)
 }
 
 fun take(->Res given) {
-  r.Console.log("  took " + given.name)
+  Console.log("  took " + given.name)
 }
 
-r.Console.log("scope end")
+Console.log("scope end")
 {
   Res a = make("a")
   Res b = make("b")
   Res view = a
-  r.Console.log("  inside, view " + view.name)
+  Console.log("  inside, view " + view.name)
 }
-r.Console.log("after the block")
+Console.log("after the block")
 
-r.Console.log("function end")
+Console.log("function end")
 fun scoped() {
   Res x = make("x")
   use(x)
 } atEnd {
-  r.Console.log("  function final cleanup")
+  Console.log("  function final cleanup")
 }
 scoped()
 
-r.Console.log("explicit release")
+Console.log("explicit release")
 Res c = make("c")
 c is atEnd.
-r.Console.log("  c is null: " + (c == null))
+Console.log("  c is null: " + (c == null))
 c is atEnd.
 
-r.Console.log("move into a variable")
+Console.log("move into a variable")
 Res d = make("d")
 Res e = ->d
-r.Console.log("  d is null: " + (d == null) + ", e is " + e.name)
+Console.log("  d is null: " + (d == null) + ", e is " + e.name)
 
-r.Console.log("move into a function")
+Console.log("move into a function")
 Res f = make("f")
 take(->f)
-r.Console.log("  after take, f is null: " + (f == null))
+Console.log("  after take, f is null: " + (f == null))
 
-r.Console.log("new value drops the old one")
+Console.log("new value drops the old one")
 Res g = make("g1")
 g = make("g2")
-r.Console.log("  g is " + g.name)
+Console.log("  g is " + g.name)
 
-r.Console.log("fields, parent and child")
+Console.log("fields, parent and child")
 {
   Holder h = Holder()
   h.spare = make("spare")
   Derived dv = Derived()
-  r.Console.log("  built " + dv.tag)
+  Console.log("  built " + dv.tag)
 }
 
-r.Console.log("move a field out")
+Console.log("move a field out")
 {
   Holder h2 = Holder()
   Res taken = ->h2.inner
-  r.Console.log("  taken " + taken.name + ", inner null: " + (h2.inner == null))
+  Console.log("  taken " + taken.name + ", inner null: " + (h2.inner == null))
 }
 
-r.Console.log("loop")
+Console.log("loop")
 for i32 i = 0..3 {
   Res item = make("item" + i)
 }
 
-r.Console.log("return and break")
+Console.log("return and break")
 fun ->Res find(i32 n) {
   for i32 i = 0..5 {
     Res candidate = make("cand" + i)
@@ -110,31 +110,31 @@ fun ->Res find(i32 n) {
   return null
 }
 Res found = find(1)
-r.Console.log("  found " + found.name)
+Console.log("  found " + found.name)
 
-r.Console.log("weak")
+Console.log("weak")
 @Res strong = make("strong")
 %Res weak = %strong
 enforce weak {
-  r.Console.log("  alive: " + weak.name)
+  Console.log("  alive: " + weak.name)
 } else {
-  r.Console.log("  gone")
+  Console.log("  gone")
 }
 strong is done.
 enforce weak {
-  r.Console.log("  alive: " + weak.name)
+  Console.log("  alive: " + weak.name)
 } else {
-  r.Console.log("  gone")
+  Console.log("  gone")
 }
 
-r.Console.log("exception")
+Console.log("exception")
 fun fails() {
   Res guard = make("guard")
   throw Exception("boom")
 }
 fails()
 catch Exception ex {
-  r.Console.log("  caught " + ex.message)
+  Console.log("  caught " + ex.message)
 }
 
-r.Console.log("program end")
+Console.log("program end")

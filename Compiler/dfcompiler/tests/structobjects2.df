@@ -1,10 +1,10 @@
 namespace structobjects2
-alias Root as r
+import Root
 
 public class Dog(string name) {
   public string name
 } atEnd {
-  r.Console.log("  end " + name)
+  Console.log("  end " + name)
 }
 
 struct Pet {
@@ -27,40 +27,40 @@ fun swapIn(&Pet p) { p = make("in") }
 
 fun string labelOf(Pet p) { p.label }
 
-r.Console.log("1 self assign")
+Console.log("1 self assign")
 Pet a = make("a")
 a = a
-r.Console.log(a.dog.name)
-r.Console.log("2 & parameter")
+Console.log(a.dog.name)
+Console.log("2 & parameter")
 swapIn(&a)
-r.Console.log(a.label)
-r.Console.log("3 this replaced")
+Console.log(a.label)
+Console.log("3 this replaced")
 a.reset()
-r.Console.log(a.label)
-r.Console.log("4 nested replaced")
+Console.log(a.label)
+Console.log("4 nested replaced")
 Owner o = Owner(who: "o", pet: make("p1"))
 o.pet = make("p2")
 o.pet.dog = Dog("p3")
-r.Console.log("5 string fields")
+Console.log("5 string fields")
 string name = "named"
 a.label = name
 name = "changed"
-r.Console.log(a.label)
+Console.log(a.label)
 a.note = "note"
-r.Console.log(a.note)
-r.Console.log("6 class clone")
+Console.log(a.note)
+Console.log("6 class clone")
 var h = Home()
 h.pet = make("h1")
 Home h2 = h!
 h2.pet.dog.name = "h2"
-r.Console.log($"{h.pet.dog.name} {h2.pet.dog.name}")
-r.Console.log("7 loop")
+Console.log($"{h.pet.dog.name} {h2.pet.dog.name}")
+Console.log("7 loop")
 for i32 i in 0..2 {
   Pet t = make($"loop{i}")
-  r.Console.log(labelOf(t))
+  Console.log(labelOf(t))
 }
-r.Console.log("8 copy")
+Console.log("8 copy")
 Pet c = a!
 c.dog.name = "copy"
-r.Console.log($"{a.dog.name} {c.dog.name}")
-r.Console.log("9 end")
+Console.log($"{a.dog.name} {c.dog.name}")
+Console.log("9 end")

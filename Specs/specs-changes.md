@@ -679,3 +679,33 @@
 - 4.5 `string1k` (new): a 1 KB string value (UTF-8 text ended by a 0, no stored length; at most 1023 bytes; the same as a C `char[1024]`; `toCStr()` gives the address of the buffer), copied like a number; automatic conversion to and from `string`, cut at a whole character with the silent `StringTruncatedException`; `==`, `.len`, `+=` direct, the rest through `string`; `.sizeof` is 1024
 - 15.3 `StringTruncatedException` (ID 56, silent)
 - 15.2 `DebugLine.file` and `DebugLine.function` are `string1k`
+
+## Changes in 0.0.35
+
+- 4.5 `string1k?` (new): null is not `""`; converts to `string1k` and `string` (null becomes `""`) and to and from `string?`; `+=` on a null one starts from `""`; `toCStr()` of a null one is a null `addr`; not allowed in `struct<fixed>` / `struct<compact>`
+- 4.5 null assigned to a `string1k` is `""`; `.hash` of a `string1k` is the hash of the same `string`
+
+## Changes in 0.0.36
+
+- 6.8.1 Arrays as the values of `map` and `hmap` (was "not available yet"): owned by the map with the rules of arrays in collections; `m[k]` borrows in place, a missing key gives an empty array, removed and replaced arrays end, `takeAt` and `->m[k]` give them out, `add(other)`, `clone()` and `values!` copy them, value lookups compare by identity
+
+## Changes in 0.0.37
+
+- 11.2.1 `Comparable` (written out): `Comparable` alone is `Comparable<the class>`; `T` is the class, a parent class or one of its traits; only classes with the trait have `compareTo`; `compareTo` receives null; the most specific `compareTo` of the two objects decides (the left one on a tie), none applies: the default order; `<` `<=` `>` `>=` on objects only with the trait (compile error otherwise)
+- 6.2.2 Classes without `Comparable`: in `sort` the bare class name then the address; as keys of `map` and `set` the hash (unchanged); structs field by field; `string1k` by bytes; null before `-∞`, NaN after `+∞`
+- 6.6 `sort()` uses the order of 6.2.2; an exception of a `compareTo` is raised when the sort ends (in the keys of a map or a set it is dropped)
+
+## Changes in 0.0.38
+
+- 6.4, 10 Several loop variables without the parentheses (`for string key, i32 value in m`, `for var a, b in c`), and over collections of tuples (by position) and structs (by field order), not only maps; no tuple is made; the number of names must match the parts
+- 10, 6.4 The type of a `for` variable can be left out when it can be inferred (was a compile error in the text; the compiler already accepted it)
+
+## Changes in 0.0.39
+
+- 11.2 `any` is no longer a keyword (it is a plain name): a trait type already takes any implementing type; `specific Shape` stays
+- 6.2, 11.1 `equals(T other)` (was written `equals(any?)`), as built
+- 6.6 `filter` on objects and arrays (was "not built"): the items kept are cloned, the new collection owns them
+- 3.2, 11.1.5.3 `arr`, `vec` and `list` of tuples that hold objects or arrays and of structs that hold strings or objects (was "not built"): the collection owns what its items hold, as a tuple or struct variable does; `fill`, `resize` and `fillAtCapacity` with one such value are a compile error
+- 12.7 A counted result used directly (`make().bark()`): the usage lives for the statement, read-only (unrestricted and static methods only)
+- 6.6 One part of a map value written in place (`m[k].1 = 5`): a missing key is added with the zero value first
+- 3.2 Tuples and structs as the values of `map` and `hmap`; tuples that hold structs with strings or objects (also among several results); one part of a collection item written in place (`v[0].1 = 5`)

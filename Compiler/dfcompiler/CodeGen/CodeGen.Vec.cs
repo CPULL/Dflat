@@ -972,7 +972,7 @@ public class set<T> : SetCollection<T> {
       if (IsClass(elem) && !value.Fresh && value.Type != "null") {
         throw Error("a vec owns its items: put a new object in the literal, or move one in with ->x", item);
       }
-      sb.Append($"{held}->{VecField(type, "items")}.p[{index}] = {StrItemAs(value, elem, Convert(value, elem, item))}; ");
+      sb.Append($"{held}->{VecField(type, "items")}.p[{index}] = {StrItemAs(value, elem, Convert(value, elem, item), item)}; ");
     }
     sb.Append($"{held}->{VecField(type, "count")} = {count}; {held}; }})");
     return new Expr(sb.ToString(), type, true);
@@ -1040,7 +1040,7 @@ public class set<T> : SetCollection<T> {
     if (IsArr(elem)) {
       return ArrGiftIndex(obj, isVec, operand, scope, gift);   // the array leaves the slot, the slot is empty (spec 6.8.1)
     }
-    if (!IsClass(elem) && !IsStrItem(elem)) {
+    if (!IsClass(elem) && !IsStrItem(elem) && !ItemOwnsParts(elem)) {   // a tuple or struct item leaves its slot empty, also in the library (spec 3.2)
       if (GiftWarningApplies()) {
         Warn("-> on a basic value is ignored: it is a copy", gift, 1);
       }
@@ -1077,6 +1077,10 @@ public class set<T> : SetCollection<T> {
     if (IsArr(VecElem(cls.Name))) {
       // spec 6.8.1
       sb.Append($"  for (df_uns i = 0; i < self->{items}.len; i++) {{ {ArrDropHelper(VecElem(cls.Name))}(self->{items}.p[i]); self->{items}.p[i] = {ZeroValue(VecElem(cls.Name))}; }}\n");
+    }
+    if (ItemOwnsParts(VecElem(cls.Name))) {
+      // spec 3.2
+      sb.Append($"  for (df_uns i = 0; i < self->{count}; i++) {{ {TupleItemDropHelper(VecElem(cls.Name))}(self->{items}.p[i]); }}\n");
     }
     sb.Append($"  free(self->{items}.p);\n  self->{items}.p = NULL;\n  self->{items}.len = 0;\n  self->{count} = 0;\n");
   }
@@ -1116,7 +1120,8 @@ public class set<T> : SetCollection<T> {
       : $"{CType(target.Type)} {old} = {target.Code}; {target.Code} = {store}; " + (owned ? $"if ({old} != {target.Code}) {{ df_drop((void*){old}); }} " : "")
         + (ownsArray && target.Variable?.ArrFlag is string flag
           ? $"if ({flag} && {old}.p != {target.Code}.p) {{ {ArrDropHelper(target.Type)}({old}); }} {flag} = true; "   // a mixed local: its own old array ends, it owns the new one
-          : ownsArray ? $"if ({old}.p != {target.Code}.p) {{ {ArrDropHelper(target.Type)}({old}); }} " : "");   // the old array of an owner ends (spec 6.8.1)
+          : ownsArray ? $"if ({old}.p != {target.Code}.p) {{ {ArrDropHelper(target.Type)}({old}); }} " : "")   // the old array of an owner ends (spec 6.8.1)
+        + (IsTupleOwner(target) ? TupleDropCode(target.Type, old) : "");   // the old parts of a tuple owner end (spec 3.2)
     string code = $"({{ {CType(vec.Type)} {held} = {NullChecked(vec.Code, vec.Type)}; bool {ok} = false; {CType(elem)} {incoming} = {zero}; {LockCheck(held, vec.Type)}"
       + $"if ({held}->{count} > 0) {{ {held}->{count} -= 1; {incoming} = {held}->{items}.p[{held}->{count}]; {held}->{items}.p[{held}->{count}] = {zero}; {ok} = true; }} "
       + assignCode
@@ -1169,7 +1174,7 @@ public class set<T> : SetCollection<T> {
   Expr VecAddCollection(Expr vec, Node arg, string sourceType, Scope scope, Node at) {
     string elem = VecElem(vec.Type);
     bool moving = arg.Kind == "Gift";
-    bool cloning = (IsClass(elem) || IsArr(elem)) && !moving;   // a plain add(other) clones the object items (spec 6.6, 12.6) and the arrays (6.8.1)
+    bool cloning = (IsClass(elem) || IsArr(elem) || ItemOwnsParts(elem)) && !moving;   // a plain add(other) clones the object items (spec 6.6, 12.6) and the arrays (6.8.1)
     cloneUsed |= cloning;
     var source = ExprOf(arg, scope, sourceType);   // a literal takes the type of the source (point 53)
     string held = NewTemp();
@@ -1186,7 +1191,7 @@ public class set<T> : SetCollection<T> {
     sb.Append(LockCheck(held, vec.Type));
     sb.Append($"df_uns {amount} = {SourceLength(sourceType, s)}; {VecReserve(held, vec.Type, $"{count} + {amount}")}");
     sb.Append(ForEachSourceItem(sourceType, s, "0", amount, item =>
-      $"{items}.p[{count}] = {(cloning ? CloneValue(item, elem, at) : IsStrItem(elem) && !moving ? StrItemDup(elem, item) : item)}; {count} += 1; " + (moving && (IsClass(elem) || elem == "string") ? $"{item} = NULL; " : moving && (IsArr(elem) || elem == "string?" || IsFunType(elem)) ? $"{item} = {ZeroValue(elem)}; " : "")));
+      $"{items}.p[{count}] = {(cloning ? (ItemOwnsParts(elem) ? $"{TupleItemDupHelper(elem, at)}({item})" : CloneValue(item, elem, at)) : IsStrItem(elem) && !moving ? StrItemDup(elem, item) : item)}; {count} += 1; " + (moving && (IsClass(elem) || elem == "string") ? $"{item} = NULL; " : moving && (IsArr(elem) || elem == "string?" || IsFunType(elem)) ? $"{item} = {ZeroValue(elem)}; " : "")));
     if (moving && sourceIsObject) {
       sb.Append($"df_drop((void*){s}); ");   // the collection was moved in: its items are gone and it ends
     }

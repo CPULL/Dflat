@@ -1,0 +1,1 @@
+item_part_borrowed.df(9): error: '0' owns its object: give it a new object or move one in with ->x

@@ -1,0 +1,39 @@
+7 6 3
+[a: (7, 8), b: (3, 4), c: (5, 6)]
+3 2 2
+true
+  end t1
+t3 2
+  end t2
+took t3 0
+t4 T4
+end of owned
+  end T4
+  end t4
+  end t3
+  end s1
+s3 b 2
+  end s2
+1 s4
+end of structs
+  end s4
+  end s3
+m2 M2
+m1 V1 2
+true m2
+3 1 m9
+end of members
+  end m9
+  end V1
+  end m2
+  end m1
+  end m2
+  end m9
+  end M2
+a1 a1 A1 2
+end of adds
+  end a1
+  end a1
+  end a2
+  end A1
+---- exit code 0 ----

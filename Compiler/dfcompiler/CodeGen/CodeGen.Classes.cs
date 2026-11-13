@@ -189,10 +189,13 @@ public sealed partial class CodeGen {
             if (withNode != null) {
               throw Error($"'{baseName}' has no placeholders: 'with' does not apply", withNode);
             }
-            if (typeArgNodes.Count == 0) {
+            if (typeArgNodes.Count == 0 && baseName == "Comparable" && genericBase.Params.Count == 1) {
+              traitArgs = new List<string> { cls.Name };   // Comparable alone: compared with its own class (spec 11.2.1)
+            } else if (typeArgNodes.Count == 0) {
               throw Error($"'{baseName}' is generic: write its type arguments, {baseName}<...>", baseType);
+            } else {
+              traitArgs = TypeArgsOf(typeArgNodes, genericBase.Params);
             }
-            traitArgs = TypeArgsOf(typeArgNodes, genericBase.Params);
           }
           baseName = ClassInstanceName(genericBase, traitArgs, baseType);
           if (cls.Traits.Any(existing => classInstanceArgs.TryGetValue(existing.Name, out var other) && other.Template == genericBase)) {
@@ -237,6 +240,7 @@ public sealed partial class CodeGen {
         }
       }
     }
+    CheckComparableTargets();
     var visited = new HashSet<ClassInfo>();
     void Order(ClassInfo cls) {
       if (visited.Add(cls)) {
@@ -1754,6 +1758,11 @@ public sealed partial class CodeGen {
     if (StructHoldsObjects(param.Type) && !LibraryCode) {
       return StructArg(param, arg, scope);   // spec 11.1.5.3
     }
+    if (param.IsTupleGift && !LibraryCode && callee != null && callee.Node.Line >= LibraryLine) {
+      // a collection takes the tuple (v.add(t), m.add(k, t)): a new tuple as it is, any other one copied with its objects and arrays (spec 3.2)
+      var givenTuple = ExprOf(arg, scope, param.Type);
+      return TupleItemAs(givenTuple, arg, param.Type, Convert(givenTuple, param.Type, arg));
+    }
     if (param.IsImplicitGift && arg.Kind is "Name" or "Member" or "Index" && arg is not { Kind: "Name", Text: "this" }) {
       // Ken(rex) for a plain primary parameter used as a field: rex is given as with ->rex, and cannot be used afterwards (spec 11.1.1)
       if (arg.Kind == "Name" && scope.Find(arg.Text!) is VarInfo givenVar) {
@@ -2108,7 +2117,9 @@ public sealed partial class CodeGen {
       }
       string hash = hashUsed ? $"df_hash_{cls.Name}" : "NULL";
       string clone = EmitCloneFunction(cls, sb);
-      sb.Append($"static const df_class {cls.Descriptor} = {{ {256 + cls.Index}, \"{DisplayName(cls.Name)}\", {parent}, {slots}, df_strp_{cls.Name}, {impls}, df_dropall_{cls.Name}, {hash}, {clone} }};\n\n");
+      string cmp = EmitCompareFunction(cls, sb);
+      sb.Append($"static const df_class {cls.Descriptor} = {{ {256 + cls.Index}, \"{DisplayName(cls.Name)}\", {parent}, {slots}, df_strp_{cls.Name}, {impls}, df_dropall_{cls.Name}, {hash}, {clone}, "
+        + $"\"{BareClassName(cls)}\", {cmp} }};\n\n");
     }
   }
 

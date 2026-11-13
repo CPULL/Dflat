@@ -602,11 +602,18 @@ public sealed class Parser {
       node.Add(new Node("Var", n, n.Text));
     } else if (IsOp("(")) {
       // for (string key, i32 value) in m: the items of each tuple go into separate variables (spec 6.4)
-      node.Add(ParseForDestructure(null));
+      node.Add(ParseForDestructure(null, true));
     } else if (Peek.Kind == TokenKind.Ident && Peek.Text == "var" && PeekAt(1).Is("(")) {
       // for var (key, value) in m: every variable takes its type from the item
       var v = Next();
-      node.Add(ParseForDestructure(new Node("Type", v, "var")));
+      node.Add(ParseForDestructure(new Node("Type", v, "var"), true));
+    } else if (Peek.Kind == TokenKind.Ident && Peek.Text == "var" && PeekAt(1).Kind == TokenKind.Ident && PeekAt(2).Is(",")) {
+      // for var key, value in m: the same without the parentheses
+      var v = Next();
+      node.Add(ParseForDestructure(new Node("Type", v, "var"), false));
+    } else if (Peek.Kind == TokenKind.Ident && PeekAt(1).Is(",")) {
+      // for key, value in m: names only, without the parentheses
+      node.Add(ParseForDestructure(null, false));
     } else {
       bool counted = IsCountedMarker();   // for @Dog dog in pack (spec 12.7): the same as for var dog in pack
       if (counted) {
@@ -615,7 +622,14 @@ public sealed class Parser {
       var type = ParseType();
       var n = ExpectIdent();
       var loopVar = new Node("Var", n, n.Text).Add(type);
-      node.Add(counted ? loopVar.Add(new Node("Counted", n)) : loopVar);
+      if (!counted && IsOp(",")) {
+        // for i32 a, string b in c: several variables without the parentheses, as with several results (spec 6.4)
+        var list = new Node("Destructure", n).Add(loopVar);
+        Next();
+        node.Add(ParseForDestructure(null, false, list));
+      } else {
+        node.Add(counted ? loopVar.Add(new Node("Counted", n)) : loopVar);
+      }
     }
     if (IsKw("in")) {
       var tin = Next();
@@ -635,14 +649,13 @@ public sealed class Parser {
 
   // (type name, &type name, name, ...) of a for header: a Destructure node with one Var per name (WritableVar for &); a Var without a type
   // takes the type given (var) or none
-  Node ParseForDestructure(Node? sharedType) {
-    var open = ExpectOp("(");
-    var list = new Node("Destructure", open);
+  Node ParseForDestructure(Node? sharedType, bool parens, Node? started = null) {
+    var list = started ?? new Node("Destructure", parens ? ExpectOp("(") : Peek);
     do {
       CheckOldMarker();
       bool writable = AcceptOp("&");
       Node? type = sharedType;
-      if (!(Peek.Kind == TokenKind.Ident && (PeekAt(1).Is(",") || PeekAt(1).Is(")")))) {
+      if (!(Peek.Kind == TokenKind.Ident && (PeekAt(1).Is(",") || PeekAt(1).Is(")") || !parens && PeekAt(1).Is("in")))) {
         if (sharedType != null) {
           throw Error("for var (a, b): the names take their types from the items, so no type is written inside");
         }
@@ -655,7 +668,9 @@ public sealed class Parser {
       }
       list.Add(item);
     } while (AcceptOp(","));
-    ExpectOp(")");
+    if (parens) {
+      ExpectOp(")");
+    }
     return list;
   }
 
@@ -1070,13 +1085,12 @@ public sealed class Parser {
   Node ParseType(bool allowCallback = true) {
     var start = Peek;
     Node type;
-    // volatile *T | specific Shape | any Shape
-    if (Peek.Kind == TokenKind.Ident && Peek.Text is "volatile" or "specific" or "any" && StartsTypeToken(PeekAt(1))) {
+    // volatile *T | specific Shape (any is a plain name, spec 11.2)
+    if (Peek.Kind == TokenKind.Ident && Peek.Text is "volatile" or "specific" && StartsTypeToken(PeekAt(1))) {
       var word = Next();
       string kind = word.Text switch {
         "volatile" => "Volatile",
-        "specific" => "Specific",
-        _ => "Any"
+        _ => "Specific"
       };
       return new Node(kind, word).Add(ParseType(allowCallback));
     }

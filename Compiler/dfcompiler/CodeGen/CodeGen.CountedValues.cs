@@ -28,7 +28,8 @@ public sealed partial class CodeGen {
     string held = NewTemp();
     string value = $"*({CType(plain)}*){held}->obj";
     if (!IsNullable(type)) {
-      return $"({{ df_rc* {held} = {block}; {held} != NULL ? {value} : {ZeroValue(plain)}; }})";
+      // a string is read in place from its cell, which can be written afterwards: a variable or a field that keeps it takes a copy (StrAssign)
+      return $"({{ df_rc* {held} = {block}; {held} != NULL ? {value} : {ZeroValue(plain)}; }})" + (plain == "string" ? MapBorrowMark : "");
     }
     if (plain == "string") {
       return $"({{ df_rc* {held} = {block}; ({CType(type)}){{ {held} != NULL, {held} != NULL ? {value} : NULL }}; }})";

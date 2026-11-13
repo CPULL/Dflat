@@ -1,0 +1,1 @@
+maparray_add_borrowed.df(6): error: 'value' takes ownership of the array: write ->mine to move it, or mine! to give a copy

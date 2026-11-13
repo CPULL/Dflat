@@ -1,0 +1,1 @@
+tuple_items_fill.df(8): error: fill would put the parts of one tuple or struct in every item: set the items one by one (spec 3.2, 11.1.5.3)

@@ -1,0 +1,11 @@
+a barks
+  end a
+3
+  end b
+c
+  end c
+boss barks
+boss is still here
+end of run
+  end boss
+---- exit code 0 ----

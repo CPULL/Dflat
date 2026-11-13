@@ -1,0 +1,51 @@
+// filter of objects and arrays (spec 6.6): the new collection owns clones of the items it keeps (vec, list, arr); an exception in the
+// function ends the clones made so far; a new array from filter or from return ->a is owned by the local that receives it
+namespace filterobjects
+import Root
+public class Dog(string name, i32 age) {
+  public string name = name
+  public i32 age = age
+} atEnd {
+  Console.log("  end " + name)
+}
+fun run() {
+  vec<Dog> dogs = [Dog("rex", 3), Dog("max", 9), Dog("bo", 5)]
+  vec<Dog> old = dogs.filter((Dog d) { d.age > 4 })
+  Console.log(old.len)
+  old[0].name = "MAX"
+  Console.log($"{dogs[1].name} {old[0].name}")
+  list<Dog> ld = [Dog("l1", 1), Dog("l2", 7)]
+  list<Dog> lo = ld.filter((Dog d) { d.age > 4 })
+  Console.log(lo.len)
+  arr<Dog> ad = [Dog("a1", 6)]
+  arr<Dog> ao = ad.filter((Dog d) { d.age > 4 })
+  Console.log(ao[0].name)
+  Console.log(dogs.filter((Dog d) { d.age > 100 }).len)
+  vec<arr<i32>> grid = [[1, 2], [3], [4, 5, 6]]
+  vec<arr<i32>> wide = grid.filter((arr<i32> r) { r.len > 1 })
+  wide[0][0] = 99
+  Console.log($"{grid[0]} {wide}")
+  Console.log("end of run")
+}
+run()
+fun stops() {
+  vec<Dog> dogs = [Dog("a", 1), Dog("b", 1), Dog("c", 1)]
+  vec<Dog> kept = dogs.filter((Dog d) {
+    if d.name == "c" { throw InvalidCastException("stop") }
+    return true
+  })
+  Console.log("not here")
+  catch InvalidCastException ex {
+    Console.log("caught " + ex.message)
+  }
+}
+stops()
+fun ->arr<Dog> mk() {
+  arr<Dog> r = [Dog("m1", 1)]
+  return ->r
+}
+fun given() {
+  arr<Dog> ao = mk()
+  Console.log(ao.len)
+}
+given()

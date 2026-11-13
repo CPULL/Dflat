@@ -1,0 +1,1 @@
+comparable_target.df(4): error: Comparable<Other>: Rock can be compared with itself, one of its parent classes or one of its traits (spec 11.2.1)

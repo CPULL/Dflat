@@ -1,0 +1,35 @@
+[a: [1, 2, 3], b: [4, 5]]
+[2, 2, 3]
+0
+0
+5
+[a: [0], c: [7], d: [8, 9], ...] (4 items)
+[7]
+[8, 9]
+true [0]
+[0] [42]
+[[0], [10]]
+a -> 1
+e -> 1
+[x, w]
+1
+max
+rex changed
+0
+[k: [1.5, 2.5]]
+[p: [99, 0]]
+replace a
+  end a1
+  end a2
+remove b
+  end b1
+take c
+taken c1
+clear hp
+  end h1
+  end h2
+end of scope
+  end c1
+  end a3
+done
+---- exit code 0 ----

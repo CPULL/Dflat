@@ -270,6 +270,14 @@ public sealed partial class CodeGen {
     return new Expr($"({{ df_rc* {usage} = {got.Code}; df_tmpf({usage}, df_rc_release_tmp); {read}; }})", inner);
   }
 
+  // make().name, make().bark(): the usage a call gives is kept for the statement and released at its end; the value is what it holds
+  Expr CountedResultUse(Expr counted) {
+    string usage = NewTemp();
+    string inner = CountedBase(counted.Type);
+    string read = IsCountedValueType(inner) ? CellRead(usage, inner) : $"DF_RC_OBJ({CType(inner)}, {usage})";
+    return new Expr($"({{ df_rc* {usage} = {counted.Code}; df_tmpf({usage}, df_rc_release_tmp); {read}; }})", inner);
+  }
+
   // x (a property of this class) or o.x: the object and the property; null when the target is not a property
   (Expr Obj, FieldInfo Property)? PropertyTarget(Node target, Scope scope) {
     // a static property: count inside its class, C.count outside (the class is the receiver, its code is empty)

@@ -1,3 +1,3 @@
-class Box { }
-arr<Box> boxes = [Box()]
-boxes.sort()
+// arrays have no order (spec 6.2.2): sort of arrays of arrays needs a lambda
+arr<arr<i32>> grid = [[1], [2]]
+grid.sort()

@@ -1,0 +1,6 @@
+// a map owns its arrays of objects: a borrowed one needs ->a or a! (spec 6.8.1)
+import Root
+class Dog(string name) { public string name = name }
+map<string, arr<Dog>> dogs = []
+arr<Dog> mine = [Dog("a")]
+dogs["x"] = mine

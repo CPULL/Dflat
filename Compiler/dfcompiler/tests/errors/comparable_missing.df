@@ -1,0 +1,3 @@
+// Comparable needs compareTo (spec 11.2.1)
+import Root
+class Rock : Comparable { }

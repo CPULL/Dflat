@@ -217,6 +217,11 @@ public sealed partial class CodeGen {
         string tempType = targetType ?? value.Type;
         string temp = NewTemp();
         string converted = Convert(value, tempType, values[index]);
+        if (StructHoldsObjects(tempType) && !LibraryCode && (targets[index].Kind == "Decl" || IsStructOwner(LValue(targets[index], scope)))) {
+          // p, n = q, 3: the owner takes a struct of its own, a new one as it is and any other one cloned (spec 11.1.5.3)
+          converted = StructOwnedCode(value, tempType, values[index]);
+          ownStructTemps.Add(temp);
+        }
         sb.Append($"{pad}{CType(tempType)} {temp} = {converted};\n");
         if (tempType == "string") {
           string fresh = FreshCode(value, converted);
@@ -242,7 +247,11 @@ public sealed partial class CodeGen {
       }
     }
     stringFresh.Clear();
+    ownStructTemps.Clear();
   }
+
+  // the temporaries of a multiple assignment that hold a struct of their own (a new one or a clone) for an owner
+  readonly HashSet<string> ownStructTemps = new();
 
   // the temporaries of a multiple assignment that hold a string: C for "the string is new"
   readonly Dictionary<string, string> stringFresh = new();
@@ -287,6 +296,7 @@ public sealed partial class CodeGen {
       if (frames.Peek().Hoisted.TryGetValue(target.Text!, out var hoisted)) {
         scope.Vars[target.Text!] = hoisted;
         hoisted.OwnsArray = ownedArrayDecls.Contains(target);
+        hoisted.OwnsStruct |= structObjDecls.Contains(target);   // spec 11.1.5.3
         MarkAssigned(hoisted);
         sb.Append($"{pad}{hoisted.CName} = {Convert(value.Value, type, target)};\n");
         if (hoisted.OwnFlag != null) {
@@ -296,7 +306,7 @@ public sealed partial class CodeGen {
       }
       string cname = "v_" + target.Text;
       sb.Append($"{pad}{CType(type)} {cname} = {Convert(value.Value, type, target)};\n");
-      var declared = StringVar(new VarInfo(type, cname, false) { OwnsArray = ownedArrayDecls.Contains(target) });
+      var declared = StringVar(new VarInfo(type, cname, false) { OwnsArray = ownedArrayDecls.Contains(target), OwnsStruct = structObjDecls.Contains(target) });
       if (declared.OwnFlag != null) {
         sb.Append($"{pad}bool {declared.OwnFlag} = {TargetFresh(value.Value)};\n{pad}(void){declared.OwnFlag};\n");
       }
@@ -321,6 +331,12 @@ public sealed partial class CodeGen {
       if (lvalue.Variable?.ArrFlag != null) {
         sb.Append($"{pad}{lvalue.Variable.ArrFlag} = true;\n");
       }
+      return;
+    }
+    if ((ownValues || ownStructTemps.Contains(value.Value.Code)) && IsStructOwner(lvalue)) {
+      // p, n = f() where p owns its struct: what the old one held ends, the new one is its own (spec 11.1.5.3)
+      string old = NewTemp();
+      sb.Append($"{pad}{{ {CType(lvalue.Type)} {old} = {lvalue.Code}; {lvalue.Code} = {Convert(value.Value, lvalue.Type, target)}; {StructDropCode(lvalue.Type, old)} }}\n");
       return;
     }
     sb.Append($"{pad}{lvalue.Code} = {Convert(value.Value, lvalue.Type, target)};\n");

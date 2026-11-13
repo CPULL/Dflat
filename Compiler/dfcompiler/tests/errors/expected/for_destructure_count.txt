@@ -1,0 +1,1 @@
+for_destructure_count.df(4): error: the items of this collection have 2 parts ((i32, string)): write 2 names, not 3

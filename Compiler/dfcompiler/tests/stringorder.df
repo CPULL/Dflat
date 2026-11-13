@@ -1,0 +1,21 @@
+// < <= > >= on strings (spec 4, 6.2.2): by bytes, the same as code point order in UTF-8; string1k, string? (null first), new strings
+namespace stringorder
+import Root
+string a = "apple"
+string b = "banana"
+Console.log(a < b)
+Console.log(a > b)
+Console.log("ab" < "abc")
+Console.log("abc" <= "abc")
+Console.log("Z" < "a")
+Console.log("z" < "é")
+Console.log("" < "a")
+string1k k = "kiwi"
+Console.log(k > "apple")
+Console.log(k < k)
+string? n = null
+string? m = "x"
+Console.log(n < m)
+Console.log(m >= "x")
+fun ->string up(string s) { return s.toUpper() }
+Console.log(up("a") < up("b"))

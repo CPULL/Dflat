@@ -13,7 +13,7 @@ public sealed partial class CodeGen {
   bool TupleHoldsArrays(string type) => IsTuple(type) && TupleElems(type).Any(elem => IsTupleOwnedPart(elem.Type) || TupleHoldsArrays(elem.Type));
 
   // the parts a tuple owns: arrays, function values, objects (spec 3.2) and counted usages (spec 12.7)
-  bool IsTupleOwnedPart(string type) => IsArr(type) || IsFunType(type) || IsClass(type) || IsCountedType(type);
+  bool IsTupleOwnedPart(string type) => IsArr(type) || IsFunType(type) || IsClass(type) || IsCountedType(type) || StructHoldsObjects(type);
 
   // the end of one part of a tuple
   string TuplePartDrop(string type, string code) =>
@@ -21,6 +21,7 @@ public sealed partial class CodeGen {
     : IsFunType(type) ? $"df_fn_drop(&{code}); "
     : IsCountedType(type) ? $"df_rc_release({code}); {code} = NULL; "
     : IsClass(type) ? $"if ({code} != NULL) {{ void* o = (void*){code}; {code} = NULL; df_drop(o); }} "
+    : StructHoldsObjects(type) ? StructDropCode(type, code) + " "   // a struct part ends its strings and objects (spec 11.1.5.3)
     : TupleHoldsArrays(type) ? TupleDropCode(type, code)
     : "";
 
@@ -58,6 +59,10 @@ public sealed partial class CodeGen {
         }
         cloneUsed = true;
         copies += $"{code}.e{index} = {CloneValue($"{code}.e{index}", elems[index].Type, at)}; ";   // a copy clones the object (spec 3.2)
+      } else if (StructHoldsObjects(elems[index].Type)) {
+        if (!(item is { Kind: "Call" or "Copy" or "Gift" })) {
+          copies += $"{code}.e{index} = {StructCloneHelper(elems[index].Type)}({code}.e{index}); ";   // a copy clones the struct (spec 11.1.5.3)
+        }
       } else if (TupleHoldsArrays(elems[index].Type)) {
         copies += TupleCopies(item, elems[index].Type, $"{code}.e{index}", at);   // a tuple inside the tuple
       }
@@ -104,10 +109,13 @@ public sealed partial class CodeGen {
   // a declaration of a tuple that holds arrays: it owns them and they end with the scope. The type is written, or it is var with a tuple
   // literal or a call of functions of the program that return such a tuple (the type of a literal is checked when it is emitted)
   bool IsTupleArrDecl(Node decl) {
-    if (LibraryCode) {
-      return false;
-    }
     var typeNode = decl.Children.FirstOrDefault(child => TypeNodeKinds.Contains(child.Kind));
+    if (LibraryCode) {
+      // the collections of the library: an item taken out of them (T gone = ->items[i], T gone = takeAt(i)) ends with the local (spec 3.2)
+      var taken = decl.Children.FirstOrDefault(child => child.Kind == "Init")?.Children[0];
+      return taken is { Kind: "Gift" } or { Kind: "Call", Text: "takeAt" } or { Kind: "Call", Children: [{ Text: "takeAt" }, ..] }
+        && typeNode != null && TryResolveType(typeNode) is string taken_type && TupleHoldsArrays(taken_type);
+    }
     if (typeNode is { Kind: "Type", Text: "var" }) {
       var init = decl.Children.FirstOrDefault(child => child.Kind == "Init")?.Children[0];
       return init is { Kind: "Tuple" } && init.Children.Any(item => item.Kind is "List" or "Name" or "Copy" or "Gift" or "Call" or "Member" or "Index" or "Tuple")
@@ -124,16 +132,65 @@ public sealed partial class CodeGen {
   static Node TupleDropNode(string name, Node at) =>
     Synthetic("AtEnd", at, "drop").Add(Synthetic("Block", at).Add(Synthetic("TupleDrop", at, name)));
 
-  // a collection of tuples that hold arrays would copy them without ending them: not built yet
+  // arr, vec, list and the values of map and hmap own the parts of their tuple items (spec 3.2, 6.6)
   void CheckTupleItems(string type, Node at) {
     string? elem = IsArr(type) ? ArrElem(type) : IsVec(type) ? VecElem(type) : IsList(type) ? ListElem(type) : IsMap(type) ? MapValue(type) : null;
     if (elem == null) {
       return;
     }
-    if (TupleHoldsArrays(elem)) {
-      throw NotSupported("Collections of tuples that hold arrays", at);
+    if (ItemOwnsParts(elem)) {
+      tupleItemAt ??= at;
     }
     CheckTupleItems(elem, at);
+  }
+
+  // tuple items of arr, vec and list that own objects, arrays, function values or counted usages (spec 3.2): the collection owns them,
+  // a copy of an item clones them, a removed or replaced item ends them, and they end with the collection
+  // structs that hold strings or objects follow the same rules (spec 11.1.5.3)
+  bool IsTupleItem(string elem) => !LibraryCode && ItemOwnsParts(elem);
+
+  // a tuple or a struct item that owns what it holds: the collection ends it with the item (the C does not depend on the code that asks)
+  bool ItemOwnsParts(string elem) => TupleHoldsArrays(elem) || StructHoldsObjects(elem);
+
+  Node? tupleItemAt;   // a place for the errors of the helpers below (the first declaration of such a collection)
+
+  // the C function that ends the parts of a tuple item
+  string TupleItemDropHelper(string type) {
+    string name = "df_tidrop_" + System.Text.RegularExpressions.Regex.Replace(type, @"[^A-Za-z0-9_]", "_");
+    if (tupleItemHelpers.Add(name)) {
+      structProtos.Append($"static void {name}({CType(type)} v);\n");
+      string drops = StructHoldsObjects(type) ? StructDropCode(type, "v") : TupleDropCode(type, "v");   // the helpers of the parts come first
+      tupleItemCode.Append($"static void {name}({CType(type)} v) {{\n  {drops}\n}}\n\n");
+    }
+    return name;
+  }
+
+  // the C function that copies a tuple item for a new owner: its objects cloned, its arrays copied, one more usage of the rest
+  string TupleItemDupHelper(string type, Node? at = null) {
+    string name = "df_tidup_" + System.Text.RegularExpressions.Regex.Replace(type, @"[^A-Za-z0-9_]", "_");
+    if (tupleItemHelpers.Add(name)) {
+      structProtos.Append($"static {CType(type)} {name}({CType(type)} v);\n");
+      string copies = StructHoldsObjects(type) ? $"c = {StructCloneHelper(type)}(c);" : TupleCopies(null, type, "c", at ?? tupleItemAt!);
+      tupleItemCode.Append($"static {CType(type)} {name}({CType(type)} v) {{\n  {CType(type)} c = v;\n  {copies}\n  return c;\n}}\n\n");
+    }
+    return name;
+  }
+
+  readonly HashSet<string> tupleItemHelpers = new();
+  readonly System.Text.StringBuilder tupleItemCode = new();   // after the class code: the helpers of the parts are there
+
+  // the value a tuple item takes: a new tuple as it is, the parts of any other one copied (as TupleOwnedCode)
+  string TupleItemAs(Expr value, Node? node, string type, string converted) {
+    if (StructHoldsObjects(type)) {
+      return value.Fresh ? converted : $"{StructCloneHelper(type)}({converted})";   // a new struct as it is, any other one cloned
+    }
+    if (node == null) {
+      return $"{TupleItemDupHelper(type)}({converted})";
+    }
+    tupleItemAt ??= node;
+    string held = NewTemp();
+    string copies = TupleCopies(node, type, held, node);
+    return copies == "" ? converted : $"({{ {CType(type)} {held} = {converted}; {copies}{held}; }})";
   }
 
   // a new tuple that holds arrays (the result of a function of the program) that nothing keeps: f().0.len, g(f()). A copy of it goes on

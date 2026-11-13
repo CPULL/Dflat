@@ -1,0 +1,1 @@
+maparray_borrowed.df(6): error: a collection owns its arrays of Dog: write ->mine to move it in, or mine! to put a copy (spec 6.8.1)

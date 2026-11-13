@@ -1,0 +1,14 @@
+p1 P1 3
+  end v1
+took v2
+  end v3
+p1 2 c 0 4
+[Pet { dog: null, tag: , age: 0 }, Pet { dog: Dog{}, tag: e, age: 5 }]
+end of run
+  end a1
+  end p1
+  end p1
+  end l1
+  end v2
+  end P1
+---- exit code 0 ----

@@ -1,0 +1,82 @@
+// arrays as map values (spec 6.8.1): map and hmap own their arrays; new / ->a / plain copy in, m[k] borrows in place, replaced and removed arrays end,
+// takeAt and ->m[k] give them out, add(other) / clone / values! copy, the arrays left end with the map
+namespace maparrays
+import Root
+class Dog(string name) { public string name = name }
+map<string, arr<i32>> m = []
+m["a"] = [1, 2, 3]
+arr<i32> b = [4, 5]
+m["b"] = b
+b[0] = 99
+Console.log(m)
+m["a"][0]++
+Console.log(m["a"])
+Console.log(m["zz"].len)
+m.add("c", [7])
+m += ("d", [8, 9])
+arr<i32> e = [10]
+m.add("e", ->e)
+Console.log(e.len)
+Console.log(m.len)
+m["a"] = [0]
+m.removeAt("b")
+Console.log(m)
+arr<i32> t = ->m["c"]
+Console.log(t)
+arr<i32> t2 = m.takeAt("d")
+Console.log(t2)
+bool found, arr<i32> g = m.tryGet("a")
+Console.log($"{found} {g}")
+map<string, arr<i32>> copy = m.clone()
+copy["a"][0] = 42
+Console.log($"{m["a"]} {copy["a"]}")
+Console.log(m.values!)
+for (string k, arr<i32> v) in m {
+  Console.log($"{k} -> {v.len}")
+}
+hmap<i32, arr<string>> h = [1: ["x", "y"], 2: ["z"]]
+h[1][1] = "w"
+Console.log(h[1])
+h.removeAt(2)
+Console.log(h.len)
+map<string, arr<Dog>> dogs = []
+dogs["p"] = [Dog("rex"), Dog("max")]
+arr<Dog> mine = [Dog("bo")]
+dogs["q"] = ->mine
+Console.log(dogs["p"][1].name)
+map<string, arr<Dog>> dogs2 = dogs.clone()
+dogs2["p"][0].name = "changed"
+Console.log($"{dogs["p"][0].name} {dogs2["p"][0].name}")
+m.clear()
+Console.log(m.len)
+map<string, arr<r64>> lit = ["k": [1.5, 2.5]]
+Console.log(lit)
+b[1] = 0
+map<string, arr<i32>> plain = []
+plain.add("p", b)
+b[0] = 7
+Console.log(plain)
+public class Pet(string name) {
+  public string name = name
+} atEnd {
+  Console.log("  end " + name)
+}
+fun ends() {
+  map<string, arr<Pet>> pets = []
+  pets["a"] = [Pet("a1"), Pet("a2")]
+  pets["b"] = [Pet("b1")]
+  pets["c"] = [Pet("c1")]
+  Console.log("replace a")
+  pets["a"] = [Pet("a3")]
+  Console.log("remove b")
+  pets.removeAt("b")
+  Console.log("take c")
+  arr<Pet> taken = pets.takeAt("c")
+  Console.log($"taken {taken[0].name}")
+  hmap<i32, arr<Pet>> hp = [1: [Pet("h1")], 2: [Pet("h2")]]
+  Console.log("clear hp")
+  hp.clear()
+  Console.log("end of scope")
+}
+ends()
+Console.log("done")

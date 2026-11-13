@@ -5,8 +5,8 @@
 #   .\run-tests.ps1 -Only a,b        run only these tests (names without .df)
 #   .\run-tests.ps1 -Update          save what the tests give now as the expected result (check the diff in git before you trust it)
 #   .\run-tests.ps1 -Verbose         accepted for old scripts: the first differing lines of a failed test are always printed
-#   .\run-tests.ps1 -Jobs 2          how many compilers run at the same time (default 4); the tests that use files or processes
-#                                    (Root.IO, ExecProcess) always run one at a time, after the others
+#   .\run-tests.ps1 -Jobs 2          how many compilers run at the same time (default 12); the tests that use files or processes
+#                                    (Root.IO, ExecProcess) run one at a time, in a lane of their own beside the others
 #
 # Two kinds of test:
 #  * tests\*.df are programs. The expected output is expected\<name>.txt: everything the program printed after the line "---- run ----"
@@ -26,7 +26,7 @@ param(
   [switch]$Verbose,
   [string[]]$Only = @(),
   [int]$TimeoutSeconds = 180,
-  [int]$Jobs = 4
+  [int]$Jobs = 12
 )
 
 $ErrorActionPreference = 'Stop'
@@ -43,10 +43,32 @@ if (-not (Test-Path $compiler)) {
   exit 2
 }
 
+# clang, found once here: without it on PATH every compiler searched the Visual Studio folder (about 0.7 s each, and the searches
+# slowed each other down when many ran together); the compilers get it through DFLAT_CC (a --cc option or a project's cc still win)
+$clang = $env:DFLAT_CC
+if (-not $clang) {
+  $onPath = Get-Command clang.exe -ErrorAction SilentlyContinue
+  if ($onPath) { $clang = $onPath.Source }
+}
+if (-not $clang) {
+  foreach ($root in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+    if (-not $root) { continue }
+    $vs = Join-Path $root 'Microsoft Visual Studio'
+    if (Test-Path $vs) {
+      $found = Get-ChildItem $vs -Recurse -Filter clang.exe -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -match 'Llvm\\x64\\bin' } | Sort-Object FullName -Descending | Select-Object -First 1
+      if ($found) { $clang = $found.FullName; break }
+    }
+    $llvm = Join-Path $root 'LLVM\bin\clang.exe'
+    if (Test-Path $llvm) { $clang = $llvm; break }
+  }
+}
+
 # starts the compiler on a file; its output is read while it runs
 function Start-Compiler([string]$file, [string]$option) {
   $info = New-Object System.Diagnostics.ProcessStartInfo
   $info.FileName = $compiler
+  if ($clang) { $info.EnvironmentVariables['DFLAT_CC'] = $clang }
   $info.Arguments = '"' + $file + '" ' + $option
   $info.UseShellExecute = $false
   $info.RedirectStandardInput = $true
@@ -71,21 +93,32 @@ function Get-CompilerResult($running) {
   return @{ Out = $running.OutTask.Result; Err = $running.ErrTask.Result }
 }
 
-# runs the compilers of the tests, at most $limit at the same time; each test gets its finished run in .Run
-function Invoke-Pool($tests, [int]$limit) {
+# runs the compilers of the tests, at most $limit at the same time; the $serial tests run one at a time beside them (in their own
+# lane, so they never overlap each other); each test gets its finished run in .Run
+function Invoke-Pool($tests, [int]$limit, $serial) {
   $queue = New-Object System.Collections.Queue
   foreach ($test in $tests) { $queue.Enqueue($test) }
+  $serialQueue = New-Object System.Collections.Queue
+  foreach ($test in $serial) { $serialQueue.Enqueue($test) }
   $active = New-Object System.Collections.ArrayList
-  while ($queue.Count -gt 0 -or $active.Count -gt 0) {
-    while ($queue.Count -gt 0 -and $active.Count -lt $limit) {
+  $serialActive = $null
+  while ($queue.Count -gt 0 -or $serialQueue.Count -gt 0 -or $active.Count -gt 0) {
+    if ($null -eq $serialActive -and $serialQueue.Count -gt 0) {
+      $serialActive = $serialQueue.Dequeue()
+      $serialActive.Running = Start-Compiler $serialActive.Path $serialActive.Option
+      [void]$active.Add($serialActive)
+    }
+    $parallelCount = $active.Count - $(if ($null -ne $serialActive) { 1 } else { 0 })
+    while ($queue.Count -gt 0 -and $parallelCount -lt $limit) {
       $test = $queue.Dequeue()
       $test.Running = Start-Compiler $test.Path $test.Option
       [void]$active.Add($test)
+      $parallelCount++
     }
     $finished = @()
     foreach ($test in $active) {
       $running = $test.Running
-      if ($running.Process.WaitForExit(50)) {
+      if ($running.Process.HasExited) {
         $finished += $test
       } elseif (([DateTime]::Now - $running.Started).TotalSeconds -gt $TimeoutSeconds) {
         try { $running.Process.Kill() } catch { }
@@ -93,10 +126,12 @@ function Invoke-Pool($tests, [int]$limit) {
         $finished += $test
       }
     }
+    if ($finished.Count -eq 0) { Start-Sleep -Milliseconds 10; continue }
     foreach ($test in $finished) {
       if (-not $test.Running.TimedOut) { $test.Running.Process.WaitForExit() }   # the output has been read to the end
       $test.Run = Get-CompilerResult $test.Running
       [void]$active.Remove($test)
+      if ($test -eq $serialActive) { $serialActive = $null }
     }
   }
 }
@@ -236,8 +271,7 @@ function Test-Serial($test) {
 }
 $parallel = @($all | Where-Object { -not (Test-Serial $_) })
 $serial = @($all | Where-Object { Test-Serial $_ })
-Invoke-Pool $parallel ([Math]::Max(1, $Jobs))
-Invoke-Pool $serial 1
+Invoke-Pool $parallel ([Math]::Max(1, $Jobs)) $serial
 
 foreach ($test in $all) {
   $result = switch ($test.Kind) {

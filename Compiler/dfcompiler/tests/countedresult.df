@@ -1,0 +1,28 @@
+// a counted result used directly (spec 12.7): make().bark(), make().name; the usage lives for the statement, the object is read-only
+namespace countedresult
+import Root
+public class Dog(string name) {
+  public string name = name
+  unrestricted fun bark() { Console.log(name + " barks") }
+  unrestricted fun i32 size() { 3 }
+} atEnd {
+  Console.log("  end " + name)
+}
+public class Kennel() {
+  @Dog boss = @Dog("boss")
+  public fun @Dog leader() { boss }
+}
+fun @Dog make(string n) {
+  @Dog d = @Dog(n)
+  return d
+}
+fun run() {
+  make("a").bark()
+  Console.log(make("b").size())
+  Console.log(make("c").name)
+  Kennel k = Kennel()
+  k.leader().bark()
+  Console.log(k.leader().name + " is still here")
+  Console.log("end of run")
+}
+run()

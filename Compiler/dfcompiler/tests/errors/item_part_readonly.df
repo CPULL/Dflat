@@ -1,0 +1,6 @@
+namespace item_part_readonly
+fun change(vec<(i32, i32)> v) {
+  v[0].1 = 5
+}
+fun main() {
+}

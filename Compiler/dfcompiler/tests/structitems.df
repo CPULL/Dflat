@@ -1,0 +1,29 @@
+// arr, vec and list of structs that hold strings or objects (spec 11.1.5.3, 6.6): the collection owns them as it owns tuples of
+// objects; a copy of an item clones them, a removed or replaced item ends them, and they end with the collection
+namespace structitems
+import Root
+public class Dog(string name) {
+  public string name = name
+} atEnd {
+  Console.log("  end " + name)
+}
+struct Pet { Dog dog, string tag, i32 age }
+fun run() {
+  vec<Pet> v = [Pet(Dog("v1"), "a", 1), Pet(Dog("v2"), "b", 2)]
+  list<Pet> l = [Pet(Dog("l1"), "c", 3)]
+  arr<Pet> a = [Pet(Dog("a1"), "d", 4)]
+  Pet p = Pet(Dog("p1"), "e", 5)
+  v.add(p!)
+  p.dog.name = "P1"
+  Console.log($"{v[2].dog.name} {p.dog.name} {v.len}")
+  v[0] = Pet(Dog("v3"), "f", 6)
+  Pet t = ->v[1]
+  Pet u = l.takeAt(0)
+  Console.log($"took {t.dog.name}")
+  v.removeAt(0)
+  vec<Pet> c = v.clone()
+  Console.log($"{c[1].dog.name} {c.len} {u.tag} {l.len} {a[0].age}")
+  Console.log(v)
+  Console.log("end of run")
+}
+run()

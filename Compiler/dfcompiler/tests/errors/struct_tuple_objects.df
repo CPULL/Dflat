@@ -1,3 +1,0 @@
-namespace struct_tuple_objects
-struct A { string s }
-fun (A, i32) f() { (A(s: "x"), 1) }

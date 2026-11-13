@@ -1,0 +1,1 @@
+item_part_readonly.df(3): error: 'v' is a read-only reference: its items cannot be changed

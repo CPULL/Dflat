@@ -28,6 +28,8 @@ public sealed partial class CodeGen {
         string converted = Convert(value, "string", at);
         return $"((df_opt_string){{ true, {StrOwned(value, converted)} }})";
       }
+      case "string1k" or "string1k?":
+        return OptStrFromS1k(value).Code;
       default:
         throw Error($"cannot convert {value.Type} to string?", at);
     }
@@ -45,9 +47,19 @@ public sealed partial class CodeGen {
         bool fresh = FreshCode(value, converted) == "true" && !IsStaticStr(converted);
         return $"((df_opt_string){{ true, {StrRead(new Expr(converted, "string", fresh))} }})";
       }
+      case "string1k" or "string1k?":
+        return OptStrRead(OptStrFromS1k(value)).Code;
       default:
         throw Error($"cannot convert {value.Type} to string?", at);
     }
+  }
+
+  // a string1k or string1k? as a new string? (spec 4.5): its own copy of the text, null stays null
+  Expr OptStrFromS1k(Expr value) {
+    string code = value.Type == "string1k"
+      ? $"((df_opt_string){{ true, df_s1k_to_str({value.Code}) }})"
+      : WithTemp(value, temp => $"({temp}.has ? (df_opt_string){{ true, df_s1k_to_str({temp}.val) }} : (df_opt_string){{0}})");
+    return new Expr(code, "string?", true);
   }
 
   // a string? declared with its type written (string? x): its string ends with the scope

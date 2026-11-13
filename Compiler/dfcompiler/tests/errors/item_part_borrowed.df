@@ -1,0 +1,10 @@
+namespace item_part_borrowed
+import Root
+public class Dog(string n) {
+  public string name = n
+}
+fun main() {
+  vec<(Dog, i32)> v = [(Dog("a"), 1)]
+  Dog rex = Dog("rex")
+  v[0].0 = rex
+}

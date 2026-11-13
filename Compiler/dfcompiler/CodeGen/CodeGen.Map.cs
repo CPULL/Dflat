@@ -146,8 +146,12 @@ public sealed partial class CodeGen {
   bool MapValueBuilt(string value) {
     string inner = BaseOf(value);
     return IsInt(inner) || inner is "bool" or "char" or "r32" or "r64" or "date" or "time" or "clock" or "lapse" || IsEnum(inner) || value == "string"
-      || IsMapObjectValue(value) || IsFunType(value);
+      || IsMapObjectValue(value) || IsFunType(value) || IsArr(value) || IsMapValueItem(value);
   }
+
+  // a tuple or a struct as the value of a map or an hmap: stored in the entry; the map owns what it holds (spec 3.2, 11.1.5.3)
+  // a nullable tuple of plain values too ((i32, i32)?: a missing key reads null); one that owns objects or arrays is not built
+  bool IsMapValueItem(string value) => !IsNullable(value) ? IsTuple(value) || IsStruct(value) : IsTuple(BaseOf(value)) && !TupleHoldsArrays(BaseOf(value));
 
   // an object value of a map or an hmap: the map owns it (spec 6.6), it ends when it is replaced or removed or with the map
   bool IsMapObjectValue(string value) => !IsNullable(value) && IsClass(value) && !IsArr(value);
@@ -175,7 +179,7 @@ public sealed partial class CodeGen {
         CompositeKeyHelpers(args[0]);
       }
       if (!HmapValueBuilt(args[1])) {
-        throw Error($"hmap values of type {DisplayName(args[1])} are not built yet (this version: the native types, string and objects)", at);
+        throw Error($"hmap values of type {DisplayName(args[1])} are not built yet (this version: the native types, string, objects, arrays, tuples and structs)", at);
       }
       return;
     }
@@ -192,7 +196,7 @@ public sealed partial class CodeGen {
       CompositeKeyHelpers(args[0]);
     }
     if (!MapValueBuilt(args[1])) {
-      throw Error($"map values of type {DisplayName(args[1])} are not built yet (this version: the native types, string and objects)", at);
+      throw Error($"map values of type {DisplayName(args[1])} are not built yet (this version: the native types, string, objects, arrays, tuples and structs)", at);
     }
   }
 
@@ -235,7 +239,7 @@ public sealed partial class CodeGen {
     : SetKeyOf(type) ? "" : $"df_str_free((df_string)(uintptr_t)({pointer})); ";
 
   // the shape of the tree, passed to the calls of the runtime: the value size, whether the keys have a pointer, how two key pointers compare
-  string MapShape(string type) => $"{MapValueSize(type)}, {(TKeyOf(type) ? $"true, df_tk_cmp_{SanitizeName(MapKey(type))}" : ObjKeyOf(type) ? "true, df_bt_cmp_same" : SetKeyOf(type) ? "true, df_bt_cmp_word" : KeyHasPointer(type) ? "true, df_bt_cmp_str" : "false, NULL")}";
+  string MapShape(string type) => $"{MapValueSize(type)}, {(TKeyOf(type) ? $"true, df_tk_cmp_{SanitizeName(MapKey(type))}" : ObjKeyOf(type) ? (IsComparableClass(MapKey(type)) ? "true, df_bt_cmp_objc" : "true, df_bt_cmp_same") : SetKeyOf(type) ? "true, df_bt_cmp_word" : KeyHasPointer(type) ? "true, df_bt_cmp_str" : "false, NULL")}";
 
   string KeyPointer(string type, string key) => TKeyOf(type) ? $"(df_bt_kw)(uintptr_t)&({key})"
     : SetKeyOf(type) ? $"df_setv_sk_{SetCName(MapKey(type))}({key})" : KeyHasPointer(type) ? $"(df_bt_kw)(uintptr_t)({key})" : "0";
@@ -264,7 +268,8 @@ public sealed partial class CodeGen {
       return CompositeSortKey(keyType, key);   // the first component (spec 6.8.4.1)
     }
     if (IsObjectKey(keyType)) {
-      return $"((uint64_t)df_hash_obj((void*)({key})))";   // the default order of classes: the hash (spec 6.2.2)
+      return IsComparableClass(keyType) ? "((uint64_t)0)"   // a Comparable class: always its compareTo (spec 6.8.4.1)
+        : $"((uint64_t)df_hash_obj((void*)({key})))";   // the default order of classes: the hash (spec 6.2.2)
     }
     if (IsSetValue(keyType)) {
       return $"df_setv_tag_{SetCName(keyType)}({key})";   // the tag first (spec 6.2.2, 11.3.6.1); the value on a tie, through the pointer
@@ -352,17 +357,30 @@ public sealed partial class CodeGen {
     if (IsMapObjectValue(valueType) && !LibraryCode && !value.Fresh && value.Type != "null") {
       throw Error("the map owns its values: give it a new object, ->x to move one in, or x! for a copy (spec 6.6)", node);
     }
+    if (IsArr(valueType)) {
+      // the map owns its arrays, as a field: a new array or ->a goes in, plain items are copied, otherwise ->a or a! (spec 6.8.1)
+      var owned = ArrItemValue(node, value, valueType, node);
+      return Convert(owned, valueType, node);
+    }
     if (IsFunType(valueType)) {
       CheckNotBorrowingFunction(valueType, node, scope, "a map");   // the map keeps a usage of the function value (spec 13.3.3)
       return FnOwned(value with { Code = Convert(value, valueType, node) });
     }
-    return StrItemAs(value, valueType, Convert(value, valueType, node));
+    return StrItemAs(value, valueType, Convert(value, valueType, node), node);
   }
 
   // a copy of a value for another map (add(other), clone): an object is cloned, a string is copied (spec 6.6, 12.6)
   string MapValueCopy(Node node, Scope scope, string valueType) {
     if (IsFunType(valueType)) {
       return $"df_fn_clone({Convert(CheckedMapValue(node, scope, valueType), valueType, node)})";   // a copy of a function value is f! (spec 13.3.3)
+    }
+    if (IsArr(valueType)) {
+      cloneUsed = true;
+      return CloneValue(Convert(CheckedMapValue(node, scope, valueType), valueType, node), valueType, node);   // a copy of its own (spec 6.8.1)
+    }
+    if (ItemOwnsParts(valueType)) {
+      // a copy with its own objects and arrays (spec 3.2, 11.1.5.3)
+      return $"{TupleItemDupHelper(valueType, node)}({Convert(CheckedMapValue(node, scope, valueType), valueType, node)})";
     }
     if (!IsMapObjectValue(valueType)) {
       return MapValueItem(node, scope, valueType);
@@ -377,6 +395,8 @@ public sealed partial class CodeGen {
     valueType == "string" ? $"df_bt_sval_put({slot}, {item}); "
     : IsMapObjectValue(valueType) ? $"{{ void* old = (void*)*{slot}; *{slot} = {item}; if (old != NULL && old != (void*)*{slot}) {{ df_drop(old); }} }} "
     : IsFunType(valueType) ? $"{{ df_fn old = *{slot}; *{slot} = {item}; df_fn_release(old); }} "   // the usage of the old value ends
+    : IsArr(valueType) ? $"{{ {ReplaceArrItem(valueType, $"(*{slot})", item)}}} "   // the replaced array ends (spec 6.8.1)
+    : ItemOwnsParts(valueType) ? $"{{ {CType(valueType)} old = *{slot}; *{slot} = {item}; {TupleItemDropHelper(valueType)}(old); }} "   // what the replaced value held ends
     : $"*{slot} = {item}; ";
 
   // the C expression of the value slot of a key held in key (a pointer to the value, or NULL when the key is missing)
@@ -448,6 +468,20 @@ public sealed partial class CodeGen {
       string goneFn = NewTemp();
       string removedFn = NewTemp();
       return $"({{ df_fn {goneFn} = {{ 0 }}; bool {removedFn} = {MapRemove(held, type, key, "&" + goneFn)}; df_fn_release({goneFn}); {removedFn}; }})";
+    }
+    if (outPointer == "NULL" && IsArr(valueType)) {
+      // the removed array ends (spec 6.8.1)
+      string goneArr = NewTemp();
+      string removedArr = NewTemp();
+      return $"({{ {CType(valueType)} {goneArr} = {ZeroValue(valueType)}; bool {removedArr} = {MapRemove(held, type, key, "&" + goneArr)}; "
+        + $"{ArrDropHelper(valueType)}({goneArr}); {removedArr}; }})";
+    }
+    if (outPointer == "NULL" && ItemOwnsParts(valueType)) {
+      // what the removed tuple or struct held ends (spec 3.2, 11.1.5.3)
+      string goneItem = NewTemp();
+      string removedItem = NewTemp();
+      return $"({{ {CType(valueType)} {goneItem} = {ZeroValue(valueType)}; bool {removedItem} = {MapRemove(held, type, key, "&" + goneItem)}; "
+        + $"{TupleItemDropHelper(valueType)}({goneItem}); {removedItem}; }})";
     }
     if (outPointer == "NULL" && IsMapObjectValue(valueType)) {
       // the removed object ends (spec 6.6)
@@ -522,10 +556,12 @@ public sealed partial class CodeGen {
       : $"if (!{cursor}.on_null) {{ {KeyFreeCode(type, $"df_bt_cur_ptr(&{cursor})")}}} ")
     + (MapValue(type) == "string" ? $"df_bt_sval_clear({slot}); "
       : IsMapObjectValue(MapValue(type)) ? $"if (*{slot} != NULL) {{ void* o = (void*)*{slot}; *{slot} = NULL; df_drop(o); }} "
-      : IsFunType(MapValue(type)) ? $"{{ df_fn f = *{slot}; *{slot} = (df_fn){{ 0 }}; df_fn_release(f); }} " : "");
+      : IsFunType(MapValue(type)) ? $"{{ df_fn f = *{slot}; *{slot} = (df_fn){{ 0 }}; df_fn_release(f); }} "
+      : IsArr(MapValue(type)) ? $"{{ {CType(MapValue(type))} a = *{slot}; *{slot} = {ZeroValue(MapValue(type))}; {ArrDropHelper(MapValue(type))}(a); }} "
+      : ItemOwnsParts(MapValue(type)) ? $"{{ {CType(MapValue(type))} v = *{slot}; *{slot} = {ZeroValue(MapValue(type))}; {TupleItemDropHelper(MapValue(type))}(v); }} " : "");
 
   // the entries own something to free: a string key, a string value, an object value
-  bool MapOwnsStrings(string type) => KeyHasPointer(type) && !SetKeyOf(type) || HObjKeyOf(type) || HTKeyOf(type) || MapValue(type) == "string" || IsMapObjectValue(MapValue(type)) || IsFunType(MapValue(type));
+  bool MapOwnsStrings(string type) => KeyHasPointer(type) && !SetKeyOf(type) || HObjKeyOf(type) || HTKeyOf(type) || MapValue(type) == "string" || IsMapObjectValue(MapValue(type)) || IsFunType(MapValue(type)) || IsArr(MapValue(type)) || ItemOwnsParts(MapValue(type));
 
   // all the entries go: what they own is freed, then the nodes
   string MapClearCode(string held, string type) {
@@ -755,7 +791,7 @@ public sealed partial class CodeGen {
             + $"df_string {taken} = df_bt_sval_take({buffer}); {taken}; }})", valueType, true);
         }
         return new Expr(head + MapKeyArg(args[0], scope, keyType, key) + $"{valueC} {taken} = {ZeroValue(valueType)}; (void){MapRemove(m, type, key, "&" + taken)}; {taken}; }})",
-          valueType, IsMapObjectValue(valueType) || IsFunType(valueType));
+          valueType, IsMapObjectValue(valueType) || IsFunType(valueType) || IsArr(valueType) || ItemOwnsParts(valueType));
       }
       case "tree_hasValue": {
         string value = NewTemp();
@@ -794,7 +830,7 @@ public sealed partial class CodeGen {
             + $"df_uns {removed} = df_ht_sweep({tree}, {HmapShape(type)}); {release}{removed}; }})", NativeUns);
         }
         return new Expr(head + $"{valueC} {value} = {given}; df_uns {removed} = 0; "
-          + $"if ({tree}->has_null && {Same(nullSlot, value)}) {{ {(valueType == "string" ? $"df_bt_sval_clear({nullSlot}); " : IsMapObjectValue(valueType) ? $"if (*{nullSlot} != NULL) {{ df_drop((void*)*{nullSlot}); *{nullSlot} = NULL; }} " : IsFunType(valueType) ? $"df_fn_release(*{nullSlot}); *{nullSlot} = (df_fn){{ 0 }}; " : "")}"
+          + $"if ({tree}->has_null && {Same(nullSlot, value)}) {{ {(valueType == "string" ? $"df_bt_sval_clear({nullSlot}); " : IsMapObjectValue(valueType) ? $"if (*{nullSlot} != NULL) {{ df_drop((void*)*{nullSlot}); *{nullSlot} = NULL; }} " : IsFunType(valueType) ? $"df_fn_release(*{nullSlot}); *{nullSlot} = (df_fn){{ 0 }}; " : ItemOwnsParts(valueType) ? $"{TupleItemDropHelper(valueType)}(*{nullSlot}); *{nullSlot} = {ZeroValue(valueType)}; " : IsArr(valueType) ? $"{ArrDropHelper(valueType)}(*{nullSlot}); *{nullSlot} = {ZeroValue(valueType)}; " : "")}"
           + $"df_bt_remove_null({tree}, {MapValueSize(type)}, NULL); {removed}++; }} "
           + ForEachEntry(m, type, (s, c) => $"if (!{c}.on_null && {Same(s, value)}) {{ {DropEntry(type, s, c)}df_bt_mark(&{c}); }} ")
           + $"{removed} += df_bt_sweep({tree}, {MapValueSize(type)}, {(KeyHasPointer(type) ? "true" : "false")}); {release}{removed}; }})", NativeUns);
@@ -868,7 +904,10 @@ public sealed partial class CodeGen {
     sb.Append($"{items} = ({ArrCType(elem)}){{ ({CType(elem)}*)df_calloc({count}, sizeof({CType(elem)})), {count} }}; df_uns {index} = 0; ");
     sb.Append(ForEachEntry(held, type, (slot, cursor) => {
       string item = keys ? CursorKey(type, cursor) : ReadSlot(type, slot);
-      if (!keys && IsMapObjectValue(elem)) {
+      if (!keys && ItemOwnsParts(elem)) {
+        return $"{items}.p[{index}++] = {TupleItemDupHelper(elem, at)}({item}); ";   // the vec owns copies of the tuples and structs (spec 3.2)
+      }
+      if (!keys && (IsMapObjectValue(elem) || IsArr(elem))) {
         cloneUsed = true;
         return $"{items}.p[{index}++] = {CloneValue(item, elem, at)}; ";   // the vec owns clones of the objects (spec 6.6, 12.6)
       }

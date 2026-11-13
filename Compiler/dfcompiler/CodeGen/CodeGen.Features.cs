@@ -32,7 +32,6 @@ public sealed partial class CodeGen {
     ["Placeholder"] = "Classes",
     ["Is"] = "Classes",
     ["Specific"] = "Classes",
-    ["Any"] = "Classes",
     ["Import"] = "Imports",
     ["FunVar"] = "Lambdas",
     ["List"] = "Collections",

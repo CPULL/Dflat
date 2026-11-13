@@ -1,0 +1,40 @@
+a1 p1 P1 y
+  end a1
+p1 2
+m1 7
+t1 9
+end of locals
+  end m1
+  end p1
+  end p1
+  end t1
+  end P1
+  end v1
+  end k1
+v2 V2 c k2
+end of items
+  end k2
+  end v3
+  end v2
+  end V2
+  end u1
+  end u2
+u3
+  end u3
+  end u4
+u5 9
+end of unkept
+  end u5
+  end w2
+w1 W1 3
+  end w1
+w3 4
+R1 W1 5
+  end w3
+  end W1
+W1 w3
+end of fromvalues
+  end R1
+  end W1
+  end w3
+---- exit code 0 ----

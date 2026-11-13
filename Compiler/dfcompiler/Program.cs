@@ -4,10 +4,10 @@ using dfparser;
 namespace dfcompiler;
 
 public static class Program {
-  public const string Version = "0.0.93alpha";
+  public const string Version = "0.0.116alpha";
 
   // the version of the specification this compiler was built for: the variable `version` of the preprocessor (spec 19.1)
-  public const string LanguageVersion = "0.0.24";
+  public const string LanguageVersion = "0.0.39";
 
   // the os and cpu pairs the compiler builds for, and the clang triple of each (a target equal to this machine passes none: clang's own default)
   static readonly Dictionary<string, string> Triples = new() {
@@ -636,7 +636,30 @@ public static class Program {
       return null;
     }
 
-    // Visual Studio's bundled clang, then the standalone LLVM installer
+    // the clang found by an earlier search (the search of the Visual Studio folder takes about 0.7 s)
+    string cacheFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Dflat", "clang-path.txt");
+    try {
+      string cached = File.ReadAllText(cacheFile).Trim();
+      if (cached.Length > 0 && File.Exists(cached)) {
+        return cached;
+      }
+    } catch (Exception) {
+      // no cache yet, or it cannot be read: search again
+    }
+    string? searched = SearchClang();
+    if (searched != null) {
+      try {
+        Directory.CreateDirectory(Path.GetDirectoryName(cacheFile)!);
+        File.WriteAllText(cacheFile, searched);
+      } catch (Exception) {
+        // the cache is only a shortcut
+      }
+    }
+    return searched;
+  }
+
+  // Visual Studio's bundled clang, then the standalone LLVM installer
+  static string? SearchClang() {
     var roots = new[] {
       Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
       Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86)

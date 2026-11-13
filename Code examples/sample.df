@@ -177,7 +177,7 @@ i32 y = 2
 x, y = y, x
 
 // ------------------------------------------------ types, casts, operators
-any Shape s = Circle(2.0)
+Shape s = Circle(2.0)
 if s is Circle cc {
   r.Console.log($"r = {cc.radius:D,02}")
 }

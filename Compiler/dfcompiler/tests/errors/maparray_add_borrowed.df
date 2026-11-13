@@ -1,0 +1,6 @@
+// add(k, v) takes the array: a borrowed array of objects needs ->a or a! (spec 6.8.1)
+import Root
+class Dog(string name) { public string name = name }
+hmap<string, arr<Dog>> dogs = []
+arr<Dog> mine = [Dog("a")]
+dogs.add("x", mine)

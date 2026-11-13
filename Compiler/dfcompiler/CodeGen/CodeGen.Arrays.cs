@@ -102,7 +102,7 @@ public sealed partial class CodeGen {
       if (IsClass(elem) && !itemValue.Fresh && itemValue.Type != "null") {
         throw Error("a collection owns its items: put a new object in the literal, or move one in with ->x", item);
       }
-      sb.Append($"{array}.p[{index}] = {StrItemAs(itemValue, elem, Convert(itemValue, elem, item))}; ");
+      sb.Append($"{array}.p[{index}] = {StrItemAs(itemValue, elem, Convert(itemValue, elem, item), item)}; ");
     }
     sb.Append($"{array}; }})");
     return new Expr(sb.ToString(), type);
@@ -253,7 +253,7 @@ public sealed partial class CodeGen {
       if (IsClass(elem) && !assigned.Fresh && assigned.Type != "null" && s.Line < LibraryLine) {
         throw Error("a collection owns its items: move an existing object in with ->x, or put a new one", s);
       }
-      value = StrItemAs(assigned, elem, Convert(assigned, elem, s));
+      value = StrItemAs(assigned, elem, Convert(assigned, elem, s), s.Children[1]);
     } else {
       value = Convert(BinaryOp(op[..^1], new Expr(slot, elem), s.Children[1], scope, s), elem, s);
     }
@@ -319,6 +319,9 @@ public sealed partial class CodeGen {
         if (IsClass(elem) && args[0].Kind != "Null") {
           throw Error("fill would put one object in every item: a class instance is not allowed, fill(null) is", at);
         }
+        if (ItemOwnsParts(elem) && at.Line < LibraryLine) {
+          throw Error("fill would put the parts of one tuple or struct in every item: set the items one by one (spec 3.2, 11.1.5.3)", at);
+        }
         if (IsArr(elem) && at.Line < LibraryLine) {
           throw Error("fill would put one array in every item: set the items one by one (spec 6.8.1)", at);
         }
@@ -355,7 +358,8 @@ public sealed partial class CodeGen {
           : elem == "string" ? "df_str_free({0}); {0} = NULL;"
           : elem == "string?" ? "df_opt_str_drop(&{0});"
           : IsFunType(elem) ? "df_fn_drop(&{0});"
-          : IsArr(elem) ? $"{ArrDropHelper(elem)}({{0}}); {{0}} = {ZeroValue(elem)};" : $"{{0}} = {ZeroValue(elem)};";
+          : IsArr(elem) ? $"{ArrDropHelper(elem)}({{0}}); {{0}} = {ZeroValue(elem)};"
+          : IsTupleItem(elem) ? $"{TupleItemDropHelper(elem)}({{0}}); {{0}} = {ZeroValue(elem)};" : $"{{0}} = {ZeroValue(elem)};";
         string code = WithTemp(array, a =>
           $"({{ for (df_uns {i} = 0; {i} < {a}.len; {i}++) {{ {string.Format(reset, Elem(a, i))} }} }})");
         return new Expr(code, "void");
@@ -381,12 +385,13 @@ public sealed partial class CodeGen {
         }
         string? compare = CompareFunction(elem);
         if (compare == null) {
-          throw Error($"{name} cannot order {elem} yet (objects and tuples need a comparer, or give a lambda)", at);
+          throw Error($"{name} cannot order {DisplayName(elem)} yet: give a lambda (spec 6.6)", at);
         }
         string descending = SortDescending(name, args, scope, at);
         NeedChunk("sort");
+        string raise = OrderUsesObjects(elem) ? CompareRaise() : "";   // a compareTo that raised (spec 11.2.1)
         string code = WithTemp(array, a =>
-          $"df_sort({a}.p, {a}.len, sizeof(*{a}.p), {compare}, {(name == "sort" ? "true" : "false")}, {descending})");
+          $"({{ df_sort({a}.p, {a}.len, sizeof(*{a}.p), {compare}, {(name == "sort" ? "true" : "false")}, {descending}); {raise}}})");
         return new Expr(code, "void");
       }
       case "copyFrom":
@@ -463,7 +468,7 @@ public sealed partial class CodeGen {
     string i = NewTemp();
     string incoming = NewTemp();
     string old = NewTemp();
-    string code = $"({{ {CType(array.Type)} {a} = {array.Code}; df_uns {i} = {IndexValue(first, args[0])}; {CType(elem)} {incoming} = {StrItemAs(replacement, elem, Convert(replacement, elem, args[1]))}; "
+    string code = $"({{ {CType(array.Type)} {a} = {array.Code}; df_uns {i} = {IndexValue(first, args[0])}; {CType(elem)} {incoming} = {StrItemAs(replacement, elem, Convert(replacement, elem, args[1]), args[1])}; "
       + $"if (!df_idx_ok({a}.len, {i}, {fn!.NameConst})) {RaiseJump} {CType(elem)} {old} = {a}.p[{i}]; {a}.p[{i}] = {incoming}; {old}; }})";
     var result = new Expr(code, elem, IsClass(elem) || IsStrItem(elem));
     return boxed ? UnboxTaken(result) : result;
@@ -531,22 +536,6 @@ public sealed partial class CodeGen {
   }
 
   // the comparer of the runtime for an item type (RuntimeSort), or null when there is none
-  string? CompareFunction(string elem) {
-    if (enums.TryGetValue(elem, out var info)) {
-      return CompareFunction(info.ValueType);
-    }
-    return elem switch {
-      "i8" or "i16" or "i32" or "i64" or "u8" or "u16" or "u32" or "u64" or "r32" or "r64" => "df_cmp_" + elem,
-      "bool" => "df_cmp_bool",
-      "char" => "df_cmp_u32",
-      "string" => "df_cmp_str",
-      "date" or "lapse" => "df_cmp_i64",
-      "time" => "df_cmp_i32",
-      "clock" => "df_cmp_u64",
-      _ => null
-    };
-  }
-
   // the length of an array made from a literal list or arr<T>[constant]; null when it is not known
   static long? ConstantArrayLength(Node init) {
     if (init.Kind == "List") {
@@ -739,6 +728,50 @@ public sealed partial class CodeGen {
     throw Error($"shuffle works on arrays and strings, not {value.Type}", at);
   }
 
+  // for (i32 a, string b) in c, for i32 a, string b in c (spec 6.4): over a collection of tuples or structs, the same loop with one item
+  // variable, whose parts are declared at the start of the body (a tuple by position, a struct by field order); no tuple is made
+  Node DestructuredLoop(Node s, Node varNode, string collectionType) {
+    string elem = IsArr(collectionType) ? ArrElem(collectionType)
+      : IsList(collectionType) ? ListElem(collectionType)
+      : IsVec(collectionType) ? VecElem(collectionType)
+      : IsView(collectionType) ? ViewElem(collectionType)
+      : CustomCollectionElem(collectionType) ?? throw Error($"for a, b in ...: cannot loop over {DisplayName(collectionType)}", s);
+    List<string> parts;
+    if (IsTuple(elem)) {
+      parts = Enumerable.Range(0, TupleElems(elem).Count).Select(index => index.ToString()).ToList();
+    } else if (IsStruct(elem)) {
+      parts = structs[elem].Fields.Select(field => field.Name).ToList();
+    } else {
+      throw Error($"for a, b in ...: the items of this collection are {DisplayName(elem)}, which has no parts; a tuple, a struct or the (key, value) entries of a map give several (spec 6.4)", s);
+    }
+    var names = varNode.Children;
+    if (names.Count != parts.Count) {
+      string shown = IsTuple(elem) ? "(" + string.Join(", ", TupleElems(elem).Select(e => DisplayName(e.Type))) + ")" : DisplayName(elem);
+      throw Error($"the items of this collection have {parts.Count} parts ({shown}): write {parts.Count} names, not {names.Count}", s);
+    }
+    if (names.FirstOrDefault(name => name.Kind == "WritableVar") is Node writable) {
+      throw NotSupported("&name in for a, b over a collection of tuples or structs", writable);
+    }
+    string item = "__item" + ++tempCounter;
+    var body = Synthetic("Block", s);
+    for (int index = 0; index < parts.Count; index++) {
+      Node read = Synthetic("Name", s, item);
+      foreach (string part in parts[index].Split('.')) {
+        read = Synthetic("Member", s, part).Add(read);
+      }
+      var type = names[index].Children.FirstOrDefault() ?? Synthetic("Type", s, "var");
+      body.Add(Synthetic("Decl", names[index], names[index].Text).Add(type).Add(Synthetic("Init", s).Add(read)));
+    }
+    foreach (var statement in s.Children.Last().Children) {
+      body.Add(statement);
+    }
+    var loop = Synthetic("For", s).Add(Synthetic("Var", s, item));
+    foreach (var child in s.Children.Skip(1).Take(s.Children.Count - 2)) {
+      loop.Add(child);
+    }
+    return Synthetic("Block", s).Add(loop.Add(body));
+  }
+
   // the for loops over a vec or a list being compiled: the C variable that points to the counter of open iterators, and the collection
   readonly Dictionary<Node, (string? Counter, Expr Collection)> countedLoops = new();
   readonly Dictionary<Node, string> mapLoopParts = new();   // a loop over m.keys or m.values: which part (CodeGen.Map.cs)
@@ -790,7 +823,8 @@ public sealed partial class CodeGen {
       throw Error($"m.{mapPart} gives one value at a time: for x in m.{mapPart}; for (k, v) in m gives both", s);
     }
     if (destructure && !overMap) {
-      throw Error("for (a, b) in ... takes the (key, value) entries of a map; other collections give one item: for x in c", s);
+      EmitBlock(DestructuredLoop(s, varNode, collection.Type), sb, scope, indent);   // for (i32 a, string b) in pairs (spec 6.4)
+      return;
     }
     if (overMap && !destructure && mapPart == null) {
       throw Error("a map gives (key, value) entries: for (k, v) in m, for (K k, V v) in m or for var (k, v) in m (spec 6.4)", s);

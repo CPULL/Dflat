@@ -1,0 +1,75 @@
+// collections of tuples that hold objects or arrays (spec 3.2, 6.6): the collection owns the parts of its tuples; a copy of an item
+// clones them, a replaced or removed item ends them, and they end with the collection
+namespace tupleitems
+import Root
+public class Dog(string name) {
+  public string name = name
+} atEnd {
+  Console.log("  end " + name)
+}
+fun literals() {
+  list<(Dog, i32)> l = [(Dog("l1"), 1), (Dog("l2"), 2)]
+  vec<(Dog, i32)> v = [(Dog("v1"), 1)]
+  arr<(Dog, i32)> a = [(Dog("a1"), 1), (Dog("a2"), 2)]
+  Console.log($"{l[0].0.name} {v[0].0.name} {a[1].0.name} {l.len}")
+  Console.log("end of literals")
+}
+literals()
+fun writes() {
+  vec<(Dog, i32)> v = [(Dog("w1"), 1)]
+  v[0] = (Dog("w2"), 2)
+  (Dog, i32) t = (Dog("w3"), 3)
+  v[0] = t
+  t.0.name = "W3"
+  Console.log($"{v[0].0.name} {t.0.name}")
+  Console.log("end of writes")
+}
+writes()
+fun arrays() {
+  vec<(arr<i32>, i32)> pairs = [([1, 2], 1)]
+  arr<i32> x = [7, 8, 9]
+  pairs[0] = (x, 2)
+  x[0] = 70
+  Console.log($"{pairs[0].0} {x}")
+}
+arrays()
+fun removals() {
+  list<(Dog, i32)> l = [(Dog("r1"), 1), (Dog("r2"), 2), (Dog("r3"), 3)]
+  (Dog, i32) t = l.takeAt(1)
+  Console.log($"took {t.0.name} {l.len}")
+  l.removeAt(0)
+  Console.log(l.len)
+  vec<(Dog, i32)> v = [(Dog("p1"), 1), (Dog("p2"), 2)]
+  bool got = v.pop(&t)
+  Console.log($"popped {t.0.name}")
+  v.clear()
+  Console.log("end of removals")
+}
+removals()
+fun whole() {
+  vec<(Dog, i32)> v = [(Dog("c1"), 3), (Dog("c2"), 1)]
+  vec<(Dog, i32)> c = v.clone()
+  c[0].0.name = "C1"
+  Console.log($"{v[0].0.name} {c[0].0.name}")
+  v.sort(((Dog, i32) x, (Dog, i32) y) { x.1 - y.1 })
+  Console.log(v[0].0.name)
+  vec<(Dog, i32)> big = v.filter(((Dog, i32) x) { x.1 > 2 })
+  Console.log(big.len)
+  for var item in v {
+    Console.log(item.0.name)
+  }
+  Console.log(v)
+  Console.log("end of whole")
+}
+whole()
+fun parts() {
+  vec<(Dog, i32)> v = [(Dog("f1"), 1), (Dog("f2"), 2)]
+  Console.log($"{v[0].0.name} {v[0].1}")
+  (Dog, i32) t = ->v[1]
+  Console.log($"moved {t.0.name}")
+  list<(Dog, i32)> l = [(Dog("g1"), 1)]
+  (Dog, i32) old = l.replace(0, (Dog("g2"), 2))
+  Console.log($"replaced {old.0.name} {l[0].0.name}")
+  Console.log("end of parts")
+}
+parts()

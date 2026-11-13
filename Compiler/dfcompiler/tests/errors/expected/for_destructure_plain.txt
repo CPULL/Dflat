@@ -1,0 +1,1 @@
+for_destructure_plain.df(4): error: for a, b in ...: the items of this collection are i32, which has no parts; a tuple, a struct or the (key, value) entries of a map give several (spec 6.4)

@@ -48,6 +48,12 @@ static int df_cmp_str(const void* a, const void* b) {
   return (x.len > y.len) - (x.len < y.len);
 }
 
+/* string1k (spec 4.5): by bytes, the same as code point order in UTF-8 */
+static int df_cmp_s1k(const void* a, const void* b) {
+  int c = strncmp((const char*)((const df_s1k*)a)->b, (const char*)((const df_s1k*)b)->b, DF_S1K_MAX);
+  return (c > 0) - (c < 0);
+}
+
 static int df_sort_order(df_cmp_fn cmp, bool desc, const void* a, const void* b) {
   int c = cmp(a, b);
   return desc ? -c : c;

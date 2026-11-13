@@ -1,0 +1,4 @@
+// the number of names must match the parts of the item (spec 6.4)
+import Root
+vec<(i32, string)> v = [(1, "a")]
+for i32 a, string b, i32 c in v { }

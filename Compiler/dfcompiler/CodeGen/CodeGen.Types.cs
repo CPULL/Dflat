@@ -449,13 +449,11 @@ public sealed partial class CodeGen {
         }
         return Normalize(t);
       }
-      case "Specific":
-      case "Any": {
-        // specific T: one type known at compile time, any T: any type that implements T. Both are
-        // handled as the trait itself: calls find the implementation at run time
+      case "Specific": {
+        // specific T: one type known at compile time; handled as the trait itself for now (calls find the implementation at run time)
         string inner = ResolveType(n.Children[0]);
         if (!IsTraitType(inner)) {
-          throw Error($"'{(n.Kind == "Any" ? "any" : "specific")}' applies to a trait, not to {inner}", n);
+          throw Error($"'specific' applies to a trait, not to {inner}", n);
         }
         return inner;
       }
@@ -488,7 +486,7 @@ public sealed partial class CodeGen {
       return false;
     }
     if (from == "null") {
-      return IsNullable(to) || to == "string" || IsTimeType(to) || IsArr(to) || IsClass(to) || to == "Exception" || IsFunType(to);
+      return IsNullable(to) || to is "string" or "string1k" || IsTimeType(to) || IsArr(to) || IsClass(to) || to == "Exception" || IsFunType(to);
     }
     if (to == "Exception" && IsExceptionClass(from)) {
       return true;
@@ -500,8 +498,8 @@ public sealed partial class CodeGen {
       string toBase = BaseOf(to);
       return Assignable(toBase, IsNullable(from) ? BaseOf(from) : from);
     }
-    if (to == "string" && from == "string?") {
-      return true;   // a null string? is "" (spec 7.1)
+    if (to is "string" or "string1k" && from is "string?" or "string1k?") {
+      return true;   // a null string? or string1k? is "" (spec 7.1, 4.5)
     }
     if (IsNullable(from)) {
       return false;
@@ -578,6 +576,9 @@ public sealed partial class CodeGen {
       if (to == "string") {
         return "df_str_lit(\"\", 0)";
       }
+      if (to == "string1k") {
+        return ZeroValue(to);   // a null string1k is "" (spec 4.5)
+      }
       if (IsTimeType(to)) {
         return NullCode(to);
       }
@@ -609,6 +610,13 @@ public sealed partial class CodeGen {
     }
     if (e.Type == "string?" && to == "string") {
       return $"({e.Code}).val";   // a null string? is "" (spec 7.1)
+    }
+    if (e.Type == "string1k?" && to is "string1k" or "string") {
+      // a null string1k? is "" (spec 4.5)
+      return WithTemp(e, temp => Convert(new Expr($"({temp}.has ? {temp}.val : {ZeroValue("string1k")})", "string1k"), to, at));
+    }
+    if (e.Type == "string?" && to == "string1k") {
+      return WithTemp(e, temp => Convert(new Expr($"{temp}.val", "string"), to, at));   // null gives "" (spec 4.5)
     }
     if (IsNullable(e.Type)) {
       throw Error($"this {e.Type} value may be null; unwrap it with '??' or 'enforce'", at);
@@ -908,6 +916,14 @@ public sealed partial class CodeGen {
         }
         return $"({(leftNullable ? leftTemp : rightTemp)}.has && {inner})";
       }));
+    }
+    if (l.Type == "string1k" && r.Type == "string1k") {
+      return $"df_s1k_eq({l.Code}, {r.Code})";   // the values of two string1k? (spec 4.5)
+    }
+    if (l.Type == "string1k" && r.Type == "string" || l.Type == "string" && r.Type == "string1k") {
+      // the value of a string1k? with a string: on the string it converts to (spec 4.5)
+      string ToStr(Expr side) => side.Type == "string1k" ? StrRead(new Expr($"df_s1k_to_str({side.Code})", "string", true)) : side.Code;
+      return $"df_str_eq({ToStr(l)}, {ToStr(r)})";
     }
     if (l.Type == "string" && r.Type == "string") {
       return $"df_str_eq({l.Code}, {r.Code})";

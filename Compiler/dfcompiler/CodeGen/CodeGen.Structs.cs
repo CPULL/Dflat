@@ -342,14 +342,29 @@ public sealed partial class CodeGen {
   }
 
   // ps[2] of an array or a vec of structs, as a place: its fields can be written (ps[2].b = 4)
-  LValueInfo? StructItemLValue(Node index, Scope scope) {
+  // parts: also the tuple items, and the items of a list (v[0].1 = 5, l[2].name = "x": a part of an item is written in place)
+  LValueInfo? StructItemLValue(Node index, Scope scope, bool parts = false) {
     if (index.Children[0].Kind == "GenericRef" || index.Children[1].Kind == "Range") {
       return null;
     }
     var obj = ExprOf(index.Children[0], scope);
+    if (parts && IsMap(obj.Type) && MapValue(obj.Type) is string mapValue && (IsStruct(mapValue) || IsTuple(mapValue))) {
+      // m[k].1 = 5: the value of the key is written in place; a missing key is added with the zero value first, as m[k] += v does (spec 6.6)
+      if (ReadOnlyVariable(index.Children[0], scope) is not null) {
+        throw Error($"'{index.Children[0].Text}' is a read-only reference: its items cannot be changed", index);
+      }
+      NeedMapChunk(obj.Type);
+      string held = NewTemp();
+      string key = NewTemp();
+      string mapSlot = NewTemp();
+      string mapCode = $"(*({{ {CType(obj.Type)} {held} = {NullChecked(obj.Code, obj.Type)}; {MapKeyArg(index.Children[1], scope, MapKey(obj.Type), key, taking: true)}"
+        + MapSlot(held, obj.Type, key, mapSlot, true) + $"{mapSlot}; }}))";
+      return new LValueInfo(mapCode, mapValue, false);
+    }
     bool isVec = IsVec(obj.Type);
-    string? elem = IsArr(obj.Type) ? ArrElem(obj.Type) : isVec ? VecElem(obj.Type) : null;
-    if (elem == null || !IsStruct(elem)) {
+    bool isList = parts && IsList(obj.Type);
+    string? elem = IsArr(obj.Type) ? ArrElem(obj.Type) : isVec ? VecElem(obj.Type) : isList ? ListElem(obj.Type) : null;
+    if (elem == null || !(IsStruct(elem) || parts && IsTuple(elem))) {
       return null;
     }
     if (ReadOnlyVariable(index.Children[0], scope) is not null) {
@@ -361,7 +376,14 @@ public sealed partial class CodeGen {
     string at = NewTemp();
     string slot = isVec ? $"{array}->{VecField(obj.Type, "items")}.p[{at}]" : $"{array}.p[{at}]";
     string length = isVec ? $"{array}->{VecField(obj.Type, "count")}" : $"{array}.len";
-    string holder = isVec ? NullChecked(obj.Code, obj.Type) : obj.Code;
+    string holder = isVec || isList ? NullChecked(obj.Code, obj.Type) : obj.Code;
+    if (isList) {
+      // the node of the item is found by walking the list (spec 6.6)
+      string node = NewTemp();
+      string listCode = $"(*({{ {CType(obj.Type)} {array} = {holder}; df_uns {at} = {IndexValue(position, index)}; "
+        + $"if (!df_idx_ok({array}->{VecField(obj.Type, "count")}, {at}, {fn!.NameConst})) {RaiseJump} {WalkToNode(array, obj.Type, node, at)}&{node}->value; }}))";
+      return new LValueInfo(listCode, elem, false);
+    }
     string code = $"(*({{ {CType(obj.Type)} {array} = {holder}; df_uns {at} = {IndexValue(position, index)}; "
       + $"if (!df_idx_ok({length}, {at}, {fn!.NameConst})) {RaiseJump} &{slot}; }}))";
     return new LValueInfo(code, elem, false);

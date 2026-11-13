@@ -1,0 +1,44 @@
+l1 v1 a2 2
+end of literals
+  end a1
+  end a2
+  end v1
+  end l1
+  end l2
+  end w1
+  end w2
+w3 W3
+end of writes
+  end w3
+  end W3
+[7, 8, 9] [70, 8, 9]
+took r2 2
+  end r1
+1
+  end r2
+popped p2
+  end p1
+end of removals
+  end r3
+  end p2
+c1 C1
+c2
+1
+c2
+c1
+[(Dog { name: c2 }, 1), (Dog { name: c1 }, 3)]
+end of whole
+  end c1
+  end C1
+  end c2
+  end c2
+  end c1
+f1 1
+moved f2
+replaced g1 g2
+end of parts
+  end g2
+  end f1
+  end g1
+  end f2
+---- exit code 0 ----

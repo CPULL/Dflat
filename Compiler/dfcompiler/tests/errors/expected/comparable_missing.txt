@@ -1,0 +1,1 @@
+comparable_missing.df(3): error: class 'Rock' must implement Comparable<Rock>.compareTo

@@ -86,6 +86,7 @@ sealed class ParamSig {
   public Node? Default { get; }
   public bool IsVariadic { get; init; }   // T name...: an arr<T> filled from the extra arguments
   public bool IsGift { get; init; }       // ->T name: the function owns the object it is given
+  public bool IsTupleGift { get; init; }  // ->T name where T is a tuple that owns objects or arrays: a collection of the library takes it (spec 3.2)
   public bool IsImplicitGift { get; init; }   // a plain primary parameter used as a field: given without -> in the call (spec 11.1.1)
   public string? GivenTo { get; init; }    // its class, for the error of a use after the call
   public int Ref { get; init; }           // 0 a copy, 1 a read-only reference, 2 &T name (writable reference, the call writes &x)
@@ -165,7 +166,7 @@ public sealed partial class CodeGen {
   static readonly HashSet<string> UnsignedTypes = new() { "u8", "u16", "u32", "u64" };
   static readonly HashSet<string> RealTypes = new() { "r32", "r64" };
   static readonly HashSet<string> TypeNodeKinds = new() {
-    "Type", "ResolvedType", "Nullable", "TupleType", "FunType", "Pointer", "WritablePointer", "Volatile", "Specific", "Any"
+    "Type", "ResolvedType", "Nullable", "TupleType", "FunType", "Pointer", "WritablePointer", "Volatile", "Specific"
   };
 
   // the keys that Console.readKey gives for the keys without a character (stdlib 2)
@@ -381,6 +382,7 @@ public sealed partial class CodeGen {
     output.Append(classGlobals).Append('\n');
     output.Append(protos).Append('\n');
     output.Append(classCode);
+    output.Append(tupleItemCode);   // the copies and ends of tuple items (CodeGen.TupleArrays.cs)
     output.Append(lambdaHelpers);   // the comparers of sort(lambda) (CodeGen.Functional.cs)
     output.Append(bodies);
     output.Append(main);
@@ -527,6 +529,7 @@ public sealed partial class CodeGen {
         IsWritable = p.Children.Any(child => child.Kind == "ReadWrite"),
         IsVariadic = variadic,
         IsGift = p.Kind == "GiftParam" && (IsClass(paramType) || paramType == "string" || IsArr(paramType) || StructHoldsObjects(paramType)),
+        IsTupleGift = p.Kind == "GiftParam" && TupleHoldsArrays(paramType),
         Ref = reference,
         IsWeak = weakParam,
         Pointer = pointer
@@ -1511,7 +1514,12 @@ public sealed partial class CodeGen {
       if (ClassLValue(target, scope) is LValueInfo classTarget) {
         return classTarget;
       }
-      if (target.Children[0].Kind == "Index" && StructItemLValue(target.Children[0], scope) is LValueInfo item) {
+      if (target.Children[0].Kind == "Index" && StructItemLValue(target.Children[0], scope, true) is LValueInfo item) {
+        if (IsTuple(item.Type)) {
+          // v[0].1 = 5: a part of a tuple item, written in place; the collection owns it as a class owns a field (spec 3.2)
+          int part = TupleFieldIndex(item.Type, target.Text!, target);
+          return new LValueInfo($"{item.Code}.e{part}", TupleElems(item.Type)[part].Type, false, null, true);
+        }
         return StructLValue(item, target, scope);   // ps[2].b = 4 (spec 11.1.5)
       }
       var owner = LValue(target.Children[0], scope);
@@ -1587,6 +1595,12 @@ public sealed partial class CodeGen {
       // in place, cut like a conversion (spec 4.5)
       var added = ExprOf(s.Children[1], scope);
       return "(void)" + SilentCall($"df_s1k_append(&{target.Code}, {StrReadOf(added, s)})", "bool", "StringTruncatedException", s);
+    }
+    if (op == "+=" && target.Type == "string1k?") {
+      // a null string1k? adds to "" (spec 4.5)
+      var added = ExprOf(s.Children[1], scope);
+      string append = SilentCall($"df_s1k_append(&({target.Code}).val, {StrReadOf(added, s)})", "bool", "StringTruncatedException", s);
+      return $"({{ if (!({target.Code}).has) {{ {target.Code} = {ZeroValue("string1k?")}; ({target.Code}).has = true; }} (void){append}; }})";
     }
     if (op == "+=" && target.Type == "string" && StrAppendAssign(targetNode, s.Children[1], scope, s) is string appended) {
       return appended;   // always in place
@@ -2298,12 +2312,19 @@ public sealed partial class CodeGen {
     if (r.Type == "string1k") {
       r = new Expr(StrRead(new Expr($"df_s1k_to_str({r.Code})", "string", true)), "string");
     }
+    if (CompareObjects(op, l, r, at) is Expr ordered) {
+      return ordered;   // < <= > >= on objects with the trait Comparable (spec 11.2.1)
+    }
     if ((IsSetValue(l.Type) || IsSetValue(r.Type)) && op is not ("==" or "!=")) {
       throw Error($"no operator works directly on a value of a set: read it with if k is T x {{ }} or k is ? {{ }} (spec 11.3.6.1)", at);
     }
     // string building
     if (op == "+" && (l.Type is "string" or "char" || r.Type is "string" or "char")) {
       return new Expr($"df_str_concat({StrReadOf(l, at)}, {StrReadOf(r, at)})", "string", true);
+    }
+    if (op is "<" or "<=" or ">" or ">=" && l.Type == "string" && r.Type == "string") {
+      // by bytes, the same as code point order in UTF-8 (spec 6.2.2)
+      return new Expr($"(df_str_order({StrReadOf(l, at)}, {StrReadOf(r, at)}) {op} 0)", "bool");
     }
     l = StrReadExpr(l);
     r = StrReadExpr(r);
@@ -2622,7 +2643,17 @@ public sealed partial class CodeGen {
     if (callee.Kind == "Member" && IsValueReceiver(callee.Children[0], scope)) {
       var receiver = ExprOf(callee.Children[0], scope);
       if (IsCountedType(receiver.Type)) {
-        throw Error($"this call gives a counted {CountedBase(receiver.Type)}: keep it in a counted variable (@{CountedBase(receiver.Type)} x = ...) to use it (spec 12.7)", n);
+        string countedClass = CountedBase(receiver.Type);
+        if (callee.Children[0].Kind != "Call" || LibraryCode) {
+          throw Error($"this call gives a counted {countedClass}: keep it in a counted variable (@{countedClass} x = ...) to use it (spec 12.7)", n);
+        }
+        // make().bark(): the usage lives for the statement; without a variable there is no lock, so only what reads (spec 12.7)
+        var direct = IsClass(countedClass) ? LookupMethods(ObjInfo(countedClass), callee.Text!) : new List<FunSig>();
+        if (direct.Count > 0 && !direct.All(f => f.IsUnrestricted || f.IsStatic) && callee.Text != "getIterator") {
+          throw Error($"'{callee.Text}' is not unrestricted: a counted {countedClass} used directly from a call is read-only; keep it in a counted variable "
+            + $"(&@{countedClass} x = ...) to call it{DefinedAt(direct, callee.Text!)} (spec 12.7)", n);
+        }
+        receiver = CountedResultUse(receiver);
       }
       CheckReadOnlyCall(callee.Children[0], receiver, callee.Text!, scope, n);
       CheckUnrestrictedValueCall(callee.Children[0], receiver, callee.Text!, scope, n);   // spec 1.6.2
@@ -2740,6 +2771,9 @@ public sealed partial class CodeGen {
       return MapLen(viewMap);   // m.keys.len: the map itself, no view object (CodeGen.Map.cs)
     }
     var obj = TempStruct(TempTuple(TempObject(ExprOf(n.Children[0], scope)), n.Children[0]));   // Dog("a").name, f().0: the new value ends with the statement
+    if (IsCountedType(obj.Type) && n.Children[0].Kind == "Call" && !LibraryCode) {
+      obj = CountedResultUse(obj);   // make().name: the usage lives for the statement (spec 12.7)
+    }
     if (IsStruct(obj.Type)) {
       return StructMember(obj, n);   // s.x (spec 11.1.5)
     }

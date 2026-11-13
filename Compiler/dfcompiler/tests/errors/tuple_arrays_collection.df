@@ -1,4 +1,0 @@
-namespace tuple_arrays_collection
-fun main() {
-  vec<(arr<i32>, i32)> pairs = []
-}

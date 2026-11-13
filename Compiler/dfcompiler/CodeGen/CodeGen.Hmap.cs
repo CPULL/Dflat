@@ -480,7 +480,7 @@ public class hset<T> : SetCollection<T> {
 
   bool HmapValueBuilt(string value) {
     string inner = BaseOf(value);
-    return IsInt(inner) || inner is "bool" or "char" or "r32" or "r64" || IsTimeType(inner) || IsEnum(inner) || value == "string" || IsMapObjectValue(value) || IsFunType(value);
+    return IsInt(inner) || inner is "bool" or "char" or "r32" or "r64" || IsTimeType(inner) || IsEnum(inner) || value == "string" || IsMapObjectValue(value) || IsFunType(value) || IsArr(value) || IsMapValueItem(value);
   }
 
   // the C type and the width in bits of the value of a native key (an enum: its value type)

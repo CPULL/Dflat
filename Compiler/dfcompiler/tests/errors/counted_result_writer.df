@@ -1,0 +1,12 @@
+namespace counted_result_writer
+public class Dog(string n) {
+  public string name = n
+  public fun rename(string to) { name = to }
+}
+fun @Dog make() {
+  @Dog d = @Dog("a")
+  return d
+}
+fun main() {
+  make().rename("b")
+}

@@ -7,7 +7,7 @@ namespace dfcompiler;
 // strings and objects (= and ! give the same result), and they end with the struct. Every struct variable owns its struct, except a
 // plain parameter (a read-only lend) and a & parameter (the caller's struct). A value that goes into an owner is new (a creation, the
 // result of a function, ->s, s!) or it is cloned. The C helpers: df_sclone_s_Name (a copy with its own strings and objects) and
-// df_sdrop_s_Name (ends them and leaves the fields empty). Not covered yet: collections and tuples of such structs (an error).
+// df_sdrop_s_Name (ends them and leaves the fields empty). arr, vec and list of such structs own them (CodeGen.TupleArrays.cs); tuples of them are not built yet (an error).
 public sealed partial class CodeGen {
   readonly HashSet<string> structCloneHelpers = new();
   readonly HashSet<string> structDropHelpers = new();
@@ -79,7 +79,14 @@ public sealed partial class CodeGen {
   // a declaration of a struct that holds objects: it owns them and they end with the scope. The type is written, or it is var with a
   // creation (Vec3(...)) or a call of functions of the program that return such a struct
   bool IsStructObjDecl(Node decl) {
-    if (LibraryCode || decl.Children.Any(child => child.Kind == "Mods")) {
+    if (LibraryCode) {
+      // the collections of the library: an item taken out of them (T gone = ->items[i], T gone = takeAt(i)) ends with the local
+      var taken = decl.Children.FirstOrDefault(child => child.Kind == "Init")?.Children[0];
+      return taken is { Kind: "Gift" } or { Kind: "Call", Children: [{ Text: "takeAt" }, ..] }
+        && decl.Children.FirstOrDefault(child => TypeNodeKinds.Contains(child.Kind)) is Node takenNode
+        && TryResolveType(takenNode) is string takenType && StructHoldsObjects(takenType);
+    }
+    if (decl.Children.Any(child => child.Kind == "Mods")) {
       return false;
     }
     var typeNode = decl.Children.FirstOrDefault(child => TypeNodeKinds.Contains(child.Kind));
@@ -149,16 +156,24 @@ public sealed partial class CodeGen {
     string? elem = IsArr(type) ? ArrElem(type) : IsVec(type) ? VecElem(type) : IsList(type) ? ListElem(type) : null;
     var parts = new List<string>();
     if (elem != null) {
+      if (StructHoldsObjects(elem)) {
+        CheckStructItems(elem, at);   // arr, vec and list own their struct items as they own tuples (CodeGen.TupleArrays.cs)
+        return;
+      }
       parts.Add(elem);
     } else if (IsMap(type) || IsSet(type)) {
       if (!IsCompositeKey(MapKey(type))) {
         parts.Add(MapKey(type));   // a struct key keeps a clone and ends it (CodeGen.CompositeKeys.cs)
       }
-      if (IsMap(type)) {
-        parts.Add(MapValue(type));
+      if (IsMap(type) && !StructHoldsObjects(MapValue(type))) {
+        parts.Add(MapValue(type));   // a struct value is owned by the map (CodeGen.Map.cs)
       }
     } else if (IsTuple(type) || IsMulti(type)) {
-      parts.AddRange(TupleElems(type).Select(item => item.Type));
+      // a tuple owns its struct parts as it owns objects (CodeGen.TupleArrays.cs); the parts inside them are checked
+      parts.AddRange(TupleElems(type).Where(item => !StructHoldsObjects(item.Type)).Select(item => item.Type));
+      foreach (var item in TupleElems(type).Where(item => StructHoldsObjects(item.Type))) {
+        CheckStructItems(item.Type, at);
+      }
     }
     foreach (var part in parts) {
       if (StructHoldsObjects(part)) {

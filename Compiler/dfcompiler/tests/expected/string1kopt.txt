@@ -1,0 +1,39 @@
+null
+[null]
+true
+c=[]
+s=[]
+d=[]
+dflt
+true
+hi
+hi there
+true
+true
+hi there
+hi there
+null
+opt
+opt
+hi there
+true
+true
+true
+null
+lbl
+Rec { tag: null, n: 3 }
+Rec { tag: t, n: 3 }
+[null, x]
+8
+null
+null
+z
+set
+set
+SET
+
+1023
+truncated
+set
+(null, 1)
+---- exit code 0 ----

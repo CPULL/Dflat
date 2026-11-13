@@ -1,0 +1,1 @@
+compare_not_comparable.df(4): error: the class Rock does not define how to be compared with other objects, consider implementing the Comparable trait for it (spec 11.2.1)

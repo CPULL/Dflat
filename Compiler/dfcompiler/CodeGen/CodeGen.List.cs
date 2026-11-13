@@ -59,6 +59,9 @@ public sealed partial class CodeGen {
     if (IsArr(elem)) {
       return $"{ArrDropHelper(elem)}({slot}); {slot} = {ZeroValue(elem)}; ";   // spec 6.8.1
     }
+    if (ItemOwnsParts(elem)) {
+      return $"{TupleItemDropHelper(elem)}({slot}); {slot} = {ZeroValue(elem)}; ";   // spec 3.2
+    }
     if (!IsClass(elem)) {
       return "";
     }
@@ -99,7 +102,7 @@ public sealed partial class CodeGen {
       if (IsClass(elem) && !assigned.Fresh && assigned.Type != "null" && s.Line < LibraryLine) {
         throw Error("a collection owns its items: move an existing object in with ->x, or put a new one", s);
       }
-      string value = StrItemAs(assigned, elem, Convert(assigned, elem, s));
+      string value = StrItemAs(assigned, elem, Convert(assigned, elem, s), s.Children[1]);
       if (IsArr(elem)) {
         string incoming = NewTemp();
         return head + $"{CType(elem)} {incoming} = {value}; " + check + WalkToNode(list, obj.Type, node, position) + ReplaceArrItem(elem, slot, incoming) + "})";
@@ -130,7 +133,7 @@ public sealed partial class CodeGen {
         throw Error("a list owns its items: put a new object in the literal, or move one in with ->x", item);
       }
       string node = NewTemp();
-      sb.Append("{ ").Append(NewListNode(type, node, StrItemAs(value, elem, Convert(value, elem, item)))).Append(AppendListNode(held, type, node)).Append("} ");
+      sb.Append("{ ").Append(NewListNode(type, node, StrItemAs(value, elem, Convert(value, elem, item), item))).Append(AppendListNode(held, type, node)).Append("} ");
     }
     sb.Append($"{held}; }})");
     return new Expr(sb.ToString(), type, true);
@@ -182,6 +185,9 @@ public sealed partial class CodeGen {
     if (IsFunType(ListElem(cls.Name))) {
       sb.Append("    df_fn_release(node->value);\n");   // spec 13.3.5
     }
+    if (ItemOwnsParts(ListElem(cls.Name))) {
+      sb.Append($"    {TupleItemDropHelper(ListElem(cls.Name))}(node->value);\n");   // spec 3.2
+    }
     sb.Append("    free(node);\n    node = after;\n  }\n");
     sb.Append($"  self->{first} = NULL;\n  self->{VecField(cls.Name, "last")} = NULL;\n  self->{VecField(cls.Name, "count")} = 0;\n");
   }
@@ -197,13 +203,16 @@ public sealed partial class CodeGen {
     if (name == "fill" && IsClass(elem) && args.Count > 0 && args[^1].Kind != "Null") {
       throw Error("fill would put one object in every item: a class instance is not allowed, fill(null) is", at);
     }
+    if (name == "fill" && ItemOwnsParts(elem) && at.Line < LibraryLine) {
+      throw Error("fill would put the parts of one tuple or struct in every item: set the items one by one (spec 3.2, 11.1.5.3)", at);
+    }
     if (name == "fill" && IsArr(elem) && at.Line < LibraryLine) {
       throw Error("fill would put one array in every item: set the items one by one (spec 6.8.1)", at);
     }
     if (name is "sort" or "sortUnstable") {
       // a bottom-up merge sort that relinks the nodes (spec 6.6): the items do not move
       var byFunction = SortByFunction(elem, args, scope);   // sort(lambda) (spec 6.6)
-      string compare = byFunction?.Compare ?? CompareFunction(elem) ?? throw Error($"{name} cannot order {elem} yet (objects and tuples need a comparer, or give a lambda)", at);
+      string compare = byFunction?.Compare ?? CompareFunction(elem) ?? throw Error($"{name} cannot order {DisplayName(elem)} yet: give a lambda (spec 6.6)", at);
       string descending = byFunction != null ? "false" : SortDescending(name, args, scope, at);
       NeedChunk("sort");
       string held = NewTemp();
@@ -211,7 +220,7 @@ public sealed partial class CodeGen {
       string first = $"{held}->{VecField(list.Type, "first")}";
       string code = $"({{ {CType(list.Type)} {held} = {NullChecked(list.Code, list.Type)}; {LockCheck(held, list.Type)}{byFunction?.Before}"
         + $"{first} = ({nodeType}*)df_list_sort((df_lnode*){first}, {held}->{VecField(list.Type, "count")}, offsetof({nodeType}, value), {compare}, {descending}, "
-        + $"(df_lnode**)&{held}->{VecField(list.Type, "last")}); {byFunction?.After}}})";
+        + $"(df_lnode**)&{held}->{VecField(list.Type, "last")}); {byFunction?.After}{(byFunction == null && OrderUsesObjects(elem) ? CompareRaise() : "")}}})";
       return new Expr(code, "void");
     }
     if (name == "swap") {
@@ -248,7 +257,7 @@ public sealed partial class CodeGen {
     // an item that goes into the list (its own copy of a string), and one that is only compared
     string Item(int index) {
       var value = ExprOf(args[index], scope, elem);
-      return StrItemAs(value, elem, Convert(value, elem, args[index]));
+      return StrItemAs(value, elem, Convert(value, elem, args[index]), args[index]);
     }
 
     string ItemRead(int index) {
@@ -579,7 +588,7 @@ public sealed partial class CodeGen {
   Expr ListAddCollection(Expr list, Node arg, string sourceType, Scope scope, Node at) {
     string elem = ListElem(list.Type);
     bool moving = arg.Kind == "Gift";
-    bool cloning = (IsClass(elem) || IsArr(elem)) && !moving;   // a plain add(other) clones the object items (spec 6.6, 12.6) and the arrays (6.8.1)
+    bool cloning = (IsClass(elem) || IsArr(elem) || ItemOwnsParts(elem)) && !moving;   // a plain add(other) clones the object items (spec 6.6, 12.6) and the arrays (6.8.1)
     cloneUsed |= cloning;
     var source = ExprOf(arg, scope, sourceType);   // a literal takes the type of the source (point 53)
     string held = NewTemp();
@@ -603,7 +612,7 @@ public sealed partial class CodeGen {
       sb.Append(ForEachSourceItem(sourceType, s, "0", SourceLength(sourceType, s), item => {
         string node = NewTemp();
         string take = moving && (IsClass(elem) || elem == "string") ? $"{item} = NULL; " : moving && (IsArr(elem) || elem == "string?" || IsFunType(elem)) ? $"{item} = {ZeroValue(elem)}; " : "";
-        string value = cloning ? CloneValue(item, elem, at) : IsStrItem(elem) && !moving ? StrItemDup(elem, item) : item;
+        string value = cloning ? (ItemOwnsParts(elem) ? $"{TupleItemDupHelper(elem, at)}({item})" : CloneValue(item, elem, at)) : IsStrItem(elem) && !moving ? StrItemDup(elem, item) : item;
         return NewListNode(list.Type, node, value) + take + AppendListNode(held, list.Type, node);
       }));
     }

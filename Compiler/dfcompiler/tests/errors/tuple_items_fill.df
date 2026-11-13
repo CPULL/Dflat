@@ -1,0 +1,9 @@
+namespace tuple_items_fill
+import Root
+public class Dog(string n) {
+  public string name = n
+}
+fun main() {
+  arr<(Dog, i32)> a = [(Dog("a"), 1), (Dog("b"), 2)]
+  a.fill((Dog("c"), 3))
+}

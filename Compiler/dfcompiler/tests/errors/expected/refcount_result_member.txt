@@ -1,1 +1,1 @@
-refcount_result_member.df(6): error: this call gives a counted Dog: keep it in a counted variable (@Dog x = ...) to use it (spec 12.7)
+refcount_result_member.df(6): error: 'bark' is not unrestricted: a counted Dog used directly from a call is read-only; keep it in a counted variable (&@Dog x = ...) to call it; 'bark' is defined at refcount_result_member.df(3) (spec 12.7)

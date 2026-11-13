@@ -1,0 +1,1 @@
+counted_result_writer.df(11): error: 'rename' is not unrestricted: a counted Dog used directly from a call is read-only; keep it in a counted variable (&@Dog x = ...) to call it; 'rename' is defined at counted_result_writer.df(4) (spec 12.7)

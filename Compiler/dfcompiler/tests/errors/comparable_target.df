@@ -1,0 +1,6 @@
+// Comparable<T>: T is the class, a parent class or one of its traits (spec 11.2.1)
+import Root
+class Other { }
+class Rock : Comparable<Other> {
+  replace fun int compareTo(Other o) { return 0 }
+}

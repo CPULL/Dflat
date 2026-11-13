@@ -1,0 +1,4 @@
+// < on objects needs the trait Comparable (spec 11.2.1)
+import Root
+class Rock { }
+Console.log(Rock() < Rock())

@@ -1,0 +1,1 @@
+string1kopt_fixed.df(3): error: a struct<fixed> holds only plain values (numbers, bool, char, addr, enums, bitfields, date, time, clock, buffers and structs with the same tag), not string1k? (spec 11.1.5.6)

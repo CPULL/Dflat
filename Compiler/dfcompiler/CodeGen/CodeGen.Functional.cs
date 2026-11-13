@@ -92,7 +92,8 @@ public sealed partial class CodeGen {
 
   // the end of one item of a block that is being filled (an exception stops the filling)
   string ItemEnd(string elem, string item) =>
-    IsStrItem(elem) ? StrItemFree(elem, item) : IsClass(elem) ? $"if ({item} != NULL) {{ df_drop((void*){item}); }} " : "";
+    IsStrItem(elem) ? StrItemFree(elem, item) : IsClass(elem) ? $"if ({item} != NULL) {{ df_drop((void*){item}); }} "
+      : IsArr(elem) ? $"{ArrDropHelper(elem)}({item}); " : "";
 
   // the copy of an item kept by filter
   string CopiedItem(string elem, string item, Node at) {
@@ -102,7 +103,15 @@ public sealed partial class CodeGen {
     if (IsStrItem(elem)) {
       return StrItemDup(elem, item);
     }
-    throw NotSupported($"filter on items of type {elem} (objects and arrays need a copy, spec 6.6)", at);
+    if (IsClass(elem) && !IsCountedType(elem) && !boxInner.ContainsKey(elem) || IsArr(elem)) {
+      // the new collection owns clones of the objects and arrays it keeps (spec 6.6, 12.6)
+      if (IsClass(elem) && classes.TryGetValue(elem, out var cls) && NotClonableReason(cls) is string reason) {
+        throw Error($"filter copies the items it keeps, and {DisplayName(elem)} cannot be cloned: {reason} (spec 6.6, 12.6)", at);
+      }
+      cloneUsed = true;
+      return CloneValue(item, elem, at);
+    }
+    throw NotSupported($"filter on items of type {DisplayName(elem)} (spec 6.6)", at);
   }
 
   // a new collection of the kind of the source with items of type elem, filled by the C 'fill' (which calls add(value) for each item); the
@@ -125,7 +134,7 @@ public sealed partial class CodeGen {
     string block = NewTemp();
     string count = NewTemp();
     string k = NewTemp();
-    bool itemsEnd = IsStrItem(elem) || IsClass(elem);
+    bool itemsEnd = IsStrItem(elem) || IsClass(elem) || IsArr(elem);
     string partial = (itemsEnd ? $"for (df_uns {k} = 0; {k} < {count}; {k}++) {{ {ItemEnd(elem, $"{block}[{k}]")}}} " : "") + $"free({block}); ";
     sb.Append($"{elemType}* {block} = ({elemType}*)df_calloc({length} > 0 ? {length} : 1, sizeof({elemType})); df_uns {count} = 0; ");
     sb.Append(fill(value => $"{block}[{count}++] = {value}; ", partial));

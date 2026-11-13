@@ -1,3 +1,0 @@
-namespace struct_collection_objects
-struct A { string s }
-var v = vec<A>()

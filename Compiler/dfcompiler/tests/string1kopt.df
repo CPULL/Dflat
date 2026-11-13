@@ -1,0 +1,86 @@
+// string1k? (spec 4.5): null is not ""; conversions with string, string1k and string?, ==, ??, ??=, += on null, toCStr() of null, .hash, fields, structs, arrays, tuples, results
+namespace string1kopt
+import Root
+class Box { public string1k? label }
+struct Rec { string1k? tag, i32 n }
+string1k? a = null
+Console.log(a)
+Console.log($"[{a}]")
+Console.log(a == null)
+string1k c = a
+Console.log($"c=[{c}]")
+string s = a
+Console.log($"s=[{s}]")
+string1k d = null
+Console.log($"d=[{d}]")
+Console.log(a ?? "dflt")
+addr p = a.toCStr()
+Console.log(p == null)
+a += "hi"
+Console.log(a)
+a += " there"
+Console.log(a)
+Console.log(a == "hi there")
+Console.log(a != null)
+p = a.toCStr()
+Console.log(string(p))
+string1k? b = a
+Console.log(b)
+string? os = null
+string1k? fromOs = os
+Console.log(fromOs)
+os = "opt"
+fromOs = os
+Console.log(fromOs)
+string1k fromOs2 = os
+Console.log(fromOs2)
+string? back = a
+Console.log(back)
+string1k k = "hi there"
+string ks = "hi there"
+Console.log(k.hash == ks.hash)
+Console.log(a.hash == ks.hash)
+string1k? n2 = null
+string? n3 = null
+Console.log(n2.hash == n3.hash)
+Box bx = Box()
+Console.log(bx.label)
+bx.label = "lbl"
+Console.log(bx.label)
+Rec r = Rec(null, 3)
+Console.log(r)
+r.tag = "t"
+Console.log(r)
+arr<string1k?> items = [null, "x"]
+Console.log(items)
+Console.log(a?.len)
+Console.log(n2?.len)
+fun string1k? f(string1k? v) {
+  return v
+}
+Console.log(f(null))
+Console.log(f("z"))
+a = null
+a ??= "set"
+Console.log(a)
+a ??= "no"
+Console.log(a)
+Console.log(a?.toUpper())
+string1k? n = null
+Console.log(n?.toUpper())
+string big = "ab".padRight(1500, 'x')
+string1k? cut = null
+cut += big
+Console.log(cut?.len)
+fun check() {
+  string1k? z = null
+  z += "é".padRight(1100, 'é')
+  catch StringTruncatedException ex {
+    Console.log("truncated")
+  }
+}
+check()
+var v = a
+Console.log(v)
+(string1k?, i32) t = (null, 1)
+Console.log(t)

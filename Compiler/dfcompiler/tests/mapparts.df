@@ -1,0 +1,44 @@
+// writing one part of a map value (spec 3.2, 6.6): m[k].1 = 5, m[k].dog = Dog("x"); the value is written in place, a replaced object
+// ends; a missing key is added with the zero value first, as m[k] += v does
+namespace mapparts
+import Root
+public class Dog(string name) {
+  public string name = name
+} atEnd {
+  Console.log("  end " + name)
+}
+struct Pet { Dog dog, string tag, i32 age }
+struct Pos { i32 x, i32 y }
+fun run() {
+  map<string, (i32, i32)> m = ["a": (1, 2)]
+  m["a"].1 = 5
+  m["a"].0 += 10
+  m["b"].1 = 7
+  Console.log(m)
+  hmap<i32, Pos> h = [1: Pos(1, 2)]
+  h[1].y = 9
+  h[1].x++
+  Console.log($"{h[1].x} {h[1].y}")
+  map<string, (Dog, i32)> d = ["k": (Dog("d1"), 1)]
+  d["k"].0 = Dog("d2")
+  d["k"].1 = 4
+  Console.log($"{d["k"].0.name} {d["k"].1}")
+  map<i32, Pet> p = [1: Pet(Dog("p1"), "a", 1)]
+  p[1].dog = Dog("p2")
+  p[1].tag = "b"
+  p[1].age += 2
+  Console.log($"{p[1].dog.name} {p[1].tag} {p[1].age}")
+  Console.log("end of run")
+}
+run()
+fun nullables() {
+  map<i32, (i32, i32)?> m = [1: (1, 2), 2: null]
+  m[3] = (5, 6)
+  m[1] = null
+  Console.log($"{m[1] == null} {m[2] == null} {m[3] == null} {m[9] == null}")
+  Console.log(m)
+  hmap<string, (string, i32)?> h = ["a": ("x", 1)]
+  h["b"] = null
+  Console.log($"{h["a"] == null} {h["b"] == null} {h.len}")
+}
+nullables()

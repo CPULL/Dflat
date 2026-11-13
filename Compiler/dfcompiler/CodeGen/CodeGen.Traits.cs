@@ -385,7 +385,7 @@ public sealed partial class CodeGen {
         }
         if (implementation == null) {
           string shown = method.Name[(method.Name.IndexOf('.') + 1)..];
-          throw Error($"class '{cls.Name}' must implement {trait.Name}.{(shown.StartsWith(ImplPrefix) ? shown[ImplPrefix.Length..] : shown)}", cls.Node);
+          throw Error($"class '{cls.Name}' must implement {DisplayName(trait.Name)}.{(shown.StartsWith(ImplPrefix) ? shown[ImplPrefix.Length..] : shown)}", cls.Node);
         }
         methods.Add(implementation);
       }

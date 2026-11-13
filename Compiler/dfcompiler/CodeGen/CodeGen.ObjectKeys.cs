@@ -43,6 +43,9 @@ public sealed partial class CodeGen {
     sb.Append("static void df_key_added(void* o) {\n  if (o == NULL) {\n    return;\n  }\n  df_uns* uses = df_key_field(o, 0);\n  if (*uses == 0) {\n    *df_key_field(o, 1) = df_hash_obj(o);\n  }\n  *uses += 1;\n}\n\n");
     sb.Append("/* the default order of classes (spec 6.2.2): by hash, the sort key; the same hash is the same key */\n");
     sb.Append("static int df_bt_cmp_same(df_bt_kw a, df_bt_kw b) {\n  (void)a;\n  (void)b;\n  return 0;\n}\n\n");
+    sb.Append("/* the keys of a Comparable class (spec 6.8.4.1): their compareTo; an exception it raises is dropped */\n");
+    sb.Append("static int df_bt_cmp_objc(df_bt_kw a, df_bt_kw b) {\n  int c = df_obj_cmp((const void*)(uintptr_t)a, (const void*)(uintptr_t)b);\n"
+      + "  if (df_cmp_err != NULL) {\n    df_exc_release(df_cmp_err);\n    df_cmp_err = NULL;\n  }\n  return c;\n}\n\n");
     sb.Append("static df_uns df_hk_obj(const void* key) {\n  return (df_uns)((const uint64_t*)key)[0];\n}\n\n");
     sb.Append("static bool df_hk_obj_eq(const void* a, const void* b) {\n  return ((const uint64_t*)a)[0] == ((const uint64_t*)b)[0];\n}\n\n");
     arrayCode.Append(sb);

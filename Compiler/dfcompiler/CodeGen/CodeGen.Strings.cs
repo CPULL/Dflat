@@ -121,8 +121,9 @@ public sealed partial class CodeGen {
   }
 
   // the value of an item of a collection (spec 4): its own copy of the string, in its smallest form
-  string StrItemAs(Expr value, string elemType, string converted) =>
-    IsFunType(elemType) ? FnOwned(value with { Code = converted })
+  string StrItemAs(Expr value, string elemType, string converted, Node? node = null) =>
+    IsTupleItem(elemType) ? TupleItemAs(value, node, elemType, converted)   // spec 3.2
+    : IsFunType(elemType) ? FnOwned(value with { Code = converted })
     : elemType == "string?" ? OptStrItem(value, converted)
     : elemType != "string" || IsStaticStr(converted) ? converted : $"df_str_item({converted}, {FreshCode(value, converted)})";
 
@@ -161,20 +162,28 @@ public sealed partial class CodeGen {
     : targetType != "string" || FreshCode(value, converted) == "true" ? converted : $"df_str_dup({converted})";
 
   // items that own a string: string and string? (spec 4, 7.1)
-  static bool IsStrItem(string elem) => elem is "string" or "string?" || IsFunType(elem);   // a function value: a usage (spec 13.3.5)
+  // (a function value: a usage, spec 13.3.5; a tuple that owns objects or arrays, spec 3.2)
+  bool IsStrItem(string elem) => elem is "string" or "string?" || IsFunType(elem) || IsTupleItem(elem);
 
   // the copy of an item that a new owner keeps
-  static string StrItemDup(string elem, string item) =>
-    elem == "string" ? $"df_str_dup({item})" : elem == "string?" ? $"df_opt_str_dup({item})" : IsFunType(elem) ? $"df_fn_retain({item})" : item;
+  string StrItemDup(string elem, string item) =>
+    elem == "string" ? $"df_str_dup({item})" : elem == "string?" ? $"df_opt_str_dup({item})" : IsFunType(elem) ? $"df_fn_retain({item})"
+    : IsTupleItem(elem) ? $"{TupleItemDupHelper(elem)}({item})" : item;
 
   // the end of the string an item holds
-  static string StrItemFree(string elem, string item) =>
-    elem == "string" ? $"df_str_free({item}); " : elem == "string?" ? $"df_str_free(({item}).val); " : IsFunType(elem) ? $"df_fn_release({item}); " : "";
+  string StrItemFree(string elem, string item) =>
+    elem == "string" ? $"df_str_free({item}); " : elem == "string?" ? $"df_str_free(({item}).val); " : IsFunType(elem) ? $"df_fn_release({item}); "
+    : IsTupleItem(elem) ? $"{TupleItemDropHelper(elem)}({item}); " : "";
 
   // the item takes a value it owns; the string it held ends
-  static string StrItemPut(string elem, string slot, string value) =>
-    elem == "string" ? $"df_str_put(&{slot}, {value}, true);" : elem == "string?" ? $"df_opt_str_set(&{slot}, {value});"
-    : IsFunType(elem) ? $"df_fn_set(&{slot}, {value});" : $"{slot} = {value};";
+  string StrItemPut(string elem, string slot, string value) {
+    if (ItemOwnsParts(elem)) {   // also in the library: its writes move an item in or write the default (clear)
+      string old = NewTemp();
+      return $"{{ {CType(elem)} {old} = {slot}; {slot} = {value}; {TupleItemDropHelper(elem)}({old}); }}";
+    }
+    return elem == "string" ? $"df_str_put(&{slot}, {value}, true);" : elem == "string?" ? $"df_opt_str_set(&{slot}, {value});"
+      : IsFunType(elem) ? $"df_fn_set(&{slot}, {value});" : $"{slot} = {value};";
+  }
 
   // the end of a string variable (its implicit atEnd)
   static Node StrDropNode(string name, Node at) {

@@ -162,6 +162,16 @@ static inline df_uns df_hash_w64(uint64_t v) {
 #endif
 }
 
+/* string1k (spec 4.5): the same hash as the string with its text */
+static df_uns df_hash_s1k(df_s1k s) {
+  uint64_t h = df_rapidhash(s.b, (size_t)df_s1k_bytes(&s));
+#if DF_UNS_BITS == 32
+  return (df_uns)((h >> 32) ^ (uint32_t)h);
+#else
+  return (df_uns)h;
+#endif
+}
+
 static df_uns df_hash_str(df_string s) {
   df_sv v = df_view(s);
   uint64_t h = df_rapidhash(v.p, (size_t)v.len);

@@ -1,0 +1,126 @@
+// default order and Comparable (spec 6.2.2, 6.6, 11.2.1): sort of objects, nullable values, tuples, structs, reals and strings;
+// < <= > >= through compareTo; the most specific compareTo; a trait as T; type name then address without Comparable; exceptions in sort; Comparable keys
+namespace comparable
+import Root
+class Animal : Comparable {
+  public string name = ""
+  replace fun int compareTo(Animal other) {
+    if other == null { return 1 }
+    return (i32)name.len - (i32)other.name.len
+  }
+}
+class Dog : Animal {
+  public i32 age = 0
+}
+fun ->Animal an(string n) {
+  Animal a = Animal()
+  a.name = n
+  return ->a
+}
+fun ->Dog dg(string n) {
+  Dog d = Dog()
+  d.name = n
+  return ->d
+}
+class Rock(i32 w) {
+  public i32 w = w
+}
+vec<Animal> zoo = [an("zebra"), dg("bo"), an("cat")]
+zoo.sort()
+for a in zoo { Console.log(a.name) }
+Console.log(an("a") < an("b"))
+Console.log(dg("x") >= an("x"))
+Console.log(an("a") > null)
+vec<Rock> rocks = [Rock(1), Rock(2), Rock(3)]
+rocks.sort()
+Console.log(rocks.len)
+arr<i32?> ns = [3, null, 1]
+ns.sort()
+Console.log(ns)
+vec<(string, i32)> ts = [("b", 2), ("a", 9), ("b", 1)]
+ts.sort()
+Console.log(ts)
+arr<r64> rs = [1.0, -1.0 / 0.0, 0.0 / 0.0, 1.0 / 0.0]
+rs.sort()
+Console.log(rs)
+Console.log(rs[3])
+arr<string> ss = ["é", "e", "z", "Z"]
+ss.sort()
+Console.log(ss)
+Console.log(ss[3])
+list<Animal> la = [an("q"), an("b")]
+la.sort(SortDirection.DESC)
+for a in la { Console.log(a.name) }
+class Beast : Comparable {
+  public i32 rank = 0
+  replace fun int compareTo(Beast other) {
+    Console.log("  Beast.compareTo")
+    if other == null { return 1 }
+    return rank - other.rank
+  }
+}
+class Hound : Beast, Comparable<Hound> {
+  replace fun int compareTo(Hound other) {
+    Console.log("  Hound.compareTo")
+    if other == null { return 1 }
+    return other.rank - rank
+  }
+}
+fun ->Beast be(i32 r) {
+  Beast a = Beast()
+  a.rank = r
+  return ->a
+}
+fun ->Hound hd(i32 r) {
+  Hound d = Hound()
+  d.rank = r
+  return ->d
+}
+Console.log(hd(1) < hd(2))
+Console.log(hd(1) < be(2))
+Console.log(be(1) < hd(2))
+trait Weighted { }
+class Box : Weighted, Comparable<Weighted> {
+  public i32 w = 0
+  replace fun int compareTo(Weighted other) { return 0 }
+}
+Console.log(Box() <= Box())
+class Thing { }
+class Stone : Thing { }
+class Pebble : Thing { }
+vec<Thing> things = [Stone(), Pebble(), Stone(), Pebble()]
+things.sort()
+Console.log(things)
+class Bad : Comparable {
+  replace fun int compareTo(Bad other) {
+    throw InvalidCastException("no order")
+  }
+}
+fun trySort() {
+  vec<Bad> bads = [Bad(), Bad()]
+  bads.sort()
+  Console.log("not here")
+  catch InvalidCastException ex {
+    Console.log("caught " + ex.message)
+  }
+}
+trySort()
+struct P { i32 x, r64 s }
+arr<P> ps = [P(2, 0.5), P(1, 9.0), P(1, 2.0)]
+ps.sort()
+Console.log(ps)
+class Key : Keyable, Comparable {
+  public i32 k = 0
+  replace fun int compareTo(Key other) { return k - other.k }
+}
+fun ->Key key(i32 v) {
+  Key x = Key()
+  x.k = v
+  return ->x
+}
+map<Key, string> km = []
+km[key(3)] = "three"
+km[key(1)] = "one"
+km[key(2)] = "two"
+for (Key k, string v) in km { Console.log(v) }
+Console.log(km[key(2)])

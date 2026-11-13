@@ -1,0 +1,13 @@
+[a: (11, 5), b: (0, 7)]
+2 9
+  end d1
+d2 4
+  end p1
+p2 b 3
+end of run
+  end p2
+  end d2
+true true false true
+[1: null, 2: null, 3: (5, 6)]
+false true 2
+---- exit code 0 ----

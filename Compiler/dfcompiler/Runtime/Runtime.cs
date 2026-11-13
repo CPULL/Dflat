@@ -1495,6 +1495,17 @@ static bool df_str_eq(df_string a, df_string b) {
   return x.len == y.len && memcmp(x.p, y.p, x.len) == 0;
 }
 
+/* < <= > >= on strings (spec 6.2.2): by bytes, the same as code point order in UTF-8; a shorter prefix first */
+static int df_str_order(df_string a, df_string b) {
+  df_sv x = df_view(a), y = df_view(b);
+  uint64_t n = x.len < y.len ? x.len : y.len;
+  int c = n ? memcmp(x.p, y.p, n) : 0;
+  if (c != 0) {
+    return c < 0 ? -1 : 1;
+  }
+  return (x.len > y.len) - (x.len < y.len);
+}
+
 /* ---- objects (classes): every object starts with its class descriptor ---- */
 
 typedef struct df_trait {
@@ -1520,6 +1531,10 @@ typedef struct df_class {
   void (*drop)(void*);   /* ends the object: its atEnd, then the objects it owns */
   df_uns (*hash)(const void*);   /* .hash (spec 6.2.1): the override of get_hash() or the default; NULL when the program uses no hash */
   void* (*clone)(const void*);   /* .clone() (spec 12.6): a new object; NULL when the class cannot be cloned (or nothing clones) */
+  const char* bare;   /* the bare name of the class, for the default order (spec 6.2.2) */
+  /* the compareTo of the class (trait Comparable, spec 11.2.1) that applies to other: its depth (the most specific has the highest, -1 when none
+     applies); with run it calls it and gives the sign of the result. NULL when the class is not Comparable */
+  int (*cmp)(const void* self, const void* other, int* depth, bool run);
 } df_class;
 
 typedef struct { const df_class* cls; } df_object;
@@ -1558,9 +1573,48 @@ static df_string df_dead_str(const void* obj) {
   return df_str_lit("(destroyed)", 11);
 }
 
-static const df_class df_dead_class = { 0, "(destroyed)", NULL, NULL, df_dead_str, NULL, 0, NULL, NULL, NULL };
+static const df_class df_dead_class = { 0, "(destroyed)", NULL, NULL, df_dead_str, NULL, 0, NULL, NULL, NULL, "(destroyed)", NULL };
 
 #define DF_IS_DEAD(p) (((const df_object*)(p))->cls == &df_dead_class)
+
+/* the exception of a compareTo called by a comparison that cannot raise it there (sort, the keys of a map): the caller raises it after */
+static df_exception* df_cmp_err = NULL;
+
+/* the order of two objects (spec 6.2.2): the most specific compareTo that applies (trait Comparable, of either object; the left one on a tie),
+   otherwise null first, then the bare names of the classes, then the addresses */
+static int df_obj_cmp(const void* a, const void* b) {
+  if (a == b) {
+    return 0;
+  }
+  const df_class* ca = a != NULL ? ((const df_object*)a)->cls : NULL;
+  const df_class* cb = b != NULL ? ((const df_object*)b)->cls : NULL;
+  int da = -1, db = -1;
+  if (ca != NULL && ca->cmp != NULL) {
+    (void)ca->cmp(a, b, &da, false);
+  }
+  if (cb != NULL && cb->cmp != NULL) {
+    (void)cb->cmp(b, a, &db, false);
+  }
+  if (da >= 0 && da >= db) {
+    return ca->cmp(a, b, &da, true);
+  }
+  if (db >= 0) {
+    return -cb->cmp(b, a, &db, true);
+  }
+  if (a == NULL || b == NULL) {
+    return a == NULL ? -1 : 1;
+  }
+  int c = strcmp(ca->bare, cb->bare);
+  if (c != 0) {
+    return c < 0 ? -1 : 1;
+  }
+  return (uintptr_t)a < (uintptr_t)b ? -1 : 1;
+}
+
+/* a comparer of the items of a sort that are objects (pointers to them) */
+static int df_cmp_objp(const void* a, const void* b) {
+  return df_obj_cmp(*(const void* const*)a, *(const void* const*)b);
+}
 
 /* a clone of an object by its class at run time (spec 12.6): null for null, a destroyed object or a class that cannot be cloned */
 static void* df_clone_obj(const void* obj) {

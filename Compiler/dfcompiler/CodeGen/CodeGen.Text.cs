@@ -323,6 +323,9 @@ public sealed partial class CodeGen {
     if (IsVec(receiver.Type) && name is "fillAtCapacity" or "resize" && CountedResize(receiver, name, args, scope, at) is Expr resized) {
       return resized;   // spec 12.7
     }
+    if (IsVec(receiver.Type) && ItemOwnsParts(VecElem(receiver.Type)) && name is "fillAtCapacity" or "resize" && args.Count > 0 && at.Line < LibraryLine) {
+      throw Error($"{name} would put the parts of one tuple or struct in many items: set the items one by one (spec 3.2, 11.1.5.3)", at);
+    }
     if (IsVec(receiver.Type) && IsClass(VecElem(receiver.Type)) && name is "fillAtCapacity" or "resize" && args.Count > 0 && args[^1].Kind != "Null") {
       throw Error($"{name} puts the same object in many items: a class instance is not allowed, null is", at);
     }
@@ -353,6 +356,10 @@ public sealed partial class CodeGen {
     if (receiver.Type == "string1k" && name == "toCStr" && args.Count == 0) {
       // the address of its own buffer, no copy: a string1k is a C char[1024] (spec 4.5); the receiver must be a place
       return new Expr($"((void*)(({receiver.Code}).b))", "addr");
+    }
+    if (receiver.Type == "string1k?" && name == "toCStr" && args.Count == 0) {
+      // its own buffer, or a null addr when it is null (spec 4.5)
+      return new Expr($"(({receiver.Code}).has ? (void*)(({receiver.Code}).val.b) : NULL)", "addr");
     }
     if (receiver.Type == "string1k" && Methods["string"].TryGetValue(name, out var stringOverloads)) {
       // every other string function works on the string it converts to (spec 4.5)
@@ -443,6 +450,9 @@ public sealed partial class CodeGen {
     }
     if (!declared.Contains("Keyable") && Mentions(program, node => node.Text == "Keyable")) {
       source.Append("trait Keyable {\n  uns keyUses\n  uns keyHash\n}\n");   // spec 11.2.1: the entries that hold the object as a key, the stored hash
+    }
+    if (!declared.Contains("Comparable") && Mentions(program, node => node.Text == "Comparable")) {
+      source.Append("trait Comparable<T> {\n  public fun int compareTo(T value)\n}\n");   // spec 11.2.1: Comparable alone is Comparable<the class>
     }
     if (!declared.Contains("SilentException") && Mentions(program, node => node.Text == "SilentException")) {
       source.Append("trait SilentException { }\n");

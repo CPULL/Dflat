@@ -1,0 +1,68 @@
+// tuples that hold structs with strings or objects (spec 3.2, 11.1.5.3): the tuple owns the struct as it owns an object; a copy of
+// the tuple clones it, a new one is taken as it is, and it ends with the tuple
+namespace tuplestructs
+import Root
+public class Dog(string name) {
+  public string name = name
+} atEnd {
+  Console.log("  end " + name)
+}
+struct Pet { Dog dog, string tag, i32 age }
+fun ->(Pet, i32) make(string name) { (Pet(Dog(name), "made", 1), 7) }
+fun Pet, i32 two(string name) {
+  return Pet(Dog(name), "two", 2), 9
+}
+fun locals() {
+  (Pet, i32) a = (Pet(Dog("a1"), "x", 1), 1)
+  Pet p = Pet(Dog("p1"), "y", 2)
+  (Pet, i32) b = (p, 2)
+  p.dog.name = "P1"
+  Console.log($"{a.0.dog.name} {b.0.dog.name} {p.dog.name} {b.0.tag}")
+  a = b
+  Console.log($"{a.0.dog.name} {a.1}")
+  (Pet, i32) c = make("m1")
+  Console.log($"{c.0.dog.name} {c.1}")
+  Pet q, i32 n = two("t1")
+  Console.log($"{q.dog.name} {n}")
+  Console.log("end of locals")
+}
+locals()
+fun items() {
+  vec<(Pet, i32)> v = [(Pet(Dog("v1"), "a", 1), 1)]
+  (Pet, i32) t = (Pet(Dog("v2"), "b", 2), 2)
+  v.add(t)
+  t.0.dog.name = "V2"
+  v[0] = (Pet(Dog("v3"), "c", 3), 3)
+  map<string, (Pet, i32)> m = ["k": (Pet(Dog("k1"), "d", 4), 4)]
+  m["k"] = (Pet(Dog("k2"), "e", 5), 5)
+  Console.log($"{v[1].0.dog.name} {t.0.dog.name} {v[0].0.tag} {m["k"].0.dog.name}")
+  Console.log("end of items")
+}
+items()
+fun unkept() {
+  make("u1")
+  two("u2")
+  Console.log(make("u3").0.dog.name)
+  Pet q, i32 n = two("u4")
+  q, n = two("u5")
+  Console.log($"{q.dog.name} {n}")
+  Console.log("end of unkept")
+}
+unkept()
+fun fromvalues() {
+  Pet q = Pet(Dog("w1"), "a", 1)
+  Pet p = Pet(Dog("w2"), "b", 2)
+  i32 n = 0
+  p, n = q, 3
+  q.dog.name = "W1"
+  Console.log($"{p.dog.name} {q.dog.name} {n}")
+  p, n = Pet(Dog("w3"), "c", 3), 4
+  Console.log($"{p.dog.name} {n}")
+  Pet r, i32 k = q, 5
+  r.dog.name = "R1"
+  Console.log($"{r.dog.name} {q.dog.name} {k}")
+  p, q = q, p
+  Console.log($"{p.dog.name} {q.dog.name}")
+  Console.log("end of fromvalues")
+}
+fromvalues()

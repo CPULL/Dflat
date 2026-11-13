@@ -99,6 +99,9 @@ public sealed partial class CodeGen {
     if (type == "string") {
       return $"df_hash_str({StrRead(e)})";
     }
+    if (type == "string1k") {
+      return $"df_hash_s1k({e.Code})";   // the same hash as the string it holds (spec 4.5)
+    }
     if (IsNullable(type)) {
       return WithTemp(e, temp => $"({temp}.has ? {HashCode(new Expr(temp + ".val", BaseOf(type)), at)} : DF_HASH_NULL)");
     }

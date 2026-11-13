@@ -289,6 +289,16 @@ public sealed partial class CodeGen {
       structObjDecls.Add(statement);
       drops.Add(StructDropNode(statement.Text!, statement));
     }
+    // (also with one value for each target, Pet a, i32 n = q, 3: the struct is a new one or a clone)
+    foreach (var target in statements.Where(statement => statement.Kind == "MultiAssign" && (GivesOwnMultiValues(statement)
+                 || statement.Children[1].Children.Count == statement.Children[0].Children.Count && statement.Children[1].Children.Count > 1))
+               .SelectMany(statement => statement.Children[0].Children).Where(target => target.Kind == "Decl"
+                 && target.Children.FirstOrDefault(child => TypeNodeKinds.Contains(child.Kind)) is { Kind: "Type" } typeNode
+                 && TryResolveType(typeNode) is string type && StructHoldsObjects(type))) {
+      owners.Add(target);   // Pet p, i32 n = f(): the struct given by a function of the program ends with the scope (spec 11.1.5.3)
+      structObjDecls.Add(target);
+      drops.Add(StructDropNode(target.Text!, target));
+    }
     foreach (var statement in statements.Where(statement => statement.Kind == "Decl" && IsBigStructDecl(statement))) {
       bigStructDecls.Add(statement);   // a struct above 64 KB: on the heap, freed with the scope (spec 11.1.5.5)
       if (owners.Add(statement)) {
@@ -508,7 +518,8 @@ public sealed partial class CodeGen {
   // a value that is a new array nobody else holds: a literal, a clone, arr<T>[n], or a call of a function that returns a new array
   bool IsNewArray(Node? value) =>
     value is { Kind: "List" or "Copy" } || value is { Kind: "Index" } && value.Children[0].Kind == "GenericRef"
-    || value is { Kind: "Call" } && CalleesOf(value) is { Count: > 0 } callees && callees.All(ReturnsNewArray);
+    || value is { Kind: "Call" } && CalleesOf(value) is { Count: > 0 } callees && callees.All(ReturnsNewArray)
+    || value is { Kind: "Call" } && value.Children[0] is { Kind: "Member", Text: "filter" or "map" };   // a.filter(f), a.map<U>(f): a new array (spec 6.6)
 
   static bool IsArrTypeNode(Node? type) =>
     type is { Kind: "Type", Text: "arr", Children.Count: 1 } || type is { Kind: "ResolvedType" } && type.Text!.StartsWith("arr<");
@@ -649,7 +660,7 @@ public sealed partial class CodeGen {
     var locals = new Dictionary<string, Node>();
     CollectDeclarations(body, locals);
     var returns = CollectReturns(body).ToList();
-    bool result = returns.Count > 0 && returns.All(ret => ret.Children.Count == 1 && (IsNewArray(ret.Children[0])
+    bool result = returns.Count > 0 && returns.All(ret => ret.Children.Count == 1 && (IsNewArray(ret.Children[0]) || ret.Children[0].Kind == "Gift"   // return ->a moves it out
       || ret.Children[0] is { Kind: "Name" } returned && (locals.TryGetValue(returned.Text!, out var decl)
         ? IsOwnedLocalArray(decl, new[] { body }) || IsMixedInItsBlock(body, decl)   // a mixed local moves its own array or gives a copy
         : f.Params.FirstOrDefault(p => p.Name == returned.Text) is ParamSig given && OwnsGivenArray(f, given))));
@@ -687,7 +698,8 @@ public sealed partial class CodeGen {
         : elem == "string" ? "df_str_free(a.p[i]);"
         : elem == "string?" ? "df_str_free(a.p[i].val);"
         : IsFunType(elem) ? "df_fn_release(a.p[i]);"
-        : IsArr(elem) ? $"{ArrDropHelper(elem)}(a.p[i]);" : "";
+        : IsArr(elem) ? $"{ArrDropHelper(elem)}(a.p[i]);"
+        : ItemOwnsParts(elem) ? $"{TupleItemDropHelper(elem)}(a.p[i]);" : "";   // spec 3.2
       string arrType = ArrCType(elem);
       classCode.Append($"static void {name}({arrType} a) {{\n");
       if (item != "") {
@@ -768,8 +780,9 @@ public sealed partial class CodeGen {
     if (IsArr(value.Type) && !LibraryCode) {
       return ArrGift(n, operand, value.Type, scope);   // spec 6.8.1
     }
-    if (StructHoldsObjects(value.Type) && !LibraryCode) {
-      return StructGift(operand, value, scope, n);   // spec 11.1.5.3
+    if (StructHoldsObjects(value.Type) && (!LibraryCode || operand.Kind == "Name")) {
+      // spec 11.1.5.3; in the collections of the library, ->value of a ->T parameter leaves it empty (it ends with the function)
+      return StructGift(operand, value, scope, n);
     }
     if (!IsClass(value.Type)) {
       if (GiftWarningApplies()) {

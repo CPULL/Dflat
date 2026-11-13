@@ -1,0 +1,55 @@
+// writing one part of a collection item (spec 3.2, 11.1.5): v[0].1 = 5, l[1].name = "x"; the part is written in place, and an object
+// or an array that is replaced ends
+namespace itemparts
+import Root
+public class Dog(string name) {
+  public string name = name
+} atEnd {
+  Console.log("  end " + name)
+}
+struct Pet { Dog dog, string tag, i32 age }
+fun plain() {
+  vec<(i32, i32)> v = [(1, 2), (3, 4)]
+  v[0].1 = 5
+  v[1].0 += 10
+  v[1].1++
+  Console.log(v)
+  arr<(string, i32)> a = [("a", 1)]
+  a[0].0 = "b"
+  a[0].1 *= 7
+  Console.log(a)
+  list<(i32, r64)> l = [(1, 1.5), (2, 2.5)]
+  l[1].0 = 9
+  l[1].1 += 1.0
+  Console.log(l)
+}
+plain()
+fun owned() {
+  vec<(Dog, i32)> v = [(Dog("d1"), 1), (Dog("d2"), 2)]
+  v[0].0 = Dog("d3")
+  v[0].1 = 7
+  v[1].0.name = "D2"
+  Console.log($"{v[0].0.name} {v[0].1} {v[1].0.name}")
+  list<(Dog, i32)> l = [(Dog("e1"), 1)]
+  l[0].0 = Dog("e2")
+  Console.log(l[0].0.name)
+  vec<(arr<i32>, i32)> g = [([1, 2], 1)]
+  g[0].0 = [7, 8, 9]
+  g[0].0[1] = 80
+  Console.log(g[0].0)
+  Console.log("end of owned")
+}
+owned()
+fun structs() {
+  list<Pet> l = [Pet(Dog("s1"), "a", 1)]
+  l[0].age = 4
+  l[0].tag = "b"
+  l[0].dog = Dog("s2")
+  Console.log($"{l[0].dog.name} {l[0].tag} {l[0].age}")
+  vec<Pet> v = [Pet(Dog("s3"), "c", 2)]
+  v[0].dog = Dog("s4")
+  v[0].age += 1
+  Console.log($"{v[0].dog.name} {v[0].age}")
+  Console.log("end of structs")
+}
+structs()

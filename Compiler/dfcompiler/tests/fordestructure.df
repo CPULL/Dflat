@@ -1,0 +1,46 @@
+// several loop variables (spec 6.4): for (T a, U b) in c and for T a, U b in c (also untyped names and var) over tuples (by position),
+// structs (by field order) and maps; no tuple is made
+namespace fordestructure
+import Root
+class Dog(string name) { public string name = name }
+vec<(i32, string)> v = [(1, "a"), (2, "b")]
+for (i32 n, string s) in v {
+  Console.log($"{n} {s}")
+}
+for i32 n, string s in v {
+  Console.log($"{n}-{s}")
+}
+for n, s in v {
+  Console.log($"{n}+{s}")
+}
+for var n, s in v {
+  Console.log($"{n}*{s}")
+}
+arr<(string, r64)> a = [("x", 1.5)]
+for string name, r64 w in a {
+  Console.log($"{name}={w}")
+}
+list<(string, i32)> dl = [("rex", 3)]
+for string d, i32 age in dl {
+  Console.log($"{d} {age}")
+}
+struct Pt { i32 x, i32 y }
+vec<Pt> pts = [Pt(1, 2), Pt(3, 4)]
+for i32 x, i32 y in pts {
+  Console.log(x + y)
+}
+map<string, i32> m = ["k": 1]
+for string k, i32 val in m {
+  Console.log($"{k}:{val}")
+}
+for k, val in m {
+  Console.log($"{k};{val}")
+}
+for i32 i = 0..2 {
+  Console.log(i)
+}
+for (i32 n, string s) in v {
+  if n == 1 { continue }
+  Console.log("only " + s)
+  break
+}

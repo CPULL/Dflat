@@ -1,0 +1,18 @@
+// any is a plain name, not a keyword (spec 11.2): a variable, a parameter, a field, a function
+namespace anyname
+import Root
+public class Box {
+  public i32 any = 3
+}
+fun i32 twice(i32 any) { any * 2 }
+fun bool any(vec<i32> v) { v.len > 0 }
+fun run() {
+  i32 any = 5
+  Box b = Box()
+  Console.log($"{any} {twice(any)} {b.any}")
+}
+run()
+fun check() {
+  Console.log(any([1, 2]))
+}
+check()

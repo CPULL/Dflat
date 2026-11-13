@@ -1,0 +1,80 @@
+// tuples and structs as the values of map and hmap (spec 3.2, 11.1.5.3, 6.6): stored in the entry; the map owns what they hold, a
+// replaced or removed value ends it, and everything ends with the map
+namespace mapitems
+import Root
+public class Dog(string name) {
+  public string name = name
+} atEnd {
+  Console.log("  end " + name)
+}
+struct Pet { Dog dog, string tag, i32 age }
+struct Pos { i32 x, i32 y }
+fun plain() {
+  map<string, (i32, i32)> m = ["a": (1, 2), "b": (3, 4)]
+  m["c"] = (5, 6)
+  m["a"] = (7, 8)
+  Console.log($"{m["a"].0} {m["c"].1} {m.len}")
+  Console.log(m)
+  hmap<i32, Pos> h = [1: Pos(1, 2)]
+  h[2] = Pos(3, 4)
+  Console.log($"{h[2].x} {h[1].y} {h.len}")
+  Console.log(m.has((3, 4)))
+}
+plain()
+fun owned() {
+  map<string, (Dog, i32)> m = ["a": (Dog("t1"), 1)]
+  m["b"] = (Dog("t2"), 2)
+  m["a"] = (Dog("t3"), 3)
+  Console.log($"{m["a"].0.name} {m["b"].1}")
+  m.removeAt("b")
+  (Dog, i32) t = m.takeAt("a")
+  Console.log($"took {t.0.name} {m.len}")
+  m["c"] = (Dog("t4"), 4)
+  map<string, (Dog, i32)> c = m.clone()
+  c["c"].0.name = "T4"
+  Console.log($"{m["c"].0.name} {c["c"].0.name}")
+  Console.log("end of owned")
+}
+owned()
+fun structs() {
+  hmap<string, Pet> h = ["x": Pet(Dog("s1"), "a", 1)]
+  h["y"] = Pet(Dog("s2"), "b", 2)
+  h["x"] = Pet(Dog("s3"), "c", 3)
+  Console.log($"{h["x"].dog.name} {h["y"].tag} {h.len}")
+  h.removeAt("y")
+  map<i32, Pet> m = [1: Pet(Dog("s4"), "d", 4)]
+  for i32 k, Pet p in m {
+    Console.log($"{k} {p.dog.name}")
+  }
+  Console.log("end of structs")
+}
+structs()
+fun members() {
+  map<i32, (Dog, i32)> m = [1: (Dog("m1"), 1)]
+  (Dog, i32) t = (Dog("m2"), 2)
+  m.add(2, t)
+  t.0.name = "M2"
+  Console.log($"{m[2].0.name} {t.0.name}")
+  vec<(Dog, i32)> vals = m.values!
+  vals[0].0.name = "V1"
+  Console.log($"{m[1].0.name} {vals[0].0.name} {vals.len}")
+  bool here, (Dog, i32) got = m.tryGet(2)
+  Console.log($"{here} {got.0.name}")
+  map<i32, (Dog, i32)> other = [9: (Dog("m9"), 9)]
+  m.add(other)
+  Console.log($"{m.len} {other.len} {m[9].0.name}")
+  Console.log("end of members")
+}
+members()
+fun adds() {
+  (Dog, i32) t = (Dog("a1"), 1)
+  vec<(Dog, i32)> v = []
+  v.add(t)
+  v.add((Dog("a2"), 2))
+  list<(Dog, i32)> l = []
+  l.add(t)
+  t.0.name = "A1"
+  Console.log($"{v[0].0.name} {l[0].0.name} {t.0.name} {v.len}")
+  Console.log("end of adds")
+}
+adds()

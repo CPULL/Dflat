@@ -1,0 +1,4 @@
+// items without parts cannot be split (spec 6.4)
+import Root
+vec<i32> v = [1]
+for i32 a, i32 b in v { }

@@ -1,0 +1,45 @@
+// generic struct types (spec 11.1.5, 11.3): one ordinary struct per list of type arguments; written (Pair<i32>) or inferred from the values
+// of the fields (Pair(1, 2)); value parameters for inline buffers (Ring<i32, 4>); methods (generic ones too), ==, printing, keys, items of
+// collections, copies that own their strings and objects; literals given to a set parameter take the best member of the set
+import Root
+public class Dog(string name) {
+  public string name
+} atEnd {
+  Console.log($"  {name} ends")
+}
+struct Pair<T> { T a, T b
+  public unrestricted fun T first() { a }
+  public unrestricted fun string with<U>(U extra) { $"{a}/{b}/{extra}" }
+}
+struct Ring<T, uns N> {
+  arr<T>[N] items,
+  uns head
+  public fun push(T value) {
+    items[head % N] = value
+    head += 1
+  }
+}
+Generic Nums { i32, r64 }
+fun string kind<T : Nums>(T x) { x is ? { i32: "i32", r64: "r64", default: "other" } }
+fun run() {
+  Pair<i32> p = Pair<i32>(1, 2)
+  Console.log($"{p} first {p.first()} {p.with("z")}")
+  var inferred = Pair(3, 4)
+  var named = Pair(a: "x", b: "y")
+  var narrow = Pair<u8>(5, 6)
+  Console.log($"{inferred} {named} {narrow}")
+  Console.log(p == Pair<i32>(1, 2))
+  map<Pair<i32>, string> where = [Pair<i32>(0, 0): "origin"]
+  where[Pair<i32>(1, 0)] = "east"
+  Console.log(where)
+  arr<Pair<string>> list = [Pair<string>("a", "b"), Pair<string>("c", "d")]
+  Console.log(list[1].b)
+  Ring<i32, 4> ring = Ring<i32, 4>()
+  for i32 v = 1..=6 { ring.push(v) }
+  Console.log($"{ring.items} head {ring.head}")
+  Pair<Dog> dogs = Pair(Dog("rex"), Dog("max"))
+  Console.log(dogs.first().name)
+  Console.log($"{kind(4)} {kind(2.5)}")
+  Console.log("  end of run")
+}
+run()

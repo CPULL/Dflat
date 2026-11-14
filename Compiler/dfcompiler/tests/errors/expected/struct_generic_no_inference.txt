@@ -1,0 +1,1 @@
+struct_generic_no_inference.df(3): error: Pair: T is i64 and string from the values given: write the type arguments, Pair<...>(...) (spec 11.3.5)

@@ -31,7 +31,8 @@ public sealed partial class CodeGen {
   bool IsStruct(string type) => structs.ContainsKey(type);
 
   void DeclareStructs(Node program) {
-    foreach (var node in program.Children.Where(child => child.Kind == "Struct")) {
+    // a generic struct (struct Pair<T>) is a template: RegisterGenerics keeps it and declares its copies (spec 11.1.5)
+    foreach (var node in program.Children.Where(child => child.Kind == "Struct" && !child.Children.Any(c => c.Kind == "GenericParams"))) {
       string name = node.Text!;
       if (structs.ContainsKey(name) || IsKnownType(name) || name == "Exception" || IsSetName(name) || genericClasses.ContainsKey(name)) {
         throw Error($"the name '{name}' is already used by a type", node);
@@ -419,7 +420,7 @@ public sealed partial class CodeGen {
     }
     var sb = new StringBuilder();
     sb.Append($"static df_string {name}({info.CName} o) {{\n");
-    sb.Append($"  df_string r = {CString(CodePoints(SourceMap.PrintName(info.Name) + " { "))};\n");
+    sb.Append($"  df_string r = {CString(CodePoints(SourceMap.PrintName(DisplayName(info.Name)) + " { "))};\n");
     for (int index = 0; index < info.Fields.Count && index < 3; index++) {
       var field = info.Fields[index];
       string label = (index > 0 ? ", " : "") + field.Name + ": ";
@@ -451,6 +452,7 @@ public sealed partial class CodeGen {
 
   void RegisterStructMethods() {
     foreach (var info in structs.Values) {
+      ExpandStructGenericMethods(info);   // its generic methods become their copies (spec 11.3.1.1)
       foreach (var member in info.Node.Children.Where(child => child.Kind == "Fun")) {
         var (visibility, _, isStatic, _, isOverride) = ReadMods(member);
         var mods = member.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ') ?? Array.Empty<string>();
@@ -523,11 +525,20 @@ public sealed partial class CodeGen {
       return structs.ContainsKey(called.Text!)
         || funs.TryGetValue(called.Text!, out var overloads) && overloads.All(fun => IsStruct(fun.Ret));
     }
+    // Vec.make().sum(), Vec.make<i32>(5).sum(): the result of a static function of a struct (the type decides after)
+    var staticCallee = receiver.Kind == "Call" ? receiver.Children[0] : null;
+    if (staticCallee is { Kind: "GenericRef" }) {
+      staticCallee = staticCallee.Children[0];
+    }
+    if (staticCallee is { Kind: "Member" } && staticCallee.Children[0] is { Kind: "Name" } owner && scope.Find(owner.Text!) == null
+        && structs.ContainsKey(owner.Text!)) {
+      return true;
+    }
     return false;
   }
 
   // s.len(), this.len(), ps[1].grow(), Vec3(1.0, 2.0, 3.0).len(): null when the receiver is not a struct
-  Expr? StructMethodCall(Node callee, List<Node> args, Scope scope, Node at) {
+  Expr? StructMethodCall(Node callee, List<Node> args, Scope scope, Node at, List<Node>? typeArgs = null) {
     var receiverNode = callee.Children[0];
     if (!MayBeStructReceiver(receiverNode, scope)) {
       return null;
@@ -537,6 +548,9 @@ public sealed partial class CodeGen {
       return null;
     }
     var info = structs[receiver.Type];
+    if (StructGenericMethodName(info, callee.Text!, typeArgs ?? new List<Node>(), args, scope, at) is string copyName) {
+      callee = Synthetic("Member", callee, copyName).Add(receiverNode);   // s.scaled(3): the copy of the generic method (spec 11.3.1.1)
+    }
     if (callee.Text == "offset" && !funs.ContainsKey(info.Name + ".offset")) {
       return StructOffset(info, args, at);   // s.offset(x) (spec 11.1.5.6)
     }
@@ -552,7 +566,7 @@ public sealed partial class CodeGen {
     }
     var f = ResolveOverload(overloads, args, scope, at);
     if (f.Visibility == Vis.Private && currentStruct != info) {
-      throw Error($"'{callee.Text}' is a private method of {info.Name}: only the methods of {info.Name} call it", at);
+      throw Error($"'{MethodCopyName(callee.Text!)}' is a private method of {info.Name}: only the methods of {info.Name} call it", at);
     }
     if (receiverNode.Kind is "Name" or "Member" or "Index" or "Paren" or "Transmute") {
       var (name, kind) = ReadOnlyPlace(receiverNode, scope);
@@ -563,7 +577,7 @@ public sealed partial class CodeGen {
           ReadOnlyKind.Constant => $"'{name}' is a constant",
           _ => $"'{name}' is a read-only reference"
         };
-        throw Error($"{what}: only the unrestricted methods of {info.Name} can be called, not '{callee.Text}'{DefinedAt(new[] { f }, callee.Text!)} (spec 1.6.2, 11.1.5.2)", at);
+        throw Error($"{what}: only the unrestricted methods of {info.Name} can be called, not '{MethodCopyName(callee.Text!)}'{DefinedAt(new[] { f }, MethodCopyName(callee.Text!))} (spec 1.6.2, 11.1.5.2)", at);
       }
       LValueInfo? place = null;
       try {

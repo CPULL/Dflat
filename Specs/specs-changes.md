@@ -720,3 +720,7 @@
 - 11.2 A sub-trait adds a link to an `executeBefore` / `executeAfter` chain by declaring the method again with its block (same parameters and result); `executeBefore` blocks run from the root trait to the most specific one
 - 15.1 A catch is `catch <ExceptionType> [<variable>]`: a variable alone is a compile error (was: the same as `catch Exception variable`); a catch can name a trait of the program (the variable is an `Exception`)
 - 15.2 Extra values: a text is a `string1k` (a `string` field is a compile error); a subclass repeats the header parameters of its parent first (a parent's default can be left out); object fields are owned in Debug builds and null in Release builds
+- 11.3.1.1, 11.1.5 Static generic methods (of classes and structs) and generic methods of structs (was: not part of this version); a struct type itself stays not generic
+- 11.1.5, 11.3.5 Generic struct types (`struct Pair<T>`, value parameters `struct Ring<T, uns N>`), not with a layout tag; inferred from the values of the fields (was: a struct is never generic)
+- 11.3.5 A literal given to a parameter whose type is a set takes the member a value of the set takes (default type if listed, else the only one of the same kind)
+- 11.3.5 Examples for the inference of a generic class from its primary constructor (`Box(5)`); a value parameter is never inferred

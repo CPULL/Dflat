@@ -95,6 +95,15 @@ public sealed partial class CodeGen {
       if (init is { Kind: "Call" } call && call.Children[0] is { Kind: "Name" } called && structs.ContainsKey(called.Text!)) {
         return StructHoldsObjects(called.Text!);
       }
+      // var p = Pair(...), var p = Pair<string>(...): a generic struct, whose copy is known only when the value is typed; the declaration
+      // takes its own strings and objects when the copy has some (StructOwnedCode does nothing for the others)
+      var genericCallee = init is { Kind: "Call" } genericCall ? genericCall.Children[0] : null;
+      if (genericCallee is { Kind: "GenericRef" }) {
+        genericCallee = genericCallee.Children[0];
+      }
+      if (genericCallee is { Kind: "Name" } templateName && genericClasses.TryGetValue(templateName.Text!, out var structTemplate) && structTemplate.Node.Kind == "Struct") {
+        return true;
+      }
       return init is { Kind: "Call" } && CalleesOf(init) is { Count: > 0 } callees && callees.All(f => f.Node.Line < LibraryLine && StructHoldsObjects(f.Ret));
     }
     return typeNode is { Kind: "Type" } && TryResolveType(typeNode) is string type && StructHoldsObjects(type);
@@ -199,7 +208,8 @@ public sealed partial class CodeGen {
   }
 
   // Vec2.dot(a, b): a static function of a struct (spec 11.1.5.2)
-  Expr StructStaticCall(StructInfo info, string name, List<Node> args, Scope scope, Node at) {
+  Expr StructStaticCall(StructInfo info, string name, List<Node> args, Scope scope, Node at, List<Node>? typeArgs = null) {
+    name = StructGenericMethodName(info, name, typeArgs ?? new List<Node>(), args, scope, at) ?? name;   // Vec.make<i32>(...) (spec 11.3.1.1)
     if (name == "offset" && !funs.ContainsKey(info.Name + ".offset")) {
       return StructOffset(info, args, at);   // Vec2.offset(y) (spec 11.1.5.6)
     }
@@ -212,7 +222,7 @@ public sealed partial class CodeGen {
     }
     var f = ResolveOverload(statics, args, scope, at);
     if (f.Visibility == Vis.Private && currentStruct != info) {
-      throw Error($"'{name}' is a private function of {info.Name}: only the code of {info.Name} calls it", at);
+      throw Error($"'{MethodCopyName(name)}' is a private function of {info.Name}: only the code of {info.Name} calls it", at);
     }
     return UserCall(f, args, scope, at);
   }

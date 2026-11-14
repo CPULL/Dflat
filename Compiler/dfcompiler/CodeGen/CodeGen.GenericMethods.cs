@@ -96,9 +96,7 @@ public sealed partial class CodeGen {
       if (cls.Parent != null && parentRoot == null && LookupMethods(cls.Parent, name).Count > 0) {
         throw Error($"'{name}' is a method of a parent class: a generic method cannot share its name with it", member);
       }
-      if (ModsOf(member).Contains("static")) {
-        throw NotSupported("static generic methods (call a generic function, or a method of an object)", member);
-      }
+      // a static generic method: its copies are static methods of the class (Util.pick<i32>(...), spec 11.3.1.1)
       var template = MakeGenericTemplate(member, name);
       genericMethods[(cls.Name, name)] = template;
       string root = parentRoot ?? cls.Name;
@@ -117,6 +115,122 @@ public sealed partial class CodeGen {
       }
       index--;
     }
+  }
+
+  // the generic methods of a struct (spec 11.1.5.2, 11.3.1.1): as in a class, each one becomes its template and its copies (the seeds, under the
+  // name of the struct) take its place among the methods; a struct has no inheritance, so there is nothing to replace
+  void ExpandStructGenericMethods(StructInfo info) {
+    var body = info.Node;
+    for (int index = 0; index < body.Children.Count; index++) {
+      var member = body.Children[index];
+      if (member.Kind != "Fun" || !IsGenericFunNode(member)) {
+        continue;
+      }
+      string name = member.Text!;
+      var template = MakeGenericTemplate(member, name);
+      genericMethods[(info.Name, name)] = template;
+      body.Children.RemoveAt(index);
+      foreach (var (seedRoot, seedName, args) in seeds.Methods) {
+        if (seedRoot != info.Name || seedName != name) {
+          continue;
+        }
+        CheckConstraints(template.Params, args, member, name);
+        var map = template.Params.Zip(args).ToDictionary(pair => pair.First.Name, pair => pair.Second);
+        var copy = CloneNode(template.Node, SubstituteTypes(map));
+        copy.Text = MangledName(name, args);
+        methodCopyNames[copy.Text] = $"{name}<{string.Join(", ", args.Select(DisplayName))}>";
+        copy.Children.RemoveAll(child => child.Kind == "GenericParams");
+        body.Children.Insert(index++, copy);
+      }
+      index--;
+    }
+  }
+
+  // s.name(args), s.name<T>(args), S.name<T>(args) on a struct with the generic method name: the name of the copy (requested as for a class),
+  // or null when name is not a generic method of the struct
+  string? StructGenericMethodName(StructInfo info, string name, List<Node> written, List<Node> args, Scope scope, Node at) {
+    if (!genericMethods.TryGetValue((info.Name, name), out var template)) {
+      if (written.Count > 0) {
+        throw Error($"'{name}' is not a generic method of {DisplayName(info.Name)}", at);
+      }
+      return null;
+    }
+    var types = InferTypeArgs(template, written, args, scope, at);
+    CheckConstraints(template.Params, types, at, name);
+    string mangled = MangledName(name, types);
+    if (funs.ContainsKey(info.Name + "." + mangled)) {
+      return mangled;
+    }
+    if (seeds.Methods.Any(seed => seed.Root == info.Name && seed.Name == name && seed.Args.SequenceEqual(types))) {
+      throw new CompileException($"internal error: the copy {mangled} of the generic method {name} was not created", at.Line);
+    }
+    int maxCopies = Limit("copies", 16);
+    if (seeds.Methods.Count(seed => seed.Root == info.Name && seed.Name == name) >= maxCopies) {
+      throw Error($"the generic method {info.Name}.{name} was used with more than {maxCopies} type lists (the limit is set by --max-copies)", at);
+    }
+    seeds.Methods.Add((info.Name, name, types));
+    throw new NeedInstanceException();
+  }
+
+  // Box(5), Pair("a", 2): the type arguments of a generic class from the arguments of its primary constructor (spec 11.3.5), as for a generic
+  // function; a literal given to a parameter of a set type takes the best member of the set; a parameter that no argument fixes, or a value
+  // parameter: written arguments are needed
+  List<string> InferClassTypeArgs(GenericClass template, List<Node> args, Scope scope, Node at) {
+    var constructor = template.Node.Children.FirstOrDefault(child => child.Kind == "PrimaryCtor");
+    var bound = new Dictionary<string, string>();
+    var names = template.Params.Where(p => p.ValueType == null).Select(p => p.Name).ToHashSet();
+    if (constructor != null) {
+      var asFun = new GenericFun(template.Name, Synthetic("Fun", template.Node, template.Name).Add(constructor), template.Params);
+      foreach (var (pattern, argument) in PatternPairs(constructor, args)) {
+        if (!MentionsParam(pattern, names)) {
+          continue;
+        }
+        string actual = ExprOf(argument, scope).Type;
+        if (actual is "null" or "void" || IsMulti(actual)) {
+          continue;
+        }
+        MatchType(pattern, SetLiteralArgType(asFun, pattern, argument, actual), bound, names, argument);
+      }
+    }
+    var result = new List<string>();
+    foreach (var param in template.Params) {
+      if (!bound.TryGetValue(param.Name, out var type)) {
+        throw Error($"{template.Name}: {param.Name} cannot be inferred from the arguments of its constructor: write the type arguments, {template.Name}<...>(...) (spec 11.3.5)", at);
+      }
+      result.Add(type);
+    }
+    CheckConstraints(template.Params, result, at, template.Name);
+    return result;
+  }
+
+  // Pair(1, 2), Pair(a: "x", b: "y"): the type arguments of a generic struct from the values given to its fields whose type is a type parameter
+  // (by position or by name); a parameter that no value fixes, two values that disagree, or a value parameter: written arguments are needed
+  List<string> InferStructTypeArgs(GenericClass template, List<Node> args, Scope scope, Node at) {
+    var fields = template.Node.Children.Where(child => child.Kind == "Field").ToList();
+    var found = new Dictionary<string, string>();
+    for (int index = 0; index < args.Count; index++) {
+      var arg = args[index];
+      Node? field = arg.Kind == "Named" ? fields.FirstOrDefault(f => f.Text == arg.Text) : index < fields.Count ? fields[index] : null;
+      var valueNode = arg.Kind == "Named" ? arg.Children[0] : arg;
+      if (field?.Children[0] is not { Kind: "Type", Children.Count: 0 } fieldType || template.Params.All(p => p.Name != fieldType.Text)
+          || field.Children.Any(child => child.Kind == "Size")) {
+        continue;
+      }
+      string type = ExprOf(valueNode, scope).Type;
+      if (found.TryGetValue(fieldType.Text!, out var earlier) && earlier != type) {
+        throw Error($"{template.Name}: {fieldType.Text} is {DisplayName(earlier)} and {DisplayName(type)} from the values given: write the type arguments, {template.Name}<...>(...) (spec 11.3.5)", at);
+      }
+      found[fieldType.Text!] = type;
+    }
+    var result = new List<string>();
+    foreach (var param in template.Params) {
+      if (!found.TryGetValue(param.Name, out var type)) {
+        throw Error($"{template.Name}: {param.Name} cannot be inferred from the values given: write the type arguments, {template.Name}<...>(...) (spec 11.3.5)", at);
+      }
+      result.Add(type);
+    }
+    CheckConstraints(template.Params, result, at, template.Name);
+    return result;
   }
 
   // obj.name(args) or obj.name<T>(args) on a class with the generic method name: the name of the copy for these type arguments. A copy that

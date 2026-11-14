@@ -232,9 +232,10 @@ public sealed partial class CodeGen {
     foreach (var plain in program.Children.Where(child => child.Kind == "Class" && child.Children.Any(c => c.Kind == "Where") && !child.Children.Any(c => c.Kind == "GenericParams"))) {
       throw Error($"'where' is for generic classes: '{plain.Text}' has no type parameters", plain);
     }
-    foreach (var node in program.Children.Where(child => child.Kind is "Class" or "Trait" && (child.Children.Any(c => c.Kind == "GenericParams") || PlaceholdersOf(child).Count > 0)).ToList()) {
+    foreach (var node in program.Children.Where(child => child.Kind is "Class" or "Trait" && (child.Children.Any(c => c.Kind == "GenericParams") || PlaceholdersOf(child).Count > 0)
+        || child.Kind == "Struct" && child.Children.Any(c => c.Kind == "GenericParams")).ToList()) {
       string name = node.Text!;
-      if (genericClasses.ContainsKey(name) || IsSetName(name)) {
+      if (genericClasses.ContainsKey(name) || IsSetName(name) || structs.ContainsKey(name)) {
         throw Error($"the name '{name}' is already used", node);
       }
       var placeholders = PlaceholdersOf(node);
@@ -271,6 +272,9 @@ public sealed partial class CodeGen {
       program.Children.Add(copy);
       classInstanceArgs[mangled] = (generic, args);
       displayNames[mangled] = $"{generic.Name}<{string.Join(", ", args.Select(DisplayName))}>";
+      if (generic.Node.Kind == "Struct") {
+        structs[mangled] = new StructInfo(mangled, copy);   // Pair<i32> is an ordinary struct from here on (DeclareStructs ran before)
+      }
     }
   }
 
@@ -864,6 +868,7 @@ public sealed partial class CodeGen {
       if (actual is "null" or "void" || IsMulti(actual)) {
         continue;
       }
+      actual = SetLiteralArgType(generic, pattern, argument, actual);   // twice(4) with twice(Nums n), Nums { i32, r64 }: i32 (spec 11.3.6)
       MatchType(pattern, actual, bound, names, argument);
     }
     var inferred = new List<string>();
@@ -875,6 +880,32 @@ public sealed partial class CodeGen {
       inferred.Add(type);
     }
     return inferred;
+  }
+
+  // a literal given to a parameter whose type is a set (a parameter T : Nums, or Nums n): the same choice as for a value of the set (11.3.6.1):
+  // its default type when the set lists it, otherwise the only member of the same kind (integer or real); other cases are left to the check
+  string SetLiteralArgType(GenericFun generic, Node pattern, Node argument, string actual) {
+    var literal = argument.Kind == "Neg" && argument.Children.Count == 1 ? argument.Children[0] : argument;
+    if (literal.Kind is not ("Int" or "Real") || pattern is not { Kind: "Type", Children.Count: 0 }
+        || generic.Params.FirstOrDefault(p => p.Name == pattern.Text) is not TypeParam param) {
+      return actual;
+    }
+    bool suffixed = char.IsLetter(literal.Text![^1]) && !literal.Text.StartsWith("0x") && !literal.Text.StartsWith("0b");
+    if (suffixed) {
+      return actual;   // 4u8: the type written
+    }
+    foreach (var constraint in param.Constraints.Where(c => c is { Kind: "Type", Children.Count: 0 } && IsSetName(c.Text!))) {
+      var members = SetMembers(constraint.Text!);
+      if (members.Contains(actual)) {
+        return actual;
+      }
+      var sameKind = members.Where(member => literal.Kind == "Real" ? IsRealMember(member)
+        : SetValueNatives.Contains(member) && member is not ("bool" or "char") && !IsRealMember(member)).ToList();
+      if (sameKind.Count == 1) {
+        return sameKind[0];
+      }
+    }
+    return actual;
   }
 
   // the declared type of each parameter next to the argument given to it (positional, named and variadic)

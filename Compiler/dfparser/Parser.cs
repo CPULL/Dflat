@@ -1674,7 +1674,14 @@ public sealed class Parser {
       node.Add(layout);
     }
     if (IsOp("<")) {
-      throw Error("a struct has no generics (spec 11.1.5)");
+      // struct Pair<T> { T a, T b }, struct Ring<T, uns N> { arr<T>[N] items } (spec 11.1.5): not with a layout tag, whose layout is fixed for C
+      if (layout != null) {
+        throw Error("a struct with a layout tag (<fixed>, <compact>) cannot be generic: its layout must be known without type arguments (spec 11.1.5)");
+      }
+      node.Add(ParseGenericParams());
+      if (Peek.Kind == TokenKind.Ident && Peek.Text == "where") {
+        node.Add(ParseWhere());
+      }
     }
     if (IsOp("(")) {
       throw Error($"a struct has no constructors: it is created with {name.Text}(field: value) (spec 11.1.5.1)");

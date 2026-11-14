@@ -1,0 +1,12 @@
+Pair<i32> { a: 1, b: 2 } first 1 1/2/z
+Pair<i64> { a: 3, b: 4 } Pair<string> { a: x, b: y } Pair<u8> { a: 5, b: 6 }
+true
+[Pair<i32> { a: 0, b: 0 }: origin, Pair<i32> { a: 1, b: 0 }: east]
+d
+[5, 6, 3, ...] (4 items) head 6
+rex
+i32 r64
+  end of run
+  rex ends
+  max ends
+---- exit code 0 ----

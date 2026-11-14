@@ -1,0 +1,1 @@
+struct_generic_layout.df(2,21): error: a struct with a layout tag (<fixed>, <compact>) cannot be generic: its layout must be known without type arguments (spec 11.1.5), found '<'

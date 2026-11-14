@@ -1,0 +1,6 @@
+// a type argument written on a method of a struct that is not generic (spec 11.3.1.1)
+struct Vec { i32 x, i32 y
+  public fun i32 sum() { x + y }
+}
+Vec v = Vec(1, 2)
+i32 s = v.sum<i32>()

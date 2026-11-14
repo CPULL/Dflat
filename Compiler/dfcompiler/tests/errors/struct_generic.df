@@ -1,2 +1,0 @@
-namespace struct_generic
-struct A<T> { T x }

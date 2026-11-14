@@ -1,0 +1,1 @@
+struct_generic_value_param.df(3): error: Ring: T cannot be inferred from the values given: write the type arguments, Ring<...>(...) (spec 11.3.5)

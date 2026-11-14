@@ -1,0 +1,1 @@
+class_generic_no_inference.df(5): error: the arguments give 'T' two types, i64 and string: write the type argument or cast

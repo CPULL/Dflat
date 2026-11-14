@@ -1,0 +1,5 @@
+// the arguments of a generic class constructor give T two types: the type arguments are written (spec 11.3.5)
+class Pair<T>(T a, T b) {
+  public T a
+}
+var p = Pair(1, "x")

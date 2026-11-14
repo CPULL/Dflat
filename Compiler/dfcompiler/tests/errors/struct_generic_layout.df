@@ -1,0 +1,2 @@
+// a struct with a layout tag is not generic: its layout must be known for C (spec 11.1.5)
+struct<fixed> Packet<T> { T value }

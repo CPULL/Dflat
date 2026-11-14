@@ -2627,6 +2627,18 @@ public sealed partial class CodeGen {
         return TransformTo(transform.Children[0], callee.Children.Skip(1).ToList(), args, scope, n);
       }
       var typeArgs = callee.Children.Skip(1).ToList();
+      if (callee.Children[0] is { Kind: "Member" } staticRef && staticRef.Children[0] is { Kind: "Name" } owner && scope.Find(owner.Text!) == null
+          && classes.TryGetValue(owner.Text!, out var ownerClass)) {
+        // Util.pick<i32>(a, b): the copy of a static generic method for the types written (spec 11.3.1.1)
+        return MethodCall(ownerClass, staticRef.Text!, null, false, args, scope, n, typeArgs);
+      }
+      if (callee.Children[0] is { Kind: "Member" } structStaticRef && structStaticRef.Children[0] is { Kind: "Name" } structOwner
+          && scope.Find(structOwner.Text!) == null && structs.TryGetValue(structOwner.Text!, out var ownerStruct)) {
+        return StructStaticCall(ownerStruct, structStaticRef.Text!, args, scope, n, typeArgs);   // Vec.make<i32>(...) (spec 11.3.1.1)
+      }
+      if (callee.Children[0] is { Kind: "Member" } structMethodRef && StructMethodCall(structMethodRef, args, scope, n, typeArgs) is Expr structGeneric) {
+        return structGeneric;   // v.scaled<i32>(3) (spec 11.3.1.1)
+      }
       if (callee.Children[0] is { Kind: "Member" } methodRef && ExprOf(methodRef.Children[0], scope) is var receiver && IsClass(receiver.Type)) {
         // obj.addSize<i32>(5): the copy of the generic method for the types written (spec 11.3.1)
         return MethodCall(ObjInfo(receiver.Type), methodRef.Text!, TempObject(receiver).Code, false, args, scope, n, typeArgs);
@@ -2651,6 +2663,18 @@ public sealed partial class CodeGen {
     }
     if (callee.Kind == "SafeMember") {
       return SafeAccess(callee, n, scope);
+    }
+    // Pair(1, 2): a generic struct with its type arguments inferred from the values of its fields (spec 11.1.5, 11.3.5)
+    if (callee.Kind == "Name" && scope.Find(callee.Text!) == null && genericClasses.TryGetValue(callee.Text!, out var structTemplate)
+        && structTemplate.Node.Kind == "Struct") {
+      string copy = ClassInstanceName(structTemplate, InferStructTypeArgs(structTemplate, args, scope, n), n);
+      return StructCreate(structs[copy], args, scope, n);
+    }
+    // Box(5): a generic class with its type arguments inferred from the arguments of its primary constructor (spec 11.3.5)
+    if (callee.Kind == "Name" && scope.Find(callee.Text!) == null && genericClasses.TryGetValue(callee.Text!, out var classTemplate)
+        && classTemplate.Node.Kind == "Class" && !classTemplate.HasPlaceholders) {
+      string copy = ClassInstanceName(classTemplate, InferClassTypeArgs(classTemplate, args, scope, n), n);
+      return Call(Synthetic("Call", n).Add(Synthetic("Name", n, copy)).Add(n.Children[1]), scope);
     }
     // Vec3(x: 2.0), Vec3(1.0, 2.0, 3.0): a new struct (spec 11.1.5.1)
     if (callee.Kind == "Name" && structs.TryGetValue(callee.Text!, out var created) && scope.Find(callee.Text!) == null) {

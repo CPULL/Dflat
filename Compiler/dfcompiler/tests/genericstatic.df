@@ -1,0 +1,37 @@
+// static generic methods of classes, and generic methods of structs (spec 11.3.1.1): one copy per list of type arguments, inferred or
+// written; static ones are called with the name of the class or of the struct; inside a struct method a bare call reaches them; a set
+// parameter makes a method generic too; a method called on the result of a static function of a struct
+import Root
+class Util {
+  public static fun T pick<T>(T a, T b, bool first) {
+    if first then return a
+    return b
+  }
+  public static fun string describe(Ints n) { $"int {n}" }
+  public fun string twice<T>(T x) { $"{x}{x}" }
+}
+Generic Ints { i32, i64 }
+Console.log(Util.pick(1, 2, false))
+Console.log(Util.pick<string>("a", "b", true))
+Console.log(Util.pick(1.5, 2.5, true))
+Console.log(Util.describe(5))
+Console.log(Util().twice(7))
+Generic Nums { i64, r64 }
+struct Vec { i32 x, i32 y
+  public fun i32 sum() { x + y }
+  public unrestricted fun string tagged<T>(T label) { $"{label}:{x},{y}" }
+  public fun grow<T>(T by) { x += 1 }
+  public unrestricted fun string twice(Nums n) { $"{n}{n}" }
+  public unrestricted fun string viaThis() { tagged("inside") }
+  public static fun Vec make<T>(T seed) { Vec(1, 1) }
+}
+Vec v = Vec(1, 2)
+Console.log(v.tagged(3))
+Console.log(v.tagged<string>("p"))
+v.grow(true)
+Console.log(v.sum())
+Console.log(v.twice(4))
+Console.log(v.twice(1.5))
+Console.log(v.viaThis())
+Console.log(Vec.make(5).sum())
+Console.log(Vec.make<string>("s").x)

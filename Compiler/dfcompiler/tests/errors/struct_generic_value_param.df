@@ -1,0 +1,3 @@
+// a value parameter is never inferred: the type arguments are written (spec 11.3.5)
+struct Ring<T, uns N> { arr<T>[N] items }
+var r = Ring()

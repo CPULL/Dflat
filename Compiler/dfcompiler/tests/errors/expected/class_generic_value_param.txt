@@ -1,0 +1,1 @@
+class_generic_value_param.df(5): error: Grid: W cannot be inferred from the arguments of its constructor: write the type arguments, Grid<...>(...) (spec 11.3.5)

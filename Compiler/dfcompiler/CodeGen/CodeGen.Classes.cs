@@ -1937,6 +1937,17 @@ public sealed partial class CodeGen {
 
   // name(args) written inside a class: a function of this class (or a parent), before free functions
   Expr? BareMethodCall(string name, List<Node> args, Scope scope, Node at) {
+    if (currentStruct != null && genericMethods.TryGetValue((currentStruct.Name, name), out var genericTemplate)) {
+      // tagged(x) inside a method of the struct: a generic method of the struct (spec 11.3.1.1), static or not as the template is
+      bool isStaticTemplate = ModsOf(genericTemplate.Node).Contains("static");
+      if (isStaticTemplate) {
+        return StructStaticCall(currentStruct, name, args, scope, at);
+      }
+      if (scope.Find("this") == null) {
+        throw Error($"'{name}' is a method: a static function has no struct to call it on", at);
+      }
+      return StructMethodCall(Synthetic("Member", at, name).Add(Synthetic("Name", at, "this")), args, scope, at);
+    }
     if (currentStruct != null && funs.TryGetValue(currentStruct.Name + "." + name, out var structFuns)) {
       // len() inside a method of a struct: this.len(), or a static function of the struct (spec 11.1.5.2)
       var chosen = ResolveOverload(structFuns, args, scope, at);

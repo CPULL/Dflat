@@ -1,0 +1,24 @@
+// generic classes infer their type arguments from the arguments of their primary constructor (spec 11.3.5): Box(5) is a Box<i64>;
+// written arguments convert (Box<u8>(7)); arguments that disagree, or a value parameter, need the type arguments written
+import Root
+class Box<T>(T v) {
+  public T v
+}
+class Two<K, V>(K key, V value) {
+  public K key
+  public V value
+}
+class Holder<T>(arr<T> items) {
+  public arr<T> items
+}
+var b = Box(5)
+Console.log(b.v)
+var s = Box("x")
+Console.log(s.v)
+var t = Two("k", 2.5)
+Console.log($"{t.key} {t.value}")
+arr<i32> nums = [1, 2, 3]
+var h = Holder(nums!)
+Console.log(h.items.len)
+Box<u8> w = Box<u8>(7)
+Console.log(w.v)

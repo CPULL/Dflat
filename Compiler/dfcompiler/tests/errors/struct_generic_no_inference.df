@@ -1,0 +1,3 @@
+// a generic struct whose type arguments cannot be inferred from the values given (spec 11.3.5)
+struct Pair<T> { T a, T b }
+var p = Pair(1, "x")

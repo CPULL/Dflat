@@ -1,4 +1,4 @@
-Compiler version 0.0.132 alpha for version 0.0.40 of the specs 2026/11/14
+Compiler version 0.0.135 alpha for version 0.0.40 of the specs 2026/11/14
 
 Changes from the previous version -----------------------
 - A plain result built in the function is given without -> (spec 13.1.1)
@@ -11,6 +11,9 @@ Changes from the previous version -----------------------
 - executeBefore / executeAfter chained over several traits: a sub-trait redeclares the method with its own block (spec 11.2)
 - Nested composite keys: tuples inside tuple keys, structs inside struct and tuple keys (spec 6.2); the new objects of a nested key literal end with the statement
 - Custom exceptions: catch by a trait of the program, subclasses repeat the header parameters of their parent, object fields (owned in Debug, null in Release), string1k fields (string is an error), Release rules of silent exceptions (spec 15.1, 15.2)
+- Static generic methods (classes and structs) and generic methods of structs (spec 11.3.1.1); a method call on the struct a static function returns (Vec.make().sum())
+- Generic struct types: struct Pair<T>, struct Ring<T, uns N> (value parameters for inline buffers), inferred from the field values (spec 11.1.5); a literal given to a set parameter takes the best member of the set (spec 11.3.5)
+- Generic classes infer their type arguments from the arguments of their primary constructor: Box(5) is a Box<i64> (spec 11.3.5)
 
 Done -----------------------
 

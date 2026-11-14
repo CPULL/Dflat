@@ -1,0 +1,1 @@
+struct_generic_arg_count.df(3): error: Pair takes 1 type argument(s), not 2

@@ -1,0 +1,5 @@
+// a value parameter of a generic class is never inferred (spec 11.3.5)
+class Grid<T, uns W>(T fill) {
+  public T fill
+}
+var g = Grid(1)

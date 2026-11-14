@@ -1,3 +1,0 @@
-fun arr<i32>, i32 pair() {
-  return [1, 2], 2
-}

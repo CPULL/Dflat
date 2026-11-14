@@ -1,0 +1,5 @@
+// a repeated header parameter keeps the type of the parent's one (spec 15.2)
+public class Coded(i32 code) : Exception {
+  public i32 code
+}
+public class Wrong(i64 code) : Coded { }

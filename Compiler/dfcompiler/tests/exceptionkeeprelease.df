@@ -1,0 +1,33 @@
+// options: --release
+// what an exception keeps in a Release build (spec 15.2): a silent one only its id and its type (the name as message, no function, the
+// extra values zeroed, the arguments still evaluated); one that is not silent its message, function and extra values; line is 0
+import Root
+public class Note(string1k what, i32 level) : Exception, SilentException {
+  public string1k what
+  public i32 level
+}
+public class Loud(i32 code) : Exception {
+  public i32 code
+}
+fun i32 side() {
+  Console.log("  argument evaluated")
+  return 7
+}
+fun string Silent() {
+  throw Note("a note", "detail", side())
+  return "no"
+  catch Note ex { return $"silent: [{ex.message}] [{ex.function}] [{ex.what}] {ex.level} line {ex.line}" }
+}
+fun string Normal() {
+  throw Loud("loud", 5)
+  return "no"
+  catch Loud ex { return $"normal: [{ex.message}] [{ex.function}] {ex.code} line {ex.line}" }
+}
+fun string Runtime() {
+  time t = time(99999999)
+  return "no catch"
+  catch SilentException ex { return $"runtime silent: [{ex.message}] [{ex.function}]" }
+}
+Console.log(Silent())
+Console.log(Normal())
+Console.log(Runtime())

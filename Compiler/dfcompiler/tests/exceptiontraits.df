@@ -1,0 +1,52 @@
+// catch by a trait of the program (spec 15.1): a catch that names a trait handles every exception class that implements it, silent ones
+// included; the variable is an Exception (ex is DnsException d reaches the class); ex is NetError tests the trait on a caught exception
+import Root
+trait NetError { }
+public class DnsException(i32 code) : Exception, NetError {
+  public i32 code
+}
+public class LinkException : Exception, NetError { }
+public class DiskException : Exception { }
+public class PingNotice : Exception, SilentException, NetError { }
+fun Fail(i32 kind) {
+  if kind == 1 then throw DnsException("dns down", 3)
+  if kind == 2 then throw LinkException("no link")
+  if kind == 3 then throw DiskException("disk full")
+  if kind == 4 then throw PingNotice("ping")
+}
+fun string Try(i32 kind) {
+  Fail(kind)
+  return "ok"
+  catch NetError ex {
+    if ex is DnsException d then return $"net (dns {d.code}): {ex.message}"
+    return "net: " + ex.message
+  }
+  catch Exception ex {
+    return "other: " + ex.message
+  }
+}
+for i32 k = 0..=3 { Console.log(Try(k)) }
+// a silent exception with the trait: caught by the trait in the function that throws it
+fun string Silent() {
+  throw PingNotice("ping")
+  return "continued"
+  catch NetError ex { return "silent by trait: " + ex.message }
+}
+Console.log(Silent())
+// no variable, and the trait tested with is
+fun string NoVariable() {
+  Fail(2)
+  return "ok"
+  catch NetError { return "net, no variable" }
+}
+Console.log(NoVariable())
+fun string Tested(i32 kind) {
+  Fail(kind)
+  return "ok"
+  catch Exception ex {
+    if ex is NetError then return "is NetError"
+    return "is not NetError"
+  }
+}
+Console.log(Tested(1))
+Console.log(Tested(3))

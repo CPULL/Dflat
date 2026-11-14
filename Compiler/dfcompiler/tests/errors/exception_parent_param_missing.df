@@ -1,0 +1,5 @@
+// an exception child must repeat the header parameters of its parent that have no default (spec 15.2)
+public class MyExWife(string1k family) : Exception {
+  public string1k family
+}
+public class MyExWife2 : MyExWife { }

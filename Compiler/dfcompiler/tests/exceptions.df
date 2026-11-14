@@ -8,11 +8,11 @@ public class NetworkException(i32 code) : Exception {
 }
 
 public class TimeoutException : AppException {
-  public string host = "unknown"
+  public string1k host = "unknown"
 }
 
-public class AlertException(string what) : Exception, SilentException {
-  public string what
+public class AlertException(string1k what) : Exception, SilentException {
+  public string1k what
 }
 
 fun Fail(i32 kind) {

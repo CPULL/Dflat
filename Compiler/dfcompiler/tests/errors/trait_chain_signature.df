@@ -1,0 +1,8 @@
+trait Base {
+  public fun i32 work(i32 x)
+    executeAfter { }
+}
+trait Other : Base {
+  public fun i32 work(string x)
+    executeAfter { }
+}

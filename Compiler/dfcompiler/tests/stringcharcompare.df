@@ -1,0 +1,13 @@
+// string with char: the char is a one-character string (spec 2.5)
+import Root
+Console.log("Test: " + (("a" == 'a') && ('B' == "B")))
+string s = "ab"
+char c = 'a'
+Console.log(s == c)
+Console.log(s != c)
+Console.log(s > c)
+Console.log("b" < 'c')
+Console.log("" == c)
+Console.log("é" == 'é')
+for x in ["x", "yy"] { Console.log(x == 'x') }
+Console.log(c == 97)

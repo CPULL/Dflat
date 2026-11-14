@@ -1,2 +1,0 @@
-// a tuple inside a tuple key is not built yet (spec 6.2)
-map<((i32, i32), i32), i32> grid = []

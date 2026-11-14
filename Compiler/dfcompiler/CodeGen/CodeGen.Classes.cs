@@ -369,6 +369,9 @@ public sealed partial class CodeGen {
           IsGift = (p.Kind == "GiftParam" || implicitGift) && (IsClass(type) || type == "string" || IsArr(type)), IsWeak = weakParam, IsWritable = writableWeak,
           IsImplicitGift = implicitGift, GivenTo = implicitGift ? $"the constructor of {DisplayName(cls.Name)}" : null
         });
+        if (cls.IsException && cls.Parent != null && cls.Parent.PrimaryParams.Any(parentParam => parentParam.Name == p.Text)) {
+          continue;   // an exception child repeats a header parameter of its parent: the parent's field takes it (spec 15.2)
+        }
         CheckFieldName(cls, p.Text!, p);
         cls.Fields.Add(new FieldInfo(p.Text!, type, cls, p) { FromParam = true, IsWeak = weakParam, IsWritable = writableWeak });
       }
@@ -606,7 +609,8 @@ public sealed partial class CodeGen {
         throw Error($"'{(hook.Kind == "ExecuteBefore" ? "executeBefore" : "executeAfter")}' goes on a function of a trait", hook);
       }
       // replace fun m() answering a trait method with executeBefore / executeAfter: the class implements __impl_m, the trait keeps m (spec 11.2)
-      if (isOverride && AllTraits(cls).Any(trait => trait.Hooked.Contains(member.Text!))) {
+      // (a chain of blocks over several traits: the deepest link, __impl___impl_m ...)
+      while (isOverride && AllTraits(cls).Any(trait => trait.Hooked.Contains(member.Text!))) {
         member.Text = ImplPrefix + member.Text;
       }
       if (cls.Fields.Any(field => field.Name == member.Text)) {
@@ -708,6 +712,17 @@ public sealed partial class CodeGen {
     var at = cls.Node;
     var block = Synthetic("Block", at);
     var ctorFields = cls.Fields.Where(field => !field.IsStatic).ToList();
+    if (cls.IsException && cls.Node.Line < LibraryLine) {
+      // the extra values of an exception have a fixed size (spec 15.2): a text is a string1k, never a string
+      foreach (var field in ctorFields.Where(field => field.Type is "string" or "string?")) {
+        throw Error($"the field '{field.Name}' of the exception {DisplayName(cls.Name)} is {field.Type}: the fields of an exception have a fixed size, write {(field.Type == "string" ? "string1k" : "string1k?")} (spec 15.2)", field.At);
+      }
+    }
+    if (ReleaseBuild && cls.IsException) {
+      // Release: the object fields of an exception stay null (spec 15.2); an object given to the constructor ends with it, a start value
+      // is not made
+      ctorFields = ctorFields.Where(field => !IsClass(field.Type) || IsArr(field.Type)).ToList();
+    }
     foreach (var field in ctorFields.Where(field => field.FromParam)) {
       Node source = Synthetic("Name", at, field.Name);
       if (cls.PrimaryParams.First(param => param.Name == field.Name).IsGift) {
@@ -742,6 +757,9 @@ public sealed partial class CodeGen {
     if (hasPrimary || cls.CtorNodes.Count == 0) {
       if (cls.Parent != null && implicitParent == null && PrivateParentInit(cls)) {
         throw Error($"the constructor of {DisplayName(cls.Parent.Name)} without parameters is private: a subclass cannot call it", cls.Node);
+      }
+      if (cls.Parent != null && implicitParent == null && cls.IsException) {
+        ExceptionParentArgs(cls, true);   // names the parameter of the parent the class does not repeat (spec 15.2)
       }
       if (cls.Parent != null && implicitParent == null) {
         throw NotSupported($"Passing arguments to the constructor of the parent class {cls.Parent.Name}", cls.Node);
@@ -779,8 +797,14 @@ public sealed partial class CodeGen {
     // the atEnd after the class is its destructor: a function of the object, run when it ends
     // the destructor fragments run first, the last registered first, then the atEnd of the class (spec 11.4)
     var trailing = cls.Node.Children.FirstOrDefault(child => child.Kind == "AtEnd" && child.Text == "trailing");
-    if (trailing != null || cls.Fragments.Count > 0) {
+    // the view and the iterator of an arr close their array in the side table of open iterators when they end (spec 6.4)
+    bool closesArr = classInstanceArgs.TryGetValue(cls.Name, out var instanceOf) && instanceOf.Template.Name is "arrView" or "arrIterator";
+    if (trailing != null || cls.Fragments.Count > 0 || closesArr) {
       var dtorBlock = Synthetic("Block", at);
+      if (closesArr) {
+        NeedChunk("arriter");
+        dtorBlock.Add(Synthetic("RawC", at, $"df_ait_close(self->{FindField(cls, "items")!.CName}.p);"));
+      }
       if (cls.Fragments.Count > 0) {
         dtorBlock.Add(FragmentRunner(cls, at));
       }
@@ -1054,8 +1078,34 @@ public sealed partial class CodeGen {
     if (cls.Parent == null) {
       return null;
     }
-    return cls.Parent.IsException ? (cls.Parent.PrimaryParams.Count == 0 ? cls.Parent.Init : null)
+    // an exception class: the parent's init, which receives the message and the parent's header parameters (spec 15.2, ExceptionParentArgs)
+    return cls.Parent.IsException ? (cls.Parent.PrimaryParams.Count == 0 || ExceptionParentArgs(cls) != null ? cls.Parent.Init : null)
       : funs[cls.Parent.Name + InitsSuffix].FirstOrDefault(init => init.Params.Count == 0 && init.Visibility != Vis.Private);
+  }
+
+  // an exception class whose parent has header parameters (spec 15.2): the child repeats them first, with the same names and types (a default
+  // of its own is allowed), then adds its own; a parameter of the parent with a default can be left out. For each parameter of the parent:
+  // the name of the child's parameter that gives it, or null when the parent's default is used. Null when the rule is not kept (report: the error)
+  List<string?>? ExceptionParentArgs(ClassInfo cls, bool report = false) {
+    var parentParams = cls.Parent!.PrimaryParams;
+    var own = cls.PrimaryParams;
+    var result = new List<string?>();
+    for (int index = 0; index < parentParams.Count; index++) {
+      var expected = parentParams[index];
+      if (index < own.Count && own[index].Name == expected.Name) {
+        if (own[index].Type != expected.Type) {
+          return report ? throw Error($"'{own[index].Name}' of {DisplayName(cls.Name)} is {DisplayName(own[index].Type)}: the parameter of {DisplayName(cls.Parent.Name)} it repeats is {DisplayName(expected.Type)} (spec 15.2)", cls.Node) : null;
+        }
+        result.Add(own[index].Name);
+        continue;
+      }
+      if (expected.Default != null && !own.Any(p => p.Name == expected.Name)) {
+        result.Add(null);   // the parent's default
+        continue;
+      }
+      return report ? throw Error($"{DisplayName(cls.Name)} must repeat the parameter '{DisplayName(expected.Type)} {expected.Name}' of {DisplayName(cls.Parent.Name)} first in its header, or {DisplayName(cls.Parent.Name)} must give it a default (spec 15.2)", cls.Node) : null;
+    }
+    return result;
   }
 
   // the parent has a constructor without parameters, but it is private (a subclass cannot call it)
@@ -1808,7 +1858,12 @@ public sealed partial class CodeGen {
     }
     if (!param.IsGift && !LibraryCode && arg.Kind == "Tuple" && TupleHoldsArrays(param.Type)) {
       // g((Dog("a"), 1)): the new parts of a tuple lent to the call end with the statement (spec 3.2)
-      return TempTupleParts(Convert(value, param.Type, arg), param.Type, NewTupleParts(arg, param.Type));
+      // (also inside a tuple literal nested in it: ((Dog("a"), 1), 2))
+      var drops = new List<(string Path, string Drop)>();
+      NewKeyParts(arg, param.Type, "(*t)", "", drops, scope, false);
+      string converted = Convert(value, param.Type, arg);
+      return drops.Count == 0 ? converted : TempBoxCode(param.Type, converted, string.Concat(drops.Select(d => d.Drop)),
+        "_a" + System.Text.RegularExpressions.Regex.Replace(string.Join("_", drops.Select(d => d.Path)), @"[^A-Za-z0-9_]", "_"));
     }
     return Convert(value, param.Type, arg);
   }
@@ -1964,7 +2019,8 @@ public sealed partial class CodeGen {
     if (subjectType == "Exception") {
       // the exception held by a catch: its descriptor chain, or the silent flag
       if (target.IsTrait) {
-        return target.Name == "SilentException" ? $"(({subject})->descriptor->silent)" : throw Error("a trait other than SilentException cannot be tested on an Exception", at);
+        // SilentException: the flag of the record; a trait of the program: the class of an exception object (spec 15.1)
+        return target.Name == "SilentException" ? $"(({subject})->descriptor->silent)" : $"(({subject})->cls != NULL && df_has_trait({subject}, &df_trait_{target.Name}))";
       }
       return target.IsException ? $"df_exc_is({subject}, {customExceptionIds[target.Name]})" : throw Error($"{target.Name} is not an exception class", at);
     }
@@ -2184,6 +2240,14 @@ public sealed partial class CodeGen {
     }
     if (f.ParentInit != null) {
       string forwarded = cls.Parent!.IsException ? ", v_message" : "";
+      if (cls.Parent.IsException && ExceptionParentArgs(cls) is List<string?> parentArgs) {
+        // the parent's header parameters: the ones the class repeats (in the same place, after the message), or the parent's defaults
+        var parentParams = cls.Parent.PrimaryParams;
+        for (int index = 0; index < parentParams.Count; index++) {
+          forwarded += ", " + (parentArgs[index] is string repeated ? ParamName(f.Params.First(p => p.Name == repeated))
+            : Convert(ExprOf(parentParams[index].Default!, new Scope(null), parentParams[index].Type), parentParams[index].Type, parentParams[index].Default!));
+        }
+      }
       string parentInit = $"{f.ParentInit.CName}(({CType(cls.Parent.Name)})self{forwarded})";
       if (PairReturn(f.ParentInit)) {
         sb.Append($"  df_err = {parentInit};\n");

@@ -709,3 +709,14 @@
 - 12.7 A counted result used directly (`make().bark()`): the usage lives for the statement, read-only (unrestricted and static methods only)
 - 6.6 One part of a map value written in place (`m[k].1 = 5`): a missing key is added with the zero value first
 - 3.2 Tuples and structs as the values of `map` and `hmap`; tuples that hold structs with strings or objects (also among several results); one part of a collection item written in place (`v[0].1 = 5`)
+
+## Changes in 0.0.40
+
+- 13.1.1 A plain result built in the function (a new object, string, array or collection, a local that holds one, a call to a function that gives) is given, as if written `->` (was a compile error asking for `->`); `->` stays accepted and is needed without a body
+- 10 `for var i = 0..10` and `for i = 0..10`: a range takes the type of its ends (was: a range needs the type)
+- 2.5 An integer with a real converts to the real with no cast; real to integer still needs one; an integer wider than the real's exact range is a level 1 warning
+- 6.4 Replacing a collection held by a variable or a field while it has open iterators or views raises `ModifyingIteratedCollectionException`; the counter of an `arr` lives in a runtime table keyed by its address; a temporary view counts until the end of its statement
+- 6.5 The view and the iterator of an `arr` that outlive it raise `UsageOfDestroyedObjectException`; the block of the array is kept until they end
+- 11.2 A sub-trait adds a link to an `executeBefore` / `executeAfter` chain by declaring the method again with its block (same parameters and result); `executeBefore` blocks run from the root trait to the most specific one
+- 15.1 A catch is `catch <ExceptionType> [<variable>]`: a variable alone is a compile error (was: the same as `catch Exception variable`); a catch can name a trait of the program (the variable is an `Exception`)
+- 15.2 Extra values: a text is a `string1k` (a `string` field is a compile error); a subclass repeats the header parameters of its parent first (a parent's default can be left out); object fields are owned in Debug builds and null in Release builds

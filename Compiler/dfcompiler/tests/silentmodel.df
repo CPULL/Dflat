@@ -3,8 +3,8 @@ import Root
 
 // silent exceptions: they leave a function only for the caller that has a catch for them (EXCEPTIONS: THE MODEL, rules 4 to 6)
 
-public class Warning(string text) : Exception, SilentException { }
-public class Notice(string text) : Exception, SilentException { }
+public class Warning(string1k text) : Exception, SilentException { }
+public class Notice(string1k text) : Exception, SilentException { }
 public class Trouble : Exception { }
 
 fun i64 mul(i64 a, i64 b) {
@@ -67,7 +67,7 @@ Console.log(wrongKind(20))                                // wrongKind 0: a catc
 
 // a catch for a parent class below Exception observes the silent children of that class
 public class Family : Exception { }
-public class Cousin(string text) : Family, SilentException { }
+public class Cousin(string1k text) : Family, SilentException { }
 fun i64 cousin(i64 a) {
   if a > 0 then throw Cousin("a cousin")
   return a

@@ -1,0 +1,29 @@
+ways out
+  break: free
+  continue: free
+  return 20: free
+  exception caught: free
+  nested: free
+  view on the spot 2, same statement: open
+  next statement: free
+  view and iterator 2 1: open
+  after their scope: free
+changes
+  sort blocked: free
+  reverse blocked: free
+  copyFrom blocked: free
+  items changed [0, 0, 0]: free
+  replace blocked
+  item write ok [7, 1, 2]
+dead arrays
+  end d1
+  end d2
+  got the view
+view is dead
+  end d1
+  end d2
+loop on dead view
+  end d1
+  end d2
+iterator is dead
+---- exit code 0 ----

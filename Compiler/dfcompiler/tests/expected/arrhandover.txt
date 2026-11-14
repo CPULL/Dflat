@@ -1,0 +1,55 @@
+outside
+  end a1
+  a is b1
+  end of outside
+  end b1
+replaced
+  end a2
+  a is b2
+  end of replaced
+  end b2
+  end b3
+lentToLending
+  len 1
+  end l1
+  end of lentToLending
+lentMore
+  false
+  end l2
+  [Dog { name: l3 }]
+  end l3
+  end of lentMore
+user
+  end b4
+  end b4
+  end of user
+  end b4
+  end b4
+twoBorrowers
+  end x1
+  end x2
+  two two
+movedOn
+  end m1
+  end m2
+  a is m3
+  end m3
+taken
+  end t1
+  end t2
+  a is t3
+  end t3
+loop
+  end L0
+  end L1
+  end L2
+  a is L3
+  end L3
+replacedTwice
+  end r0
+  end r2
+  r1 r3
+  end r1
+  end r3
+done
+---- exit code 0 ----

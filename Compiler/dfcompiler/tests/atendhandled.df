@@ -2,7 +2,7 @@
 // handles does nothing (the block has no error part)
 import Root
 
-public class Notice(string text) : Exception, SilentException { }
+public class Notice(string1k text) : Exception, SilentException { }
 
 fun i32 divide(i32 a, i32 b) { a / b }
 

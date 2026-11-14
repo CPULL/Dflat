@@ -2,7 +2,7 @@
 // the others. And a return inside the block runs every atEnd clause, the ones before the catches too (spec 7.2.4)
 import Root
 
-public class Trouble(string text) : Exception { }
+public class Trouble(string1k text) : Exception { }
 
 public class Part(string name) {
   public string name

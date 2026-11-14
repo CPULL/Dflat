@@ -1,0 +1,1 @@
+key_nested_not_keyable.df(5): error: Cat is not Keyable: the item 0 of (Cat,i32), in the key ((Cat,i32),i32), holds it; a class used in a key implements the trait Keyable (spec 6.2, 11.2.1)

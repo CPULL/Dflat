@@ -1,0 +1,137 @@
+// open iterators and views of arr (spec 6.4, 6.5, 12.5): a loop, a view or an iterator keeps the array from changing its order (sort,
+// sortUnstable, reverse, copyFrom) or being replaced until it ends, on every way out; items can still be written (a[i] = v, swap,
+// replace, fill(value), clear()); a temporary view ends with its statement; an array that ends
+// while a view or an iterator holds it makes them raise UsageOfDestroyedObjectException
+import Root
+public class Dog(string name) {
+  public string name
+} atEnd {
+  Console.log("  end " + name)
+}
+public class Box {
+  public arr<Dog> dogs = [Dog("d1"), Dog("d2")]
+}
+// the array can change again: nothing holds it open
+fun string probe(&arr<i32> a) {
+  a.sort()
+  return "free"
+  catch ModifyingIteratedCollectionException ex { return "open" }
+}
+fun i32 firstBig(arr<i32> a) {
+  for x in a {
+    if x > 10 { return x }
+  }
+  return -1
+}
+fun i32 boom(arr<i32> a) {
+  for x in a {
+    if x == 3 { throw IndexOutOfRangeException("boom") }
+  }
+  return 0
+}
+fun string tryBoom(arr<i32> a) {
+  boom(a)
+  return "no"
+  catch IndexOutOfRangeException ex { return "caught" }
+}
+fun string sortInLoop(&arr<i32> a) {
+  for x in a {
+    a.sort()
+  }
+  return "sorted"
+  catch ModifyingIteratedCollectionException ex { return "sort blocked" }
+}
+fun string reverseWithView(&arr<i32> a) {
+  var v = a[0..2]
+  a.reverse()
+  return "reversed"
+  catch ModifyingIteratedCollectionException ex { return "reverse blocked" }
+}
+fun string copyWithIterator(&arr<i32> a) {
+  arr<i32> source = [5, 6]
+  var it = a.getIterator()
+  a.copyFrom(0, source, 0, 2)
+  return "copied"
+  catch ModifyingIteratedCollectionException ex { return "copyFrom blocked" }
+}
+fun string itemsWithIterator(&arr<i32> a) {
+  var it = a.getIterator()
+  a.swap(0, 1)
+  a.fill(4)
+  a[2] = 8
+  a.clear()
+  return $"items changed {a}"
+}
+fun string replaceInLoop() {
+  arr<i32> a = [3, 1, 2]
+  for x in a {
+    a = [9]
+  }
+  return "replaced"
+  catch ModifyingIteratedCollectionException ex { return "replace blocked" }
+}
+fun string writeItem() {
+  arr<i32> a = [3, 1, 2]
+  for x in a { a[0] = 7 }
+  return $"item write ok {a}"
+}
+fun ->arrView<Dog> fromBox() {
+  Box b = Box()
+  var v = b.dogs[0..1]
+  return ->v
+}
+fun ->arrIterator<Dog> iterBox() {
+  Box b = Box()
+  var it = b.dogs.getIterator()
+  return ->it
+}
+fun string readDead() {
+  var v = fromBox()
+  Console.log("  got the view")
+  return $"{v[0].name}"
+  catch UsageOfDestroyedObjectException ex { return "view is dead" }
+}
+fun string loopDead() {
+  var v = fromBox()
+  for d in v { Console.log(d.name) }
+  return "looped"
+  catch UsageOfDestroyedObjectException ex { return "loop on dead view" }
+}
+fun string iterDead() {
+  var it = iterBox()
+  var n = it.next()
+  return "next ok"
+  catch UsageOfDestroyedObjectException ex { return "iterator is dead" }
+}
+fun main() {
+  arr<i32> a = [1, 20, 3]
+  Console.log("ways out")
+  for x in a { if x == 20 { break } }
+  Console.log($"  break: {probe(&a)}")
+  for x in a { if x == 1 { continue } }
+  Console.log($"  continue: {probe(&a)}")
+  Console.log($"  return {firstBig(a)}: {probe(&a)}")
+  Console.log($"  exception {tryBoom(a)}: {probe(&a)}")
+  for x in a { for z in a { } }
+  Console.log($"  nested: {probe(&a)}")
+  Console.log($"  view on the spot {a[1..].len}, same statement: {probe(&a)}")
+  Console.log($"  next statement: {probe(&a)}")
+  if true {
+    var v = a[0..2]
+    var it = a.getIterator()
+    var nx = it.next()
+    Console.log($"  view and iterator {v.len} {nx.0}: {probe(&a)}")
+  }
+  Console.log($"  after their scope: {probe(&a)}")
+  Console.log("changes")
+  Console.log($"  {sortInLoop(&a)}: {probe(&a)}")
+  Console.log($"  {reverseWithView(&a)}: {probe(&a)}")
+  Console.log($"  {copyWithIterator(&a)}: {probe(&a)}")
+  Console.log($"  {itemsWithIterator(&a)}: {probe(&a)}")
+  Console.log($"  {replaceInLoop()}")
+  Console.log($"  {writeItem()}")
+  Console.log("dead arrays")
+  Console.log(readDead())
+  Console.log(loopDead())
+  Console.log(iterDead())
+}

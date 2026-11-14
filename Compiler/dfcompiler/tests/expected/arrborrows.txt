@@ -32,11 +32,15 @@ replacedLender
   end r-a
   a r-b1
   end of replacedLender
+  end r-b1
+  end r-b2
 outerBorrower
   end o-outer
   outer 1
   end of outerBorrower
+  end o-b
 declBorrowerReturned
+  end d-b
   got d-b
 paramBorrow
   len 1
@@ -44,6 +48,7 @@ paramBorrow
   end p-d
 tempLend
   lent 1
+  end tl
   end of tempLend
 mixedPop
   end mp-c
@@ -54,6 +59,7 @@ mixedPop
 plainItems
   3 2
 end of main
+  end d-b
   end mm-b
   end mm-a
   end m-b

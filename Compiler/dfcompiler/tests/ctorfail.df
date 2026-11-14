@@ -1,7 +1,7 @@
 // A constructor whose field initializers raise: the half-built object ends and the caller gets nothing but the exception (spec 15.7.6)
 import Root
 
-public class Notice(string text) : Exception, SilentException { }
+public class Notice(string1k text) : Exception, SilentException { }
 
 public class Part(i32 id) {
   public i32 id

@@ -2,8 +2,8 @@
 // Run with the environment variable DF_EXC_COUNT=1 to print how many records are alive at the end (it must be 0).
 import Root
 
-public class Notice(string text) : Exception, SilentException { }
-public class Trouble(string text) : Exception { }
+public class Notice(string1k text) : Exception, SilentException { }
+public class Trouble(string1k text) : Exception { }
 
 fun i32 divide(i32 a, i32 b) { a / b }
 fun note(i32 x) {

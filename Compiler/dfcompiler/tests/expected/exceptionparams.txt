@@ -1,0 +1,6 @@
+plain: no reason
+w2: smith
+w3: none
+w4: rossi 12
+c: 500 retry true
+---- exit code 0 ----

@@ -3,7 +3,7 @@
 // (spec 7.2.6)
 import Root
 
-public class Trouble(string text) : Exception { }
+public class Trouble(string1k text) : Exception { }
 
 public class Res(string name) {
   public string name

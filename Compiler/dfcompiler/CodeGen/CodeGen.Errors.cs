@@ -316,7 +316,8 @@ public sealed partial class CodeGen {
         IsWeak = decl.Children.Any(child => child.Kind == "WeakInit"),
         IsCounted = IsCountedDecl(decl),
         IsWritable = decl.Children.Any(child => child.Kind == "ReadWrite"),
-        ArrFlag = mixedArrayDecls.Contains(decl) ? $"oa_v_{name}_{frame.Id}" : null
+        ArrFlag = mixedArrayDecls.Contains(decl) ? $"oa_v_{name}_{frame.Id}" : null,
+        HandoverTo = arrHandover.TryGetValue(decl, out var taker) ? taker : null
       });
       typingScope.Vars[name] = frame.Hoisted[name];
     }
@@ -480,6 +481,9 @@ public sealed partial class CodeGen {
       if (typeName == "all") {
         return (null, name);
       }
+      if (ExceptionId(typeName) is null && CatchTrait(typeName, catchNode) is not null) {
+        return (CatchByTrait, name);   // catch NetError ex: every exception class that implements the trait (spec 15.1)
+      }
       return (ExceptionId(typeName) ?? throw UnknownException(typeName, catchNode), name);
     }
     if (name == null) {
@@ -492,8 +496,26 @@ public sealed partial class CodeGen {
     if (ExceptionId(resolved) is int id) {
       return (id, null);                // catch DivisionByZeroException { }
     }
+    if (CatchTrait(resolved, catchNode) is not null) {
+      return (CatchByTrait, null);      // catch NetError { }
+    }
     // a catch starts with an exception type: there is no shorthand with the variable alone (spec 15.1)
     throw Error($"unknown exception type '{name}': a catch names an exception type, then an optional variable (catch Exception {name} gets any exception)", catchNode);
+  }
+
+  const int CatchByTrait = -3;   // the id of a catch that names a trait of the program (CatchTrait gives the trait)
+
+  // the trait of the program a catch names (catch NetError ex), or null; it is remembered for the dispatch
+  readonly Dictionary<Node, ClassInfo> catchTraits = new();
+
+  ClassInfo? CatchTrait(string name, Node catchNode) {
+    if (catchTraits.TryGetValue(catchNode, out var known)) {
+      return known;
+    }
+    if (name == "SilentException" || !traits.TryGetValue(name, out var trait)) {
+      return null;
+    }
+    return catchTraits[catchNode] = trait;
   }
 
   // first segment through name aliases: r.DivisionByZeroException → Root.DivisionByZeroException
@@ -582,7 +604,9 @@ public sealed partial class CodeGen {
           caughtAll = true;
           break;
         }
-        string test = id == null ? on! : (id == -2 ? "df_err->descriptor->silent" : $"df_exc_is(df_err, {id})") + (on != null ? $" && {on}" : "");
+        string test = id == null ? on! : (id == -2 ? "df_err->descriptor->silent"
+          : id == CatchByTrait ? $"(df_err->cls != NULL && df_has_trait(df_err, &df_trait_{catchTraits[frame.Catches[next].Node].Name}))"   // an exception object whose class has the trait
+          : $"df_exc_is(df_err, {id})") + (on != null ? $" && {on}" : "");
         sb.Append($"{pad}  if ({test}) goto {frame.CatchLabel(next)};\n");
       }
       if (!caughtAll) {

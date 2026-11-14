@@ -1,0 +1,5 @@
+  argument evaluated
+silent: [Note] [] [] 0 line 0
+normal: [loud] [string Normal()] 5 line 0
+runtime silent: [OutOfRangeCastException] []
+---- exit code 0 ----

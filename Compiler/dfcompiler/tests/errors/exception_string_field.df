@@ -1,0 +1,4 @@
+// the fields of an exception have a fixed size: a text is a string1k (spec 15.2)
+public class Failed(string reason) : Exception {
+  public string reason
+}

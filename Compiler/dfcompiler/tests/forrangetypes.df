@@ -1,0 +1,9 @@
+// for var i = a..b and for i = a..b take the type of the ends (spec 10)
+import Root
+for var i = 0..3 { Console.log(i) }
+for j = 2..=0 { Console.log(j) }
+u8 n = 2
+for var k = 0..n { Console.log(k) }
+i16 lo = -2
+for m = lo..0 { Console.log(m) }
+for i32 x = 0..2 { Console.log(x) }

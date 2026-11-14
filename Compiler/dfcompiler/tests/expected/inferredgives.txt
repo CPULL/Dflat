@@ -1,0 +1,10 @@
+Made
+Local
+Boss
+Hi Ann
+12
+abab
+[1, 2] 2
+Hi Bob
+still accepted
+---- exit code 0 ----

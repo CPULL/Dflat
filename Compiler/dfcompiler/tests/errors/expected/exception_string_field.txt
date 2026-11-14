@@ -1,0 +1,1 @@
+exception_string_field.df(2): error: the field 'reason' of the exception Failed is string: the fields of an exception have a fixed size, write string1k (spec 15.2)

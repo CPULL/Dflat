@@ -1,0 +1,40 @@
+// exception classes whose parent has header parameters (spec 15.2): the child repeats them first, with the same names and types (a default
+// of its own is allowed), then adds its own; a parameter of the parent with a default can be left out; body fields with defaults never count
+import Root
+public class MyEx : Exception {
+  public string1k reason = "no reason"
+}
+public class MyEx2 : MyEx { }
+public class MyExWife(string1k family) : Exception {
+  public string1k family
+}
+public class MyExWife2(string1k family) : MyExWife { }
+public class MyExWife3(string1k family = "none") : MyExWife { }
+public class MyExWife4(string1k family, i32 years) : MyExWife3 {
+  public i32 years
+}
+public class Coded(i32 code = 500) : Exception {
+  public i32 code
+}
+public class CodedChild(bool retry) : Coded {
+  public bool retry
+}
+fun Fail(i32 kind) {
+  if kind == 1 then throw MyEx2("plain")
+  if kind == 2 then throw MyExWife2("w2", "smith")
+  if kind == 3 then throw MyExWife3("w3")
+  if kind == 4 then throw MyExWife4("w4", "rossi", 12)
+  if kind == 5 then throw CodedChild("c", true)
+}
+fun string Try(i32 kind) {
+  Fail(kind)
+  return "ok"
+  catch MyExWife4 ex { return $"{ex.message}: {ex.family} {ex.years}" }
+  catch MyExWife ex { return $"{ex.message}: {ex.family}" }
+  catch MyEx ex { return $"{ex.message}: {ex.reason}" }
+  catch Coded ex {
+    if ex is CodedChild c then return $"{ex.message}: {ex.code} retry {c.retry}"
+    return "coded"
+  }
+}
+for i32 k = 1..=5 { Console.log(Try(k)) }

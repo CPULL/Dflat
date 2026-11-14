@@ -1,0 +1,11 @@
+// an integer with a real: the integer becomes the real; real to integer still needs a cast (spec 2)
+import Root
+i32 maxHp = 10
+maxHp = (i32)(maxHp * 1.5)
+Console.log(maxHp)
+u8 small = 3
+r32 f = 0.5f
+Console.log(small * f)
+i16 h = 7
+Console.log(h / 2.0)
+Console.log(h < 7.5)

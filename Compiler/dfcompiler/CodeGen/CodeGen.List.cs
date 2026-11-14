@@ -465,6 +465,9 @@ public sealed partial class CodeGen {
     sb.Append($"if ({start} > {end} || {end} > {length}) {outside} ");
     if (!IsArr(obj.Type)) {
       sb.Append($"{held}->{VecField(obj.Type, "iteratorCounter")} += 1; ");   // released by the atEnd of the view
+    } else {
+      NeedChunk("arriter");
+      sb.Append($"df_ait_open({held}.p); ");   // spec 6.4: closed by the atEnd of the view
     }
     string call = UserCallCode(ctor, $"{ctor.CName}({held}, {start}, {end} - {start})");
     sb.Append($"{call}; }})");
@@ -478,7 +481,11 @@ public sealed partial class CodeGen {
     string count = $"{view}->{FindField(cls, "count")!.CName}";
     string loop = $"for (df_uns {position} = 0; {position} < {count}; {position}++)";
     if (ViewTemplate(viewType) == "arrView") {
-      return (loop, $"{view}->{FindField(cls, "items")!.CName}.p[{start} + {position}]");
+      // the array ended while the view held it (spec 12.5)
+      string items = $"{view}->{FindField(cls, "items")!.CName}";
+      NeedChunk("arriter");
+      sb.Append($"{pad}if (df_ait_dead({items}.p)) {{ df_raise(&df_desc_UsageOfDestroyedObjectException, {fn!.NameConst}); {RaiseJump} }}\n");
+      return (loop, $"{items}.p[{start} + {position}]");
     }
     string collection = $"{view}->{cls.ParentField!.CName}";
     string collectionType = cls.ParentField.Type;

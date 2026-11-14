@@ -612,10 +612,8 @@ public sealed class Parser {
     var node = new Node("For", t);
     bool saved = noBrace;
     noBrace = true;
-    if (Peek.Kind == TokenKind.Ident && PeekAt(1).Is("=")) {
-      throw Error($"the 'for' variable needs a type: for i32 {Peek.Text} = ...");
-    }
-    if (Peek.Kind == TokenKind.Ident && PeekAt(1).Is("in")) {
+    if (Peek.Kind == TokenKind.Ident && (PeekAt(1).Is("in") || PeekAt(1).Is("="))) {
+      // for i = 0..10: the type comes from the ends of the range, as with var (spec 10)
       var n = Next();
       node.Add(new Node("Var", n, n.Text));
     } else if (IsOp("(")) {

@@ -1,0 +1,1 @@
+exception_parent_param_type.df(5): error: 'code' of Wrong is i64: the parameter of Coded it repeats is i32 (spec 15.2)

@@ -1,1 +1,0 @@
-map_nested_tuple_key.df(2): error: map keys of type ((i32,i32),i32) are not built yet (this version: integers, bool, char, enums, reals, date, time, string, string?, string1k, string1k?, tuples of them, strings and Keyable objects, structs of exact natives, strings and Keyable objects, sets of exact natives, Keyable classes)

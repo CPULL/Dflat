@@ -162,6 +162,9 @@ public sealed partial class CodeGen {
     if (args.Count != 2) {
       throw Error($"{kind} takes a key type and a value type: {kind}<K, V>", at);
     }
+    if (at.Line < LibraryLine && (IsTuple(args[0]) || IsStruct(args[0])) && IsCompositeKey(args[0])) {
+      CheckKeyableParts(args[0], args[0], at);   // reported where the program writes the type (spec 6.2, 11.2.1)
+    }
     if (IsArr(args[0]) || IsVec(args[0]) || IsList(args[0]) || IsMap(args[0]) || IsSet(args[0]) || IsView(args[0])) {
       throw Error($"a collection cannot be a key (spec 6.2): {DisplayName(args[0])}", at);
     }
@@ -341,29 +344,45 @@ public sealed partial class CodeGen {
   // a tuple key with objects (spec 6.2): the collection keeps a clone (df_tk_box_), so the new objects of the key ((Dog("a"), 1), ->d, d!,
   // or all of them for a new tuple given by a function) end with the statement; a borrowed one ((rex, 1)) stays with its owner
   string TempTupleKey(string converted, Expr key, Node node, string keyType, Scope scope) {
-    var elems = TupleElems(keyType);
-    if (LibraryCode || !elems.Any(elem => IsObjectKeyPart(elem.Type) || elem.Type is "string" or "string?")) {
+    if (LibraryCode) {
       return converted;
     }
-    var fresh = node.Kind == "Tuple" ? NewTupleParts(node, keyType)
-      : key.Fresh ? Enumerable.Range(0, elems.Count).Where(index => IsObjectKeyPart(elems[index].Type)).ToList() : new List<int>();
-    // the new strings of a tuple literal key (("a" + x, 1), (f(), 2)): the collection keeps its own copy, they end with the statement
-    var strings = new List<int>();
+    // the new parts of the key, also inside a tuple literal nested in it ((((Dog("a"), 1), "x")): their C path and the code that ends them
+    var drops = new List<(string Path, string Drop)>();
     if (node.Kind == "Tuple") {
-      for (int index = 0; index < elems.Count && index < node.Children.Count; index++) {
-        var item = TupleItemNode(node.Children[index]);
-        if (elems[index].Type is "string" or "string?" && (item.Kind is "Binary" or "Interp" or "Copy"
-            || item.Kind == "Call" && ExprOf(item, scope) is { Fresh: true } made && made.Type is "string" or "string?" && !IsStaticStr(made.Code))) {
-          strings.Add(index);
-        }
+      NewKeyParts(node, keyType, "(*t)", "", drops, scope);
+    } else if (key.Fresh) {
+      // a new tuple given by a function: its objects and the structs with objects (a nested tuple: all of its parts) end with the statement
+      foreach (var (cname, type) in KeyComponents(keyType).Where(part => IsObjectKeyPart(part.Type))) {
+        drops.Add((cname, TuplePartDrop(type, $"(*t).{cname}")));
       }
     }
-    if (strings.Count == 0) {
-      return TempTupleParts(converted, keyType, fresh);
+    if (drops.Count == 0) {
+      return converted;
     }
-    string drop = string.Concat(fresh.Select(index => TuplePartDrop(elems[index].Type, $"(*t).e{index}")))
-      + string.Concat(strings.Select(index => elems[index].Type == "string" ? $"df_str_free((*t).e{index}); " : $"df_str_free((*t).e{index}.val); "));
-    return TempBoxCode(keyType, converted, drop, "_k" + string.Join("_", fresh) + "_s" + string.Join("_", strings));
+    string suffix = "_k" + System.Text.RegularExpressions.Regex.Replace(string.Join("_", drops.Select(d => d.Path)), @"[^A-Za-z0-9_]", "_");
+    return TempBoxCode(keyType, converted, string.Concat(drops.Select(d => d.Drop)), suffix);
+  }
+
+  // the parts of a tuple literal key that are new (an object or a struct with objects made here, ->x, x!, a new string): the collection keeps its
+  // own copy, so they end with the statement; a nested tuple literal is walked the same way
+  void NewKeyParts(Node tuple, string type, string at, string path, List<(string Path, string Drop)> drops, Scope scope, bool strings = true) {
+    var elems = TupleElems(type);
+    var fresh = NewTupleParts(tuple, type);
+    for (int index = 0; index < elems.Count && index < tuple.Children.Count; index++) {
+      string part = elems[index].Type;
+      string code = $"{at}.e{index}";
+      string partPath = path + "e" + index;
+      var item = TupleItemNode(tuple.Children[index]);
+      if (IsTuple(part) && item.Kind == "Tuple") {
+        NewKeyParts(item, part, code, partPath + "_", drops, scope, strings);
+      } else if (fresh.Contains(index)) {
+        drops.Add((partPath, TuplePartDrop(part, code)));
+      } else if (strings && part is "string" or "string?" && (item.Kind is "Binary" or "Interp" or "Copy"
+          || item.Kind == "Call" && ExprOf(item, scope) is { Fresh: true } made && made.Type is "string" or "string?" && !IsStaticStr(made.Code))) {
+        drops.Add((partPath + "s", part == "string" ? $"df_str_free({code}); " : $"df_str_free({code}.val); "));
+      }
+    }
   }
 
   // a value for a map whose values are valueType

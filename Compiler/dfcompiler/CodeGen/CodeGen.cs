@@ -105,6 +105,7 @@ sealed class VarInfo {
 
   public bool OwnsArray { get; set; }   // a local array that ends with its scope; return moves it out (spec 6.8.1)
   public string? ArrFlag { get; set; }   // an owned local array that is also assigned borrowed ones (a = b): the C flag "it holds its own array"
+  public string? HandoverTo { get; set; }   // an owned local array lent with a = b: the a that takes the array when this one lets it go
   public bool BorrowsArray { get; set; }   // an array parameter, or a local made from another array: ->x cannot take its block
   public bool OwnsTuple { get; set; }   // a typed local tuple that holds arrays: its arrays are its own and end with it (spec 6.8.1)
 
@@ -292,6 +293,8 @@ public sealed partial class CodeGen {
       }
     }
 
+    InferGivenResults();   // spec 13.1.1: a plain result that is built here is given
+    CollectArgsOfReadCalls(program, null);   // spec 6.8.1: new arrays lent to calls whose result is only read
     ClassifyReturns();
     LowerGlobalAccesses(program);   // spec 18.3: copies of lent results, the locks of field reads and writes
     LowerCountedVars(program);
@@ -800,7 +803,8 @@ public sealed partial class CodeGen {
 
       case "ArrDrop":
         if (scope.Find(s.Text!) is VarInfo array && IsArr(array.Type)) {
-          string drop = array.ArrFlag != null ? $"if ({array.ArrFlag}) {{ {ArrDropHelper(array.Type)}({array.CName}); }} {array.ArrFlag} = false;" : $"{ArrDropHelper(array.Type)}({array.CName});";
+          string drop = array.ArrFlag != null ? $"if ({array.ArrFlag}) {{ {ArrDropHelper(array.Type)}({array.CName}); }} {array.ArrFlag} = false;"
+            : $"{HandoverDrop(array, array.CName, scope)}";
           sb.Append(pad).Append($"{drop} {array.CName}.p = NULL; {array.CName}.len = 0;\n");   // spec 6.8.1
         }
         return;
@@ -1096,7 +1100,8 @@ public sealed partial class CodeGen {
         sb.Append($"{pad}{hoisted.OwnFlag} = {ownsString};\n");
       }
       if (hoisted.ArrFlag != null) {
-        sb.Append($"{pad}{hoisted.ArrFlag} = true;\n");   // a new array, a moved one or null: its own
+        // a new array, a moved one or null: its own; arr<T> c = b only borrows
+        sb.Append($"{pad}{hoisted.ArrFlag} = {(init != null && init.Children[0].Kind == "Name" ? "false" : "true")};\n");
       }
     } else {
       variable = StringVar(new VarInfo(type, "v_" + s.Text, isConst));
@@ -1212,6 +1217,16 @@ public sealed partial class CodeGen {
   }
 
   // for T i = start..end [step ...] { }: counts down when start > end
+  string RangeType(Node range, Scope scope, Node at) {
+    static bool IsLiteral(Node end) => end.Kind == "Int" || end.Kind is "Unary" or "Paren" && end.Children.Count == 1 && IsLiteral(end.Children[0]);
+    var typed = range.Children.Take(2).Where(end => !IsLiteral(end)).Select(end => ExprOf(end, scope).Type).ToList();
+    string type = typed.Count == 0 ? NativeInt : typed.Count == 1 ? typed[0] : Unify(typed[0], typed[1], "..", at);
+    if (!IsInt(type)) {
+      throw Error($"a 'for' range variable must be an integer, and this range is {type}", at);
+    }
+    return type;
+  }
+
   void EmitFor(Node s, StringBuilder sb, Scope scope, int indent) {
     string pad = Pad(indent);
     var varNode = s.Children[0];
@@ -1226,17 +1241,17 @@ public sealed partial class CodeGen {
     if (varNode.Kind == "WritableVar") {
       throw Error($"for &{varNode.Text}: a counting loop has no items to borrow; & is for the items of a collection (spec 6.4)", s);
     }
-    if (varNode.Children.Count == 0) {
-      throw Error($"the 'for' variable '{varNode.Text}' needs a type", s);
-    }
     var range = source.Children[0];
     if (range.Kind != "Range") {
-      throw Error("only 'for' over ranges is supported yet", s);
+      throw Error("'for x = ...' needs a range such as 0..10 (two dots)", s);
     }
     if (range.Children[0].Kind == "Open" || range.Children[1].Kind == "Open") {
       throw Error("a 'for' range needs a start and an end", s);
     }
-    string type = ResolveType(varNode.Children[0]);
+    // for var i = a..b and for i = a..b: the type of the ends; a literal end takes the type of the other end, two literals the native int (spec 10)
+    string type = varNode.Children.Count == 0 || varNode.Children[0] is { Kind: "Type", Text: "var" }
+      ? RangeType(range, scope, s)
+      : ResolveType(varNode.Children[0]);
     if (!IsInt(type)) {
       throw Error("a 'for' range variable must be an integer", s);
     }
@@ -2337,6 +2352,21 @@ public sealed partial class CodeGen {
     if (op == "+" && (l.Type is "string" or "char" || r.Type is "string" or "char")) {
       return new Expr($"df_str_concat({StrReadOf(l, at)}, {StrReadOf(r, at)})", "string", true);
     }
+    if (op is "==" or "!=" or "<" or "<=" or ">" or ">=" && (l.Type, r.Type) is ("string", "char") or ("char", "string")) {
+      // string with char: the char is a one-character string; == only when the string is exactly that character (spec 2.5)
+      string ls = StrReadOf(l, at);
+      string rs = StrReadOf(r, at);
+      return op switch {
+        "==" => new Expr($"df_str_eq({ls}, {rs})", "bool"),
+        "!=" => new Expr($"(!df_str_eq({ls}, {rs}))", "bool"),
+        _ => new Expr($"(df_str_order({ls}, {rs}) {op} 0)", "bool")
+      };
+    }
+    if (op is "==" or "!=" or "<" or "<=" or ">" or ">=" && (l.Type == "char" && IsInt(r.Type) || IsInt(l.Type) && r.Type == "char")) {
+      // char with integer: by code point, level 2 warning (spec 2.5)
+      Warn($"{l.Type} {op} {r.Type} compares the code point of the char", at, 2);
+      return new Expr($"(((int64_t){l.Code}) {op} ((int64_t){r.Code}))", "bool");
+    }
     if (op is "<" or "<=" or ">" or ">=" && l.Type == "string" && r.Type == "string") {
       // by bytes, the same as code point order in UTF-8 (spec 6.2.2)
       return new Expr($"(df_str_order({StrReadOf(l, at)}, {StrReadOf(r, at)}) {op} 0)", "bool");
@@ -2427,9 +2457,19 @@ public sealed partial class CodeGen {
     }
   }
 
-  static string Unify(string a, string b, string op, Node at) {
+  string Unify(string a, string b, string op, Node at) {
     if (a == b && IsNumeric(a)) {
       return a;
+    }
+    // an integer with a real: the integer becomes the real (spec 2); an integer wider than the real's exact range warns
+    if (IsNumeric(a) && IsNumeric(b) && (Family(a) == "real") != (Family(b) == "real")) {
+      string real = Family(a) == "real" ? a : b;
+      string integer = real == a ? b : a;
+      int exact = real switch { "r32" => 24, "r64" => 53, _ => 113 };
+      if (Bits(integer) > exact) {
+        Warn($"{integer} to {real}: values above 2^{exact} lose precision", at, 1);
+      }
+      return real;
     }
     if (IsNumeric(a) && IsNumeric(b) && Family(a) == Family(b)) {
       return Bits(a) >= Bits(b) ? a : b;

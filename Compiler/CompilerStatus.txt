@@ -1,6 +1,16 @@
-Compiler version 0.0.126 alpha for version 0.0.39 of the specs 2026/11/13
+Compiler version 0.0.132 alpha for version 0.0.40 of the specs 2026/11/14
 
 Changes from the previous version -----------------------
+- A plain result built in the function is given without -> (spec 13.1.1)
+- for var i = 0..10 and for i = 0..10 take the type of the range (spec 10)
+- An integer with a real converts to the real with no cast (spec 2.5)
+- string == char and char == integer comparisons (spec 2.5)
+- Fewer array leaks: a borrowed array handed to its one borrower, c = b; return c, var x = f(), lend([..]).len (spec 6.8.1)
+- arr iterators and views: sort, reverse and copyFrom of an iterated or viewed arr raise ModifyingIteratedCollectionException, and so does replacing it; a view or iterator that outlives its arr raises UsageOfDestroyedObjectException (spec 6.4, 6.5)
+- var it = a.getIterator() of an arr compiles (it was taken for a borrow)
+- executeBefore / executeAfter chained over several traits: a sub-trait redeclares the method with its own block (spec 11.2)
+- Nested composite keys: tuples inside tuple keys, structs inside struct and tuple keys (spec 6.2); the new objects of a nested key literal end with the statement
+- Custom exceptions: catch by a trait of the program, subclasses repeat the header parameters of their parent, object fields (owned in Debug, null in Release), string1k fields (string is an error), Release rules of silent exceptions (spec 15.1, 15.2)
 
 Done -----------------------
 
@@ -63,7 +73,7 @@ text[pos] reads a character
 Partial -----------------------
 
 Arrays arr<T>: literals, arr<T>[size], index read/write with IndexOutOfRangeException, .len, for-in, has, indexOf, fill, clear, reverse, sort / sortUnstable (default order, SortDirection.ASC / DESC; numbers, bool, char, string, date, time, clock, lapse, enums), copyFrom (count or range form; an obvious misfit of constant indexes on arrays of known length is a compile error). Missing: sort with a lambda (no lambdas yet), sort and copyFrom of objects (a comparer, cloning), views and ranges as values, sized declarations (arr<T>[n] x), warning for elements read before fill
-Silent exceptions: library calls (date(string), time(...), (time)n) raise them only when a catch in the same function can handle them; catches in callers do not see them yet; custom ones need classes
+Silent exceptions: library calls (date(string), time(...), (time)n) raise them only when a catch in the same function can handle them; catches in callers do not see them yet; custom silent exceptions are classes that implement SilentException (built)
 Strings: layout of spec 4.4 (single-block classes 0-7, literals class 11, moved class 13 read only); ownership and freeing (step b); changes in place (step c); block strings (step d; the iterator counter of the root is not used yet, the functions that are not block-aware read a flat copy). Still leaking (never a double free): the items of arrays (arrays are never freed), strings in tuples, var declarations of strings, a for-in over a new string left with return. Missing: the compile error for an owner that ends or is assigned again while a borrow is alive
 Parsing: date.parse, time.parse and <integer or real type>.parse(text, default, format) (all of section 9 for numbers); tryParse for integers, reals, date and time with (&)variable (a library form, not general (&) parameters); no dec
 Formatting: dates and times (8.4), integers and reals (8.1, 8.2) and strings (8.3), all as toStr(format) and {x:format}; the other types (char, bool ...) ignore a spec with a warning
@@ -79,7 +89,6 @@ Ownership, move, copy, refcount
 Move parameters on non-objects, volatile references, reference parameters on constructors, (&) borrows that replace an object
 Lambdas and captures: the rest of spec 13.3.6 (counted and weak captures, &a of strings and arrays, modes in function types, function types in fields and collections, f1!, the &a lock)
 Pointers, alignment, volatile (the pointer types *T and (*)T); addr is built only as the opaque handle of spec 15.9 (no arithmetic, no printing)
-Custom exception classes, catch by trait
 Class atEnd
 128/256-bit ints, r16/r128
 dec

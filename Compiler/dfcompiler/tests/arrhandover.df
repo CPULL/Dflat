@@ -1,0 +1,101 @@
+﻿// borrowed arrays that end (spec 6.8.1): the lender hands its array to the one local that borrows it with a = b (outside its block, or
+// when it is assigned again); arr<T> c = b; return c gives a copy; var x = f() owns a new array; a new array lent to a call whose result
+// is only read (.len, .has, a hole) ends with the statement; two borrowers: not freed (safe)
+import Root
+public class Dog(string name) {
+  public string name
+} atEnd {
+  Console.log("  end " + name)
+}
+fun outside() {
+  arr<Dog> a = [Dog("a1")]
+  if true {
+    arr<Dog> b = [Dog("b1")]
+    a = b
+  }
+  Console.log($"  a is {a[0].name}")
+  Console.log("  end of outside")
+}
+fun replaced() {
+  arr<Dog> b = [Dog("b2")]
+  arr<Dog> a = [Dog("a2")]
+  a = b
+  b = [Dog("b3")]
+  Console.log($"  a is {a[0].name}")
+  Console.log("  end of replaced")
+}
+fun ->arr<Dog> returned() {
+  arr<Dog> b = [Dog("b4")]
+  arr<Dog> c = b
+  return c
+}
+fun lentToLending() {
+  Console.log($"  len {lend([Dog("l1")]).len}")
+  Console.log("  end of lentToLending")
+}
+fun arr<Dog> lend(arr<Dog> x) { x }
+fun lentMore() {
+  Console.log($"  {lend([Dog("l2")]).has(Dog("x"))}")
+  Console.log($"  {lend([Dog("l3")])}")
+  Console.log("  end of lentMore")
+}
+fun user() {
+  var r = returned()
+  arr<Dog> s = returned()
+  Console.log("  end of user")
+}
+fun twoBorrowers() {
+  arr<Dog> a1 = [Dog("x1")]
+  arr<Dog> a2 = [Dog("x2")]
+  if true {
+    arr<Dog> b = [Dog("two")]
+    a1 = b
+    a2 = b
+  }
+  Console.log($"  {a1[0].name} {a2[0].name}")
+}
+fun movedOn() {
+  arr<Dog> a = [Dog("m1")]
+  if true {
+    arr<Dog> b = [Dog("m2")]
+    a = b
+    a = [Dog("m3")]
+  }
+  Console.log($"  a is {a[0].name}")
+}
+fun taken() {
+  arr<Dog> a = [Dog("t1")]
+  if true {
+    arr<Dog> b = [Dog("t2")]
+    a = b
+  }
+  a = [Dog("t3")]
+  Console.log($"  a is {a[0].name}")
+}
+fun loop() {
+  arr<Dog> a = [Dog("L0")]
+  for i32 i = 1..=3 {
+    arr<Dog> b = [Dog($"L{i}")]
+    a = b
+  }
+  Console.log($"  a is {a[0].name}")
+}
+fun replacedTwice() {
+  arr<Dog> b = [Dog("r1")]
+  arr<Dog> a = [Dog("r0")]
+  a = b
+  b = [Dog("r2")]
+  b = [Dog("r3")]
+  Console.log($"  {a[0].name} {b[0].name}")
+}
+Console.log("outside"); outside()
+Console.log("replaced"); replaced()
+Console.log("lentToLending"); lentToLending()
+Console.log("lentMore"); lentMore()
+Console.log("user"); user()
+Console.log("twoBorrowers"); twoBorrowers()
+Console.log("movedOn"); movedOn()
+Console.log("taken"); taken()
+Console.log("loop"); loop()
+Console.log("replacedTwice"); replacedTwice()
+Console.log("done")

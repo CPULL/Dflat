@@ -157,6 +157,9 @@ public class arrView<T>(arr<T> items, uns start, uns count) {
   public fun uns get_len() { count }
 
   public fun T read_pos(uns index) {
+    if items.isGone() {
+      throw UsageOfDestroyedObjectException("Usage Of Destroyed Object Exception")
+    }
     if index >= count {
       throw IndexOutOfRangeException("Index Out Of Range Exception")
     }
@@ -164,6 +167,9 @@ public class arrView<T>(arr<T> items, uns start, uns count) {
   }
 
   public fun uns indexOf(T value) {
+    if items.isGone() {
+      throw UsageOfDestroyedObjectException("Usage Of Destroyed Object Exception")
+    }
     uns i = 0
     while i < count {
       if items[start + i] == value {
@@ -185,6 +191,9 @@ public class arrIterator<T>(arr<T> items) : IndexIterator<T> {
 
   replace fun (T value, bool isValid) next() {
     T none
+    if items.isGone() {
+      throw UsageOfDestroyedObjectException("Usage Of Destroyed Object Exception")
+    }
     if cursor >= items.len {
       return (none, false)
     }
@@ -1005,7 +1014,10 @@ public class set<T> : SetCollection<T> {
     }
     string name = ClassInstanceName(genericClasses["arrIterator"], new List<string> { ArrElem(array.Type) }, at);
     var ctor = funs[name][0];
-    return new Expr(UserCallCode(ctor, $"{ctor.CName}({array.Code})"), name, true);
+    // the iterator opens its array in the side table of open iterators; its atEnd closes it (spec 6.4)
+    NeedChunk("arriter");
+    string held = NewTemp();
+    return new Expr($"({{ {CType(array.Type)} {held} = {array.Code}; df_ait_open({held}.p); {UserCallCode(ctor, $"{ctor.CName}({held})")}; }})", name, true);
   }
 
   // a class of the program that implements IndexCollection<T>: for x in c asks getIterator() once and calls next() until isValid is false (spec 6.12)

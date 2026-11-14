@@ -1,0 +1,6 @@
+  rex ends
+release: pet is null
+  rex ends
+rethrown: null
+end
+---- exit code 0 ----

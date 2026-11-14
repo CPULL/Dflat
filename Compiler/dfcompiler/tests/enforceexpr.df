@@ -2,7 +2,7 @@
 // are enforced, each clause gives the value (a single expression, or return in a longer block), nothing handled gives zero or null
 import Root
 
-public class Trouble(string text) : Exception { }
+public class Trouble(string1k text) : Exception { }
 
 public class Box(i32 size) {
   public i32 size

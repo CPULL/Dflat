@@ -2,9 +2,9 @@
 // until a catch handles it; the last atEnd always runs, like a finally; the temporary usage of a weak reference ends after it
 import Root
 
-public class E1(string text) : Exception { }
-public class E2(string text) : Exception { }
-public class E3(string text) : Exception { }
+public class E1(string1k text) : Exception { }
+public class E2(string1k text) : Exception { }
+public class E3(string1k text) : Exception { }
 
 public class Dog(string name) {
   public string name

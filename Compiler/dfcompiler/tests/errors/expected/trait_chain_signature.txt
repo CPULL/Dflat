@@ -1,0 +1,1 @@
+trait_chain_signature.df(6): error: 'work' of Other must have the parameters and the result of 'work' of Base to add a block to it

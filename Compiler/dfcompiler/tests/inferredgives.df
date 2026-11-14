@@ -1,0 +1,37 @@
+// a plain result that is built in the function is given, as if written ->T (spec 13.1.1)
+import Root
+public class Dog(string n) {
+  public string name = n
+}
+public class Kennel {
+  public Dog boss = Dog("Boss")
+  public fun Dog leader() { boss }   // a field: still lent
+}
+fun Dog make() { Dog("Made") }
+fun Dog makeLocal() {
+  Dog made = Dog("Local")
+  return made
+}
+fun string greet(string name) { "Hi " + name }
+fun string fg(i32 r, i32 g, i32 b) { return $"[38;2;{r};{g};{b}m" }
+fun string twice(string s) {
+  var t = s + s
+  return t
+}
+fun arr<i32>, i32 pair() {
+  return [1, 2], 2
+}
+fun string relay(string s) { greet(s) }   // a call to a function that gives
+fun ->string marked() { "still accepted" }
+
+Console.log(make().name)
+Console.log(makeLocal().name)
+Kennel k = Kennel()
+Console.log(k.leader().name)
+Console.log(greet("Ann"))
+Console.log(fg(1, 2, 3).len)
+Console.log(twice("ab"))
+arr<i32> a, i32 n = pair()
+Console.log($"{a} {n}")
+Console.log(relay("Bob"))
+Console.log(marked())

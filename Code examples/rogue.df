@@ -18,9 +18,9 @@ const i32 LEVELS = 10
 fun i64 rnd(i64 s) { return (s * 1103515245 + 12345) % 2147483648 }
 fun i32 roll(i64 s, i32 n) { return (i32)(s % (i64)n) }
 
-fun ->string fg(i32 r, i32 g, i32 b) { return ESC + $"[38;2;{r};{g};{b}m" }
+fun string fg(i32 r, i32 g, i32 b) { return ESC + $"[38;2;{r};{g};{b}m" }
 
-fun ->string bar(i32 v, i32 max, i32 len) {
+fun string bar(i32 v, i32 max, i32 len) {
   i32 full = Math.clamp(v * len / Math.max(1, max), 0, len)
   string s = fg(230, 60, 60)
   for i32 i in 0..full { s = s + "█" }
@@ -358,7 +358,7 @@ fun main() {
             plvl++
             xpGap = xpGap * 2
             nextXp = nextXp + xpGap
-            maxHp = (i32)((r64)maxHp * 1.5)
+            maxHp = (i32)(maxHp * 1.5)
             hp = maxHp
             msg = msg + $"⭐ LEVEL UP! You are level {plvl}. "
           }

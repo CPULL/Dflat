@@ -1,7 +1,7 @@
 // A silent throw leaves its function like any throw; the caller ignores it unless a catch around the call handles it (spec 15.4, 15.7.4)
 import Root
 
-public class Notice(string text) : Exception, SilentException { }
+public class Notice(string1k text) : Exception, SilentException { }
 public class Trouble : Exception { }
 
 fun note(i32 x) {

@@ -1,0 +1,67 @@
+// executeBefore / executeAfter chained over a hierarchy of traits (spec 11.2): every trait that redeclares the method with a block adds a
+// link; the before blocks run from the root trait down, the class, then the after blocks from the most specific trait up to the root;
+// an exception in a block or in the class stops what follows, and the after blocks run only when the implementation succeeded
+import Root
+trait Base {
+  public fun i32 work(i32 x)
+    executeBefore { Console.log($"  before Base {x}") }
+    executeAfter { Console.log($"  after Base {work.result}") }
+}
+trait Middle : Base {
+  public fun i32 work(i32 x)
+    executeBefore { Console.log("  before Middle") }
+    executeAfter { Console.log($"  after Middle {work.result}") }
+}
+trait Top : Middle {
+  public fun i32 work(i32 x)
+    executeAfter { Console.log("  after Top") }
+}
+trait Defaulted : Base {
+  public fun i32 work(i32 x) { x * 10 }
+    executeAfter { Console.log("  after Defaulted") }
+}
+public class Thing : Top {
+  replace fun i32 work(i32 x) {
+    Console.log("  Thing.work")
+    return x + 1
+  }
+}
+public class Lazy : Defaulted { }
+public class Plain : Base {
+  replace fun i32 work(i32 x) { x - 1 }
+}
+Console.log("Thing")
+Console.log(Thing().work(5))
+Console.log("Lazy")
+Console.log(Lazy().work(2))
+Console.log("Plain")
+Console.log(Plain().work(2))
+Console.log("through Base")
+Base b = Thing()
+Console.log(b.work(7))
+trait Guarded {
+  public fun advance(i32 n)
+    executeAfter { Console.log("  after Guarded") }
+}
+trait Checked : Guarded {
+  public fun advance(i32 n)
+    executeBefore {
+      if n < 0 { throw IndexOutOfRangeException("negative") }
+    }
+    executeAfter { Console.log("  after Checked") }
+}
+public class Stepper : Checked {
+  replace fun advance(i32 n) {
+    if n == 0 { throw IndexOutOfRangeException("zero") }
+    Console.log($"  Stepper.advance {n}")
+  }
+}
+fun string run(i32 n) {
+  Stepper().advance(n)
+  return "ok"
+  catch IndexOutOfRangeException ex { return "stopped: " + ex.message }
+}
+Console.log("void chain")
+Console.log(run(3))
+Console.log(run(-1))
+Console.log(run(0))

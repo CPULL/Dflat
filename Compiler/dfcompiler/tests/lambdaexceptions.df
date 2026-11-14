@@ -2,8 +2,8 @@
 namespace lambdaexceptions
 import Root
 
-public class Bad(string what) : Exception { }
-public class Quiet(string what) : Exception, SilentException { }
+public class Bad(string1k what) : Exception { }
+public class Quiet(string1k what) : Exception, SilentException { }
 
 fun i32 apply(i32(i32) f, i32 v) {
   f(v)

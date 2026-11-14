@@ -1,0 +1,8 @@
+  rex ends
+  spare ends
+caught two levels up: rex spare
+  rex ends
+  spare ends
+rethrown: rex
+end
+---- exit code 0 ----

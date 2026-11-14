@@ -1,0 +1,72 @@
+// nested composite keys (spec 6.2, 6.2.2): tuples inside tuple keys and structs inside struct and tuple keys, in map, hmap, set, hset;
+// ordered component by component, left to right, the nested ones included; the collection keeps its own copy, the new objects of a
+// key literal (also inside a nested tuple) end with the statement, the copies end with their entry
+import Root
+struct Cell {
+  i32 x,
+  i32 y
+}
+struct Area {
+  Cell corner,
+  string name
+}
+map<((i32, i32), i32), string> grid = []
+grid[((1, 2), 3)] = "a"
+grid[((0, 9), 1)] = "b"
+grid[((1, 2), 0)] = "c"
+grid[((1, 2), 3)] = "a2"
+Console.log(grid)
+Console.log(grid.len)
+Console.log(grid[((0, 9), 1)])
+map<Area, i32> areas = []
+areas[Area(Cell(1, 2), "home")] = 1
+areas[Area(Cell(1, 2), "away")] = 2
+areas[Area(Cell(0, 5), "zero")] = 3
+for (k, v) in areas { Console.log($"{k.name} {k.corner.x},{k.corner.y} = {v}") }
+hmap<(string, (i32, string)), i32> h = []
+h[("a", (1, "b"))] = 10
+h[("a", (1, "c"))] = 20
+h[("a", (1, "b"))] = 11
+Console.log(h.len)
+Console.log(h[("a", (1, "b"))])
+set<(Cell, string)> s = []
+s += (Cell(1, 1), "p")
+s += (Cell(1, 1), "p")
+s += (Cell(2, 1), "q")
+Console.log(s.len)
+Console.log(s.has((Cell(2, 1), "q")))
+hset<Area> hs = []
+hs += Area(Cell(3, 4), "x")
+Console.log(hs.has(Area(Cell(3, 4), "x")))
+Console.log(hs.has(Area(Cell(3, 4), "y")))
+class Dog(string name) : Keyable {
+  public string name
+  replace fun uns get_hash() { 7u }
+  replace fun bool equals(T other) {
+    if T is Dog {
+      return name == other.name
+    }
+    return false
+  }
+} atEnd {
+  Console.log($"  {name} ends")
+}
+struct Owner {
+  Dog dog,
+  string city
+}
+fun run() {
+  hmap<((Dog, i32), string), i32> h = []
+  h[((Dog("rex"), 1), "a")] = 1
+  h[((Dog("max"), 1), "a")] = 2
+  Console.log($"  len {h.len} rex {h[((Dog("rex"), 1), "a")]}")
+  map<(Owner, i32), string> m = []
+  m[(Owner(Dog("fido"), "rome"), 1)] = "x"
+  Console.log($"  map len {m.len}")
+  Console.log("  removing max")
+  h.removeAt(((Dog("max"), 1), "a"))
+  Console.log($"  len {h.len}")
+  Console.log("  end of run")
+}
+run()
+Console.log("done")

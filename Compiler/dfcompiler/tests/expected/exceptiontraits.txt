@@ -1,0 +1,9 @@
+ok
+net (dns 3): dns down
+net: no link
+other: disk full
+silent by trait: ping
+net, no variable
+is NetError
+is not NetError
+---- exit code 0 ----

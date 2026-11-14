@@ -46,6 +46,11 @@ public sealed partial class CodeGen {
     if (needs.Contains("sort")) {
       sb.Append(RuntimeSort.Source);
     }
+    if (needs.Contains("arriter")) {
+      sb.Append(RuntimeArrIter.Source);   // spec 6.4: the open iterators and views of arr
+    } else {
+      sb.Append("#define df_ait_free(p) free(p)\n");   // no array is ever open: an array that ends frees its block at once
+    }
     if (needs.Contains("map")) {
       sb.Append(RuntimeMap.Source);
     }

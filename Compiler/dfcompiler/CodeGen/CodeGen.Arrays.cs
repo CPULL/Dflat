@@ -277,8 +277,34 @@ public sealed partial class CodeGen {
       + $"if (!df_idx_ok({length}, {position}, {fn!.NameConst})) {RaiseJump} {store} }})";
   }
 
+  // the members that change the order of an array: not while it has open iterators or views (spec 6.4); swap, replace, fill(value),
+  // clear() and a[i] = v are allowed
+  static readonly HashSet<string> ArrChangingMembers = new() { "reverse", "sort", "sortUnstable", "copyFrom" };
+
+  readonly Dictionary<string, string> heldArrays = new();   // the temporary of a changing member -> the C of the array it holds
+
+  string OriginalArrayCode(Expr array) => heldArrays.TryGetValue(array.Code, out var original) ? original : array.Code;
+
+  // the array has open iterators or views: ModifyingIteratedCollectionException (spec 6.4)
+  string ArrOpenCheck(string array) {
+    NeedChunk("arriter");
+    return $"if (df_ait_count({array}.p) > 0) {{ df_raise(&df_desc_ModifyingIteratedCollectionException, {fn!.NameConst}); {RaiseJump} }} ";
+  }
+
   // members of an array
   Expr? ArrayMethod(Expr array, string name, List<Node> args, Scope scope, Node at) {
+    if (LibraryCode || !ArrChangingMembers.Contains(name)) {
+      return ArrayMember(array, name, args, scope, at);
+    }
+    string held = NewTemp();
+    heldArrays[held] = array.Code;   // copyFrom compares the destination with the source as written
+    if (ArrayMember(new Expr(held, array.Type), name, args, scope, at) is not Expr changed) {
+      return null;
+    }
+    return changed with { Code = $"({{ {CType(array.Type)} {held} = {array.Code}; {ArrOpenCheck(held)}{changed.Code}; }})" };
+  }
+
+  Expr? ArrayMember(Expr array, string name, List<Node> args, Scope scope, Node at) {
     string elem = ArrElem(array.Type);
     string Elem(string a, string i) => $"{a}.p[{i}]";
 
@@ -399,6 +425,11 @@ public sealed partial class CodeGen {
       case "getIterator":
         Arity(0);
         return ArrayIterator(array, at);
+      case "isGone" when LibraryCode:
+        // the views and the iterators of the library: the array ended while they held it (spec 12.5)
+        Arity(0);
+        NeedChunk("arriter");
+        return new Expr(WithTemp(array, a => $"df_ait_dead({a}.p)"), "bool");
       case "swap":
         return ArraySwap(array, args, scope, at);
       case "replace":
@@ -649,7 +680,7 @@ public sealed partial class CodeGen {
       return CollectionCopyFrom(destination, args, scope, at);   // from a vec or a list (spec 6.6)
     }
     if (IsClass(elem) && IsArr(source.Type) && ArrElem(source.Type) == elem) {
-      if (destination.Code == source.Code && SimpleCode.IsMatch(source.Code)) {
+      if (OriginalArrayCode(destination) == source.Code && SimpleCode.IsMatch(source.Code)) {
         throw Error("copyFrom cannot use the same array as source and destination", at);
       }
       CheckCopyFromRanges(args, scope, at);
@@ -658,7 +689,7 @@ public sealed partial class CodeGen {
     if (!IsArr(source.Type) || ArrElem(source.Type) != elem) {
       throw Error($"copyFrom needs an {destination.Type} as the source, not {source.Type}", args[1]);
     }
-    if (destination.Code == source.Code && SimpleCode.IsMatch(source.Code)) {
+    if (OriginalArrayCode(destination) == source.Code && SimpleCode.IsMatch(source.Code)) {
       throw Error("copyFrom cannot use the same array as source and destination", at);
     }
     string Index(Node node) {
@@ -883,6 +914,21 @@ public sealed partial class CodeGen {
       countedLoops.Remove(s);
       return;
     }
+    bool overArr = IsArr(collection.Type) && !LibraryCode;
+    if (overArr && counted.Counter == null) {
+      // the loop opens its array in the side table of open iterators (spec 6.4): the atEnd of a block around it closes it on every way out
+      NeedChunk("arriter");
+      tempCounter++;
+      string opened = $"df_open{tempCounter}";
+      countedLoops[s] = (opened, collection);
+      var release = Synthetic("RawC", s, $"df_ait_close({opened});");
+      var wrapper = Synthetic("Block", s).Add(s).Add(Synthetic("AtEnd", s, "drop").Add(Synthetic("Block", s).Add(release)));
+      sb.Append($"{pad}{{\n{pad}  const void* {opened} = NULL;\n");
+      EmitBlock(wrapper, sb, scope, indent + 1);
+      sb.Append($"{pad}}}\n");
+      countedLoops.Remove(s);
+      return;
+    }
     string? customElem = overVec || overView || overMap ? null : CustomCollectionElem(collection.Type);
     if (customElem != null && counted.Counter == null) {
       // a custom collection: the iterator is an owned variable of a block around the loop, so it ends (and gives back the counter of open
@@ -1012,6 +1058,9 @@ public sealed partial class CodeGen {
     }
     if (overVec || overMap) {
       sb.Append($"{innerPad}{counted.Counter} = &{whole}->{VecField(collection.Type, "iteratorCounter")};\n{innerPad}*{counted.Counter} += 1;\n");
+    }
+    if (overArr) {
+      sb.Append($"{innerPad}{counted.Counter} = {whole}.p;\n{innerPad}df_ait_open({counted.Counter});\n");   // closed by the block around (above)
     }
     string iteration = "";
     if (customElem != null) {

@@ -1,1 +1,0 @@
-result_new_object.df(2): error: this result is a new Dog that the caller owns: write fun ->Dog make(...) (spec 13.1.1)

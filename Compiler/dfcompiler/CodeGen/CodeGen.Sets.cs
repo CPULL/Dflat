@@ -23,6 +23,9 @@ public sealed partial class CodeGen {
     if (IsArr(args[0]) || IsVec(args[0]) || IsList(args[0]) || IsMap(args[0]) || IsSet(args[0]) || IsView(args[0])) {
       throw Error($"a collection cannot be an item of a set (spec 6.2): {DisplayName(args[0])}", at);
     }
+    if (at.Line < LibraryLine && (IsTuple(args[0]) || IsStruct(args[0])) && IsCompositeKey(args[0])) {
+      CheckKeyableParts(args[0], args[0], at);   // reported where the program writes the type (spec 6.2, 11.2.1)
+    }
     if (hashed && !HmapKeyBuilt(args[0])) {
       throw Error($"hset items of type {DisplayName(args[0])} are not built yet (this version: integers, bool, char, enums, reals, date, time, clock, lapse, string, string?, string1k, string1k?, tuples of them, strings and Keyable objects, structs of exact natives, strings and Keyable objects, sets of exact natives, Keyable classes)", at);
     }

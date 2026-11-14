@@ -1,0 +1,41 @@
+// options: --release
+// object fields in exceptions in a Release build (spec 15.2): they stay null, an object given to the constructor ends at once, a start
+// value is not made
+import Root
+public class Dog(string name) {
+  public string name
+} atEnd {
+  Console.log($"  {name} ends")
+}
+public class PetException(->Dog pet) : Exception {
+  public Dog pet
+  public Dog spare = Dog("spare")
+}
+fun Fail() {
+  throw PetException("pet", Dog("rex"))
+}
+fun string Inner() {
+  Fail()
+  return "no"
+}
+fun string Outer() {
+  Inner()
+  return "no"
+  catch PetException ex {
+    if ex.pet == null then return "release: pet is null"
+    return $"caught two levels up: {ex.pet.name} {ex.spare.name}"
+  }
+}
+fun string Rethrow() {
+  Outer2()
+  return "no"
+  catch PetException ex { if ex.pet == null then return "rethrown: null"
+    return "rethrown: " + ex.pet.name }
+}
+fun Outer2() {
+  Fail()
+  catch PetException ex { throw ex }
+}
+Console.log(Outer())
+Console.log(Rethrow())
+Console.log("end")

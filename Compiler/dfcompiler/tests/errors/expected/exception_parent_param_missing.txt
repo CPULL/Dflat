@@ -1,0 +1,1 @@
+exception_parent_param_missing.df(5): error: MyExWife2 must repeat the parameter 'string1k family' of MyExWife first in its header, or MyExWife must give it a default (spec 15.2)

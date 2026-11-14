@@ -1,0 +1,33 @@
+Thing
+  before Base 5
+  before Middle
+  Thing.work
+  after Top
+  after Middle 6
+  after Base 6
+6
+Lazy
+  before Base 2
+  after Defaulted
+  after Base 20
+20
+Plain
+  before Base 2
+  after Base 1
+1
+through Base
+  before Base 7
+  before Middle
+  Thing.work
+  after Top
+  after Middle 8
+  after Base 8
+8
+void chain
+  Stepper.advance 3
+  after Checked
+  after Guarded
+ok
+stopped: negative
+stopped: zero
+---- exit code 0 ----

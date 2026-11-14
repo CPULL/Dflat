@@ -33,7 +33,24 @@ public sealed partial class CodeGen {
   bool TempArrayArg(ParamSig param, Node arg, FunSig? callee, int position) =>
     callee != null && position >= 0 && !LibraryCode && IsArr(param.Type) && !param.IsGift && param.Ref == 0 && !param.IsVariadic && !IsByPointer(param)
     && callee.Node.Line < LibraryLine && !callee.IsExtern && IsNewArray(arg)
-    && (callee.Ret == "void" || IsPlainValueType(callee.Ret) || callee.Gives.Contains(0) && (IsClass(callee.Ret) || callee.Ret == "string"));
+    && (callee.Ret == "void" || IsPlainValueType(callee.Ret) || callee.Gives.Contains(0) && (IsClass(callee.Ret) || callee.Ret == "string")
+      || argsOfReadCalls.Contains(arg));
+
+  // the arguments of the calls whose result is only read where it is made (lend([..]).len, .has(x), .indexOf(x), $"{lend([..])}"): whatever
+  // the result lends from them dies with the statement, so a new array given there can end with the statement too (spec 6.8.1)
+  readonly HashSet<Node> argsOfReadCalls = new();
+
+  void CollectArgsOfReadCalls(Node node, Node? parent) {
+    if (node.Kind == "Call" && node.Children.Count > 1 && node.Children[1].Kind == "Args"
+        && (parent is { Kind: "Member", Text: "len" or "has" or "indexOf" } && parent.Children[0] == node || parent is { Kind: "Hole" })) {
+      foreach (var arg in node.Children[1].Children) {
+        argsOfReadCalls.Add(arg);
+      }
+    }
+    foreach (var child in node.Children) {
+      CollectArgsOfReadCalls(child, node);
+    }
+  }
 
   // an item that is replaced ends, unless it is the same block
   string ReplaceArrItem(string elem, string slot, string incoming) {
@@ -89,7 +106,22 @@ public sealed partial class CodeGen {
     }
     MarkAssigned(target.Variable);
     string old = NewTemp();
-    return $"({{ {CType(type)} {old} = {target.Code}; {target.Code} = {code}; {ArrDropHelper(type)}({old}); }})";
+    string drop = target.Variable is { HandoverTo: not null } lender ? HandoverDrop(lender, old, scope) : $"{ArrDropHelper(type)}({old});";
+    // an array with open iterators or views is not replaced (spec 6.4)
+    return $"({{ {CType(type)} {old} = {target.Code}; {ArrOpenCheck(old)}{target.Code} = {code}; {drop} }})";
+  }
+
+  // an owned local array lets its array go (its end, or a new array assigned to it): the one local that borrowed it with a = b and still
+  // holds it takes it as its own; otherwise it ends. A borrower without the flag of a mixed local cannot take it: the array is not freed
+  string HandoverDrop(VarInfo lender, string array, Scope scope) {
+    string drop = $"{ArrDropHelper(lender.Type)}({array});";
+    if (lender.HandoverTo == null) {
+      return drop;
+    }
+    if (scope.Find(lender.HandoverTo) is not { ArrFlag: string flag } taker) {
+      return "";   // safe: left as it was (spec 6.8.1)
+    }
+    return $"if ({array}.p != NULL && {array}.p == {taker.CName}.p) {{ {flag} = true; }} else {{ {drop} }}";
   }
 
   // a = value for a local that owns or borrows (IsMixedLocalArray): its own old array ends; a new array, ->b or null makes it an owner
@@ -100,7 +132,7 @@ public sealed partial class CodeGen {
     MarkAssigned(target.Variable);
     string old = NewTemp();
     string flag = target.Variable!.ArrFlag!;
-    return $"({{ {CType(type)} {old} = {target.Code}; {target.Code} = {code}; if ({flag} && {old}.p != {target.Code}.p) {{ {ArrDropHelper(type)}({old}); }} "
+    return $"({{ {CType(type)} {old} = {target.Code}; {ArrOpenCheck(old)}{target.Code} = {code}; if ({flag} && {old}.p != {target.Code}.p) {{ {ArrDropHelper(type)}({old}); }} "
       + $"{flag} = {(GivesOwnArray(value) ? "true" : "false")}; }})";
   }
 

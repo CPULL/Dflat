@@ -205,8 +205,15 @@ public sealed partial class CodeGen {
     }
     ExpandGenericMethods(trait, body);   // a generic method of a trait: its copies, replaced by every class that implements it (spec 11.3.1)
     var members = body.Children.Where(member => member.Kind == "Fun").ToList();
+    var chainLinks = new HashSet<Node>();
     foreach (var member in members.ToList()) {
       if (member.Children.Any(child => child.Kind is "ExecuteBefore" or "ExecuteAfter")) {
+        // a sub-trait that redeclares a method of a parent trait with its own block: one more link of the chain (spec 11.2). Its wrapper
+        // answers the parent's __impl_m, and the class implements one level deeper: m runs B(parent), B(this), the class, A(this), A(parent)
+        while (AncestorHooks(trait, member.Text!)) {
+          member.Text = ImplPrefix + member.Text;
+          chainLinks.Add(member);
+        }
         members.Insert(members.IndexOf(member), SplitExecuteBlocks(trait, member));
       }
     }
@@ -239,8 +246,19 @@ public sealed partial class CodeGen {
       f.TSlot = trait.TraitMethods.Count;
       trait.TraitMethods.Add(f);
       for (var up = trait.Super; up != null; up = up.Super) {
-        if (up.TraitMethods.Any(g => g.Name.EndsWith("." + member.Text) && ParamTypes(g).SequenceEqual(ParamTypes(f)))) {
-          throw NotSupported($"A trait that redeclares '{member.Text}' of its parent trait {up.Name}", member);
+        if (up.TraitMethods.FirstOrDefault(g => g.Name.EndsWith("." + member.Text)) is FunSig parentMethod) {
+          if (chainLinks.Contains(member)) {
+            // the link answers the parent's method: the same parameters and result (spec 11.2)
+            if (!ParamTypes(parentMethod).SequenceEqual(ParamTypes(f)) || parentMethod.Ret != f.Ret) {
+              throw Error($"'{ShownMethodName(member.Text!)}' of {DisplayName(trait.Name)} must have the parameters and the result of '{ShownMethodName(member.Text!)}' of {DisplayName(up.Name)} to add a block to it", member);
+            }
+            f.IsAbstract = false;
+            f.Visibility = parentMethod.Visibility;
+            break;
+          }
+          if (ParamTypes(parentMethod).SequenceEqual(ParamTypes(f))) {
+            throw NotSupported($"A trait that redeclares '{member.Text}' of its parent trait {up.Name}", member);
+          }
         }
       }
     }
@@ -250,6 +268,24 @@ public sealed partial class CodeGen {
   // ---------------------------------------------------------------- executeBefore / executeAfter (spec 11.2)
 
   const string ImplPrefix = "__impl_";   // a name no program can write (a name cannot start with _)
+
+  // a parent trait (at any level) already has executeBefore / executeAfter on this method name
+  static bool AncestorHooks(ClassInfo trait, string name) {
+    for (var up = trait.Super; up != null; up = up.Super) {
+      if (up.Hooked.Contains(name)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // the method name as the program wrote it (without the __impl_ of the chain)
+  static string ShownMethodName(string name) {
+    while (name.StartsWith(ImplPrefix)) {
+      name = name[ImplPrefix.Length..];
+    }
+    return name;
+  }
 
   // fun R m(params) executeBefore { B } executeAfter { A } becomes two trait functions:
   //   __impl_m(params): what the class implements (its body is the default body of m, if any); private
@@ -298,7 +334,7 @@ public sealed partial class CodeGen {
     }
     if (after != null) {
       foreach (var statement in after.Children) {
-        block.Add(ResultReads(statement, name, returns != null));
+        block.Add(ResultReads(statement, ShownMethodName(name), returns != null));   // m.result, also in a link of a chain
       }
     }
     if (returns != null) {
@@ -370,6 +406,23 @@ public sealed partial class CodeGen {
 
   const string TraitInitSuffix = ".__tinit";
 
+  static bool DerivesFrom(ClassInfo sub, ClassInfo trait) {
+    for (var up = sub.Super; up != null; up = up.Super) {
+      if (up == trait) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static int TraitDepth(ClassInfo trait) {
+    int depth = 0;
+    for (var up = trait.Super; up != null; up = up.Super) {
+      depth++;
+    }
+    return depth;
+  }
+
   // for every class: what answers each method of each trait it implements
   void BuildImpls(ClassInfo cls) {
     foreach (var trait in AllTraits(cls)) {
@@ -381,12 +434,23 @@ public sealed partial class CodeGen {
             implementation = candidates.FirstOrDefault(g => !g.IsStatic && ParamTypes(g).SequenceEqual(ParamTypes(method)) && g.Ret == method.Ret);
           }
         }
+        if (implementation == null) {
+          // a sub-trait of this trait, among the traits of the class, that answers the method: a link of an executeBefore / executeAfter
+          // chain (spec 11.2); the most specific one wins
+          string bare = method.Name[(method.Name.IndexOf('.') + 1)..];
+          foreach (var sub in AllTraits(cls).Where(sub => sub != trait && DerivesFrom(sub, trait)).OrderByDescending(TraitDepth)) {
+            if (sub.TraitMethods.FirstOrDefault(g => g.Name == sub.Name + "." + bare && !g.IsAbstract) is FunSig link) {
+              implementation = link;
+              break;
+            }
+          }
+        }
         if (implementation == null && !method.IsAbstract) {
           implementation = method;                 // the default implementation of the trait
         }
         if (implementation == null) {
           string shown = method.Name[(method.Name.IndexOf('.') + 1)..];
-          throw Error($"class '{cls.Name}' must implement {DisplayName(trait.Name)}.{MethodCopyName(shown.StartsWith(ImplPrefix) ? shown[ImplPrefix.Length..] : shown)}", cls.Node);
+          throw Error($"class '{cls.Name}' must implement {DisplayName(trait.Name)}.{MethodCopyName(ShownMethodName(shown))}", cls.Node);
         }
         methods.Add(implementation);
       }

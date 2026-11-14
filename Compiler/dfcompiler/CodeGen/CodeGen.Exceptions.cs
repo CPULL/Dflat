@@ -57,7 +57,8 @@ public sealed partial class CodeGen {
   // the default value written in a call, for a parameter that has none
   static Node? DefaultNodeFor(string type, Node at) {
     return type switch {
-      "string" => Synthetic("String", at, "\"\""),
+      "string" or "string1k" => Synthetic("String", at, "\"\""),   // a string1k field: the text of an exception (spec 15.2)
+      _ when type.EndsWith('?') => Synthetic("Null", at, "null"),
       "bool" => Synthetic("Bool", at, "false"),
       "r32" or "r64" => Synthetic("Real", at, "0.0"),
       "char" => Synthetic("Char", at, "'\\0'"),
@@ -72,7 +73,10 @@ public sealed partial class CodeGen {
     var at = cls.Node;
     var result = new List<ParamSig> { new("message", "string", Synthetic("String", at, "\"\"")) };
     foreach (var param in cls.PrimaryParams) {
-      result.Add(new ParamSig(param.Name, param.Type, param.Default ?? DefaultNodeFor(param.Type, at)));
+      // the passing mode of the header parameter stays (->Dog pet: the exception owns the object, spec 15.2)
+      result.Add(new ParamSig(param.Name, param.Type, param.Default ?? DefaultNodeFor(param.Type, at)) {
+        IsGift = param.IsGift, IsWeak = param.IsWeak, IsWritable = param.IsWritable, IsImplicitGift = param.IsImplicitGift, GivenTo = param.GivenTo
+      });
     }
     return result;
   }
@@ -107,8 +111,19 @@ public sealed partial class CodeGen {
     }
     var created = ExprOf(call, scope);
     string temp = NewTemp();
+    // a silent exception in a release build keeps only its id and its type (spec 15.2): the name as message, no function, the extra values
+    // zeroed (their arguments were still evaluated); the object fields are already null in a release build
+    string silentRelease = "";
+    if (ReleaseBuild && IsSilentClass(cls)) {
+      silentRelease = "df_exc_silent_strip((df_exception*)" + temp + "); ";
+      for (var c = cls; c != null; c = c.Parent) {
+        foreach (var field in c.Fields.Where(field => !field.IsStatic && !IsClass(field.Type) && !IsArr(field.Type) && !IsCountedType(field.Type) && !IsFunType(field.Type))) {
+          silentRelease += $"{temp}->{field.CName} = {ZeroValue(field.Type)}; ";
+        }
+      }
+    }
     string raise = $"{{ {CType(name)} {temp} = {created.Code}; "
-      + $"{temp}->function = df_cstr_truncated({fn!.NameConst}, strlen({fn.NameConst}), 1024); df_exc_trace((df_exception*){temp}); "
+      + $"{temp}->function = df_cstr_truncated({fn!.NameConst}, strlen({fn.NameConst}), 1024); df_exc_trace((df_exception*){temp}); {silentRelease}"
       + $"df_err = (df_exception*){temp}; df_err_thrown = true; goto {Handler}; }}";
     sb.Append(condition == "" ? $"{pad}{raise}\n" : $"{pad}if ({condition}) {raise}\n");
     return condition == "";

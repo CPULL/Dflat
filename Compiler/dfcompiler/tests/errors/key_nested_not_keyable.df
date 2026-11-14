@@ -1,0 +1,5 @@
+// an object inside a nested tuple of a key must be of a Keyable class (spec 6.2, 11.2.1)
+class Cat(string name) {
+  public string name
+}
+map<((Cat, i32), i32), string> m = []

@@ -1,0 +1,27 @@
+[((0, 9), 1): b, ((1, 2), 0): c, ((1, 2), 3): a2]
+3
+b
+zero 0,5 = 3
+away 1,2 = 2
+home 1,2 = 1
+2
+11
+2
+true
+true
+false
+  rex ends
+  max ends
+  len 2 rex 1
+  rex ends
+  fido ends
+  map len 1
+  removing max
+  max ends
+  max ends
+  len 1
+  end of run
+  fido ends
+  rex ends
+done
+---- exit code 0 ----

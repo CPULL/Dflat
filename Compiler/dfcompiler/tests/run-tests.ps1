@@ -11,6 +11,7 @@
 # Two kinds of test:
 #  * tests\*.df are programs. The expected output is expected\<name>.txt: everything the program printed after the line "---- run ----"
 #    of the compiler (so it ends with the exit code line). They are compiled and run with no input (an empty standard input).
+#    A first line "// options: --release" (any compiler options) compiles that program with them.
 #  * tests\errors\*.df are programs that must NOT compile. The expected result is errors\expected\<name>.txt: the error lines of the
 #    compiler ("name.df(line): error: message", with no folder). A program that compiles is a failure.
 #  * tests\projects\<name>\ are programs of several files (spec 16), each folder with its .dsprj: the expected output is
@@ -244,7 +245,10 @@ if ($Only.Count -gt 0) {
 # every test: its name, what the compiler runs on, how its output is read and where its expected result is
 $all = New-Object System.Collections.ArrayList
 foreach ($test in $programs) {
-  [void]$all.Add(@{ Name = $test.BaseName; Path = $test.FullName; Option = '--run'; Kind = 'program'
+  # a first line "// options: --release" adds compiler options to this test
+  $firstLine = Get-Content -LiteralPath $test.FullName -TotalCount 1
+  $extra = if ($firstLine -match '^//\s*options:\s*(.+)$') { ' ' + $Matches[1].Trim() } else { '' }
+  [void]$all.Add(@{ Name = $test.BaseName; Path = $test.FullName; Option = $extra.Trim() + ' --run'; Kind = 'program'
     Expected = (Join-Path $testsFolder ('expected\' + $test.BaseName + '.txt')) })
 }
 foreach ($test in $errorPrograms) {

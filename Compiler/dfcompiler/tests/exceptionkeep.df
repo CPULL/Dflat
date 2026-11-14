@@ -1,0 +1,31 @@
+// what an exception keeps (spec 15.2), Debug build: the message, the function, the line and the extra values, silent ones included
+import Root
+public class Note(string1k what, i32 level) : Exception, SilentException {
+  public string1k what
+  public i32 level
+}
+public class Loud(i32 code) : Exception {
+  public i32 code
+}
+fun i32 side() {
+  Console.log("  argument evaluated")
+  return 7
+}
+fun string Silent() {
+  throw Note("a note", "detail", side())
+  return "no"
+  catch Note ex { return $"silent: [{ex.message}] [{ex.function}] [{ex.what}] {ex.level} line {ex.line}" }
+}
+fun string Normal() {
+  throw Loud("loud", 5)
+  return "no"
+  catch Loud ex { return $"normal: [{ex.message}] [{ex.function}] {ex.code} line {ex.line}" }
+}
+fun string Runtime() {
+  time t = time(99999999)
+  return "no catch"
+  catch SilentException ex { return $"runtime silent: [{ex.message}] [{ex.function}]" }
+}
+Console.log(Silent())
+Console.log(Normal())
+Console.log(Runtime())

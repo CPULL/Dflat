@@ -238,6 +238,22 @@ static void df_exc_report(void) {
   }
 }
 
+/* a silent exception in a release build keeps only its id and its type (spec 15.2): the message is the name of the type, the function is
+   empty (a null string); the extra values are zeroed where a class of the program throws it */
+#ifdef DF_RELEASE
+static void df_exc_silent_strip(df_exception* exception) {
+  if (!exception->descriptor->silent) {
+    return;
+  }
+  free(exception->message);
+  exception->message = df_cstr_truncated(exception->descriptor->name, strlen(exception->descriptor->name), 2048);
+  free(exception->function);
+  exception->function = df_cstr_truncated("", 0, 1024);
+}
+#else
+#define df_exc_silent_strip(exception) ((void)0)
+#endif
+
 static df_exception* df_new_exception(const df_descriptor* descriptor, const char* message, uint64_t messageLength, const char* function) {
   df_exception* exception = (df_exception*)df_alloc(sizeof(df_exception));
   exception->cls = NULL;
@@ -247,6 +263,7 @@ static df_exception* df_new_exception(const df_descriptor* descriptor, const cha
   exception->function = df_cstr_truncated(function, strlen(function), 1024);
   exception->line = 0;
   df_exc_trace(exception);
+  df_exc_silent_strip(exception);
   df_exc_live++;
   return exception;
 }

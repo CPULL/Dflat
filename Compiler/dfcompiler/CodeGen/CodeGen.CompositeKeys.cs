@@ -20,11 +20,19 @@ public sealed partial class CodeGen {
   // a string1k key alone is a key of one component with no name (spec 4.5): Part reads it from the key itself
   // a string? or string1k? key is its value then its flag (spec 7.1): null is the null slot of a map / set, and in an hmap / hset it hashes as
   // "null".hash and differs from "" by the flag
+  // a tuple or a struct inside the key is flattened into its own components, with the C path to each (e0.e1, f_corner.f_x): the order, the
+  // copy, the end and the equality work on these leaves, left to right, as on the components of a flat key (spec 6.2.2)
   List<(string CName, string Type)> KeyComponents(string type) => type == "string1k" ? new() { ("", "string1k") }
     : type is "string?" or "string1k?" ? new() { ("val", BaseOf(type)), ("has", "bool") }
-    : IsTuple(type)
-    ? TupleElems(type).Select((elem, index) => ($"e{index}", elem.Type)).ToList()
-    : structs[type].Fields.Select(field => ($"f_{field.Name}", field.Type)).ToList();
+    : (IsTuple(type)
+      ? TupleElems(type).Select((elem, index) => ($"e{index}", elem.Type))
+      : structs[type].Fields.Select(field => ($"f_{field.Name}", field.Type)))
+      .SelectMany(part => IsNestedKeyPart(part.Item2)
+        ? KeyComponents(part.Item2).Select(inner => ($"{part.Item1}.{inner.CName}", inner.Type))
+        : new[] { (part.Item1, part.Item2) }).ToList();
+
+  // a tuple or a struct used as a component of a tuple or a struct key (spec 6.2)
+  bool IsNestedKeyPart(string type) => (IsTuple(type) || IsStruct(type)) && IsCompositeKey(type);
 
   // a component of a composite key read through a pointer (ptr->name) or from a value (value.name); the unnamed one of a string1k key is the key
   static string Part(string pointer, string cname) => cname == "" ? $"(*{pointer})" : $"{pointer}->{cname}";
@@ -41,9 +49,13 @@ public sealed partial class CodeGen {
   // a tuple or a struct this version takes as a key
   bool IsCompositeKey(string type) =>
     type is "string1k" or "string?" or "string1k?"
-    || IsTuple(type) && TupleElems(type).All(elem => IsExactKeyPart(elem.Type) || elem.Type is "string" or "string1k" or "string?" or "string1k?" || IsObjectKeyPart(elem.Type))
+    || IsTuple(type) && TupleElems(type).All(elem => IsKeyLeafOrNested(elem.Type))
     || IsStruct(type) && structs[type].Fields.Count > 0
-      && structs[type].Fields.All(field => field.Buffer == null && (IsExactKeyPart(field.Type) || field.Type is "string" or "string1k" or "string?" or "string1k?" || IsObjectKeyPart(field.Type)));
+      && structs[type].Fields.All(field => field.Buffer == null && IsKeyLeafOrNested(field.Type));
+
+  // a component a tuple or a struct key can have: an exact native, a string kind, a Keyable object, or a tuple or a struct of them
+  bool IsKeyLeafOrNested(string type) =>
+    IsExactKeyPart(type) || type is "string" or "string1k" or "string?" or "string1k?" || IsObjectKeyPart(type) || IsNestedKeyPart(type);
 
   // a composite key of map / set (the B-tree) and of hmap / hset
   bool TKeyOf(string type) => !IsHmap(type) && IsCompositeKey(MapKey(type));
@@ -64,22 +76,7 @@ public sealed partial class CodeGen {
       NeedChunk("sort");   // df_cmp_s1k (RuntimeSort.cs)
       S1kSortKeyHelper();
     }
-    if (IsStruct(keyType)) {
-      foreach (var field in structs[keyType].Fields.Where(field => IsObjectKeyPart(field.Type))) {
-        if (!traits.ContainsKey("Keyable") || !IsSubtype(field.Type, "Keyable")) {
-          throw Error($"{DisplayName(field.Type)} is not Keyable: the field '{field.Name}' of {DisplayName(keyType)}, a key, holds it; a class used in a key implements the trait Keyable (spec 6.2, 11.2.1)", field.At);
-        }
-        CheckKeyable(field.Type, field.At);   // the helpers of the object keys
-      }
-    }
-    if (IsTuple(keyType)) {
-      foreach (var (index, elem) in TupleElems(keyType).Select((elem, index) => (index, elem)).Where(pair => IsObjectKeyPart(pair.elem.Type))) {
-        if (!traits.ContainsKey("Keyable") || !IsSubtype(elem.Type, "Keyable")) {
-          throw Error($"{DisplayName(elem.Type)} is not Keyable: the item {index} of {DisplayName(keyType)}, a key, holds it; a class used in a key implements the trait Keyable (spec 6.2, 11.2.1)", at!);
-        }
-        CheckKeyable(elem.Type, at!);
-      }
-    }
+    CheckKeyableParts(keyType, keyType, at);
     bool owning = IsStruct(keyType) && StructHoldsObjects(keyType);
     if (owning) {
       cloneUsed = true;
@@ -145,6 +142,33 @@ public sealed partial class CodeGen {
     sb.Append($"static bool df_tk_eq_{name}(const void* a, const void* b);   /* written with the hmap shape (CompositeKeyEquality) */\n\n");
     arrayCode.Append(sb);
     return name;
+  }
+
+  // every object held by the key, also inside a nested tuple or struct, is of a Keyable class (spec 6.2, 11.2.1)
+  void CheckKeyableParts(string keyType, string partType, Node? at) {
+    if (IsStruct(partType)) {
+      foreach (var field in structs[partType].Fields) {
+        if (IsObjectKeyPart(field.Type)) {
+          if (!traits.ContainsKey("Keyable") || !IsSubtype(field.Type, "Keyable")) {
+            throw Error($"{DisplayName(field.Type)} is not Keyable: the field '{field.Name}' of {DisplayName(partType)}, {(partType == keyType ? "a key" : $"in the key {DisplayName(keyType)}")}, holds it; a class used in a key implements the trait Keyable (spec 6.2, 11.2.1)", field.At);
+          }
+          CheckKeyable(field.Type, field.At);   // the helpers of the object keys
+        } else if (IsNestedKeyPart(field.Type)) {
+          CheckKeyableParts(keyType, field.Type, field.At);
+        }
+      }
+    } else if (IsTuple(partType)) {
+      foreach (var (index, elem) in TupleElems(partType).Select((elem, index) => (index, elem))) {
+        if (IsObjectKeyPart(elem.Type)) {
+          if (!traits.ContainsKey("Keyable") || !IsSubtype(elem.Type, "Keyable")) {
+            throw Error($"{DisplayName(elem.Type)} is not Keyable: the item {index} of {DisplayName(partType)}, {(partType == keyType ? "a key" : $"in the key {DisplayName(keyType)}")}, holds it; a class used in a key implements the trait Keyable (spec 6.2, 11.2.1)", at!);
+          }
+          CheckKeyable(elem.Type, at!);
+        } else if (IsNestedKeyPart(elem.Type)) {
+          CheckKeyableParts(keyType, elem.Type, at);
+        }
+      }
+    }
   }
 
   // the equality of two hmap slots of a composite key, emitted once with the shape of the hmap (the equals of the classes are known by then):

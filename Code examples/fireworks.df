@@ -1,0 +1,94 @@
+import Root
+
+public class Particle(r64 x, r64 y, r64 vx, r64 vy, i32 life, char symbol) {
+  public r64 x
+  public r64 y
+  public r64 vx
+  public r64 vy
+  public i32 life
+  public char symbol
+}
+
+fun clear(&arr<string> screen) {
+  for uns i = 0..screen.len {
+    screen[i] = " ".padRight(64)
+  }
+}
+
+fun put(&arr<string> screen, i32 px, i32 py, char c) {
+  if py < 0 || (uns)py >= screen.len || px < 0 || px >= 64 { return }
+  string row = screen[py]
+  row[px] = c
+  screen[py] = row
+}
+
+fun render(&arr<string> screen, vec<Particle> particles) {
+  clear(&screen)
+  for Particle p in particles {
+    put(&screen, (i32)p.x, (i32)p.y, p.symbol)
+  }
+
+  Console.clear()
+  for string row in screen {
+    Console.log(row)
+  }
+}
+
+fun explode(&vec<Particle> particles, r64 cx, r64 cy, i32 count) {
+  for i32 i = 0..count {
+    r64 angle = Random.realRange(0.0, Math.PI2)
+    r64 speed = Random.realRange(0.35, 1.7)
+    char sym = "*+x●"[Random.int(0, 3)]
+    particles.add(Particle(
+      cx, cy,
+      Math.cos(angle) * speed,
+      Math.sin(angle) * speed - 0.55,
+      (i32)Random.int(14, 32),
+      sym
+    ))
+  }
+}
+
+fun main() {
+  Console.log("Dflat Fireworks")
+  Time.sleep(600)
+
+  arr<string> screen = arr<string>[20]
+  vec<Particle> particles = []
+
+  explode(&particles, 18.0, 16.0, 40)
+  explode(&particles, 42.0, 14.0, 32)
+  explode(&particles, 30.0, 17.0, 28)
+
+  for i32 frame = 0..55 {
+    for &Particle p in particles {
+      p.x += p.vx
+      p.y += p.vy
+      p.vy += 0.065
+      p.vx *= 0.988
+      p.life--
+    }
+
+    // remove dead particles
+    i32 i = (i32)particles.len - 1
+    while i >= 0 {
+      if particles[i].life <= 0 {
+        particles.removeAt((uns)i)
+      }
+      i--
+    }
+
+    render(&screen, particles)
+
+    if frame == 16 {
+      explode(&particles, 25.0, 15.0, 35)
+    }
+    if frame == 33 {
+      explode(&particles, 48.0, 13.0, 30)
+    }
+
+    Time.sleep(45)
+  }
+
+  Console.log($"\nDone. {particles.len} particles left.")
+}

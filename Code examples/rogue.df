@@ -1,0 +1,411 @@
+// ============================================================
+//   D♭ — DEPTHS OF THE FLAT
+//   A roguelike in 10 levels. Defeat the Demon on level 10.
+//   Controls: arrows or w a s d to move/attack, q to quit
+//   Console: 120 columns. Map = left 80 (40 tiles x 2), stats = right 40
+// ============================================================
+import Root
+alias Root.Console as console
+
+const string ESC = "\u{1b}"
+const i32 W = 40          // tiles across (each tile is 2 columns)
+const i32 H = 22          // tiles down
+const i32 ROOMS = 10
+const i32 LEVELS = 10
+
+// map tiles: 0 floor, 1 wall, 2 stairs, 3 potion, 4 gold, 10+k weapon k, 20+k armour k
+
+fun i64 rnd(i64 s) { return (s * 1103515245 + 12345) % 2147483648 }
+fun i32 roll(i64 s, i32 n) { return (i32)(s % (i64)n) }
+
+fun ->string fg(i32 r, i32 g, i32 b) { return ESC + $"[38;2;{r};{g};{b}m" }
+
+fun ->string bar(i32 v, i32 max, i32 len) {
+  i32 full = Math.clamp(v * len / Math.max(1, max), 0, len)
+  string s = fg(230, 60, 60)
+  for i32 i in 0..full { s = s + "█" }
+  s = s + fg(70, 30, 30)
+  for i32 i in full..len { s = s + "█" }
+  return s + ESC + "[0m"
+}
+
+fun intro() {
+  console.log(ESC + "[2J" + ESC + "[H\n")
+  vec<string> logo = [
+    "   ██████╗     ██╗      ██████╗  ██████╗  ██████╗ ██╗   ██╗███████╗",
+    "   ██╔══██╗    ██║      ██╔══██╗██╔═══██╗██╔════╝ ██║   ██║██╔════╝",
+    "   ██║  ██║ ██████╗     ██████╔╝██║   ██║██║  ███╗██║   ██║█████╗  ",
+    "   ██║  ██║ ██╔══██╗    ██╔══██╗██║   ██║██║   ██║██║   ██║██╔══╝  ",
+    "   ██████╔╝ ██████╔╝    ██║  ██║╚██████╔╝╚██████╔╝╚██████╔╝███████╗",
+    "   ╚═════╝  ╚═════╝     ╚═╝  ╚═╝ ╚═════╝  ╚═════╝  ╚═════╝ ╚══════╝"
+  ]
+  i32 shade = 0
+  for var line in logo {
+    console.log(fg(255 - shade, 140 + shade / 2, 40 + shade * 2) + line + ESC + "[0m")
+    shade += 30
+    Root.Time.sleep(120)
+  }
+  console.log("\n        🐀 🦇 🐍 👺 👹 🦍 🧌 💀 🐉 😈        D E P T H S   O F   T H E   F L A T\n")
+  Root.Time.sleep(800)
+  console.log(fg(230, 230, 230) + "   A rogue short as C#," + ESC + "[0m")
+  Root.Time.sleep(1200)
+  console.log(fg(230, 230, 230) + "   as native as C++," + ESC + "[0m")
+  Root.Time.sleep(1200)
+  console.log(fg(230, 230, 230) + "   with no garbage collector," + ESC + "[0m")
+  Root.Time.sleep(1200)
+  console.log(fg(255, 210, 60) + "   and safe as Rust." + ESC + "[0m")
+  Root.Time.sleep(1500)
+  console.log(fg(120, 120, 120) + "\n   Press any key to descend..." + ESC + "[0m")
+  char? k = null
+  while (k == null) { k = console.readKey() }
+}
+
+fun main() {
+  // ---------- game data ----------
+  vec<string> mName = ["Rat", "Bat", "Snake", "Goblin", "Orc", "Ogre", "Troll", "Skeleton", "Dragon", "Demon"]
+  vec<string> mEmo  = ["🐀", "🦇", "🐍", "👺", "👹", "🦍", "🧌", "💀", "🐉", "😈"]
+  vec<i32> mDmg = []
+  vec<i32> mHpMax = []
+  i32 d0 = 1
+  for i32 k in 0..10 {
+    mDmg.add(d0)            // 1, 2, 4 ... 512
+    mHpMax.add(d0 * 2)      // 2, 4, 8 ... 1024
+    d0 = d0 * 2
+  }
+
+  vec<i32> power = [1, 2, 3, 6, 10, 19, 34, 61, 110, 200]
+  vec<string> wName = ["Spoon", "Knife", "Club", "Axe", "Dagger", "Sword", "Trident", "Bow", "Wand", "Thunder"]
+  vec<string> wEmo  = ["🥄", "🔪", "🏏", "🪓", "🗡️", "⚔️", "🔱", "🏹", "🪄", "⚡"]
+  vec<string> aName = ["Shirt", "Coat", "Gi", "Vest", "Gauntlets", "Helm", "Shield", "Mithril", "Dragon scale", "Divine aura"]
+  vec<string> aEmo  = ["👕", "🧥", "🥋", "🦺", "🧤", "⛑️", "🛡️", "🥼", "🐲", "👑"]
+
+  // ---------- player ----------
+  i64 seed = 20261114
+  i32 depth = 1
+  i32 plvl = 1
+  i32 hp = 20
+  i32 maxHp = 20
+  i32 xp = 0
+  i32 xpGap = 10
+  i32 nextXp = 10
+  i32 gold = 0
+  i32 kills = 0
+  i32 weapon = 0
+  i32 armour = 0
+  bool alive = true
+  bool quit = false
+  string msg = "You enter the Depths of the Flat. Find the stairs 🪜"
+
+  console.log(ESC + "[?25l")
+  intro()
+
+  // the dungeon name decides the dungeon: same name, same levels
+  console.log(ESC + "[?25h" + fg(255, 210, 60) + "\n   Name your dungeon: " + ESC + "[0m")
+  string dname = console.readLine()
+  if dname == "" || dname == "\n" || dname == "\r\n" then dname = "Depths of the Flat"
+  seed = (i64)(dname.hash % 2147483648)
+  console.log(ESC + "[?25l" + ESC + "[2J")
+
+  while (alive && !quit && depth <= LEVELS) {
+    // ---------- build a new level (freed automatically when the level ends) ----------
+    vec<i32> map = []
+    vec<bool> seen = []
+    for i32 i in 0..W * H {
+      map.add(1)
+      seen.add(false)
+    }
+
+    vec<i32> cx = []
+    vec<i32> cy = []
+    for i32 r in 0..ROOMS {
+      seed = rnd(seed)
+      i32 rw = 4 + roll(seed, 6)
+      seed = rnd(seed)
+      i32 rh = 3 + roll(seed, 4)
+      seed = rnd(seed)
+      i32 x0 = 1 + roll(seed, W - rw - 2)
+      seed = rnd(seed)
+      i32 y0 = 1 + roll(seed, H - rh - 2)
+      for i32 y in y0..y0 + rh {
+        for i32 x in x0..x0 + rw { map[y * W + x] = 0 }
+      }
+      cx.add(x0 + rw / 2)
+      cy.add(y0 + rh / 2)
+    }
+    for i32 r in 1..ROOMS {
+      i32 ax = cx[r - 1]
+      i32 ay = cy[r - 1]
+      i32 bx = cx[r]
+      i32 by = cy[r]
+      for i32 x in Math.min(ax, bx)..=Math.max(ax, bx) { map[ay * W + x] = 0 }
+      for i32 y in Math.min(ay, by)..=Math.max(ay, by) { map[y * W + bx] = 0 }
+    }
+
+    // stairs (none on the last level: kill the Demon to win)
+    if depth < LEVELS then map[cy[ROOMS - 1] * W + cx[ROOMS - 1]] = 2
+
+    // potions, gold, and gear around the current depth
+    map[cy[2] * W + cx[2] + 1] = 3
+    map[cy[6] * W + cx[6] + 1] = 3
+    map[cy[1] * W + cx[1] - 1] = 4
+    map[cy[4] * W + cx[4] - 1] = 4
+    map[cy[8] * W + cx[8] - 1] = 4
+    seed = rnd(seed)
+    map[cy[3] * W + cx[3] - 1] = 10 + Math.min(9, depth - 1 + roll(seed, 2))
+    seed = rnd(seed)
+    map[cy[7] * W + cx[7] + 1] = 10 + Math.min(9, Math.max(0, depth - 2 + roll(seed, 2)))
+    seed = rnd(seed)
+    map[cy[5] * W + cx[5] - 1] = 20 + Math.min(9, depth - 1 + roll(seed, 2))
+    seed = rnd(seed)
+    map[cy[8] * W + cx[8] + 1] = 20 + Math.min(9, Math.max(0, depth - 2 + roll(seed, 2)))
+
+    i32 px = cx[0]
+    i32 py = cy[0]
+
+    // ---------- monsters: one new kind per level, mixed with weaker ones ----------
+    vec<i32> mx = []
+    vec<i32> my = []
+    vec<i32> mhp = []
+    vec<i32> mkind = []
+    i32 nMon = 6 + depth / 2
+    if depth == LEVELS then nMon = 1
+    for i32 m in 0..nMon {
+      seed = rnd(seed)
+      i32 room = 1 + roll(seed, ROOMS - 1)
+      seed = rnd(seed)
+      i32 kind = Math.max(0, depth - 1 - roll(seed, 3))
+      if m == 0 {
+        kind = depth - 1          // the new monster of this level
+        room = ROOMS - 1
+      }
+      seed = rnd(seed)
+      mx.add(cx[room] + roll(seed, 3) - 1)
+      my.add(cy[room] + 1)
+      mhp.add(mHpMax[kind])
+      mkind.add(kind)
+    }
+
+    bool onLevel = true
+    bool pending = false        // waiting for Y/N on an item
+    i32 foe = -1                // monster currently fighting, -1 = none
+    while (onLevel && alive && !quit) {
+      // ---------- sidebar ----------
+      vec<string> side = []
+      for i32 i in 0..H { side.add("") }
+      side[0] = fg(255, 255, 120) + $"🧙 HERO — level {plvl}" + ESC + "[0m"
+      side[2] = $"❤️  HP   {hp}/{maxHp}"
+      side[3] = "    " + bar(hp, maxHp, 20)
+      side[4] = $"⭐ XP   {xp}/{nextXp}"
+      side[5] = fg(255, 210, 60) + $"💰 Gold {gold}" + ESC + "[0m"
+      side[6] = $"🗺️  Depth {depth}/{LEVELS}   Kills {kills}"
+      side[8] = fg(150, 150, 150) + "WEAPON" + ESC + "[0m"
+      side[9] = $"{wEmo[weapon]} {wName[weapon]}  ⚔ {power[weapon]}"
+      side[11] = fg(150, 150, 150) + "ARMOUR" + ESC + "[0m"
+      side[12] = $"{aEmo[armour]} {aName[armour]}  🛡 {power[armour]}"
+
+      if pending {
+        i32 t = map[py * W + px]
+        side[14] = fg(80, 220, 255) + "── YOU FOUND ──" + ESC + "[0m"
+        if t < 20 {
+          i32 k = t - 10
+          side[15] = $"New:  {wEmo[k]} {wName[k]}  ⚔ {power[k]}"
+          side[16] = $"Now:  {wEmo[weapon]} {wName[weapon]}  ⚔ {power[weapon]}"
+        } else {
+          i32 k = t - 20
+          side[15] = $"New:  {aEmo[k]} {aName[k]}  🛡 {power[k]}"
+          side[16] = $"Now:  {aEmo[armour]} {aName[armour]}  🛡 {power[armour]}"
+        }
+        side[18] = fg(120, 255, 120) + "[Y] take it   " + fg(255, 120, 120) + "[N] leave it" + ESC + "[0m"
+      } else {
+        if foe >= 0 && mhp[foe] > 0 {
+          i32 k = mkind[foe]
+          side[14] = fg(255, 90, 90) + "── FIGHTING ──" + ESC + "[0m"
+          side[15] = $"{mEmo[k]} {mName[k]}"
+          side[16] = $"❤️  HP {mhp[foe]}/{mHpMax[k]}  " + bar(mhp[foe], mHpMax[k], 12)
+          side[17] = $"⚔ Attack {mDmg[k]}  → hits you for {Math.max(1, mDmg[k] - power[armour])}"
+        }
+        side[18] = fg(120, 120, 120) + "arrows / wasd: move, attack" + ESC + "[0m"
+        side[19] = fg(120, 120, 120) + "q: quit" + ESC + "[0m"
+      }
+
+      // ---------- draw ----------
+      string screen = ESC + "[H"
+      for i32 y in 0..H {
+        for i32 x in 0..W {
+          i32 i = y * W + x
+          i32 ddx = x - px
+          i32 ddy = y - py
+          bool vis = ddx * ddx + ddy * ddy <= 36
+          if vis then seen[i] = true
+          string cell = "  "
+          if seen[i] {
+            i32 t = map[i]
+            if t == 1 {
+              if vis { cell = fg(140, 120, 100) + "██" } else { cell = fg(55, 48, 40) + "██" }
+            } else if t == 2 {
+              cell = "🪜"
+            } else if t == 3 {
+              cell = "🧪"
+            } else if t == 4 {
+              cell = "💰"
+            } else if t >= 20 {
+              cell = aEmo[t - 20]
+            } else if t >= 10 {
+              cell = wEmo[t - 10]
+            } else {
+              if vis { cell = fg(100, 100, 110) + "· " } else { cell = fg(40, 40, 45) + "· " }
+            }
+          }
+          if vis {
+            for i32 m in 0..nMon {
+              if mhp[m] > 0 && mx[m] == x && my[m] == y then cell = mEmo[mkind[m]]
+            }
+          }
+          if x == px && y == py then cell = "🧙"
+          screen = screen + cell + ESC + "[0m"
+        }
+        screen = screen + ESC + "[83G" + side[y] + ESC + "[0m" + ESC + "[K\n"
+      }
+      screen = screen + "  " + msg + ESC + "[K"
+      console.log(screen)
+
+      // ---------- input ----------
+      char? key = null
+      while (key == null) { key = console.readKey() }
+
+      if pending {
+        i32 i = py * W + px
+        i32 t = map[i]
+        if key == 'y' || key == 'Y' {
+          if t < 20 {
+            weapon = t - 10
+            msg = $"You take the {wName[weapon]}! (+{weapon + 1} XP)"
+          } else {
+            armour = t - 20
+            msg = $"You put on the {aName[armour]}! (+{armour + 1} XP)"
+          }
+          xp += (t % 10) + 1
+          map[i] = 0
+          pending = false
+        } else if key == 'n' || key == 'N' {
+          msg = "You leave it where it is."
+          pending = false
+        }
+      } else {
+        i32 dx = 0
+        i32 dy = 0
+        if key == 'w' || key == '↑' then dy = -1
+        if key == 's' || key == '↓' then dy = 1
+        if key == 'a' || key == '←' then dx = -1
+        if key == 'd' || key == '→' then dx = 1
+        if key == 'q' then quit = true
+
+        if dx != 0 || dy != 0 {
+          msg = ""
+          i32 tx = px + dx
+          i32 ty = py + dy
+          i32 target = -1
+          for i32 m in 0..nMon {
+            if mhp[m] > 0 && mx[m] == tx && my[m] == ty then target = m
+          }
+
+          if target >= 0 {
+            seed = rnd(seed)
+            i32 dmg = power[weapon] + roll(seed, power[weapon] / 4 + 2)
+            mhp[target] -= dmg
+            foe = target
+            i32 k = mkind[target]
+            if mhp[target] <= 0 {
+              kills++
+              xp += mDmg[k]
+              seed = rnd(seed)
+              gold += (k + 1) * 5 + roll(seed, 10)
+              msg = $"You slay the {mEmo[k]} {mName[k]}! (+{mDmg[k]} XP) "
+              if k == 9 {
+                depth = LEVELS + 1      // the Demon is dead: victory
+                onLevel = false
+              }
+            } else {
+              msg = $"You hit the {mName[k]} for {dmg}. "
+            }
+          } else if map[ty * W + tx] != 1 {
+            px = tx
+            py = ty
+            i32 t = map[ty * W + tx]
+            if t == 2 {
+              depth++
+              onLevel = false
+              hp = Math.min(maxHp, hp + maxHp / 4)
+              msg = $"You descend to level {depth}... something new lurks here."
+            } else if t == 3 {
+              hp = Math.min(maxHp, hp + maxHp / 2)
+              map[ty * W + tx] = 0
+              msg = "🧪 You drink a potion. You feel much better! "
+            } else if t == 4 {
+              seed = rnd(seed)
+              i32 g = 10 * depth + roll(seed, 20)
+              gold += g
+              map[ty * W + tx] = 0
+              msg = $"💰 You find {g} gold! "
+            } else if t >= 10 {
+              pending = true
+              msg = "You found something! Keep it? [Y/N]"
+            }
+          }
+
+          // ---------- level up ----------
+          while (xp >= nextXp) {
+            plvl++
+            xpGap = xpGap * 2
+            nextXp = nextXp + xpGap
+            maxHp = (i32)((r64)maxHp * 1.5)
+            hp = maxHp
+            msg = msg + $"⭐ LEVEL UP! You are level {plvl}. "
+          }
+
+          // ---------- monsters act ----------
+          if onLevel && !pending {
+            for i32 m in 0..nMon {
+              if mhp[m] > 0 {
+                i32 ex = px - mx[m]
+                i32 ey = py - my[m]
+                if Math.abs(ex) <= 1 && Math.abs(ey) <= 1 {
+                  i32 dmg = Math.max(1, mDmg[mkind[m]] - power[armour])
+                  hp -= dmg
+                  foe = m
+                  msg = msg + $"{mEmo[mkind[m]]} hits you for {dmg}. "
+                } else if Math.abs(ex) + Math.abs(ey) < 9 {
+                  i32 nx = mx[m] + Math.sign(ex)
+                  i32 ny = my[m] + Math.sign(ey)
+                  bool free = map[ny * W + nx] != 1
+                  for i32 o in 0..nMon {
+                    if o != m && mhp[o] > 0 && mx[o] == nx && my[o] == ny then free = false
+                  }
+                  if nx == px && ny == py then free = false
+                  if free {
+                    mx[m] = nx
+                    my[m] = ny
+                  }
+                }
+              }
+            }
+            if hp <= 0 then alive = false
+          }
+        }
+      }
+    }
+  }
+
+  // ---------- the end ----------
+  console.log(ESC + "[2J" + ESC + "[H")
+  if quit {
+    console.log("\n  You flee the Depths. Coward... but alive.")
+  } else if alive {
+    console.log(fg(255, 210, 60) + "\n  👑 VICTORY! 👑  The 😈 Demon is dead. You conquered the Depths of the Flat!" + ESC + "[0m")
+  } else {
+    console.log(fg(255, 60, 60) + $"\n  💀 You died on level {depth}." + ESC + "[0m")
+  }
+  console.log($"  Hero level {plvl}   Gold {gold}   Monsters slain {kills}\n")
+} atEnd {
+  console.log(ESC + "[0m" + ESC + "[?25h  Every level was freed the moment you left it. Zero garbage collection.\n")
+}

@@ -1,0 +1,125 @@
+// ============================================================
+//   D♭ SHOWCASE — "same tune as C#, cleaner key signature"
+// ============================================================
+alias Root.Console as console
+
+// ---------- 1. A musical scale ----------
+class Note(string name, i32 semitone) {
+  public string name
+  public i32 semitone
+
+  unrestricted fun string mood() {
+    semitone ? { 0: "home", 1..=4: "rising", 5..=8: "soaring", default: "almost home" }
+  }
+} atEnd {
+  console.log($"   ♪ {name} fades out")
+}
+
+fun playScale() {
+  console.log("\n🎹  D♭ MAJOR — the scale this language is named after\n")
+  vec<Note> scale = []
+  scale.add(Note("D♭", 0))
+  scale.add(Note("E♭", 2))
+  scale.add(Note("F",  4))
+  scale.add(Note("G♭", 5))
+  scale.add(Note("A♭", 7))
+  scale.add(Note("B♭", 9))
+  scale.add(Note("C",  11))
+
+  for var n in scale {
+    string bar = ""
+    for i32 i in 0..=n.semitone { bar = bar + "█" }
+    console.log($"  {n.name}\t{bar}  ({n.mood()})")
+  }
+  console.log("\n  …and when the scale ends, every note frees itself:")
+}
+
+// ---------- 2. The Mandelbrot set ----------
+fun drawMandelbrot() {
+  console.log("\n🌀  THE MANDELBROT SET\n")
+  string palette = " .:-=+*#%@"
+  for uns row in 0..24 {
+    string line = "  "
+    for uns col in 0..72 {
+      r64 cr = ((r64)col - 50.0) / 24.0
+      r64 ci = ((r64)row - 12.0) / 11.0
+      r64 zr = 0.0
+      r64 zi = 0.0
+      i32 iter = 0
+      while (zr * zr + zi * zi < 4.0 && iter < 90) {
+        r64 t = zr * zr - zi * zi + cr
+        zi = 2.0 * zr * zi + ci
+        zr = t
+        iter++
+      }
+      i32 shade = iter >= 90 ? { 9, iter % 9 }
+      line = line + palette[shade]
+    }
+    console.log(line)
+  }
+}
+
+// ---------- 3. Primes at native speed ----------
+fun primeRace() {
+  console.log("\n⚡  FINDING EVERY PRIME BELOW 1,000,000\n")
+  i32 limit = 1000000
+  vec<bool> composite = []
+  for i32 i in 0..=limit { composite.add(false) }
+
+  i32 count = 0
+  i32 last = 0
+  for i32 p in 2..=limit {
+    if (!composite[p]) {
+      count++
+      last = p
+      if (p <= 1000) {
+        i32 m = p * p
+        while (m <= limit) {
+          composite[m] = true
+          m += p
+        }
+      }
+    }
+  }
+  console.log($"  Found {count} primes. The largest is {last}.")
+}
+
+// ---------- 4. A pocket galaxy ----------
+class Star(string name, i32 brightness) {
+  public string name
+  public i32 brightness
+
+  unrestricted fun string kind() {
+    brightness ? { 9..=10: "SUPERGIANT", 6..=8: "giant", 3..=5: "sun-like", default: "dwarf" }
+  }
+}
+
+fun galaxy() {
+  console.log("\n✨  A POCKET GALAXY\n")
+  vec<Star> sky = []
+  sky.add(Star("Sirius", 9))
+  sky.add(Star("Vega", 7))
+  sky.add(Star("Sol", 4))
+  sky.add(Star("Proxima", 1))
+  Star wanderer = Star("Betelgeuse", 10)
+  sky.add(->wanderer)
+
+  map census = ["SUPERGIANT": 0, "giant": 0, "sun-like": 0, "dwarf": 0]
+  for var s in sky {
+    string glow = ""
+    for i32 i in 0..s.brightness { glow = glow + "★" }
+    console.log($"  {s.name}\t{glow}  {s.kind()}")
+    census[s.kind()] += 1
+  }
+  console.log($"\n  Census: {census}")
+}
+
+fun main() {
+  console.log("D♭ — readable like C#, fast like C")
+  playScale()
+  drawMandelbrot()
+  primeRace()
+  galaxy()
+} atEnd {
+  console.log("\n🎬  Curtain. Every object freed deterministically — zero GC.\n")
+}

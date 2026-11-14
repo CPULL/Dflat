@@ -1,0 +1,56 @@
+// ============================================================
+//   D♭ — A JOURNEY INTO INFINITY
+//   Full-colour animated zoom into the Mandelbrot set
+// ============================================================
+alias Root.Console as console
+
+const string ESC = "\u{1b}"
+
+fun ->string pixel(i32 iter, i32 maxIter) {
+  string esc = "\u{1b}"
+  r64 t = (r64)iter / (r64)maxIter
+  r64 u = 1.0 - t
+  i32 r = (i32)(9.0 * u * t * t * t * 255.0)
+  i32 g = (i32)(15.0 * u * u * t * t * 255.0)
+  i32 b = (i32)(8.5 * u * u * u * t * 255.0)
+  esc + $"[48;2;{r};{g};{b}m "
+}
+
+fun main() {
+  string esc = "\u{1b}"
+  i32 width = 120
+  i32 height = 45
+  r64 cx = -0.743643887037151
+  r64 cy = 0.131825904205330
+  r64 scale = 3.0
+
+  console.log(esc + "[?25l" + esc + "[2J")      // hide cursor, clear screen
+
+  for i32 frame in 0..300 {
+    i32 maxIter = 80 + frame * 3
+    string screen = esc + "[H"                  // jump to top-left, redraw in place
+    for i32 row in 0..height {
+      for i32 col in 0..width {
+        r64 cr = cx + ((r64)col / (r64)width - 0.5) * scale
+        r64 ci = cy + ((r64)row / (r64)height - 0.5) * scale * 0.75
+        r64 zr = 0.0
+        r64 zi = 0.0
+        i32 iter = 0
+        while (zr * zr + zi * zi < 4.0 && iter < maxIter) {
+          r64 t = zr * zr - zi * zi + cr
+          zi = 2.0 * zr * zi + ci
+          zr = t
+          iter++
+        }
+        screen = screen + pixel(iter, maxIter)
+      }
+      screen = screen + esc + "[0m\n"
+    }
+    screen = screen + esc + $"[0m  D♭ — zoom x{(i64)(3.0 / scale)}   frame {frame}/300"
+    console.log(screen)
+    scale = scale * 0.965
+    Root.Time.sleep(16)
+  }
+} atEnd {
+  console.log("\u{1b}[0m\u{1b}[?25h\n  Every frame computed natively. Zero garbage collection.\n")
+}

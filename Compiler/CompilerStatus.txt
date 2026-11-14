@@ -1,16 +1,6 @@
 Compiler version 0.0.132 alpha for version 0.0.40 of the specs 2026/11/14
 
 Changes from the previous version -----------------------
-- A plain result built in the function is given without -> (spec 13.1.1)
-- for var i = 0..10 and for i = 0..10 take the type of the range (spec 10)
-- An integer with a real converts to the real with no cast (spec 2.5)
-- string == char and char == integer comparisons (spec 2.5)
-- Fewer array leaks: a borrowed array handed to its one borrower, c = b; return c, var x = f(), lend([..]).len (spec 6.8.1)
-- arr iterators and views: sort, reverse and copyFrom of an iterated or viewed arr raise ModifyingIteratedCollectionException, and so does replacing it; a view or iterator that outlives its arr raises UsageOfDestroyedObjectException (spec 6.4, 6.5)
-- var it = a.getIterator() of an arr compiles (it was taken for a borrow)
-- executeBefore / executeAfter chained over several traits: a sub-trait redeclares the method with its own block (spec 11.2)
-- Nested composite keys: tuples inside tuple keys, structs inside struct and tuple keys (spec 6.2); the new objects of a nested key literal end with the statement
-- Custom exceptions: catch by a trait of the program, subclasses repeat the header parameters of their parent, object fields (owned in Debug, null in Release), string1k fields (string is an error), Release rules of silent exceptions (spec 15.1, 15.2)
 
 Done -----------------------
 

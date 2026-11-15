@@ -7,7 +7,7 @@ namespace dfcompiler;
 // which takes the Dflat values and calls the C function: a string becomes a const char* (UTF-8, ended by a 0, valid during the call), an
 // arr<T> becomes a T* and a size_t length. The other types go as they are; addr is a void*.
 public sealed partial class CodeGen {
-  bool IsExternValueType(string type) => IsNumeric(type) || type is "bool" or "addr" || IsStruct(type) && structs[type].Layout != null;
+  bool IsExternValueType(string type) => IsNumeric(type) || type is "bool" or "addr" || IsStruct(type) && structs[type].Layout != null || IsPointer(type);   // a pointer: its cursor (spec 12.1)
 
   void CheckExtern(Node funNode, ClassInfo? cls, string? enumName, string ret, List<ParamSig> ps, bool noBody) {
     if (cls != null || enumName != null) {
@@ -38,17 +38,30 @@ public sealed partial class CodeGen {
   }
 
   // string(addr) borrows a C text (UTF-8 ended by a 0) and never frees it; string(->addr) takes it and frees it with free() when the string
-  // ends or changes (spec 4.4.6, 15.9). The result is a string?: a null addr gives null, and string s = string(p) takes "" for it. ->x empties the variable or field x (it no longer owns the text); ->f() takes the result
+  // ends or changes; string(addr!) copies it at once and never frees it (spec 4.4.6, 15.9). The result is a string?: a null addr gives null,
+  // and string s = string(p) takes "" for it. ->x empties the variable or field x (it no longer owns the text); ->f() takes the result.
+  // A StringEncoding (UTF8 by default) can follow: any encoding but UTF8 reads the text in that encoding and copies it (taken: freed at once)
   Expr StringFromAddr(List<Node> args, Scope scope, Node at) {
-    if (args.Count != 1 || args[0].Kind == "Named") {
-      throw Error("string(...) takes one addr: string(addr) borrows a C text, string(->addr) takes it (spec 4.4.6)", at);
+    const string forms = "string(addr) borrows a C text, string(->addr) takes it, string(addr!) copies it; a StringEncoding can follow (spec 4.4.6)";
+    if (args.Count is < 1 or > 2 || args[0].Kind == "Named" || args.Count == 2 && args[1].Kind == "Named" && args[1].Text != "encoding") {
+      throw Error($"string(...) takes one addr and an optional StringEncoding: {forms}", at);
     }
     var arg = args[0];
     bool owned = arg.Kind == "Gift";
-    var operand = owned ? arg.Children[0] : arg;
+    bool copied = arg.Kind == "Copy";
+    var operand = owned || copied ? arg.Children[0] : arg;
     var value = ExprOf(operand, scope);
     if (value.Type is not ("addr" or "null")) {
-      throw Error($"string(...) takes an addr, not {value.Type}: string(addr) borrows a C text, string(->addr) takes it (spec 4.4.6)", at);
+      throw Error($"string(...) takes an addr, not {value.Type}: {forms}", at);
+    }
+    string? encoding = null;
+    if (args.Count == 2) {
+      var encNode = args[1].Kind == "Named" ? args[1].Children[0] : args[1];
+      var enc = ExprOf(encNode, scope);
+      if (enc.Type != "StringEncoding") {
+        throw Error($"the second argument of string(...) is a StringEncoding, not {enc.Type}: {forms}", args[1]);
+      }
+      encoding = enc.Code;
     }
     if (value.Type == "null") {
       return new Expr("((df_opt_string){0})", "string?", true);
@@ -63,15 +76,25 @@ public sealed partial class CodeGen {
       string taken = NewTemp();
       code = $"({{ void** {slot} = &({target.Code}); void* {taken} = *{slot}; *{slot} = NULL; {taken}; }})";
     }
+    if (encoding != null || copied) {
+      NeedChunk("text");   // df_str_from_c_enc (RuntimeText.cs)
+      return new Expr($"df_str_from_c_enc({code}, (int32_t)({encoding ?? "0"}), {(owned ? 1 : copied ? 2 : 0)})", "string?", true);
+    }
     return new Expr($"df_str_from_c_opt({code}, {(owned ? "true" : "false")})", "string?", true);   // a null addr is null (spec 7.1)
   }
 
   // the prototype of the C function and the wrapper the program calls
   string ExternDeclarations(FunSig f) {
+    foreach (var pointerType in f.Params.Where(p => p.Pointer == 0 && IsPointer(p.Type)).Select(p => p.Type).Append(f.Ret).Where(IsPointer)) {
+      CheckExternPointer(pointerType, f.Node);   // spec 12.1
+    }
     string ret = f.Ret == "void" ? "void" : CType(f.Ret);
+    string cRet = IsPointer(f.Ret) ? CType(PointedType(f.Ret)) + "*" : ret;   // a C pointer; the program gets it unbounded
     var cParams = new List<string>();
     foreach (var p in f.Params) {
-      if (p.Pointer != 0) {
+      if (IsPointer(p.Type)) {
+        cParams.Add((IsWritablePointer(p.Type) ? "" : "const ") + CType(PointedType(p.Type)) + "*");   // only the cursor crosses (spec 12.1)
+      } else if (p.Pointer != 0) {
         cParams.Add((p.Pointer == 1 ? "const " : "") + CType(p.Type) + "*");
       } else if (p.Type == "string") {
         cParams.Add("const char*");
@@ -83,7 +106,7 @@ public sealed partial class CodeGen {
       }
     }
     var sb = new StringBuilder();
-    sb.Append($"extern {ret} {f.Name}({(cParams.Count == 0 ? "void" : string.Join(", ", cParams))});\n");
+    sb.Append($"extern {cRet} {f.Name}({(cParams.Count == 0 ? "void" : string.Join(", ", cParams))});\n");
     string wrapperParams = f.Params.Count == 0 ? "void" : string.Join(", ", f.Params.Select(p =>
       p.Pointer != 0 ? $"{(p.Pointer == 1 ? "const " : "")}{CType(p.Type)}* v_{p.Name}" : $"{CType(p.Type)} v_{p.Name}"));
     sb.Append($"static {ret} {f.CName}({wrapperParams}) {{\n");
@@ -97,6 +120,8 @@ public sealed partial class CodeGen {
       } else if (IsArr(p.Type)) {
         args.Add($"v_{p.Name}.p");
         args.Add($"(size_t)v_{p.Name}.len");
+      } else if (IsPointer(p.Type)) {
+        args.Add($"v_{p.Name}.cur");
       } else {
         args.Add($"v_{p.Name}");
       }
@@ -105,6 +130,10 @@ public sealed partial class CodeGen {
     if (ret == "void") {
       sb.Append($"  {call};\n");
       frees.ForEach(free => sb.Append(free));
+    } else if (IsPointer(f.Ret)) {
+      sb.Append($"  {cRet} r = {call};\n");
+      frees.ForEach(free => sb.Append(free));
+      sb.Append($"  return ({ret}){{ r, r, -1, NULL }};\n");   // unbounded (spec 12.1)
     } else {
       sb.Append($"  {ret} r = {call};\n");
       frees.ForEach(free => sb.Append(free));

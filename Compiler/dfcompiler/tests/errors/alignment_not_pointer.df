@@ -1,0 +1,5 @@
+import Root
+fun main() {
+  i32 a = 1
+  bool ok = Alignment.isAligned(a)
+}

@@ -1,0 +1,5 @@
+import Root
+fun main() {
+  list<i32> l = [1]
+  pointer p = pointer.to(l)
+}

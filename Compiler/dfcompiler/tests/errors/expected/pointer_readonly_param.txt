@@ -1,0 +1,1 @@
+pointer_readonly_param.df(2): error: 'v' is read-only here: &* needs a place that can be written (spec 12.1, 13.1)

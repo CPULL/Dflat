@@ -1,0 +1,1 @@
+string_from_three.df(3): error: string(...) takes one addr and an optional StringEncoding: string(addr) borrows a C text, string(->addr) takes it, string(addr!) copies it; a StringEncoding can follow (spec 4.4.6)

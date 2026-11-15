@@ -1,0 +1,1 @@
+pointer_cast_writable.df(4): error: a read-only pointer (pointer<i32>) cannot be cast to a writable one (pointer<&u8>) (spec 12.1)

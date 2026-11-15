@@ -1,0 +1,1 @@
+unsafe_class_outside.df(3): error: 'Port' is an unsafe class: it can be used only from unsafe code (unsafe { }, an unsafe function or class) (spec 12.1)

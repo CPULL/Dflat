@@ -1,0 +1,1 @@
+alignment_not_pointer.df(4): error: Alignment.isAligned takes a pointer, not i32 (spec 12.2)

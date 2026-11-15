@@ -1,0 +1,2 @@
+extern fun take(**i32 p)
+fun main() { }

@@ -1,0 +1,1 @@
+pointer_arith.df(3): error: no pointer arithmetic: move the cursor with p.add(steps) and read with p[i] (spec 12.1)

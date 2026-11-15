@@ -333,6 +333,10 @@ public sealed partial class CodeGen {
       owners.Add(statement);
       drops.Add(StrDropNode(statement.Text!, statement));
     }
+    foreach (var statement in statements.Where(IsPointerDecl)) {
+      owners.Add(statement);   // a pointer to a vec gives back its count when it ends (spec 12.1)
+      drops.Add(PointerDropNode(statement.Text!, statement));
+    }
     foreach (var statement in statements.Where(statement => statement.Kind == "Decl" && IsStructObjDecl(statement))) {
       owners.Add(statement);   // a struct that holds strings or objects: they end with the scope (spec 11.1.5.3)
       structObjDecls.Add(statement);
@@ -815,7 +819,7 @@ public sealed partial class CodeGen {
     if (statements.Count == 0 || statements.Any(s => s.Kind is "AtEnd" or "AtEndOf" or "Catch" or "Label")) {
       return statements;
     }
-    if (!statements.Any(s => (s.Kind == "Decl" && (IsCountedDecl(s) || ObjectTypeOf(s) != null || IsStringDecl(s) || IsOptStringDecl(s) || IsFunDecl(s) || IsStructObjDecl(s) || IsBigStructDecl(s)
+    if (!statements.Any(s => (s.Kind == "Decl" && (IsPointerDecl(s) || IsCountedDecl(s) || ObjectTypeOf(s) != null || IsStringDecl(s) || IsOptStringDecl(s) || IsFunDecl(s) || IsStructObjDecl(s) || IsBigStructDecl(s)
           || IsArrTypeNode(s.Children.FirstOrDefault(child => TypeNodeKinds.Contains(child.Kind)))))
         || (s.Kind == "MultiAssign" && s.Children[0].Children.Any(target => target.Kind == "Decl" && IsStringDecl(target))))) {
       return statements;

@@ -1,6 +1,13 @@
-Compiler version 0.0.135 alpha for version 0.0.40 of the specs 2026/11/14
+Compiler version 0.0.141 alpha for version 0.0.40 of the specs 2026/11/15
 
 Changes from the previous version -----------------------
+- Pointers, step 5 (spec 12.1, 22): extern functions take *T / &*T as const T* / T* (the cursor) and return pointers unbounded (the call is unsafe code); pointer fields of struct<fixed> and struct<compact> hold the C pointer (read and written in unsafe code)
+- Pointers, step 4 (spec 12.1): casts (*i16)p, (&*u8)w, (pointer<u64>)p (count recomputed, leftover dropped); addr a = p, [addr]p, [u64]p; [*i32]a and [*i32]number in unsafe code only (unbounded); static data *"1.2.3", *5, *LIMIT; *T{count} in declarations; unsafe { }, unsafe fun, unsafe class (usable only from unsafe code)
+- Pointers, step 3 (spec 12.1, 12.2): add, addRaw, inRange, inRangeRaw, getOffset, getOffsetRaw (also from another pointer or addr), getAddress, getAddressRaw, isAligned; Root.Alignment.type<T>(), arch, cache, isAligned(p), isAligned<T>(p), isAlignedCache(p)
+- Pointers, step 2 (spec 12.1): pointer.to(buff), *a[i], &*a[i] on arr and vec (bounds of the whole array, cursor on the item); the arr or vec cannot be replaced, moved or passed as & until the last use of the pointer; a pointer variable made from a vec counts as an open iterator until it ends or gets a new value (add, remove ... raise ModifyingIteratedCollectionException); pointer.to(list) is an error
+- toStr() of a pointer: *i32 0x1a2b, &*i32 when writable, *i32 null, , 256 / , 37/256 for more than one item (spec 12.1); Console.log and interpolation use it
+- Pointers, step 1 (spec 12.1): *T, &*T, pointer<T>, pointer<&T> and pointer p = ... to numbers, bool, char, enums, structs and pointers; *x, &*x, pointer.to(x), pointer.to(&x); p[i], p[], p[].x read and written (writable pointers only); null, == and !=; bounds and null checked; a pointer cannot outlive what it points into
+- C strings with an encoding: string(addr, StringEncoding), string(->addr, StringEncoding), and string(addr!) that copies the C text (spec 4.4.6)
 - A plain result built in the function is given without -> (spec 13.1.1)
 - for var i = 0..10 and for i = 0..10 take the type of the range (spec 10)
 - An integer with a real converts to the real with no cast (spec 2.5)
@@ -91,7 +98,8 @@ dfoot (7c); vec, list, map, hmap, set and hset are built in part (see below)
 Ownership, move, copy, refcount
 Move parameters on non-objects, volatile references, reference parameters on constructors, (&) borrows that replace an object
 Lambdas and captures: the rest of spec 13.3.6 (counted and weak captures, &a of strings and arrays, modes in function types, function types in fields and collections, f1!, the &a lock)
-Pointers, alignment, volatile (the pointer types *T and (*)T); addr is built only as the opaque handle of spec 15.9 (no arithmetic, no printing)
+Pointers: steps 1 to 3 built (0.0.137-0.0.139alpha). Root.Alignment values are not compile-time constants yet (array sizes, value parameters), cache is always 64 (no compiler option). Step 4 built (0.0.140alpha); not in it: *T to &*T in unsafe code (its form is open), a pointer to a local const that is not an integer literal, calls to unsafe functions are not restricted (only unsafe classes are). Step 5 built (0.0.141alpha): all five pointer steps are done. Left: callbacks (pointer.to(f(...))), *arr<T> parameters, pointers to pointers given to C. Not built: pointers in fields, collections and tuples, pointers to objects, strings and fields of objects, a pointer to the item of a list node, the lock of an arr given to a pointer by assignment (only declarations lock it)
+Alignment, volatile; addr is built only as the opaque handle of spec 15.9 (no arithmetic, no printing)
 Class atEnd
 128/256-bit ints, r16/r128
 dec

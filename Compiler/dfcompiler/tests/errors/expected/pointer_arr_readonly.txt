@@ -1,0 +1,1 @@
+pointer_arr_readonly.df(2): error: 'a' is read-only here: &* needs a collection that can be written (spec 12.1, 13.1)

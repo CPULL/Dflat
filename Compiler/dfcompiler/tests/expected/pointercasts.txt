@@ -1,0 +1,14 @@
+cast: 1 2 6 true
+leftover dropped: false true false
+writable cast: 21
+addr: true true
+back: 10 40 false
+unsafe function: 10
+unsafe class: 10
+static: 1.2.3 42 7
+const: 9
+real: 0.5
+bound: 21 30 false true
+caught: Index Out Of Range Exception
+bound in unsafe: 40 false
+---- exit code 0 ----

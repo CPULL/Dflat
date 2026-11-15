@@ -1,0 +1,7 @@
+import Root
+fun main() {
+  arr<i32> b = [1, 2]
+  pointer p = pointer.to(b)
+  b = [3]
+  Console.log(p[0])
+}

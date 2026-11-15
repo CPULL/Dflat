@@ -1971,6 +1971,86 @@ static bool df_idx_ok(df_uns len, df_uns index, const char* function) {
   return false;
 }
 
+/* the address of item index of a pointer (spec 12.1): NULL after raising NullPointerException or IndexOutOfRangeException;
+   count < 0 is an unbounded pointer */
+static void* df_ptr_at(void* cur, void* base, int64_t count, int64_t index, size_t size, const char* function) {
+  if (!cur) {
+    df_raise(&df_desc_NullPointerException, function);
+    return NULL;
+  }
+  int64_t at = ((char*)cur - (char*)base) + index * (int64_t)size;
+  if (count >= 0 && (at < 0 || at + (int64_t)size > count * (int64_t)size)) {
+    df_raise(&df_desc_IndexOutOfRangeException, function);
+    return NULL;
+  }
+  return (char*)cur + index * (int64_t)size;
+}
+
+/* p.add(steps) (spec 12.1): the new cursor, or NULL after raising NullPointerException or IndexOutOfRangeException when it would leave the
+   bounds (the item at the new cursor must be inside) */
+static void* df_ptr_move(void* cur, void* base, int64_t count, int64_t delta, size_t size, const char* function) {
+  if (!cur) {
+    df_raise(&df_desc_NullPointerException, function);
+    return NULL;
+  }
+  int64_t to = ((char*)cur - (char*)base) + delta;
+  if (count >= 0 && (to < 0 || to + (int64_t)size > count * (int64_t)size)) {
+    df_raise(&df_desc_IndexOutOfRangeException, function);
+    return NULL;
+  }
+  return (char*)cur + delta;
+}
+
+/* *i32{count} p = q (spec 12.1): a negative bound raises IndexOutOfRangeException; in safe code the count items from the cursor must be
+   inside the bounds of q (an unbounded q cannot be bounded there) */
+static bool df_ptr_bound_ok(void* cur, void* base, int64_t count, int64_t bound, size_t size, bool safe, const char* function) {
+  if (bound < 0) {
+    df_raise(&df_desc_IndexOutOfRangeException, function);
+    return false;
+  }
+  if (!cur || !safe) {
+    return true;
+  }
+  int64_t at = (char*)cur - (char*)base;
+  if (count < 0 || bound * (int64_t)size > count * (int64_t)size - at) {
+    df_raise(&df_desc_IndexOutOfRangeException, function);
+    return false;
+  }
+  return true;
+}
+
+/* p.inRange(steps): the cursor moved by the amount stays inside the bounds; false for the null pointer */
+static bool df_ptr_in_range(void* cur, void* base, int64_t count, int64_t delta, size_t size) {
+  if (!cur) {
+    return false;
+  }
+  int64_t to = ((char*)cur - (char*)base) + delta;
+  return count < 0 || (to >= 0 && to + (int64_t)size <= count * (int64_t)size);
+}
+
+/* p.isAligned(bytes): an alignment of 0 or 1 is always met */
+static bool df_ptr_aligned(void* cur, uint64_t bytes) {
+  return bytes <= 1 || (uint64_t)(uintptr_t)cur % bytes == 0;
+}
+
+/* the text of a pointer (spec 12.1): "*i32 null", "*i32 0x1a2b", "*i32 0x1a2b, 256", "*i32 0x1a2b, 37/256" */
+static df_string df_ptr_str(const char* name, void* cur, void* base, int64_t count, size_t size) {
+  char buf[600];
+  if (!cur) {
+    snprintf(buf, sizeof buf, "%s null", name);
+  } else if (count <= 1) {
+    snprintf(buf, sizeof buf, "%s 0x%llx", name, (unsigned long long)(uintptr_t)cur);
+  } else {
+    long long at = (long long)(((char*)cur - (char*)base) / (int64_t)size);
+    if (at == 0) {
+      snprintf(buf, sizeof buf, "%s 0x%llx, %lld", name, (unsigned long long)(uintptr_t)cur, (long long)count);
+    } else {
+      snprintf(buf, sizeof buf, "%s 0x%llx, %lld/%lld", name, (unsigned long long)(uintptr_t)cur, at, (long long)count);
+    }
+  }
+  return df_str_from_buf(buf);
+}
+
 /* an index given as a signed number: a negative one (or one past the range of uns) becomes a value no array has */
 static df_uns df_idx_arg(int64_t v) {
   return v < 0 || (uint64_t)v > DF_UNS_MAX ? DF_UNS_MAX : (df_uns)v;

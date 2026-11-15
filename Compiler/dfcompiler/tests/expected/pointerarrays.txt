@@ -1,0 +1,24 @@
+arr: 1 5 15
+written: 20
+item: 3 1 5
+through the item: 34 50
+caught: Index Out Of Range Exception
+caught: Index Out Of Range Exception
+structs: 40 1
+vec: 10 30
+items can change: 11
+caught: Modifying Iterated Collection Exception
+size: 3
+after the pointer: 4
+after the block: [11, 20, 30, ...] (5 items)
+loop 11
+loop 20
+after the loop: 6
+, 5
+, 2/5
+, 4/5
+no count
+*i32 null
+true
+true
+---- exit code 0 ----

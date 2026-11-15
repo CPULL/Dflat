@@ -66,7 +66,7 @@ public sealed partial class CodeGen {
         if (info.Fields.Any(field => field.Name == member.Text)) {
           throw Error($"the struct '{info.Name}' already has a field '{member.Text}'", member);
         }
-        string type = ResolveType(member.Children[0]);
+        string type = StructFieldPointer(ResolveType(member.Children[0]), info.Layout, member);   // a C pointer in a struct<fixed> (spec 12.1)
         var init = member.Children.FirstOrDefault(child => child.Kind == "Init")?.Children[0];
         if (member.Children.FirstOrDefault(child => child.Kind == "Size") is Node size) {
           // arr<T>[N]: N items stored inline (spec 11.1.5.4)
@@ -124,7 +124,7 @@ public sealed partial class CodeGen {
     if (IsArr(type)) {
       throw Error("a struct cannot have an array of undefined size: an arr field needs a size known at compile time, arr<T>[N] (spec 11.1.5.4)", at);
     }
-    if (IsStruct(type) || IsEnum(type) || IsNumeric(type) || type is "bool" or "char" or "addr" or "string1k" || IsTimeType(type)) {
+    if (IsStruct(type) || IsEnum(type) || IsNumeric(type) || type is "bool" or "char" or "addr" or "string1k" || IsTimeType(type) || IsCPtr(type)) {
       return;
     }
     if (IsNullable(type) && !IsStruct(BaseOf(type)) && BaseOf(type) != "string" && !IsTuple(BaseOf(type))) {
@@ -302,6 +302,9 @@ public sealed partial class CodeGen {
       throw Error("offset takes the name of a field: s.offset(x) (spec 11.1.5.6)", n);
     }
     var field = StructFieldOf(obj.Type, n.Text!, n);
+    if (IsCPtr(field.Type)) {
+      return CPtrRead(StructFieldRead($"({obj.Code})", field), field.Type, n);   // an unbounded pointer (spec 12.1)
+    }
     return new Expr(StructFieldRead($"({obj.Code})", field), field.Type);
   }
 

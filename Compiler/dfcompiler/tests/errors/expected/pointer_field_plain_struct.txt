@@ -1,0 +1,1 @@
+pointer_field_plain_struct.df(1): error: feature not supported: pointer fields outside a struct<fixed> or struct<compact> (spec 12.1)

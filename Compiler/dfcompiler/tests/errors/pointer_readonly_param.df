@@ -1,0 +1,4 @@
+fun f(i32 v) {
+  &*i32 w = &*v
+}
+fun main() { f(1) }

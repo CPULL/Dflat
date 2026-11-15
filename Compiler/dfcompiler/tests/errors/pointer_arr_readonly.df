@@ -1,0 +1,4 @@
+fun f(arr<i32> a) {
+  pointer<&i32> w = pointer.to(&a)
+}
+fun main() { f([1]) }

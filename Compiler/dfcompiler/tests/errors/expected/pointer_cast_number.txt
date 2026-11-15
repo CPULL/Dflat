@@ -1,0 +1,1 @@
+pointer_cast_number.df(3): error: a pointer becomes u64 only with a transmute: [u64]p (spec 12.1, 3.5)

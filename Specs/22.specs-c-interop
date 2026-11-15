@@ -1,104 +1,375 @@
 # 22. C Interop and libraries
 
-# DFLAT C INTEROP - BRAINSTORMING NOTES (2026-11-05)
-Nothing is final. Based on spec 13.1 (functions) and 4 (strings).
+Goal: call any external library (dll, lib, so, any format) that exposes a C-style interface.
+Draft, not final. Example: Specs/draft_zlib.dflib.
 
-## BASIS
+## ALREADY IN THE SPEC
 - Markers (13.1): plain = read-only lend, & = writable, -> = give, x! = copy,
   @ share, % weak, * raw pointer, &* writable raw pointer.
-- Dflat types: int / uns arch-dependent, i<size> / u<size>, addr = generic address.
-- Working mode: brainstorming; observations, not a stream of questions.
+- extern fun, minimal (15.9): numbers, bool, addr, string parameter as const char*,
+  arr<T> / &arr<T> as pointer + size_t, layout-tagged structs by copy or by *S / &*S.
+- Structs (11.1.5): struct<fixed> / struct<compact> for C layout (11.1.5.6), plain
+  values only; transmute (11.1.5.7) gives views over the same memory.
+- string? and string(addr) / string(->addr) for C strings (4.4.6).
+- toCStr(StringEncoding) gives a C string (UTF8, UTF16, ...) (4.3).
 
-## THREE INTEROP CASES
-- DD: Dflat calls Dflat - ownership markers already cover it.
-- CD: C calls our Dflat library - our library defines buffer ownership, the C side adapts.
-- DC: Dflat calls a foreign C library - the foreign library defines it, Dflat adapts.
-- Marshalling runs in opposite directions in CD and DC.
+## LIBRARIES AND IMPORT
+- Each C library has a Dflat wrapper file, `.dflib`, which holds all the library needs so the
+  compiler removes the boilerplate: library name, functions, calling conventions, marshalling.
+  It replaces the gfx setup hardcoded in the compiler.
+- A program imports a library with `import lib <name>` (`import lib zlib`). The namespace of
+  the library (its `Namespace:`) is imported with it: its public names are used without the
+  prefix (`messageBox(...)`), and the fully qualified names stay valid.
+- The namespace is imported only in the file that writes `import lib`. The library is part of
+  the whole program: the other files use its fully qualified names (`std.win32.user32.messageBox(...)`)
+  or import its namespace (`import std.win32.user32`, 16.2).
+- A target is OS + CPU (the --target names).
+- The location of the library files is in the .dsprj, key `libpath`: the library path where
+  the files are found, possibly with a subfolder for each target.
+- Loading a library by name while the program runs is in the standard library:
+  `Root.Process.loadLib(name)`.
 
-## MAPPING IDEAS (C <-> Dflat)
-- const char* <-> string (immutable). Writable char* buffer <-> &arr<byte>.
-- int* outWidth style out parameters <-> & (writable borrow). In-out is the same &;
-  a pointer to a variable that is read then written is written explicitly (&uns destLen).
-- Pointer + length: the explicit form (&*byte + uns) is low level but usable.
-  Wish: replace it with &arr<byte>; problem: the C length is not always next to the
-  buffer (before, elsewhere, via pointer, in the return value, none). Annotations for
-  the position were suggested, but "a lot of syntax for nothing" - undecided.
-- void** <-> &addr (probable). Functions returning const char* <-> string.
-- C callbacks <-> Dflat lambda/function type, written return(params) name.
-- C int is i32 (not the Dflat int); C long is platform-dependent.
-- Unions = different views over the same struct memory. Bitfields already supported.
+## DFLIB FILE
+- Comments as in Dflat: /* comment */ and // comment.
+- Name: <name> - the name used by `import lib`. No spaces. Mandatory.
+- Namespace: <namespace> - the namespace of the native members, so Dflat code can fully
+  qualify them (`std.compress.zlib`).
+- Description: <text> - a short single-line description. Optional.
+- Version: <text> - a string, since versions follow no single rule. Optional.
+- Convention: <name> - the default calling convention of the library.
+- Library level values are defaults; a function overrides them only where it differs.
+- A calling convention in square brackets before a `native` overrides `Convention:` for that
+  function: `[cdecl] native i32 wsprintfW(...)` in a stdcall library.
 
-## STRINGS
-- null and "" are the same string (section 4); plain string stays non-nullable.
-- string? is an opt-in nullable string
-  string(addr) and string(->addr).
-- string(addr) idea: a header with class 12 holding the C
-  pointer, read-only, converted to a normal string at the first edit.
-- Who owns/frees C memory varies per library: nothing assumed.
-- Observation: string(->addr) must free with the allocator it came from (C free);
-  memory from sqlite3_free or CoTaskMemFree cannot be handed over.
-- A string result for C: toCStr(StringEncoding) already exists (UTF8, UTF16, ...).
+### Library files
+- LibName, <target>, <kind>: <files> - the file names of the library binary for a target
+  (no path). The target can use `*` as in the target blocks. The kind is `static` or `dynamic`:
+  - `static: <file>` - linked into the executable.
+  - `dynamic: <file>` - one file to link and to run (.so, .dylib).
+  - `dynamic: <link file>, <run file>` - the import library to link and the library to run
+    (Windows .lib + .dll); the compiler copies the run file next to the executable.
+  - A run file in square brackets is not copied: it is part of the system (`[user32.dll]`).
+```
+LibName, linux-*, dynamic: libz.so
+LibName, win-*, dynamic: zlib1.lib, zlib1.dll
+```
+- When both kinds are available, the import picks one: `import lib static zlib`,
+  `import lib dynamic zlib`. With no kind, static is used, with a level 1 warning.
+
+### Versions
+- Two .dflib files can have the same LibName with different versions (zlib 1.2.3, zlib
+  2.0beta); `import lib zlib 2.0beta` picks one (`import lib static zlib 2.0beta` with a kind).
+- `import lib zlib` with no version when more than one version exists is a compile error.
+- Two versions can be imported in the same program when their namespaces differ; when their
+  members conflict it is a compile error.
+
+### Functions
+- Each C function is declared with `native` and its C types; the Dflat function that maps to
+  it follows right after it. The Dflat function maps with `->`: its named results are
+  assigned from the native call, so each item is mapped explicitly. The pairs are kept
+  together so the file stays readable:
+```
+// get the zlib version
+native *char zlibVersion()
+fun string v version() -> v = string(zlibVersion())
+
+// the largest size compress can produce from sourceLen bytes
+native u32 compressBound(u32 sourceLen)
+fun uns n bound(uns len) -> n = compressBound(len)
+
+// decompress a buffer
+native i32 uncompress(&*u8 dest, &*u32 destLen, *u8 source, u32 sourceLen)
+fun i32 res, uns written uncompress(&arr<byte> dest, arr<byte> src) -> {
+    u32 len = dest.len               // in: the size of the buffer
+    res = uncompress(dest, &len, src, src.len)
+    written = len                    // out: the bytes zlib wrote
+}
+```
+- A function with no result maps to the call alone: `fun f() -> native_f()`.
+- In the native call, `=` marks whatever is given back as output: `=name` is an out parameter
+  that fills the named result (numbers, addr, handles alike):
+```
+native i32 callMe(i32 param, &*i32 res)
+fun i32 res callMe(i32 param) -> callMe(param, =res)
+```
+- `null` is valid for a pointer parameter (NULL in C).
+- C type names are written with an alias (16) or as the Dflat type of the same size, and a
+  cast converts them in the mapping. Win32 BOOL is a 4-byte int, not a C bool:
+```
+alias i32 as BOOL
+native BOOL Win_IsItWorking()                // or: native i32 Win_IsItWorking()
+fun bool r isItWorking() -> r = (bool)Win_IsItWorking()
+```
+- `->` defines a mapping in a .dflib. When the call needs more than one line, the mapping is
+  a block in braces; its locals live until the end of the block:
+```
+fun MsgBoxResult res messageBox(string text, string caption, MsgBoxButtons buttons, MsgBoxIcon icon)
+  -> {
+    var textBuf = text.toCStr(StringEncoding.UTF16)
+    var captionBuf = caption.toCStr(StringEncoding.UTF16)
+    res = [MsgBoxResult]MessageBoxW(null, (*u16)pointer.to(textBuf), (*u16)pointer.to(captionBuf),
+                                    [u32]buttons | [u32]icon)
+  }
+```
+- The native call places each length where C wants it (before, after, through a
+  pointer), with no position annotations.
+- `native` functions are not exposed to the program: it sees only the Dflat functions. Inside
+  a mapping, a name that is both a `fun` and a `native` calls the native.
+- A `native` whose types all match 1 to 1 is mapped automatically: the program calls it with
+  its name, with no `fun`. The `native` line is written anyway: IDEs read the .dflib for
+  context.
+- The inline form (`-> native ...` on one line) is for 1 to 1 mappings; a mapping that needs
+  more declares the `native` on its own line, as above. Variables use the same two forms.
+- A function has an alias only when its C name is not a valid Dflat name.
+- C int is i32 (not the Dflat int). Types whose size changes per target (C long) are written
+  with their real size in target blocks (u32 by default, u64 on linux-x64 / linux-arm64).
+- C constants (#define, enum values) become Dflat `const`; groups of related values (flags
+  like the Win32 MB_*) become a Dflat enum, so a wrong value cannot be given.
+
+### Variadic functions
+- The variadic part of a C function (`...`) is a Dflat variadic parameter (13.4) whose type
+  is a set (6.10) of the accepted types: each argument can be any type of the set, so one call
+  can mix them; any other type is a compile error.
+```
+Generic CArg { i8, i16, i32, i64, u8, u16, u32, u64, r32, r64, addr, string }
+
+native i32 printf(*char format, CArg args...)
+fun i32 n print(string format, CArg args...) -> n = printf(format, args)
+
+print("%s is %d years old, %.2f m\n", name, 42, 1.80)      // program
+```
+- The compiler writes a plain C call with the type of each argument; clang applies the C
+  variadic rules (float to double, small integers to int, the stack on Apple arm64).
+- A string argument is given as a C text for the call.
+- The format string is not checked against the arguments: a mismatch is the caller's
+  responsibility.
+
+### Variables
+- Exported C variables live in the namespace of the .dflib, as its functions do:
+```
+import lib libc                          // Namespace: std.lib.c
+Console.log(std.lib.c.timezone)
+```
+- A plain type is read-only, `&` is read/write, as the passing markers (13.1).
+- When the mapping is 1 to 1, the native is declared inline after `->`:
+```
+i32 countedTotal -> native i32 countedTotal          // read-only
+&i32 writableVar -> native i32 writableVar           // read/write
+```
+- When the mapping needs more, the native is declared on its own line and mapped with `->`,
+  as for functions:
+```
+i32 timezone -> native i32 timezone
+
+win-* {
+  native i32 _get_timezone(&*i32 seconds)
+  i32 timezone -> _get_timezone(=timezone)           // read through a function
+}
+```
+
+### Handles
+- A C handle (an opaque pointer like sqlite3* or HWND, a void* HANDLE, an integer like a
+  POSIX fd or a Vulkan VkBuffer, a small struct) is declared with `handle` in the .dflib, in
+  its namespace. The declaration always says what the handle is made of:
+```
+handle HWND addr
+handle Db addr
+handle Buffer u64                                    // a Vulkan non-dispatchable handle
+handle File i32 invalid -1                           // an invalid value other than null
+handle Complex struct { i32 a, u64 b, r64 c, addr d }
+```
+- Each handle is its own type: a `Db` cannot be given where a `Buffer` is expected, and an
+  `addr` cannot be given where a `Db` is expected. A handle can be used where the type it is
+  made of is expected (`string(mem)` with `handle CoMem addr`).
+- `string(mem)` of a handle borrows the text (4.4.6): the handle is linked to the string and
+  is not freed until the string ends.
+- The C string forms of 4.4.6 take a StringEncoding, UTF8 by default: `string(addr,
+  StringEncoding encoding = StringEncoding.UTF8)`, `string(->addr, StringEncoding encoding =
+  StringEncoding.UTF8)`. UTF8 works as 4.4.6 says (no copy). Any other encoding reads the text
+  in that encoding and copies it into a new string: the address is not kept, so a handle given
+  to it can be freed right away, and `string(->addr, ...)` frees the C text at once.
+- `string(addr!)` (4.4.6) copies the C text into a new string at once and never frees
+  it: for a text the library keeps and frees itself (sqlite3_column_text is freed at the next
+  sqlite3_step). Inside `string(...)`, `addr!` means "copy the text", as `->addr` means "take
+  it"; it takes a StringEncoding too: `string(addr!, StringEncoding.UTF16)`.
+```
+fun string p documentsPath() -> {
+    CoMem mem
+    SHGetKnownFolderPath(FOLDERID_Documents, 0, null, &mem)
+    p = string(mem, StringEncoding.UTF16)            // a copy
+}                                                    // mem ends: CoTaskMemFree
+```
+- A handle has no arithmetic. It is stored, passed, returned, compared with a handle of the
+  same type, and compared with `null`, which means its invalid value; a struct handle
+  is the exception (below).
+- A handle cannot be copied, only moved (`->`, 13.1): a copy (`h!`, `clone()`) is a compile
+  error, so only one owner can free it. Plain and `&` parameters lend it as usual.
+- A handle given with `->` (`f(->h)`) belongs to the function: the variable becomes null, and
+  the freeing function of the handle runs as soon as that function ends (unless it moves the
+  handle on).
+- Used where the type it is made of is expected, a handle is lent (`string(mem)`: the handle
+  still frees it) or moved (`string(->mem)`: the text is copied, then the freeing function of
+  the handle runs at once, CoTaskMemFree for a CoMem).
+- A struct handle is never null and cannot be compared with `null`: C gives a struct either
+  by value (a real struct, never null) or as a pointer (`Foo*` is a `pointer<Foo>`, nullable
+  like every pointer, 12.1).
+- A native call creates it, usually through an out parameter:
+  `native i32 sqlite3_open(*char name, &Db db)`.
+- The out parameter fills a named result with `=` (Functions); the native result can be
+  assigned to another named result:
+```
+handle Ref addr
+native i32 native_get_ctx(*char name, &Ref ctx)
+fun Ref r, i32 res getContext(string name) -> res = native_get_ctx(name, =r)
+```
+- Several out parameters fill several named results:
+  `fun Res window, Res screen gfxScreens(string name) -> nativegfxcall(name, =window, =screen)`.
+- The function that frees a handle is a native + fun pair, marked with `[~T name]` on its
+  parameter; one per handle type (a second one is a compile error):
+```
+handle Db addr
+
+// close a database
+native i32 sqlite3_close(Db db)
+fun i32 res close([~Db db]) -> res = sqlite3_close(db)
+```
+- The program can call it (`i32 res = close(db)`); the handle becomes null after it, so it is
+  not freed again when the variable ends.
+- When an owned handle ends and it is not null, the compiler calls the freeing function and
+  ignores its result. A null handle is never given to it.
+- A freeing function with more than one parameter (vkDestroyBuffer(device, buffer,
+  pAllocator)) is never called automatically: the handle must be freed by an explicit call.
+
+### Targets
+- The items that differ per target go in a block; the Dflat side must be the same in every
+  block. A definition outside any block is the default; a block that matches the target
+  replaces it for that target. There is no `* { }` block.
+- A block can name several targets, separated by commas, and use `*` as a wildcard:
+```
+linux-x64, osx-arm64, win-x32 {
+  // valid for all the targets listed
+}
+*-x64 {
+  // all x64 targets
+}
+linux-* {
+  // all linux architectures
+}
+```
+- When several blocks match, the most specific one wins; between equally specific blocks
+  (`linux-*` and `*-x64` on linux-x64) the first one in the file wins.
+- A function or variable that has no definition for a target is an error only when it is used
+  in a program built for that target.
+
+## CALLING CONVENTIONS
+- One convention per target: win-x64 (Microsoft x64; __stdcall/__cdecl/__fastcall ignored,
+  only __vectorcall differs), linux-x64 / osx-x64 (System V), arm64 (AAPCS64; Apple differs
+  only for variadic arguments, a target rule).
+- win-x32 is where it matters: cdecl (C default), stdcall (Win32 API, WINAPI/CALLBACK, names
+  decorated _Name@<bytes>), fastcall (rare), vectorcall (rare); thiscall is C++ only.
+- ARM32 hard/soft float is per target, never per function.
+- Dflat compiles to C: the compiler writes the keyword in the prototype and the wrapper,
+  clang does the rest (decoration included).
+- Callbacks need the convention too (WNDPROC is stdcall).
+- A convention is ignored on targets where it means nothing, as C compilers do.
+
+Examples:
+```
+// zlib (zlib1.dll, libz.so): every function is cdecl
+Name: zlib
+Convention: cdecl
+native u32 crc32(u32 crc, *u8 buf, u32 len)                 // cdecl
+```
+```
+// user32: the Win32 API is stdcall
+Name: user32
+Convention: stdcall
+native i32 MessageBoxW(Hwnd owner, *u16 text, *u16 caption, u32 type)    // stdcall
+native i32 GetSystemMetrics(i32 index)                                    // stdcall
+```
+```
+// a stdcall library with one cdecl function
+Name: mixed
+Convention: stdcall
+native i32 openDevice(i32 id)                               // stdcall
+[cdecl] native i32 deviceVersion()                          // cdecl
+```
+- On win-x32 cdecl and stdcall produce different calls; on win-x64, linux-x64 and arm64
+  they produce the same call.
 
 ## OWNERSHIP / WHO FREES
-- C headers and libraries do not express it; it is in the manual at best.
-- Wanted: a marker saying who frees. Candidates: [~functionName] just before the item that should be freed and by calling which function. [~] for standard free(addr)
-  Parameter: the receiver owns it and must free it. Result: the caller frees it.
-- The library's free function is an ordinary function call, not the problem.
+- C headers and libraries do not express it; it is in the manual at best. Nothing is assumed.
+- Memory that the caller must free with a specific function is a handle too, with the same
+  rules (Handles): one handle type per freeing function.
+```
+handle CoMem addr                                    // memory from the COM allocator
 
-## HEADERS AND LIBRARIES
-- Standard C libraries (.dll .so .a .lib) contain symbol names only, no signatures
-  (debug info aside). The .h is the source of signatures.
-- Dflat has no headers: the compiler can write the list of functions itself.
-  Options: embedded in the .lib, a .dfh next to it, and a .h for C users (must be a
-  separate file, a C compiler cannot read it from the archive). Undecided.
-- Hypothesis: one header format (.dfh) for Dflat and foreign libraries.
-- Tool: reads a .h and generates a .dfh (name maybe "libh"), only what is possible.
-  After annotations are added the tool is not used again except for a new library
-  version; no merge mechanism.
-- .dfh targets: a shared base, with a target attached only to the items that differ
-  (syntax to be defined).
+native CoTaskMemFree(CoMem p)
+fun free([~CoMem p]) -> CoTaskMemFree(p)
 
-## FOREIGN LIBRARY OPTIONS (all four wanted)
-- A: hand-written declarations (the old extern fun is not to be used as is).
-- B: a bindgen-like tool, written in Dflat.
-- C: bindings packaged as an ordinary Dflat library (a design project, constraining).
-- D: dynamic loading by name (a new world).
-- A is the foundation; B generates A; C packages A.
+native i32 SHGetKnownFolderPath(*u8 id, u32 flags, addr token, &CoMem path)
+fun CoMem path, i32 res knownFolder(*u8 id, u32 flags) -> res = SHGetKnownFolderPath(id, flags, null, =path)
+```
+- string(->addr) on a plain addr frees with C free. Memory with its own freeing function
+  (sqlite3_free, CoTaskMemFree) is a handle, and string(->h) frees it with that function.
 
-## C PREPROCESSOR
-- Plan: a minimal in-house preprocessor, with clang for complex cases (clang -E -dD
-  keeps macro definitions). Clang output depends on the target platform.
+## TOOLS (later)
+- A tool that reads a .h and writes a first .dflib, only what is possible; the .dflib is then
+  tuned by hand, and the tool is used again only for a new library version (no merge).
+- A minimal in-house C preprocessor, with clang for complex cases (clang -E -dD keeps macro
+  definitions); clang output depends on the target.
+- Calling Dflat libraries from C (exports, a generated .h): out of scope for now.
 
-## VULKAN HEADER SCAN (vulkan_core.h, 775 functions)
-- 464 functions need struct pointers; 257 need no struct; handles 1049 parameters.
-- pAllocator appears 117 times (nearly always NULL); 114 count+pointer pairs.
-- Returns: 475 void, 283 VkResult.
-- Headers cloned in the workspace under /home/claude/vk-src (not delivered).
+## POINTERS (12.1)
+- Shared objects (z_stream): the C struct is a struct<fixed> in the .dflib, its pointer
+  fields are pointer<T> / pointer<&T> holding the C pointer only, with no bounds and no
+  validity guarantee. The wrapper hides them where it can (compress(in, &out) sets
+  nextIn / nextOut before each deflate); no miracles: what C gives without a size stays
+  unbounded.
+  ```
+  struct<fixed> ZStream {
+    pointer<u8>  nextIn       // const Bytef*
+    u32          availIn
+    u64          totalIn
+    pointer<&u8> nextOut      // Bytef*
+    u32          availOut
+    u64          totalOut
+    pointer<u8>  msg          // char*, set by zlib
+    addr         state        // zlib's own memory, opaque
+    ...
+  }
+  ```
+- A .dflib is not unsafe as a whole: only the methods that need it are marked `unsafe`.
+- Returned arrays (Vulkan two-call): the second call takes `pointer.to(&devs)` (`&*devs[0]`),
+  bounded to the array and alive for the call only; the wrapper may hide the two calls.
+- Wide strings: a pointer cast, `(*u16)pointer.to(text.toCStr(StringEncoding.UTF16))`;
+  the count becomes bytes / 2.
+- C unions: no union declaration; the same bytes are read as another type with transmute
+  (3.5).
+- C errors (errno, GetLastError, result codes) never become exceptions by themselves: the
+  wrapper code reads them and throws an exception when it wants to.
 
-## STRUCTS
-- Defined set of fields over memory; may have methods, but no state. Classes are for
-  full power; structs are structured data. Easy to implement (tuples exist).
-- Open: whether a struct may hold a string (owned allocation).
-- Structs are the big blocker for Vulkan, Win32 and raylib; not for SQLite's everyday
-  API, zlib, libsodium, stb_image, GLFW, libc.
-- Next blockers: nullable string, variadic functions, callbacks with captured state.
-
-## EXAMPLE LIBRARIES
-- SQLite: needs no structs; options: C lib + .dfh, transpile to a Dflat library, or a
-  single sqlite.df source file (the Dflat counterpart of "here is the .c and .h").
-  Open: whether transpiling is a goal in itself.
-- Others: stb_image, libcurl, GLFW, raylib, libsodium, C standard library.
-- Win32 API: an excellent candidate (BOOL is 4 bytes, A/W pairs, stdcall on x86,
-  GetLastError, structs, callbacks, import libs; win32metadata describes the API).
+## CALLBACKS
+- A callback is a pointer to a function with the signature the C side expects; the .dflib
+  declares the callback type. The type of the pointer is `pointer<fun(...)>`.
+```
+fun iAmACallback(i32 a, *arr<char> b) {
+  ...
+}
+pointer funPointer = pointer.to(iAmACallback(i32, *arr<char>))   // pointer<fun(i32, *arr<char>)>
+```
+- The parameter types in `pointer.to(f(...))` choose the function among its overloads.
+- C never passes an array by value: an array parameter is written `*arr<char>` or
+  `pointer<char>`.
+- Only plain functions and static methods; lambdas with captured state (through the C
+  `void* userData`) come later.
+- The calling convention comes from the callback type in the .dflib: the compiler writes a
+  small C function with that convention that calls the Dflat function; the Dflat function
+  has no tag.
 
 ## OPEN
-- Struct layout and by-value/by-pointer rules; structs holding strings.
-- Position of C length parameters; the ownership marker syntax.
-- Header format and location (.h / .dfh / embedded), .dfh target syntax.
-- Variadic functions; callbacks with state; C calling conventions per function.
-
-
-## Freeing annotations
-fun [~CoTaskMemFree] addr SHGetKnownFolderPath(...)
-fun i32 getWindowHandler(i32 size, [~releaseWindowHandler] &addr winHdlrPointer)
-fun releaseWindowHandler(addr winHdlr)
+- .dsprj `libpath`: subfolder naming per target.
+- Callbacks with captured state (lambdas): later.
+- Returned arrays: whether the .dflib can declare the two-call pattern so the wrapper
+  returns an arr directly: later.
+- Wide strings: `*u32` instead of `*u16` on Linux (wchar_t) in a target block.

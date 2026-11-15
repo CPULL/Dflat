@@ -420,6 +420,7 @@ public sealed partial class CodeGen {
             break;
           }
           CheckFieldName(cls, member.Text!, member);
+          CheckNoPointerField(type, member);   // spec 12.1
           var field = new FieldInfo(member.Text!, type, cls, member) {
             Visibility = visibility,
             IsStatic = isStatic,

@@ -141,6 +141,9 @@ public sealed partial class CodeGen {
       // set tags = ["red", "blue"], hset tags = [...]: the item type comes from the literal (spec 6.3)
       return InferSetType(init.Children[0], scope, decl, typeNode.Text == "hset");
     }
+    if (typeNode is { Kind: "Type", Text: "pointer", Children.Count: 0 } && !typeAliases.ContainsKey("pointer") && !IsKnownType("pointer")) {
+      return InferPointerDecl(decl, init, scope);   // pointer p = pointer.to(x) (spec 12.1)
+    }
     // var x = value: the type of the value
     if (typeNode.Kind == "Type" && typeNode.Text == "var" && typeNode.Children.Count == 0 && !typeAliases.ContainsKey("var")) {
       if (init == null || scope == null) {
@@ -587,6 +590,9 @@ public sealed partial class CodeGen {
       }
       if (node.Kind == "WritableAddressOf" && node.Children.Count > 0 && node.Children[0] is { Kind: "Name" } address && address.Text == name) {
         return true;
+      }
+      if (node.Kind == "Call" && node.Children[0] is { Kind: "Member", Text: "add" or "addRaw" } moved && moved.Children[0] is { Kind: "Name" } movedName && movedName.Text == name) {
+        return true;   // p.add(1) moves the cursor of a pointer (spec 12.1)
       }
       if (node.Kind == "MultiAssign" && node.Children.Count > 0 && node.Children[0].Children.Any(target => target.Kind == "Name" && target.Text == name)) {
         return true;

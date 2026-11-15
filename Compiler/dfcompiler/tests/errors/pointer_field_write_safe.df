@@ -1,0 +1,6 @@
+struct<fixed> Buf { pointer<u8> data, u32 size }
+fun main() {
+  arr<u8> bytes = [1]
+  Buf b = Buf(size: 1)
+  b.data = pointer.to(bytes)
+}

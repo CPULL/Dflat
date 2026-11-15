@@ -1,0 +1,1 @@
+pointer_transmute_safe.df(4): error: [pointer<i32>]x makes a pointer the compiler cannot check: only in unsafe code (unsafe { }, an unsafe function or class) (spec 12.1)

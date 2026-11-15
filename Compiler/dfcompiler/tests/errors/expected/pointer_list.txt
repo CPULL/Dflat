@@ -1,0 +1,1 @@
+pointer_list.df(4): error: pointer.to on a list is a compile error: its items are not in one block; take a pointer to one item (spec 12.1)

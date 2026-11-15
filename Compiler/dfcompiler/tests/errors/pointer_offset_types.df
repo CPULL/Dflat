@@ -1,0 +1,7 @@
+fun main() {
+  i32 a = 1
+  i64 b = 2
+  *i32 p = *a
+  *i64 q = *b
+  i64 d = p.getOffset(q)
+}

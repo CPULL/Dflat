@@ -1,0 +1,10 @@
+import Root
+fun main() {
+  vec<i32> v = [1, 2]
+  pointer p = pointer.to(v)
+  v = [5, 6, 7]
+  catch ModifyingIteratedCollectionException e {
+    Console.log("caught: " + e.message)
+  }
+  Console.log(p[0])
+}

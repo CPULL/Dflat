@@ -1,0 +1,7 @@
+fun move(*i32 p) {
+  p.add(1)
+}
+fun main() {
+  i32 v = 1
+  move(*v)
+}

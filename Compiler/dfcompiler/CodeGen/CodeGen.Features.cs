@@ -40,11 +40,7 @@ public sealed partial class CodeGen {
     ["GenericParams"] = "Generics",
     ["Where"] = "Generics",
     ["ValueArg"] = "Generics",
-    ["AddressOf"] = "Pointers",
     ["WritableAddressOf"] = "Pointers",
-    ["WritablePointerOf"] = "Pointers",
-    ["Pointer"] = "Pointers",
-    ["WritablePointer"] = "Pointers",
     ["Volatile"] = "Pointers",
     ["Copy"] = "Ownership"
   };

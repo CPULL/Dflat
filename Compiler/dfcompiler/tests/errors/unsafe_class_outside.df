@@ -1,0 +1,4 @@
+unsafe class Port(i32 n) { }
+fun main() {
+  Port p = Port(1)
+}

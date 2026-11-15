@@ -1,0 +1,1 @@
+pointer_arr_strings.df(3): error: feature not supported: a pointer to strings (spec 12.1: numbers, bool, char, enums and structs for now; *"text" for static data)

@@ -1,0 +1,1 @@
+pointer_vec_replace.df(5): error: 'v' is lent to 'p' until its last use: until then it and its fields cannot be assigned, ended, moved or passed as & (spec 12)

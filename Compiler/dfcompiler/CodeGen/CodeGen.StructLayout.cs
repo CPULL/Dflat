@@ -18,7 +18,7 @@ public sealed partial class CodeGen {
         }
         continue;
       }
-      bool plain = IsNumeric(type) || IsEnum(type) || type is "bool" or "char" or "addr" or "date" or "time" or "clock";
+      bool plain = IsNumeric(type) || IsEnum(type) || type is "bool" or "char" or "addr" or "date" or "time" or "clock" || IsCPtr(type);   // a C pointer (spec 12.1)
       if (!plain) {
         throw Error($"a struct<{info.Layout}> holds only plain values (numbers, bool, char, addr, enums, bitfields, date, time, clock, buffers and structs with the same tag), not {type} (spec 11.1.5.6)", field.At);
       }

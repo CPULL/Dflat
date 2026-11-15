@@ -1,0 +1,47 @@
+// user32 - Windows user interface (message box only)
+Name: user32
+Namespace: std.win32.user32
+Description: Win32 user interface functions
+Convention: stdcall                                  // WINAPI; ignored on win-x64
+LibName, win-*, dynamic: user32.lib, [user32.dll]     // a system dll: not copied
+
+handle Window addr                                      // HWND
+
+// the buttons of a message box (MB_OK, MB_OKCANCEL, ...)
+enum u32 MsgBoxButtons { Ok: 0x0, OkCancel: 0x1, AbortRetryIgnore: 0x2, YesNoCancel: 0x3, YesNo: 0x4, RetryCancel: 0x5 }
+
+// the icon of a message box (MB_ICONERROR, ...)
+enum u32 MsgBoxIcon { None: 0x0, Error: 0x10, Question: 0x20, Warning: 0x30, Information: 0x40 }
+
+// the button pressed (IDOK, IDCANCEL, ...); Failed when the box could not be shown
+enum i32 MsgBoxResult { Failed: 0, Ok: 1, Cancel: 2, Abort: 3, Retry: 4, Ignore: 5, Yes: 6, No: 7 }
+
+// the window in front of the user (can be null)
+native Window GetForegroundWindow()
+fun Window w foregroundWindow() -> w = GetForegroundWindow()
+
+// show a message box
+// a wide string is *u16 (wchar_t is 2 bytes on Windows): the arr<byte> of toCStr is given
+// through a pointer cast (12.1), the count becomes bytes / 2
+native i32 MessageBoxW(Window owner, *u16 text, *u16 caption, u32 type)
+
+fun MsgBoxResult res messageBox(string text, string caption, MsgBoxButtons buttons, MsgBoxIcon icon)
+  -> {
+    var textBuf = text.toCStr(StringEncoding.UTF16)
+    var captionBuf = caption.toCStr(StringEncoding.UTF16)
+    res = [MsgBoxResult]MessageBoxW(null, (*u16)pointer.to(textBuf), (*u16)pointer.to(captionBuf),
+                                    [u32]buttons | [u32]icon)
+  }
+
+fun MsgBoxResult res messageBox(Window owner, string text, string caption, MsgBoxButtons buttons, MsgBoxIcon icon)
+  -> res = [MsgBoxResult]MessageBoxW(owner, (*u16)pointer.to(text.toCStr(StringEncoding.UTF16)),
+                                     (*u16)pointer.to(caption.toCStr(StringEncoding.UTF16)),
+                                     [u32]buttons | [u32]icon)
+
+/* Program:
+
+import lib user32
+
+MsgBoxResult r = messageBox("Save changes?", "Dflat", MsgBoxButtons.YesNo, MsgBoxIcon.Question)
+if r == MsgBoxResult.Yes { ... }
+*/

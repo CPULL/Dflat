@@ -310,7 +310,9 @@ public sealed class Parser {
            // global Cache cache = Cache(1) (spec 18.1): global is a modifier only before a type and a name, so it is not a reserved word
            || Peek.Kind == TokenKind.Ident && Peek.Text == "global" && PeekAt(1).Kind is TokenKind.Ident or TokenKind.Keyword && PeekAt(1).Line == Peek.Line
               && (PeekAt(2).Kind == TokenKind.Ident || PeekAt(2).Is("<"))
-           || Peek.Kind == TokenKind.Ident && Peek.Text == "notclonable" && PeekAt(1).Kind == TokenKind.Keyword && PeekAt(1).Text == "class") {   // spec 11.1, 12.6
+           || Peek.Kind == TokenKind.Ident && Peek.Text == "notclonable" && PeekAt(1).Kind == TokenKind.Keyword && PeekAt(1).Text == "class"   // spec 11.1, 12.6
+           // unsafe fun f(), unsafe class Device (spec 12.1): a modifier only before a keyword, so it is not a reserved word
+           || Peek.Kind == TokenKind.Ident && Peek.Text == "unsafe" && PeekAt(1).Kind == TokenKind.Keyword) {
       mods.Add(Next());
     }
     return mods;
@@ -374,6 +376,10 @@ public sealed class Parser {
 
   Node ParseStatementCore(string? ownerName, bool caseBody) {
     classMember = ownerName != null;   // a field of a class can have accessor blocks (spec 11.1.4)
+    if (Peek.Kind == TokenKind.Ident && Peek.Text == "unsafe" && PeekAt(1).Is("{")) {
+      var word = Next();
+      return new Node("Unsafe", word).Add(ParseBlock(ownerName));   // unsafe { ... } (spec 12.1)
+    }
     var mods = ParseModifiers();
     if (IsOp("_") && PeekAt(2).Kind == TokenKind.Ident && PeekAt(2).Line == Peek.Line) {
       CheckUnderscoreName();   // _Texture2D t: the old weak marker
@@ -1182,6 +1188,11 @@ public sealed class Parser {
       var marker = Next();
       Next();
       return new Node("CountedType", marker).Add(ParseType()).Add(new Node("ReadWrite", marker));
+    }
+    if (IsOp("&") && PeekAt(1).Kind == TokenKind.Ident) {
+      // pointer<&i32>: a writable pointer (spec 12.1)
+      var marker = Next();
+      return new Node("WritableType", marker).Add(ParseType());
     }
     int save = pos;
     try {
@@ -2155,8 +2166,10 @@ public sealed class Parser {
     var open = Next();
     Node? type = null;
     bool isCast = false;
-    if (Peek.Kind == TokenKind.Ident) {
-      bool builtin = BuiltinTypes.Contains(Peek.Text);
+    // (*i16)p, (&*u8)p: a pointer cast (spec 12.1)
+    bool pointerType = IsOp("*") || IsOp("&") && PeekAt(1).Is("*");
+    if (Peek.Kind == TokenKind.Ident || pointerType) {
+      bool builtin = !pointerType && BuiltinTypes.Contains(Peek.Text);
       try {
         type = ParseType(false);
         if (IsOp(")")) {

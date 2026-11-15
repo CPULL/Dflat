@@ -1,0 +1,1 @@
+pointer_offset_types.df(6): error: getOffset counts steps of i32: the other pointer must point to the same type; use getOffsetRaw for bytes (spec 12.1)

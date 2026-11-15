@@ -1,0 +1,1 @@
+pointer_field_read_safe.df(4): error: reading the pointer field 'data': a pointer that crosses into C has no bounds and no validity guarantee, so it is used only in unsafe code (unsafe { }, an unsafe function or class) (spec 12.1)

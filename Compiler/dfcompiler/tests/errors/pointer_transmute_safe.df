@@ -1,0 +1,5 @@
+fun main() {
+  i32 v = 1
+  addr a = *v
+  *i32 p = [*i32]a
+}

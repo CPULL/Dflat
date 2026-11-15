@@ -1,0 +1,64 @@
+namespace pointercasts
+import Root
+
+// spec 12.1, pointers step 4: casts, addr, transmutes, static data, *T{count}, unsafe
+
+const i32 LIMIT = 42
+
+fun *string getVersion() { *"1.2.3" }
+
+fun *i32 limit() { *LIMIT }
+
+unsafe fun i32 peek(addr where) {
+  *i32 p = [*i32]where
+  p[]
+}
+
+unsafe class Device(addr base) {
+  public fun i32 first() {
+    *i32 p = [*i32]base
+    p[]
+  }
+}
+
+fun main() {
+  arr<u8> bytes = [1, 0, 2, 0, 3, 0, 4, 0, 5, 0, 6, 0, 7]
+  pointer h = (*i16)pointer.to(bytes)
+  Console.log($"cast: {h[0]} {h[1]} {h[5]} {h.toStr().endsWith(", 6")}")
+  pointer<u64> wide = (pointer<u64>)pointer.to(bytes)
+  Console.log($"leftover dropped: {wide.toStr().contains(",")} {wide.inRange(0)} {wide.inRange(1)}")
+  arr<i32> values = [10, 20, 30, 40]
+  pointer<&u8> raw = (&*u8)pointer.to(&values)
+  raw[4] = 21
+  Console.log($"writable cast: {values[1]}")
+
+  addr a = pointer.to(values)
+  Console.log($"addr: {a == [addr]pointer.to(values)} {[u64]pointer.to(values) != 0}")
+  unsafe {
+    *i32 back = [*i32]a
+    Console.log($"back: {back[]} {back[3]} {back.toStr().contains(",")}")
+    Console.log($"unsafe function: {peek(a)}")
+    Device d = Device(a)
+    Console.log($"unsafe class: {d.first()}")
+  }
+
+  *string version = getVersion()
+  Console.log($"static: {version[]} {limit()[]} {(*7)[]}")
+  const i32 local = 9
+  *i32 pl = *local
+  Console.log($"const: {pl[]}")
+  *r64 half = *0.5
+  Console.log($"real: {half[]}")
+
+  *i32{2} two = *values[1]
+  Console.log($"bound: {two[0]} {two[1]} {two.inRange(2)} {two.toStr().endsWith(", 2")}")
+  *i32{3} three = *values[2]
+  catch IndexOutOfRangeException e {
+    Console.log("caught: " + e.message)
+  }
+  unsafe {
+    *i32 loose = [*i32]a
+    *i32{4} four = loose
+    Console.log($"bound in unsafe: {four[3]} {four.inRange(4)}")
+  }
+}

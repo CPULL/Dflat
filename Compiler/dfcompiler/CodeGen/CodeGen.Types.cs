@@ -196,6 +196,12 @@ public sealed partial class CodeGen {
     if (IsFunType(type)) {
       return "df_fn";   // a function value { code, ctx } (spec 13.3.5)
     }
+    if (IsPointer(type)) {
+      return PointerCType(type);   // { cur, base, count } (spec 12.1)
+    }
+    if (IsCPtr(type)) {
+      return CPtrCType(type);   // a pointer field of a struct<fixed>: the C pointer (spec 12.1)
+    }
     if (IsCountedType(type) || IsWeakType(type)) {
       return "df_rc*";   // @Dog, _Dog: a counted or weak parameter or result, the counting block (spec 12.7)
     }
@@ -288,6 +294,12 @@ public sealed partial class CodeGen {
     if (IsFunType(type)) {
       return "((df_fn){0})";   // a function value starts as null (spec 13.3.2)
     }
+    if (IsPointer(type)) {
+      return $"(({CType(type)}){{0}})";   // the null pointer (spec 12.1)
+    }
+    if (IsCPtr(type)) {
+      return "NULL";
+    }
     if (IsCountedType(type) || IsWeakType(type)) {
       return "NULL";
     }
@@ -367,6 +379,9 @@ public sealed partial class CodeGen {
         if (IsNullable(inner)) {
           throw Error($"'{inner}' is already nullable", n);
         }
+        if (IsPointer(inner)) {
+          throw Error($"pointers are already nullable; '{inner}?' is not allowed (spec 12.1)", n);
+        }
         return inner + "?";
       }
       case "TupleType": {
@@ -383,6 +398,10 @@ public sealed partial class CodeGen {
         return n.Text!;   // a type parameter replaced by its type argument (generics)
       case "FunType":
         return ResolveFunType(n);   // fun(i32), string(char, char) (spec 13.3.2)
+      case "Pointer":
+      case "WritablePointer":
+        // *i32{count}: the bound is applied by the declaration (spec 12.1)
+        return ResolvePointerType(n, n.Children[0], n.Kind == "WritablePointer", false);   // *T, &*T (spec 12.1)
       case "Type": {
         string t = StripLibraryQualifier(n.Text!);
         if (t == "View" && vecPrelude) {
@@ -416,6 +435,16 @@ public sealed partial class CodeGen {
         if (TypeFeatures.TryGetValue(t, out var feature)) {
           throw NotSupported(feature, n);
         }
+        if (t == "pointer" && !typeAliases.ContainsKey(t) && !IsKnownType(t)) {
+          // pointer<T>, pointer<&T> (spec 12.1); pointer alone takes its type from its value (ResolveDeclType)
+          if (n.Children.Count != 1) {
+            throw Error(n.Children.Count == 0 ? "'pointer' without a type argument takes its type from its value: pointer p = pointer.to(x) (spec 12.1)"
+              : "pointer takes one type argument: pointer<T> or pointer<&T> (spec 12.1)", n);
+          }
+          var argument = n.Children[0];
+          bool writableArg = argument.Kind == "WritableType";
+          return ResolvePointerType(n, writableArg ? argument.Children[0] : argument, writableArg, true);
+        }
         if (t == "arr") {
           if (n.Children.Count != 1) {
             throw Error("arr needs one element type: arr<T>", n);
@@ -425,6 +454,9 @@ public sealed partial class CodeGen {
             throw Error("an array cannot hold multiple values", n);
           }
           return "arr<" + element + ">";
+        }
+        if (classes.TryGetValue(t, out var usedClass)) {
+          CheckUnsafeClassUse(usedClass, n);   // spec 12.1
         }
         if (genericClasses.TryGetValue(t, out var genericClass)) {
           if (genericClass.HasPlaceholders) {
@@ -484,6 +516,16 @@ public sealed partial class CodeGen {
     }
     if (IsMulti(to) || IsMulti(from)) {
       return false;
+    }
+    if (to == "addr" && IsPointer(from)) {
+      return true;   // addr a = p: the address of the cursor (spec 12.1)
+    }
+    if (IsCPtr(to)) {
+      return from == "null" || IsPointer(from) && Assignable(PointerOfCPtr(to), from);
+    }
+    if (IsPointer(to) || IsPointer(from)) {
+      // &*T converts to *T; *T never becomes writable (spec 12.1)
+      return from == "null" || IsPointer(to) && IsPointer(from) && PointedType(to) == PointedType(from) && (IsWritablePointer(from) || !IsWritablePointer(to));
     }
     if (from == "null") {
       return IsNullable(to) || to is "string" or "string1k" || IsTimeType(to) || IsArr(to) || IsClass(to) || to == "Exception" || IsFunType(to);
@@ -582,8 +624,8 @@ public sealed partial class CodeGen {
       if (IsTimeType(to)) {
         return NullCode(to);
       }
-      if (IsArr(to) || IsClass(to) || to == "addr") {
-        return ZeroValue(to);
+      if (IsArr(to) || IsClass(to) || to == "addr" || IsPointer(to)) {
+        return ZeroValue(to);   // a pointer: the null pointer (spec 12.1)
       }
       if (to == "Exception") {
         return "NULL";
@@ -607,6 +649,18 @@ public sealed partial class CodeGen {
       }
       return WithTemp(e, temp =>
         $"(({CType(to)}){{ {temp}.has, {Convert(new Expr(temp + ".val", fromBase), toBase, at)} }})");
+    }
+    if (to == "addr" && IsPointer(e.Type)) {
+      return $"((void*)({e.Code}).cur)";   // addr a = p (spec 12.1)
+    }
+    if (IsCPtr(to)) {
+      return CPtrWrite(e, to, at);   // s.nextOut = p (spec 12.1)
+    }
+    if (IsPointer(to)) {
+      // &*T to *T: the same C value; *T never becomes writable (spec 12.1)
+      return Assignable(to, e.Type) ? PointerCopy(e) : throw Error(IsPointer(e.Type) && PointedType(e.Type) == PointedType(to)
+        ? $"a read-only pointer ({DisplayName(e.Type)}) cannot become writable: make a writable one with &*x or pointer.to(&x) (spec 12.1)"
+        : $"cannot convert {DisplayName(e.Type)} to {DisplayName(to)} (spec 12.1)", at);
     }
     if (e.Type == "string?" && to == "string") {
       return $"({e.Code}).val";   // a null string? is "" (spec 7.1)
@@ -746,6 +800,12 @@ public sealed partial class CodeGen {
     if (e.Type == "string") {
       return e.Code;
     }
+    if (IsPointer(e.Type)) {
+      return PointerStr(e);   // *i32 0x1a2b, 37/100 (spec 12.1)
+    }
+    if (IsCPtr(e.Type)) {
+      return CPtrStr(e);   // a pointer field printed with its struct
+    }
     if (e.Fresh && IsClass(e.Type)) {
       e = TempObject(e);   // log(v.clone()): the new collection or object ends with the statement
     } else if (e.Fresh && IsArr(e.Type) && !LibraryCode) {
@@ -845,6 +905,9 @@ public sealed partial class CodeGen {
 
   // C bool expression for l == r. Null equals only null.
   string EqualsCode(Expr l, Expr r, Node at) {
+    if (IsCPtr(l.Type) && IsCPtr(r.Type)) {
+      return $"((void*)({l.Code}) == (void*)({r.Code}))";   // pointer fields of two structs: the same address (spec 12.1)
+    }
     if (IsSetValue(l.Type) || IsSetValue(r.Type)) {
       return SetValueEquals(l, r, at);   // spec 11.3.6.1
     }

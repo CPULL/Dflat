@@ -18,3 +18,15 @@ bool is_even(int32_t n) { return n % 2 == 0; }
 void* nothing(void) { return NULL; }
 const char* greeting(void) { return "h\xc3\xa9llo"; }
 char* make_text(int32_t n) { char* t = (char*)malloc(n + 1); memset(t, 'x', n); t[n] = 0; return t; }
+
+/* C strings with an encoding (spec 4.4.6): string(addr, encoding), string(->addr, encoding), string(addr!, encoding) */
+const uint16_t* wide_greeting(void) { static const uint16_t w[] = { 'h', 0xE9, 'l', 'l', 'o', ' ', 0xD83D, 0xDE00, 0 }; return w; }
+uint16_t* make_wide(int32_t n) { uint16_t* w = (uint16_t*)malloc((n + 1) * 2); for (int32_t i = 0; i < n; i++) w[i] = 'w'; w[n] = 0; return w; }
+const uint32_t* utf32_text(void) { static const uint32_t t[] = { 'a', 0x20AC, 0x1F600, 0 }; return t; }
+const unsigned char* utf32be_text(void) { static const unsigned char t[] = { 0, 0, 0, 'O', 0, 0, 0, 'K', 0, 0, 0, 0 }; return t; }
+const unsigned char* utf16be_text(void) { static const unsigned char t[] = { 0, 'b', 0, 'e', 0, 0 }; return t; }
+const char* latin1_text(void) { return "caf\xe9"; }
+const char* ascii_text(void) { return "a\xe9z"; }
+static char scratch_buf[8] = "aaaaa";
+const char* scratch(void) { return scratch_buf; }
+void scratch_change(void) { memcpy(scratch_buf, "bbbbb", 5); }

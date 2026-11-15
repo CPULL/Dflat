@@ -1,0 +1,4 @@
+extern fun *i32 get_table()
+fun main() {
+  *i32 t = get_table()
+}

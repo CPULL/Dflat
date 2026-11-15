@@ -1,0 +1,1 @@
+pointer_field_write_safe.df(5): error: storing a pointer in a struct field: a pointer that crosses into C has no bounds and no validity guarantee, so it is used only in unsafe code (unsafe { }, an unsafe function or class) (spec 12.1)

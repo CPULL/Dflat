@@ -1,0 +1,1 @@
+pointer_add_param.df(2): error: 'p' is a plain parameter: it is read-only (spec 13.1); copy it into a local (pointer<i32> v = p) or take &pointer<i32> p

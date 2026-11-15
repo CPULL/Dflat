@@ -1,0 +1,1 @@
+extern_pointer_pointer.df(1): error: feature not supported: a pointer to a pointer given to or returned by a C function

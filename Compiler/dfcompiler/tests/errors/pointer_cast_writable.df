@@ -1,0 +1,5 @@
+fun main() {
+  i32 v = 1
+  *i32 p = *v
+  pointer<&u8> w = (&*u8)p
+}

@@ -1,0 +1,4 @@
+fun main() {
+  arr<string> s = ["a"]
+  pointer p = pointer.to(s)
+}

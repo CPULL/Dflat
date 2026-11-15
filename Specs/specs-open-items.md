@@ -15,11 +15,11 @@
 - Reference counting: generics with counted type arguments (`Stack<@Dog>`), after 0.1.0; the `Rc` / `Arc` split, with threads
 - DateTime library: import path, timezone database, parsing for `CalendarDate` / `ZonedDateTime`
 - Import paths of the standard library parts (`import stdrnd`)
-- Pointers: automatic bound for `*` on `arr` / `vec` / `list`; bound methods on unbounded pointers
+- Pointers: bound methods on unbounded pointers
 - `addr` in `dfoot` (fixed memory maps ok, runtime addresses problematic)
 - Safe / unsafe logic
 - Function pointers (objects); C function tables (COM vtables, Vulkan dispatch tables)
-- C interop: calling conventions, callbacks, returned arrays, UTF-16 strings, `string?` as map keys and values and set items (7.1), ownership across the boundary, unions, bit flags, varargs (the minimal extern fun is in 15.9)
+- C interop: callbacks with captured state, returned arrays (two-call pattern in the .dflib), wide strings on Linux (`*u32`), `string?` as map keys and values and set items (7.1), ownership across the boundary, bit flags, varargs (the minimal extern fun is in 15.9; the rest in 22)
 - Deferred: async/await, locks/atomics, tasks, SIMD, EF syntax, Vulkan, shaders
 - Borrow locks: borrows across functions and loops are not checked yet (method calls: 13.1.1)
 - Pointers: the exact way to convert `*T` to `&*T` in unsafe code, the syntax of the `unsafe` block and what it allows, handling of null pointers in safe code, which cases the compiler can prove valid, pointer equality, `.hash` and `toStr()`, and pointers in generics

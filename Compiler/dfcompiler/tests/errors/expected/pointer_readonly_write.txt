@@ -1,0 +1,1 @@
+pointer_readonly_write.df(3): error: 'r' is a read-only pointer (pointer<i32>): write through a &*T, made with &*x or pointer.to(&x) (spec 12.1)

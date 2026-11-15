@@ -1,0 +1,5 @@
+struct<fixed> Buf { pointer<u8> data, u32 size }
+fun main() {
+  Buf b = Buf(size: 1)
+  pointer<u8> d = b.data
+}

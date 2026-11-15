@@ -1,0 +1,1 @@
+pointer_outlive.df(4): error: 'p' would point into 'x' after its block ends: a pointer cannot outlive what it points to (spec 12.1)

@@ -1,0 +1,58 @@
+namespace pointermethods
+import Root
+
+// spec 12.1, 12.2, pointers step 3: add, addRaw, inRange, inRangeRaw, getOffset, getOffsetRaw, getAddress, getAddressRaw, isAligned, Root.Alignment
+
+struct Pair { i32 a, i32 b }
+
+fun i64 walk(arr<i32> items) {
+  pointer p = pointer.to(items)
+  i64 total = 0
+  total += p[]
+  while p.inRange(1) {
+    p.add(1)
+    total += p[]
+  }
+  total
+}
+
+fun main() {
+  arr<i32> buff = [10, 20, 30, 40, 50]
+  Console.log($"walk: {walk(buff)}")
+  pointer p = pointer.to(buff)
+  p.add(2)
+  Console.log($"add: {p[]}")
+  Console.log($"offset: {p.getOffset()} {p.getOffsetRaw()}")
+  p.add(-1)
+  Console.log($"back: {p[]} {p[-1]} {p[3]}")
+  p.addRaw(8)
+  Console.log($"raw: {p[]}")
+  Console.log($"inRange: {p.inRange(1)} {p.inRange(2)} {p.inRange(-3)} {p.inRange(-4)} {p.inRangeRaw(4)} {p.inRangeRaw(5)}")
+  pointer q = pointer.to(buff)
+  Console.log($"between: {p.getOffset(q)} {q.getOffset(p)} {p.getOffsetRaw(q)}")
+  Console.log($"address: {p.getAddress() == q.getAddress(3)} {q.getAddressRaw(12) == p.getAddress()}")
+  p.add(2)
+  catch IndexOutOfRangeException e {
+    Console.log("caught: " + e.message)
+  }
+  Console.log($"stays: {p[]}")
+  p.add(-3)
+  Console.log($"after: {p[]}")
+
+  Pair pair = Pair(1, 2)
+  pointer pp = pointer.to(pair)
+  Console.log($"one item: {pp.inRange(0)} {pp.inRange(1)}")
+
+  *i32 none = null
+  Console.log($"null: {none.inRange(0)} {none.getAddress() == null}")
+  none.add(1)
+  catch NullPointerException e {
+    Console.log("caught: " + e.message)
+  }
+
+  Console.log($"aligned: {q.isAligned(4)} {q.isAligned(1)} {q.isAligned(0)}")
+  q.addRaw(1)
+  Console.log($"unaligned: {q.isAligned(4)} {q.isAligned()}")
+  Console.log($"alignment: {Alignment.type<i32>()} {Alignment.type<i64>()} {Alignment.type<u8>()} {Alignment.arch} {Root.Alignment.cache}")
+  Console.log($"isAligned: {Alignment.isAligned<i32>(p)} {Alignment.isAligned<i32>(q)} {Alignment.isAligned(q)}")
+}

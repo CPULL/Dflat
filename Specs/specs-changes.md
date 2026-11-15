@@ -724,3 +724,19 @@
 - 11.1.5, 11.3.5 Generic struct types (`struct Pair<T>`, value parameters `struct Ring<T, uns N>`), not with a layout tag; inferred from the values of the fields (was: a struct is never generic)
 - 11.3.5 A literal given to a parameter whose type is a set takes the member a value of the set takes (default type if listed, else the only one of the same kind)
 - 11.3.5 Examples for the inference of a generic class from its primary constructor (`Box(5)`); a value parameter is never inferred
+- 4.4.6 `string(addr!)` copies a C text at once and never frees it; `string(addr)`, `string(->addr)` and `string(addr!)` take a `StringEncoding` (UTF8 by default): any other encoding reads the text and copies it
+- 12.1 `pointer<T>` / `pointer<&T>` (same types as `*T` / `&*T`, type argument inferred), `pointer.to(x)` / `pointer.to(&x)`, `*a[i]` bounded to the whole `arr`, a pointer borrows its value, pointer casts `(*T)p` (count = bytes / size of `T`, leftover dropped), pointer fields of a `struct<fixed>` are the C pointer only (unbounded, no validity guarantee)
+- 12.1, 12.2 Pointer methods and `Root.Alignment` members in camelCase (`add`, `getAddress`, `isAligned`, `arch`, ...)
+- 22 Pointers in C interop: z_stream as a `struct<fixed>` with pointer fields, only the methods that need it are `unsafe`, returned arrays through `pointer.to(&devs)`, wide strings through a pointer cast
+- 12.1 Pointer to a `vec`: start of its array, counted like an iterator, only the size is locked; `pointer.to` a `list` is a compile error, a pointer to one node's item locks only that node
+- 22 Equally specific target blocks: the first in the file wins; .dsprj key `libpath`; `Root.Process.loadLib(name)`; a struct handle is never null (by value, or a nullable `pointer<Foo>`); unions through transmute; C errors become exceptions only when the wrapper throws them
+- 22 Callbacks: `pointer.to(f(types))` gives a `pointer<fun(...)>`, array parameters as `*arr<T>` / `pointer<T>`, plain functions and static methods only, the convention comes from the .dflib callback type (the compiler writes a C function for it)
+- 22 A handle cannot be copied, only moved (`->`); plain and `&` parameters lend it; given as the type it is made of, it is lent when the resource stays with it and moved (becomes null) when the receiver releases it
+- 22 `import lib` imports the namespace of the library only in its own file; the other files use the qualified names or import the namespace
+- 16.2 An import is valid only in the file that writes it
+- 22 A handle given with `->` belongs to the function, its freeing function runs when the function ends; `string(->h)` copies the text and frees it with the handle's freeing function (a plain `addr` still uses C free)
+- 12.1 `toStr()` of a pointer: `*T 0x1a2b`, `&*T` when writable, `*T null`; with more than one item `, count`, and `, cursor/count` when the cursor is not 0
+- 12.1 Pointer fields of a `struct<fixed>` / `struct<compact>` are read and written (but `null`) only in unsafe code; extern functions take pointers as their cursor (`const T*` / `T*`) and a call that returns a pointer is unsafe code
+- 12.1 `*T{count} p = q`: starts at the cursor of `q`; in safe code the items must be inside the bounds of `q` (`IndexOutOfRangeException`), in unsafe code any count; a pointer transmutes to `addr`, `u64`, `i64`; a pointer transmuted from an `addr` or an integer is unbounded
+- 12.1 `add` outside the bounds raises `IndexOutOfRangeException` and leaves the cursor; the methods on the null pointer: `add` / `getOffset` raise `NullPointerException`, `inRange` false, `getAddress` null, `isAligned` true
+- 12.1 Null pointer and out-of-bounds reads and writes raise `NullPointerException` / `IndexOutOfRangeException`; a pointer that would outlive the value it points into (outer block, returned) is a compile error

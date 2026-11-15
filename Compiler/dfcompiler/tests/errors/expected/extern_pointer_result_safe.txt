@@ -1,0 +1,1 @@
+extern_pointer_result_safe.df(3): error: 'get_table' returns a pointer from C: a pointer that crosses into C has no bounds and no validity guarantee, so it is used only in unsafe code (unsafe { }, an unsafe function or class) (spec 12.1)

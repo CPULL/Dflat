@@ -1,0 +1,1 @@
+struct Plain { pointer<u8> data }

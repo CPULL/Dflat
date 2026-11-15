@@ -1,0 +1,1 @@
+pointer_const_write.df(2): error: &* on a const or a literal: a const cannot be written through a pointer (spec 12.1)

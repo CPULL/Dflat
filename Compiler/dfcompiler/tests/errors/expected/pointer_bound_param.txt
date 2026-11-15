@@ -1,0 +1,1 @@
+pointer_bound_param.df(1): error: feature not supported: a bound in the type of a parameter (*T{count} is for declarations)

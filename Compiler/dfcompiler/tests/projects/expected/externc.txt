@@ -17,4 +17,16 @@ XXXX
 [xx, héllo]
 true false héllo
 []
+héllo 😀 7
+www true
+ww
+a€😀
+OK
+be
+café
+a�z
+héllo
+bbbbb aaaaa héllo 😀
+true true
+aaaaa!
 ---- exit code 0 ----

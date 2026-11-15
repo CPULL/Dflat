@@ -1,0 +1,2 @@
+fun f(*i32{2} p) { }
+fun main() { }

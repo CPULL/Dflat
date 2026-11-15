@@ -1,0 +1,1 @@
+pointer_nullable.df(1): error: pointers are already nullable; 'pointer<i32>?' is not allowed (spec 12.1)

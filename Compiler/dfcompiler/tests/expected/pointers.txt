@@ -1,0 +1,15 @@
+read: 5 5
+written: 11
+pointer.to: 20 20 20
+through a function: 43
+result: 43
+struct: 10 3 13 10
+field: 3
+enum: Blue
+nested: 1.5
+null: true false true
+same address: true true
+reassigned: 43
+param: 7
+caught: Index Out Of Range Exception
+---- exit code 0 ----

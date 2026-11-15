@@ -1,0 +1,1 @@
+pointer_in_collection.df(1): error: feature not supported: pointers inside collections, tuples and other generic types

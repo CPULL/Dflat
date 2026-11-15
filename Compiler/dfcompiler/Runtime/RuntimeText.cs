@@ -565,6 +565,75 @@ static df_arr_u8 df_str_tocstr(df_string text, int32_t encoding) {
   return result;
 }
 
+/* string(addr, encoding), string(->addr, encoding), string(addr!, encoding) (spec 4.4.6); mode 0 borrows, 1 takes, 2 copies.
+   UTF8 borrowed or taken keeps the C text (class 12). Every other case reads the text up to its terminator (a 0 of 1, 2 or 4 bytes,
+   the size of the encoding's unit) and copies it into a new string; a taken text is freed at once. A bad code unit is U+FFFD.
+   A null address is null */
+static df_opt_string df_str_from_c_enc(void* p, int32_t encoding, int32_t mode) {
+  if (encoding == 0 && mode != 2) {
+    return df_str_from_c_opt(p, mode == 1);
+  }
+  df_opt_string o = { p != NULL, NULL };
+  if (!p) {
+    return o;
+  }
+  const uint8_t* d = (const uint8_t*)p;
+  df_sb b = { 0 };
+  switch (encoding) {
+    case 1:
+    case 3: {
+      bool le = encoding == 1;
+      for (uint64_t i = 0;; i += 2) {
+        uint32_t u = le ? (uint32_t)(d[i] | (d[i + 1] << 8)) : (uint32_t)((d[i] << 8) | d[i + 1]);
+        if (u == 0) {
+          break;
+        }
+        if (u >= 0xD800 && u < 0xDC00) {
+          uint32_t v = le ? (uint32_t)(d[i + 2] | (d[i + 3] << 8)) : (uint32_t)((d[i + 2] << 8) | d[i + 3]);
+          if (v >= 0xDC00 && v < 0xE000) {
+            df_sb_cp(&b, 0x10000 + ((u - 0xD800) << 10) + (v - 0xDC00));
+            i += 2;
+            continue;
+          }
+        }
+        df_sb_cp(&b, (u >= 0xD800 && u < 0xE000) ? 0xFFFD : u);
+      }
+      break;
+    }
+    case 2:
+    case 4: {
+      bool le = encoding == 2;
+      for (uint64_t i = 0;; i += 4) {
+        uint32_t u = le ? (uint32_t)d[i] | ((uint32_t)d[i + 1] << 8) | ((uint32_t)d[i + 2] << 16) | ((uint32_t)d[i + 3] << 24)
+          : (uint32_t)d[i + 3] | ((uint32_t)d[i + 2] << 8) | ((uint32_t)d[i + 1] << 16) | ((uint32_t)d[i] << 24);
+        if (u == 0) {
+          break;
+        }
+        df_sb_cp(&b, (u > 0x10FFFF || (u >= 0xD800 && u < 0xE000)) ? 0xFFFD : u);
+      }
+      break;
+    }
+    case 5:
+      for (uint64_t i = 0; d[i]; i++) {
+        df_sb_cp(&b, d[i] < 0x80 ? d[i] : 0xFFFD);
+      }
+      break;
+    case 6:
+      for (uint64_t i = 0; d[i]; i++) {
+        df_sb_cp(&b, d[i]);
+      }
+      break;
+    default:
+      df_sb_bytes(&b, (const char*)d, strlen((const char*)d));   /* UTF8 copied as it is */
+      break;
+  }
+  if (mode == 1) {
+    free(p);
+  }
+  o.val = df_sb_done(&b);
+  return o;
+}
+
 /* Fisher-Yates on any element size; the generator is the one of Root.Random */
 static void df_shuffle(void* base, uint64_t count, uint64_t size) {
   char* items = (char*)base;

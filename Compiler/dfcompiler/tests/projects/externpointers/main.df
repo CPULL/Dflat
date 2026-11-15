@@ -1,0 +1,48 @@
+// pointers given to C and returned by C, pointer fields of a struct<fixed> (spec 12.1, 22)
+namespace app
+import Root
+
+struct<fixed> ZStream {
+  pointer<u8> nextIn,
+  u32 availIn,
+  pointer<&u8> nextOut,
+  u32 availOut
+}
+
+extern fun i64 sum_items(*i32 p, i32 n)
+extern fun fill_items(&*i32 p, i32 n, i32 v)
+extern fun *i32 get_table()
+extern fun *i32 get_nothing()
+extern fun i32 is_null(*i32 p)
+extern fun i32 stream_run(&*ZStream s)
+
+unsafe fun string run(arr<u8> input, &arr<u8> output) {
+  ZStream s = ZStream(availIn: (u32)input.len, availOut: (u32)output.len)
+  s.nextIn = pointer.to(input)
+  s.nextOut = pointer.to(&output)
+  i32 done = stream_run(&*s)
+  pointer<&u8> after = s.nextOut
+  $"{done} {s.availIn} {s.availOut} {after.toStr().contains(",")}"
+}
+
+arr<i32> items = [1, 2, 3, 4, 5]
+Console.log(sum_items(pointer.to(items), 5))
+Console.log(sum_items(*items[2], 3))
+fill_items(pointer.to(&items), 3, 100)
+Console.log($"{items[0]} {items[2]} {items[3]}")
+Console.log(is_null(null))
+unsafe {
+  *i32 t = get_table()
+  Console.log($"{t[0]} {t[3]} {t.inRange(100)}")
+  *i32{4} bounded = t
+  Console.log($"{bounded[3]} {bounded.inRange(4)}")
+  Console.log(get_nothing() == null)
+}
+arr<u8> input = [104, 105, 33]
+arr<u8> output = arr<u8>[8]
+unsafe {
+  Console.log(run(input, &output))
+}
+Console.log($"{output[0]} {output[1]} {output[2]} {output[3]}")
+ZStream empty = ZStream(availIn: 0, availOut: 0)
+Console.log(empty.availIn)

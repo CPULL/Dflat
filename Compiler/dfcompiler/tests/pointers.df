@@ -1,0 +1,76 @@
+namespace pointers
+import Root
+
+// spec 12.1, pointers step 1: *T, &*T, pointer<T>, pointer<&T>, pointer.to, p[i], p[], p[].x, null, ==, bounds
+
+struct Point { i32 x, i32 y }
+
+enum Color { Red, Green, Blue }
+
+fun i32 readFirst(*i32 p) { p[] }
+
+fun setTo(&*i32 p, i32 v) {
+  p[0] = v
+}
+
+fun *i32 same(*i32 p) { p }
+
+fun i32 sumPoint(pointer<Point> p) { p[].x + p[].y }
+
+fun main() {
+  i32 value = 5
+  *i32 reader = *value
+  Console.log($"read: {reader[]} {reader[0]}")
+  &*i32 writer = &*value
+  writer[] = 7
+  writer[0] += 3
+  writer[]++
+  Console.log($"written: {value}")
+
+  pointer p = pointer.to(value)
+  pointer<&i32> w = pointer.to(&value)
+  w[] = 20
+  Console.log($"pointer.to: {p[]} {readFirst(p)} {readFirst(w)}")
+  setTo(&*value, 42)
+  setTo(w, 43)
+  Console.log($"through a function: {value}")
+  *i32 again = same(*value)
+  Console.log($"result: {again[]}")
+
+  Point pt = Point(1, 2)
+  pointer<&Point> pp = pointer.to(&pt)
+  pp[].x = 10
+  pp[].y++
+  Console.log($"struct: {pt.x} {pt.y} {sumPoint(pp)} {pp[].x}")
+  *i32 field = *pt.y
+  Console.log($"field: {field[]}")
+
+  Color c = Color.Green
+  &*Color pc = &*c
+  pc[] = Color.Blue
+  Console.log($"enum: {c}")
+
+  r64 real = 1.5
+  *r64 rp = *real
+  **r64 deep = *rp
+  Console.log($"nested: {deep[][]}")
+
+  *i32 nothing = null
+  Console.log($"null: {nothing == null} {reader == null} {reader != null}")
+  Console.log($"same address: {reader == p} {reader == *value}")
+  nothing = reader
+  Console.log($"reassigned: {nothing[]}")
+
+  Console.log($"param: {viaParam(4, pt)}")
+  i64 i = 1
+  Console.log($"out of bounds: {reader[i]}")
+  catch IndexOutOfRangeException e {
+    Console.log("caught: " + e.message)
+  }
+}
+
+fun i32 viaParam(i32 v, Point pt) {
+  *i32 p = *v
+  *i32 q = pointer.to(pt.y)
+  p[] + q[]
+}

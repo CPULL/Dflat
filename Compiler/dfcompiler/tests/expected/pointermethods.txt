@@ -1,0 +1,19 @@
+walk: 150
+add: 30
+offset: 2 8
+back: 20 10 50
+raw: 40
+inRange: true false true false true false
+between: 3 -3 12
+address: true true
+caught: Index Out Of Range Exception
+stays: 40
+after: 10
+one item: true false
+null: false true
+caught: Null Pointer Exception
+aligned: true true true
+unaligned: false false
+alignment: 4 8 1 8 64
+isAligned: true false false
+---- exit code 0 ----

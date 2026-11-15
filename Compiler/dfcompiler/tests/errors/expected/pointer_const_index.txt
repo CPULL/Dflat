@@ -1,0 +1,1 @@
+pointer_const_index.df(3): error: index 1 is outside the pointer 'p', which has 1 item (spec 12.1)

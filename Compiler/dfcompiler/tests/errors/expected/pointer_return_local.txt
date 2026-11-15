@@ -1,0 +1,1 @@
+pointer_return_local.df(3): error: the result points into 'x', which ends with the function: a pointer cannot outlive what it points to (spec 12.1)

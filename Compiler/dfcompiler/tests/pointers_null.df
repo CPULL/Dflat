@@ -1,0 +1,12 @@
+namespace pointers_null
+import Root
+
+// spec 12.1: reading through the null pointer raises NullPointerException
+
+fun main() {
+  *i32 p = null
+  Console.log($"value: {p[]}")
+  catch NullPointerException e {
+    Console.log("caught: " + e.message)
+  }
+}

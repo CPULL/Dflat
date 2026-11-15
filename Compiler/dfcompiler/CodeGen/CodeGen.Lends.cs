@@ -200,6 +200,9 @@ public sealed partial class CodeGen {
     if (node.Kind is "Fun" or "Lambda") {
       return null;
     }
+    if (node is { Kind: "Call" } && node.Children[0] is { Kind: "Member", Text: "to" } toMember && toMember.Children[0] is { Kind: "Name", Text: "pointer" }) {
+      return null;   // pointer.to(&buff): another pointer into the same items, which can be written (spec 12.1)
+    }
     string? Touched(Node target) {
       var place = target.Kind == "Index" ? target.Children[0] : target;
       if (LendPath(place) is not string path) {

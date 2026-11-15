@@ -1,0 +1,5 @@
+fun *i32 make() {
+  i32 x = 1
+  return *x
+}
+fun main() { make() }

@@ -1,0 +1,84 @@
+namespace pointerarrays
+import Root
+
+// spec 12.1, pointers step 2: pointer.to(buff), *a[i], pointer.to(v), the count of a vec; toStr
+
+struct Cell { i32 v, i32 w }
+
+fun i32 sum(*i32 p, i32 n) {
+  i32 total = 0
+  for i = 0..n {
+    total += p[i]
+  }
+  total
+}
+
+fun string tail(string text) {
+  i64 comma = text.lastIndexOf(",")
+  if comma < 0 { return "no count" }
+  text.substr((u32)comma, (u32)text.len - (u32)comma)
+}
+
+fun main() {
+  arr<i32> buff = [1, 2, 3, 4, 5]
+  pointer p = pointer.to(buff)
+  Console.log($"arr: {p[0]} {p[4]} {sum(p, 5)}")
+  pointer<&i32> w = pointer.to(&buff)
+  w[1] = 20
+  Console.log($"written: {buff[1]}")
+  *i32 third = *buff[2]
+  Console.log($"item: {third[]} {third[-2]} {third[2]}")
+  &*i32 last = &*buff[4]
+  last[] = 50
+  last[-1] += 30
+  Console.log($"through the item: {buff[3]} {buff[4]}")
+  Console.log($"bounds: {third[3]}")
+  catch IndexOutOfRangeException e {
+    Console.log("caught: " + e.message)
+  }
+  *i32 outside = *buff[5]
+  catch IndexOutOfRangeException e {
+    Console.log("caught: " + e.message)
+  }
+
+  arr<Cell> cells = [Cell(1, 2), Cell(3, 4)]
+  pointer<&Cell> pc = pointer.to(&cells)
+  pc[1].w = 40
+  Console.log($"structs: {cells[1].w} {pc[0].v}")
+
+  vec<i32> v = [10, 20, 30]
+  pointer pv = pointer.to(v)
+  Console.log($"vec: {pv[0]} {pv[2]}")
+  v[0] = 11
+  Console.log($"items can change: {pv[0]}")
+  v.add(40)
+  catch ModifyingIteratedCollectionException e {
+    Console.log("caught: " + e.message)
+  }
+  Console.log($"size: {v.len}")
+  pv = null
+  v.add(40)
+  Console.log($"after the pointer: {v.len}")
+  {
+    pointer<&i32> inner = pointer.to(&v)
+    inner[3] = 41
+  }
+  v.add(50)
+  Console.log($"after the block: {v}")
+  for i = 0..2 {
+    *i32 each = *v[i]
+    Console.log($"loop {each[]}")
+  }
+  v.add(60)
+  Console.log($"after the loop: {v.len}")
+
+  Console.log(tail(p.toStr()))
+  Console.log(tail(third.toStr()))
+  Console.log(tail($"{last}"))
+  i32 one = 1
+  Console.log(tail((*one).toStr()))
+  *i32 none = null
+  Console.log(none)
+  Console.log(p.toStr().startsWith("*i32 0x"))
+  Console.log(w.toStr().startsWith("&*i32 0x"))
+}

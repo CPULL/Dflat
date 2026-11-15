@@ -1,0 +1,1 @@
+pointer_untyped.df(1): error: 'pointer' without a type argument takes its type from its value: pointer p = pointer.to(x) (spec 12.1)

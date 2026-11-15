@@ -49,6 +49,7 @@ public sealed partial class CodeGen {
       paths.Add("Root.ExecProcess." + name);
     }
     paths.UnionWith(new[] { "Root.Console.Color", "Root.Console.setColors", "Root.ExecProcess.RunResult" });
+    paths.UnionWith(new[] { "Root.Alignment.type", "Root.Alignment.arch", "Root.Alignment.cache", "Root.Alignment.isAligned", "Root.Alignment.isAlignedCache" });   // spec 12.2
     return paths;
   }
 

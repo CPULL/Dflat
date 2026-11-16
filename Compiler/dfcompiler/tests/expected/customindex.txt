@@ -1,0 +1,10 @@
+10 25 30 40 wraps: 25
+10
+25
+30
+40
+view len 2, first 25, has 30 true, has 10 false
+tail 30
+tail 40
+head len 2
+---- exit code 0 ----

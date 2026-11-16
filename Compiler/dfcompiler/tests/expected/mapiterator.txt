@@ -1,0 +1,6 @@
+al 25
+bob 30
+1 one true
+first al 25
+3
+---- exit code 0 ----

@@ -1,0 +1,16 @@
+// import lib (spec 22): a .dflib in the project folder, its static library in libs/<target>/, natives mapped 1 to 1 and through -> mappings
+namespace app
+import lib dfcalc
+import Root
+
+Console.log(dfc_add(2, 3))
+Console.log(times(4, 5))
+arr<i32> values = [1, 2, 3, 4]
+Console.log(sum(values))
+Console.log(name())
+i32 q, i32 r = divide(17, 5)
+Console.log($"{q} {r}")
+Calc c = Calc(10)
+c.add(5)
+Console.log(c.value)
+Console.log(tests.dfcalc.times(2, 2))

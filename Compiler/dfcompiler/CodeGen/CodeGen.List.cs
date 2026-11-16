@@ -430,6 +430,11 @@ public sealed partial class CodeGen {
       throw Error("View takes the type of its collection: View<vec<T>>", n);
     }
     string collection = ResolveType(n.Children[0]);
+    if (CustomIndexElem(collection) != null) {
+      // View<C> of a custom collection: the class its get_view returns (spec 6.5)
+      return funs.TryGetValue(collection + ".get_view", out var getView) && getView.Count > 0 ? getView[0].Ret
+        : throw Error($"{DisplayName(collection)} has no get_view(uns? start, uns? end): it has no views (spec 6.5, 6.7)", n);
+    }
     string kind = IsArr(collection) ? "arrView" : IsVec(collection) ? "vecView" : IsList(collection) ? "listView"
       : throw Error($"views exist on arr, vec and list, not on {collection} (spec 6.5)", n);
     return ClassInstanceName(genericClasses[kind], new List<string> { IndexCollectionElem(collection)! }, n);
@@ -440,6 +445,13 @@ public sealed partial class CodeGen {
   Expr ViewExpr(Node n, Scope scope) {
     var range = n.Children[1];
     var obj = ExprOf(n.Children[0], scope);
+    if (CustomIndexElem(obj.Type) != null) {
+      // a custom collection: its get_view(uns? start, uns? end), a missing bound is null; a..=b gives b + 1 as the end (spec 6.5, 6.7)
+      Node Bound(Node bound, bool inclusive) => bound.Kind == "Open" ? Synthetic("Null", bound)
+        : inclusive ? Synthetic("Binary", bound, "+").Add(bound).Add(Synthetic("Int", bound, "1")) : bound;
+      var bounds = new List<Node> { Bound(range.Children[0], false), Bound(range.Children[1], range.Text == "..=") };
+      return CustomIndexCall(obj, "get_view", bounds, scope, n, "get_view(uns? start, uns? end)");
+    }
     string? elem = IndexCollectionElem(obj.Type);
     if (elem == null) {
       throw Error($"views exist on arr, vec and list, not on {obj.Type} (spec 6.5)", n);

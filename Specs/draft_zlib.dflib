@@ -25,15 +25,15 @@ const i32 Z_DEFAULT_COMPRESSION = -1
 
 // get the zlib version (a static text: borrowed)
 native *char zlibVersion()
-fun string v version() -> v = string(zlibVersion())
+public fun string v version() -> v = string(zlibVersion())
 
 // the largest size compress can produce from sourceLen bytes
 native ULong compressBound(ULong sourceLen)
-fun uns n bound(uns len) -> n = compressBound((ULong)len)
+public fun uns n bound(uns len) -> n = compressBound((ULong)len)
 
 // compress a buffer with the default level
 native i32 compress(&*u8 dest, &*ULong destLen, *u8 source, ULong sourceLen)
-fun ZResult res, uns written compress(&arr<byte> dest, arr<byte> src) -> {
+public fun ZResult res, uns written compress(&arr<byte> dest, arr<byte> src) -> {
     ULong len = (ULong)dest.len                      // in: the size of the buffer
     res = (ZResult)compress(dest, &len, src, (ULong)src.len)
     written = len                                    // out: the bytes zlib wrote
@@ -41,7 +41,7 @@ fun ZResult res, uns written compress(&arr<byte> dest, arr<byte> src) -> {
 
 // compress a buffer with a level
 native i32 compress2(&*u8 dest, &*ULong destLen, *u8 source, ULong sourceLen, i32 level)
-fun ZResult res, uns written compress(&arr<byte> dest, arr<byte> src, i32 level) -> {
+public fun ZResult res, uns written compress(&arr<byte> dest, arr<byte> src, i32 level) -> {
     ULong len = (ULong)dest.len
     res = (ZResult)compress2(dest, &len, src, (ULong)src.len, level)
     written = len
@@ -49,7 +49,7 @@ fun ZResult res, uns written compress(&arr<byte> dest, arr<byte> src, i32 level)
 
 // decompress a buffer
 native i32 uncompress(&*u8 dest, &*ULong destLen, *u8 source, ULong sourceLen)
-fun ZResult res, uns written uncompress(&arr<byte> dest, arr<byte> src) -> {
+public fun ZResult res, uns written uncompress(&arr<byte> dest, arr<byte> src) -> {
     ULong len = (ULong)dest.len
     res = (ZResult)uncompress(dest, &len, src, (ULong)src.len)
     written = len
@@ -57,7 +57,7 @@ fun ZResult res, uns written uncompress(&arr<byte> dest, arr<byte> src) -> {
 
 // checksums; len is a C unsigned int (4 bytes everywhere); the value fits in 32 bits
 native ULong crc32(ULong crc, *u8 buf, u32 len)
-fun u32 c crc32(u32 crc, arr<byte> buf) -> c = (u32)crc32(crc, buf, (u32)buf.len)
+public fun u32 c crc32(u32 crc, arr<byte> buf) -> c = (u32)crc32(crc, buf, (u32)buf.len)
 
 native ULong adler32(ULong adler, *u8 buf, u32 len)
-fun u32 a adler32(u32 adler, arr<byte> buf) -> a = (u32)adler32(adler, buf, (u32)buf.len)
+public fun u32 a adler32(u32 adler, arr<byte> buf) -> a = (u32)adler32(adler, buf, (u32)buf.len)

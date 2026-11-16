@@ -1,0 +1,7 @@
+// the binary a LibName line names is not in libpath/<target>/ (spec 22)
+Name: ghost
+Namespace: tests.ghost
+LibName, win-*, static: ghost.lib
+LibName, linux-*, static: libghost.a
+
+native i32 ghost_value()

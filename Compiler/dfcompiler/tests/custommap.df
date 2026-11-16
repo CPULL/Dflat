@@ -1,0 +1,100 @@
+// Custom maps (spec 6.7, 6.7.2): a class that implements MapCollection<Key, Value> writes the mandatory members; c[k], c[k] = v, c[k] += v,
+// ->c[k], for (k, v) in c, the default members (add, tryGet, swap, keyOf, remove, removeAll, removeAt, add(other)), += and -=, .keys and .values
+import Root
+
+// a tiny map from small keys 0..7 to strings, kept in two arrays
+public class Slots : MapCollection<u8, string> {
+  arr<bool> used = arr<bool>[8]
+  arr<string> texts = arr<string>[8]
+
+  replace fun uns get_len() {
+    uns n = 0
+    for bool u in used {
+      if u { n += 1 }
+    }
+    return n
+  }
+  replace fun bool has(string value) {
+    for u8 i in 0..8 {
+      if used[i] && texts[i] == value { return true }
+    }
+    return false
+  }
+  replace fun clear() {
+    for u8 i in 0..8 { used[i] = false }
+  }
+  replace fun bool hasKey(u8 key) { key < 8 && used[key] }
+  unrestricted fun string read_key(u8 key) { texts[key] }
+  public fun set_key(u8 key, string value) {
+    texts[key] = value
+    used[key] = true
+  }
+  public fun string move_out(u8 key) {
+    used[key] = false
+    return texts[key]
+  }
+  replace fun ->MapIterator<u8, string> getIterator() {
+    return SlotsIterator(this)
+  }
+}
+
+public class SlotsIterator(Slots slots as parent) : MapIterator<u8, string> {
+  u8 cursor = 0
+  replace fun (u8 key, string value, bool isValid) next() {
+    while cursor < 8 && !slots.hasKey(cursor) {
+      cursor += 1
+    }
+    if cursor >= 8 {
+      return (0, "", false)
+    }
+    u8 at = cursor
+    cursor += 1
+    return (at, slots[at], true)
+  }
+}
+
+Slots s = Slots()
+s[3] = "three"
+s[1] = "one"
+s[3] += "!"
+Console.log($"len {s.len} has 1 {s.hasKey(1)} has 2 {s.hasKey(2)}: {s[3]}")
+for (u8 k, string v) in s {
+  Console.log($"{k} = {v}")
+}
+string gone = ->s[1]
+Console.log($"took {gone}, len {s.len}")
+s[6] = "six"
+var ks = s.keys
+Console.log($"keys len {ks.len} has 6 {ks.has(6)} has 1 {ks.has(1)}")
+for u8 k in s.keys {
+  Console.log($"key {k}")
+}
+for string v in s.values {
+  Console.log($"value {v}")
+}
+Console.log($"values has six {s.values.has("six")}")
+Slots t = Slots()
+t[2] = "two"
+t[6] = "SIX"
+s.add(t)
+s += t
+for (u8 k, string v) in s {
+  Console.log($"merged {k} = {v}")
+}
+Console.log($"add 5 {s.add(5, "five")} add 5 again {s.add(5, "FIVE")} {s[5]}")
+bool found, string text = s.tryGet(5)
+Console.log($"{found} {text}")
+bool missing, string other = s.tryGet(6, "none")
+Console.log($"{missing} {other}")
+s.swap(3, 5)
+Console.log($"swap: 3={s[3]} 5={s[5]}")
+s.swap(5, 7)
+Console.log($"move: has 5 {s.hasKey(5)} 7={s[7]}")
+Console.log($"keyOf three! = {s.keyOf("three!")}")
+s[0] = "x"
+s[1] = "x"
+Console.log($"removeAll x {s.removeAll("x")} remove FIVE {s.remove("FIVE")} len {s.len}")
+s.removeAt(7)
+for (u8 k, string v) in s {
+  Console.log($"left {k} = {v}")
+}

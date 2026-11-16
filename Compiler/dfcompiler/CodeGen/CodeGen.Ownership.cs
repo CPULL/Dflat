@@ -887,7 +887,7 @@ public sealed partial class CodeGen {
       return StructGift(operand, value, scope, n);
     }
     if (!IsClass(value.Type)) {
-      if (GiftWarningApplies()) {
+      if (GiftWarningApplies() && n.Text != "named-result") {   // the return of the named results of a .dflib mapping (spec 22) gives them all
         Warn("-> on a basic value is ignored: it is a copy", n, 1);
       }
       return new Expr(value.Code, value.Type);
@@ -959,8 +959,11 @@ public sealed partial class CodeGen {
     }
     string slot = NewTemp();
     string taken = NewTemp();
-    string code = $"({{ {CType(target.Type)}* {slot} = &({target.Code}); void* {taken} = (void*)*{slot}; *{slot} = NULL; df_drop({taken}); }})";
+    string code = $"({{ {CType(target.Type)}* {slot} = &({target.Code}); void* {taken} = (void*)*{slot}; *{slot} = NULL; df_drop({taken});{(finalize.Text == "implicit" ? "" : " df_dtor_check();")} }})";   // written x is atEnd.: a failed destructor panics once the object is all released; the end of a scope checks after all its objects (spec 11.4)
     sb.Append(pad).Append(CheckRaise(code, "void")).Append(";\n");
+    if (finalize.Text != "implicit" && target.Variable != null) {
+      pendingMoves.Add((target.Variable, $"ended with {subject.Text} is atEnd."));   // a later use in the same block is a compile error (spec 12.4)
+    }
   }
 
   // ---------------------------------------------------------------- assignments
@@ -992,7 +995,7 @@ public sealed partial class CodeGen {
     string old = NewTemp();
     string typeName = CType(target.Type);
     string code = $"({{ {typeName} {fresh} = {converted}; {typeName}* {slot} = &({target.Code}); {typeName} {old} = *{slot}; *{slot} = {fresh}; "
-      + $"if ({old} != {fresh}) {{ df_drop((void*){old}); }} }})";
+      + $"if ({old} != {fresh}) {{ df_drop((void*){old}); df_dtor_check(); }} }})";   // spec 11.4
     return CheckRaise(code, "void");
   }
 
@@ -1825,14 +1828,31 @@ public sealed partial class CodeGen {
 
   // ---------------------------------------------------------------- the destruction code of the classes
 
-  List<FieldInfo> OwnedStringFields(ClassInfo cls) {
-    return IntroducedTraits(cls).SelectMany(trait => trait.Fields).Concat(cls.Fields)
-      .Where(field => !field.IsStatic && field.Type == "string" && !field.IsCounted).ToList();
+  // the fields of the class itself, or (traits) the properties of the traits it introduces, which end after the trait atEnd blocks (spec 11.4)
+  IEnumerable<FieldInfo> DropFields(ClassInfo cls, bool traits) =>
+    traits ? IntroducedTraits(cls).SelectMany(trait => trait.Fields) : cls.Fields;
+
+  List<FieldInfo> OwnedStringFields(ClassInfo cls, bool traits = false) {
+    return DropFields(cls, traits).Where(field => !field.IsStatic && field.Type == "string" && !field.IsCounted).ToList();
   }
 
-  List<FieldInfo> OwnedObjectFields(ClassInfo cls) {
-    return IntroducedTraits(cls).SelectMany(trait => trait.Fields).Concat(cls.Fields)
-      .Where(field => !field.IsStatic && IsClass(field.Type) && !field.IsParentRef && !field.IsWeak && !field.IsCounted).ToList();
+  List<FieldInfo> OwnedObjectFields(ClassInfo cls, bool traits = false) {
+    return DropFields(cls, traits).Where(field => !field.IsStatic && IsClass(field.Type) && !field.IsParentRef && !field.IsWeak && !field.IsCounted).ToList();
+  }
+
+  // the end of the trait properties a class holds: objects, strings, string?
+  string TraitFieldDrops(ClassInfo cls) {
+    var sb = new System.Text.StringBuilder();
+    foreach (var field in OwnedObjectFields(cls, true)) {
+      sb.Append($"  if (self->{field.CName} != NULL) {{ void* o = (void*)self->{field.CName}; self->{field.CName} = NULL; df_drop(o); }}\n");
+    }
+    foreach (var field in OwnedStringFields(cls, true)) {
+      sb.Append($"  df_str_free(self->{field.CName});\n  self->{field.CName} = NULL;\n");
+    }
+    foreach (var field in DropFields(cls, true).Where(field => !field.IsStatic && field.Type == "string?" && !field.IsCounted)) {
+      sb.Append($"  df_opt_str_drop(&self->{field.CName});\n");   // spec 7.1
+    }
+    return sb.ToString();
   }
 
   void EmitDropGlue(ClassInfo cls) {
@@ -1848,6 +1868,10 @@ public sealed partial class CodeGen {
       }
     }
     var sb = classCode;
+    string traitDrops = TraitFieldDrops(cls);
+    if (traitDrops.Length > 0) {
+      sb.Append($"static void df_dropt_{cls.Name}({cls.StructName}* self) {{\n{traitDrops}}}\n");
+    }
     sb.Append($"static void df_dropc_{cls.Name}({cls.StructName}* self) {{\n");
     if (cls.Dtor != null) {
       // an orphan adopted child already ran its atEnd when it found its parent gone (slot DF_UNS_MAX, spec 12.5)
@@ -1867,7 +1891,7 @@ public sealed partial class CodeGen {
     foreach (var field in OwnedStringFields(cls)) {
       sb.Append($"  df_str_free(self->{field.CName});\n  self->{field.CName} = NULL;\n");
     }
-    foreach (var field in IntroducedTraits(cls).SelectMany(trait => trait.Fields).Concat(cls.Fields).Where(field => !field.IsStatic && field.Type == "string?" && !field.IsCounted)) {
+    foreach (var field in cls.Fields.Where(field => !field.IsStatic && field.Type == "string?" && !field.IsCounted)) {
       sb.Append($"  df_opt_str_drop(&self->{field.CName});\n");   // spec 7.1
     }
     EmitArrayFieldDrops(cls, sb);   // spec 6.8.1 (CodeGen.ArrOwnership.cs)
@@ -1888,9 +1912,22 @@ public sealed partial class CodeGen {
       EmitMapDropGlue(sb, cls);
     }
     sb.Append("}\n");
+    // when the object dies (spec 11.4): each class runs its atEnd blocks and ends what it owns, the class first, then its parents; then the
+    // traits' atEnd blocks (the reverse of construction), then the trait properties end. A block that throws does not stop the others
+    // (df_dtor_fail)
     sb.Append($"static void df_dropall_{cls.Name}(void* p) {{\n");
     for (var c = cls; c != null; c = c.Parent) {
       sb.Append($"  df_dropc_{c.Name}(({c.StructName}*)p);\n");
+    }
+    for (var c = cls; c != null; c = c.Parent) {
+      foreach (var trait in Enumerable.Reverse(IntroducedTraits(c)).Where(trait => trait.Dtor != null)) {
+        sb.Append($"  {trait.Dtor!.CName}(p);\n");
+      }
+    }
+    for (var c = cls; c != null; c = c.Parent) {
+      if (TraitFieldDrops(c).Length > 0) {
+        sb.Append($"  df_dropt_{c.Name}(({c.StructName}*)p);\n");
+      }
     }
     sb.Append("  ((df_object*)p)->cls = &df_dead_class;\n}\n\n");
   }

@@ -1,0 +1,3 @@
+// two .dflib files with the same Name: the import writes the version (spec 22)
+namespace app
+import lib dfcalc

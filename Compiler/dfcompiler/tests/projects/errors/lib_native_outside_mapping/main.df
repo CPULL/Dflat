@@ -1,0 +1,5 @@
+namespace app
+import lib dfcalc
+import Root
+arr<i32> v = [1, 2, 3]
+Console.log(sumTwo(v))

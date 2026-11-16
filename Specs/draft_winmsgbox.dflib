@@ -18,14 +18,14 @@ enum i32 MsgBoxResult { Failed: 0, Ok: 1, Cancel: 2, Abort: 3, Retry: 4, Ignore:
 
 // the window in front of the user (can be null)
 native Window GetForegroundWindow()
-fun Window w foregroundWindow() -> w = GetForegroundWindow()
+public fun Window w foregroundWindow() -> w = GetForegroundWindow()
 
 // show a message box
 // a wide string is *u16 (wchar_t is 2 bytes on Windows): the arr<byte> of toCStr is given
 // through a pointer cast (12.1), the count becomes bytes / 2
 native i32 MessageBoxW(Window owner, *u16 text, *u16 caption, u32 type)
 
-fun MsgBoxResult res messageBox(string text, string caption, MsgBoxButtons buttons, MsgBoxIcon icon)
+public fun MsgBoxResult res messageBox(string text, string caption, MsgBoxButtons buttons, MsgBoxIcon icon)
   -> {
     var textBuf = text.toCStr(StringEncoding.UTF16)
     var captionBuf = caption.toCStr(StringEncoding.UTF16)
@@ -33,7 +33,7 @@ fun MsgBoxResult res messageBox(string text, string caption, MsgBoxButtons butto
                                     [u32]buttons | [u32]icon)
   }
 
-fun MsgBoxResult res messageBox(Window owner, string text, string caption, MsgBoxButtons buttons, MsgBoxIcon icon)
+public fun MsgBoxResult res messageBox(Window owner, string text, string caption, MsgBoxButtons buttons, MsgBoxIcon icon)
   -> res = [MsgBoxResult]MessageBoxW(owner, (*u16)pointer.to(text.toCStr(StringEncoding.UTF16)),
                                      (*u16)pointer.to(caption.toCStr(StringEncoding.UTF16)),
                                      [u32]buttons | [u32]icon)

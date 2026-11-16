@@ -158,6 +158,7 @@ public sealed partial class CodeGen {
 
   int lambdaCounter;
   readonly HashSet<Node> borrowingLambdas = new();
+  readonly Dictionary<Node, List<VarInfo>?> lambdaBorrowed = new();   // a borrowing lambda: the variables it borrows (null: not known)
   readonly HashSet<Node> writingLambdas = new();   // lambdas with a & capture: f! of one is a compile error (spec 13.3.3)
 
   // a capture kept by address (a borrow) can have any type; a copy or a move only the types handled below
@@ -270,6 +271,18 @@ public sealed partial class CodeGen {
       lambda.ReturnsOwnedSet = true;
     }
     bool borrows = false;
+    var borrowedVars = new List<VarInfo>();   // the variables of the enclosing code it borrows (this is not one: it outlives the locals)
+    bool unknownBorrow = false;              // it borrows through a function value whose borrows are not known
+    void BorrowsThrough(VarInfo outerFn) {
+      if (!outerFn.FnBorrows) {
+        return;
+      }
+      if (outerFn.FnBorrowed == null) {
+        unknownBorrow = true;
+      } else {
+        borrowedVars.AddRange(outerFn.FnBorrowed);
+      }
+    }
     var fields = new StringBuilder();
     var inits = new StringBuilder();
     var ends = new StringBuilder();
@@ -354,6 +367,7 @@ public sealed partial class CodeGen {
               }
               string address = WritableAddress(Synthetic("Name", at, name), scope, type, at);
               borrows = true;
+              borrowedVars.Add(outer);
               fields.Append($"  void* p_{name};\n");
               inits.Append($"c_->p_{name} = (void*)({address}); ");
               lambda.LambdaVars.Add((name, new VarInfo(type, $"(*({cType}*)c->p_{name})", false) { RefSlot = true, BorrowsArray = IsArr(type) }));
@@ -364,6 +378,7 @@ public sealed partial class CodeGen {
             }
           }
           borrows = true;
+          borrowedVars.Add(outer);
           fields.Append($"  void* p_{name};\n");
           inits.Append($"c_->p_{name} = (void*)&({outer.CName}); ");
           var inner = new VarInfo(type, $"(*({cType}*)c->p_{name})", readOnly || IsClass(type)) {
@@ -400,6 +415,7 @@ public sealed partial class CodeGen {
             ends.Append($"  df_fn_release({field});\n");
             clones.Append($"  n->v_{name} = df_fn_clone(c->v_{name});\n");
             borrows |= outer.FnBorrows;
+            BorrowsThrough(outer);
             lambda.LambdaVars.Add((name, new VarInfo(type, field, false) { FnBorrows = outer.FnBorrows, FnWrites = outer.FnWrites }));
           } else if (IsArr(type) || IsClass(type) && !IsTraitType(type)) {
             // a clone (12.6): the lambda owns it
@@ -430,6 +446,7 @@ public sealed partial class CodeGen {
             ends.Append($"  df_fn_release({field});\n");
             clones.Append($"  n->v_{name} = df_fn_clone(c->v_{name});\n");
             borrows |= outer.FnBorrows;
+            BorrowsThrough(outer);
             lambda.LambdaVars.Add((name, new VarInfo(type, field, false) { FnBorrows = outer.FnBorrows, FnWrites = outer.FnWrites }));
           } else {
             throw NotSupported($"->{name} of a {type} in a lambda (spec 13.3.1)", at);
@@ -442,6 +459,7 @@ public sealed partial class CodeGen {
     pendingInstances.Add(lambda);
     if (borrows) {
       borrowingLambdas.Add(n);
+      lambdaBorrowed[n] = unknownBorrow ? null : borrowedVars;   // what it borrows, for the lifetime check (spec 13.3.4)
     }
     if (captures.Any(capture => capture.Kind == "WritableCapture" || capture.Kind is "CopyCapture" or "MoveCapture" && capture.Outer.FnWrites)
         || members.Any(member => member.Kind == "WritableCapture")) {
@@ -573,6 +591,39 @@ public sealed partial class CodeGen {
     _ => true
   };
 
+  // the variables a function value borrows: an empty list when it borrows nothing, null when they are not known (a parameter, a call ...)
+  List<VarInfo>? FnBorrowedOf(Node value, Scope scope) => value.Kind switch {
+    "Lambda" => borrowingLambdas.Contains(value) ? lambdaBorrowed.GetValueOrDefault(value) : new List<VarInfo>(),
+    "Name" => scope.Find(value.Text!) is VarInfo variable ? (variable.FnBorrows ? variable.FnBorrowed : new List<VarInfo>()) : null,
+    "Paren" or "Copy" => FnBorrowedOf(value.Children[0], scope),
+    _ => FnMayBorrow(value, scope) ? null : new List<VarInfo>()
+  };
+
+  // true when the local holder ends before the lender: both are seen from here, and the holder is declared after the lender in the same block or
+  // in a block inside the lender's (spec 13.3.4). A lender that is not a local of the enclosing blocks (a global) lives longer
+  static bool EndsBefore(VarInfo holder, VarInfo lender, Scope scope) {
+    var chain = new List<Scope>();
+    for (var s = scope; s != null; s = s.Parent) {
+      chain.Insert(0, s);
+    }
+    (int Depth, int Index)? Place(VarInfo variable) {
+      for (int depth = chain.Count - 1; depth >= 0; depth--) {
+        int index = chain[depth].Vars.Values.ToList().IndexOf(variable);
+        if (index >= 0) {
+          return (depth, index);
+        }
+      }
+      return null;
+    }
+    if (Place(holder) is not var (holderDepth, holderIndex)) {
+      return false;
+    }
+    if (Place(lender) is not var (lenderDepth, lenderIndex)) {
+      return !lender.IsParam;   // not a local of these blocks: a global or a static, which outlives every local
+    }
+    return holderDepth > lenderDepth || (holderDepth == lenderDepth && holderIndex > lenderIndex);
+  }
+
   // the value may hold a & capture (a lambda written with one, or a variable that keeps one): f! of it is a compile error (spec 13.3.3)
   bool FnMayWrite(Node value, Scope scope) => value.Kind switch {
     "Lambda" => writingLambdas.Contains(value),
@@ -610,7 +661,14 @@ public sealed partial class CodeGen {
     var value = ExprOf(valueNode, scope, target.Type);
     string converted = Convert(value, target.Type, valueNode);
     if (FnMayBorrow(valueNode, scope)) {
-      throw Error($"this function value borrows variables, so it cannot be kept in '{targetNode.Text}', which may outlive them: {(target.Variable == null ? "a field keeps only lambdas that own their captures: capture" : "declare a new variable for it, or capture")} with x! or ->x (spec 13.3.4)", at);
+      // allowed when the compiler proves that the variable ends before everything the value borrows (spec 13.3.4)
+      if (target.Variable is { IsParam: false } local && !target.IsField && !target.IsStatic
+          && FnBorrowedOf(valueNode, scope) is List<VarInfo> borrowed && borrowed.All(lender => EndsBefore(local, lender, scope))) {
+        local.FnBorrowed = local.FnBorrows ? local.FnBorrowed?.Concat(borrowed).ToList() : borrowed;
+        local.FnBorrows = true;
+      } else {
+        throw Error($"this function value borrows variables, so it cannot be kept in '{targetNode.Text}', which may outlive them: {(target.Variable == null ? "a field keeps only lambdas that own their captures: capture" : "declare the variable after what the lambda borrows, in the same block or an inner one, or capture")} with x! or ->x (spec 13.3.4)", at);
+      }
     }
     MarkAssigned(target.Variable);
     return $"df_fn_set(&{target.Code}, {FnOwned(value with { Code = converted })})";

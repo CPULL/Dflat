@@ -1,0 +1,19 @@
+// a custom map gives (key, value) entries: for x in m is an error, as on map (spec 6.4)
+import Root
+public class One : MapCollection<i32, i32> {
+  replace fun uns get_len() { 0 }
+  replace fun bool has(i32 value) { false }
+  replace fun clear() { }
+  replace fun bool hasKey(i32 key) { false }
+  unrestricted fun i32 read_key(i32 key) { 0 }
+  public fun set_key(i32 key, i32 value) { }
+  public fun i32 move_out(i32 key) { 0 }
+  replace fun ->MapIterator<i32, i32> getIterator() { return OneIterator() }
+}
+public class OneIterator : MapIterator<i32, i32> {
+  replace fun (i32 key, i32 value, bool isValid) next() { return (0, 0, false) }
+}
+One m = One()
+for var x in m {
+  Console.log(x)
+}

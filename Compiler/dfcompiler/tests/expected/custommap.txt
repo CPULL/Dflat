@@ -1,0 +1,23 @@
+len 2 has 1 true has 2 false: three!
+1 = one
+3 = three!
+took one, len 1
+keys len 2 has 6 true has 1 false
+key 3
+key 6
+value three!
+value six
+values has six true
+merged 2 = two
+merged 3 = three!
+merged 6 = SIX
+add 5 true add 5 again false FIVE
+true FIVE
+true SIX
+swap: 3=FIVE 5=three!
+move: has 5 false 7=three!
+keyOf three! = 7
+removeAll x 2 remove FIVE true len 3
+left 2 = two
+left 6 = SIX
+---- exit code 0 ----

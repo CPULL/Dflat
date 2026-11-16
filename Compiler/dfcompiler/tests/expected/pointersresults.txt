@@ -1,0 +1,298 @@
+arr: 1 5 15
+written: 20
+item: 3 1 5
+through the item: 34 50
+caught: Index Out Of Range Exception
+caught: Index Out Of Range Exception
+structs: 40 1
+vec: 10 30
+items can change: 11
+caught: Modifying Iterated Collection Exception
+size: 3
+after the pointer: 4
+after the block: [11, 20, 30, ...] (5 items)
+loop 11
+loop 20
+after the loop: 6
+, 5
+, 2/5
+, 4/5
+no count
+*i32 null
+true
+true
+---- exit code 0 ----
+cast: 1 2 6 true
+leftover dropped: false true false
+writable cast: 21
+addr: true true
+back: 10 40 false
+unsafe function: 10
+unsafe class: 10
+static: 1.2.3 42 7
+const: 9
+real: 0.5
+bound: 21 30 false true
+caught: Index Out Of Range Exception
+bound in unsafe: 40 false
+---- exit code 0 ----
+walk: 150
+add: 30
+offset: 2 8
+back: 20 10 50
+raw: 40
+inRange: true false true false true false
+between: 3 -3 12
+address: true true
+caught: Index Out Of Range Exception
+stays: 40
+after: 10
+one item: true false
+null: false true
+caught: Null Pointer Exception
+aligned: true true true
+unaligned: false false
+alignment: 4 8 1 8 64
+isAligned: true false false
+---- exit code 0 ----
+arr: 1 5 15
+written: 20
+item: 3 1 5
+through the item: 34 50
+caught: Index Out Of Range Exception
+caught: Index Out Of Range Exception
+structs: 40 1
+vec: 10 30
+items can change: 11
+caught: Modifying Iterated Collection Exception
+size: 3
+after the pointer: 4
+after the block: [11, 20, 30, ...] (5 items)
+loop 11
+loop 20
+after the loop: 6
+, 5
+, 2/5
+, 4/5
+no count
+*i32 null
+true
+true
+---- exit code 0 ----
+cast: 1 2 6 true
+leftover dropped: false true false
+writable cast: 21
+addr: true true
+back: 10 40 false
+unsafe function: 10
+unsafe class: 10
+static: 1.2.3 42 7
+const: 9
+real: 0.5
+bound: 21 30 false true
+caught: Index Out Of Range Exception
+bound in unsafe: 40 false
+---- exit code 0 ----
+walk: 150
+add: 30
+offset: 2 8
+back: 20 10 50
+raw: 40
+inRange: true false true false true false
+between: 3 -3 12
+address: true true
+caught: Index Out Of Range Exception
+stays: 40
+after: 10
+one item: true false
+null: false true
+caught: Null Pointer Exception
+aligned: true true true
+unaligned: false false
+alignment: 4 8 1 8 64
+isAligned: true false false
+---- exit code 0 ----
+arr: 1 5 15
+written: 20
+item: 3 1 5
+through the item: 34 50
+caught: Index Out Of Range Exception
+caught: Index Out Of Range Exception
+structs: 40 1
+vec: 10 30
+items can change: 11
+caught: Modifying Iterated Collection Exception
+size: 3
+after the pointer: 4
+after the block: [11, 20, 30, ...] (5 items)
+loop 11
+loop 20
+after the loop: 6
+, 5
+, 2/5
+, 4/5
+no count
+*i32 null
+true
+true
+---- exit code 0 ----
+cast: 1 2 6 true
+leftover dropped: false true false
+writable cast:caught: Null Pointer Exception
+---- exit code 0 ----
+arr: 1 5 15
+written: 20
+item: 3 1 5
+through the item: 34 50
+caught: Index Out Of Range Exception
+caught: Index Out Of Range Exception
+structs: 40 1
+vec: 10 30
+items can change: 11
+caught: Modifying Iterated Collection Exception
+size: 3
+after the pointer: 4
+after the block: [11, 20, 30, ...] (5 items)
+loop 11
+loop 20
+after the loop: 6
+, 5
+, 2/5
+, 4/5
+no count
+*i32 null
+true
+true
+---- exit code 0 ----
+cast: 1 2 6 true
+leftover dropped: false true false
+writable cast: 21
+addr: true true
+back: 10 40 false
+unsafe function: 10
+unsafe class: 10
+static: 1.2.3 42 7
+const: 9
+real: 0.5
+bound: 21 30 false true
+caught: Index Out Of Range Exception
+bound in unsafe: 40 false
+---- exit code 0 ----
+walk: 150
+add: 30
+offset: 2 8
+back: 20 10 50
+raw: 40
+inRange: true false true false true false
+between: 3 -3 12
+address: true true
+caught: Index Out Of Range Exception
+stays: 40
+after: 10
+one item: true false
+null: false true
+caught: Null Pointer Exception
+aligned: true true true
+unaligned: false false
+alignment: 4 8 1 8 64
+isAligned: true false false
+---- exit code 0 ----
+read: 5 5
+written: 11
+pointer.to: 20 20 20
+through a function: 43
+result: 43
+struct: 10 3 13 10
+field: 3
+enum: Blue
+nested: 1.5
+null: true false true
+same address: true true
+reassigned: 43
+param: 7
+caught: Index Out Of Range Exception
+---- exit code 0 ----
+caught: Null Pointer Exception
+---- exit code 0 ----
+arr: 1 5 15
+written: 20
+item: 3 1 5
+through the item: 34 50
+caught: Index Out Of Range Exception
+caught: Index Out Of Range Exception
+structs: 40 1
+vec: 10 30
+items can change: 11
+caught: Modifying Iterated Collection Exception
+size: 3
+after the pointer: 4
+after the block: [11, 20, 30, ...] (5 items)
+loop 11
+loop 20
+after the loop: 6
+, 5
+, 2/5
+, 4/5
+no count
+*i32 null
+true
+true
+---- exit code 0 ----
+cast: 1 2 6 true
+leftover dropped: false true false
+writable cast: 21
+addr: true true
+back: 10 40 false
+unsafe function: 10
+unsafe class: 10
+static: 1.2.3 42 7
+const: 9
+real: 0.5
+bound: 21 30 false true
+caught: Index Out Of Range Exception
+bound in unsafe: 40 false
+---- exit code 0 ----
+walk: 150
+add: 30
+offset: 2 8
+back: 20 10 50
+raw: 40
+inRange: true false true false true false
+between: 3 -3 12
+address: true true
+caught: Index Out Of Range Exception
+stays: 40
+after: 10
+one item: true false
+null: false true
+caught: Null Pointer Exception
+aligned: true true true
+unaligned: false false
+alignment: 4 8 1 8 64
+isAligned: true false false
+---- exit code 0 ----
+read: 5 5
+written: 11
+pointer.to: 20 20 20
+through a function: 43
+result: 43
+struct: 10 3 13 10
+field: 3
+enum: Blue
+nested: 1.5
+null: true false true
+same address: true true
+reassigned: 43
+param: 7
+caught: Index Out Of Range Exception
+---- exit code 0 ----
+caught: Null Pointer Exception
+---- exit code 0 ----
+arr: 1 5 15
+written: 20
+item: 3 1 5
+through the item: 34 50
+caught: Index Out Of Range Exception
+caught: Index Out Of Range Exception
+structs: 40 1
+vec: 10 30

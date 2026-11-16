@@ -136,7 +136,6 @@ public sealed partial class CodeGen {
   }
 
   void RegisterTraitMembers(ClassInfo trait) {
-    RejectAtEnd(trait.Node);
     var body = trait.Node.Children.First(child => child.Kind == "Block");
     foreach (var member in body.Children) {
       switch (member.Kind) {
@@ -189,8 +188,7 @@ public sealed partial class CodeGen {
           if (member.Children.First(child => child.Kind == "Params").Children.FirstOrDefault(p => p.Kind == "VariadicParam") is Node variadic) {
             throw NotSupported("Variadic constructor parameters", variadic);
           }
-          RejectAtEnd(member);
-          trait.CtorNodes.Add(member);              // overloads, like the constructors of a class (spec 11.1.1, 11.2)
+          trait.CtorNodes.Add(member);              // a trailing atEnd is a destructor fragment (spec 11.4, RegisterTraitInit)              // overloads, like the constructors of a class (spec 11.1.1, 11.2)
           break;
         }
         case "Fun":
@@ -263,6 +261,29 @@ public sealed partial class CodeGen {
       }
     }
     RegisterTraitInit(trait);
+    RegisterTraitDtor(trait);
+  }
+
+  // the atEnd after a trait and the fragments of its constructors (spec 11.4): one function of the trait (__tdtor), run when an object of a
+  // class that implements it dies, after the blocks of the class and of its parents (EmitDropGlue)
+  void RegisterTraitDtor(ClassInfo trait) {
+    var trailing = trait.Node.Children.FirstOrDefault(child => child.Kind == "AtEnd" && child.Text == "trailing");
+    if (trailing == null && trait.Fragments.Count == 0) {
+      return;
+    }
+    var block = Synthetic("Block", trait.Node);
+    if (trait.Fragments.Count > 0) {
+      block.Add(FragmentRunner(trait, trait.Node));
+    }
+    foreach (var statement in trailing?.Children[0].Children ?? new List<Node>()) {
+      block.Add(statement);
+    }
+    var node = Synthetic("Fun", trait.Node, "__tdtor").Add(Synthetic("Params", trait.Node)).Add(block);
+    var f = RegisterFun(node, null, trait)!;
+    f.Class = trait;
+    f.IsDtor = true;
+    f.Visibility = Vis.Private;
+    trait.Dtor = f;
   }
 
   // ---------------------------------------------------------------- executeBefore / executeAfter (spec 11.2)
@@ -386,6 +407,10 @@ public sealed partial class CodeGen {
       var block = Synthetic("Block", member);
       foreach (var statement in statements) {
         block.Add(CloneNode(statement));
+      }
+      // } atEnd { }: registered after the property initializers, before the body (spec 11.4)
+      foreach (var statement in DestructorFragment(trait, member, member.Children.First(child => child.Kind == "Params"))) {
+        block.Add(statement);
       }
       if (member.Children.FirstOrDefault(child => child.Kind == "Block") is Node body) {
         foreach (var statement in body.Children) {

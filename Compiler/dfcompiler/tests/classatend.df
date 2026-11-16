@@ -1,0 +1,51 @@
+// Class atEnd (spec 11.4): the atEnd of traits and of trait constructors, fragments in a class and in its parent; the order when the
+// object dies: the class's blocks, its parent's, then the traits' (the reverse of construction); the trait properties live until then
+import Root
+
+trait Root2 {
+} atEnd {
+  Console.log("trait Root2 end")
+}
+
+trait Named : Root2 {
+  public string label
+  public Named(string text) {
+    label = text
+    string kept = text + "!"
+  } atEnd {
+    Console.log($"Named fragment {kept}")
+  }
+} atEnd {
+  Console.log($"trait Named end {label}")
+}
+
+trait Tagged {
+} atEnd {
+  Console.log("trait Tagged end")
+}
+
+class Base : Named {
+  public Base(string s) : Named(s) {
+    Console.log("Base(string) body")
+  } atEnd {
+    Console.log("Base(string) fragment")
+  }
+} atEnd {
+  Console.log("Base end")
+}
+
+class Child : Base, Tagged {
+  public Child() : Base("x") {
+  } atEnd {
+    Console.log("Child() fragment")
+  }
+} atEnd {
+  Console.log("Child end")
+}
+
+fun run() {
+  Child c = Child()
+  Console.log("scope ends")
+}
+run()
+Console.log("done")

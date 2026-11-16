@@ -5,7 +5,6 @@
 - Panic exit codes (all -1000 for now; not before 0.1.0)
 - Generics: minimal intermediate form exported by compiled libraries for public generics (11.3.14), after 0.1.0
 - Stdlib: strings, files, time, collections extras (queue/stack)
-- Collections: the members of `MapIterator` (the three sub-traits of `Iterator` are decided, 6.7; the index and set iterators are defined, 6.7.1, 6.7.3)
 - Collections: how a custom class receives literals (`[...]`, `[k: v]`) (`c[k]` is decided, 6.7; `+=` and `-=` call the members, 6.6)
 - Collections: views are read-only; revisit with tasks (6.5), the full Rust borrow model stays an option
 - Collections: shared C helpers against one copy per type (code size, 11.3.12); the B-tree (6.8.4.1) and the hash table (6.8.5.1) are decided

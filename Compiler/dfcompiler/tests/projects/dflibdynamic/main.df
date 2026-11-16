@@ -1,0 +1,6 @@
+// import lib of a dynamic library (spec 22): only one kind exists, so no kind is written and no warning is given
+namespace app
+import lib dfcalcd
+import Root
+
+Console.log(dfc_add(40, 2))

@@ -26,9 +26,6 @@ public sealed partial class CodeGen {
           }
           continue;
         }
-        if (type.Kind == "Trait") {
-          throw NotSupported("Field groups in traits", member);
-        }
         var mods = member.Children.FirstOrDefault(child => child.Kind == "Mods");
         if (mods?.Text?.Split(' ').Contains("static") == true) {
           throw NotSupported("Static field groups", member);
@@ -71,8 +68,23 @@ public sealed partial class CodeGen {
         throw Error($"'{name}' is a field group and also a member of {owner}: a group name cannot be the name of another member yet", at);
       }
     }
+    // a trait's groups are seen by its own code, by its sub-traits and by the classes that implement it (spec 11.1.4.1)
+    var traitNodes = program.Children.Where(statement => statement.Kind == "Trait" && statement.Text != null)
+      .GroupBy(statement => statement.Text!).ToDictionary(group => group.Key, group => group.First());
+    Dictionary<string, List<string>> Visible(Node type, HashSet<Node> seen) {
+      var all = ownGroups.TryGetValue(type, out var mine) ? new Dictionary<string, List<string>>(mine) : new Dictionary<string, List<string>>();
+      foreach (var baseType in type.Children.FirstOrDefault(child => child.Kind == "Bases")?.Children ?? new List<Node>()) {
+        if (baseType.Text != null && traitNodes.TryGetValue(baseType.Text, out var trait) && seen.Add(trait)) {
+          foreach (var (name, fields) in Visible(trait, seen)) {
+            all.TryAdd(name, fields);
+          }
+        }
+      }
+      return all;
+    }
     foreach (var statement in program.Children) {
-      LowerGroups(statement, statement.Kind == "Class" && ownGroups.TryGetValue(statement, out var own) ? own : null);
+      var visible = statement.Kind is "Class" or "Trait" ? Visible(statement, new HashSet<Node> { statement }) : null;
+      LowerGroups(statement, visible is { Count: > 0 } ? visible : null);
     }
   }
 
@@ -103,7 +115,7 @@ public sealed partial class CodeGen {
       var receiver = read.Receiver;
       string group = node.Text!;
       node.Kind = "Tuple";
-      node.Text = null;
+      node.Text = "group:" + string.Join(",", read.Fields);   // the names of the tuple (TupleLiteral)
       node.Children.Clear();
       foreach (string field in read.Fields) {
         node.Children.Add(FieldOfGroup(receiver, group, field, node));

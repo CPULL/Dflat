@@ -1,0 +1,1 @@
+lambda_outlives.df(6): error: this function value borrows variables, so it cannot be kept in 'show', which may outlive them: declare the variable after what the lambda borrows, in the same block or an inner one, or capture with x! or ->x (spec 13.3.4)

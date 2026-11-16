@@ -1,4 +1,5 @@
 namespace lambda_borrow_assign
-i32 n = 0
+// declared before n: f could outlive what the lambda borrows (spec 13.3.4)
 fun() f = () { }
+i32 n = 0
 f = () { Root.Console.log(n) }

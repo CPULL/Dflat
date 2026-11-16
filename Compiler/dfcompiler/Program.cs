@@ -4,7 +4,7 @@ using dfparser;
 namespace dfcompiler;
 
 public static class Program {
-  public const string Version = "0.0.141alpha";
+  public const string Version = "0.0.149alpha";
 
   // the version of the specification this compiler was built for: the variable `version` of the preprocessor (spec 19.1)
   public const string LanguageVersion = "0.0.40";
@@ -49,10 +49,39 @@ public static class Program {
     public List<string> CSources { get; } = new();   // csource= of the project file: C files compiled with the program (temporary, spec 15.9)
     public string? VulkanSdk { get; set; }           // vulkan-sdk= and glfw= of the project file: the folders the gfx library needs
     public string? Glfw { get; set; }
+    public string? LibPath { get; set; }             // libpath= of the project file: the binaries of the C libraries, one subfolder per target (spec 22)
     public Dictionary<string, int> Limits { get; } = new();
     public long? DoubleGrowLimit { get; set; }   // --double-grow-limit 8mb (spec 6.8.2)
     public long? GrowStep { get; set; }          // --fixed-grow-step 64: a vec grows by this many items each time, for small targets (spec 6.8.2)
     public int? GrowExtra { get; set; }          // --further-grow-factor 1.25: what the capacity adds, in thousandths (250)   // --max-vec-copies 32, max-copies=8 ...: the limits of the generated copies (spec 11.3.12)
+  }
+
+  // --check-each a.df b.df ...: for the tests of the programs that must not compile. Each file (or project folder) is compiled to C in
+  // this same process, one after the other, so .NET starts once for all of them; what each compile prints is written between
+  // "==== <file>" and "==== exit <code>"
+  static int CheckEach(List<string> inputs) {
+    var stdout = Console.Out;
+    var stderr = Console.Error;
+    foreach (string input in inputs) {
+      var captured = new StringWriter();
+      int code;
+      Console.SetOut(captured);
+      Console.SetError(captured);
+      try {
+        SourceMap.Reset();
+        code = Main(new[] { input, "--emit-c" });
+      } catch (Exception ex) {
+        captured.WriteLine($"internal error: {ex.Message}");
+        code = 3;
+      } finally {
+        Console.SetOut(stdout);
+        Console.SetError(stderr);
+      }
+      stdout.WriteLine($"==== {input}");
+      stdout.Write(captured.ToString());
+      stdout.WriteLine($"==== exit {code}");
+    }
+    return 0;
   }
 
   sealed class UsageException : Exception {
@@ -61,6 +90,9 @@ public static class Program {
   }
 
   public static int Main(string[] args) {
+    if (args.Length > 0 && args[0].Equals("--check-each", StringComparison.OrdinalIgnoreCase)) {
+      return CheckEach(args.Skip(1).ToList());
+    }
     var cli = new Settings();
     string? input = null;
     try {
@@ -185,6 +217,8 @@ public static class Program {
     output ??= Path.Combine(sourceDir, "build." + effective, forWindows ? name + ".exe" : name);
 
     var importedLibraries = new Dictionary<string, string>();
+    var libraryArgs = new List<string>();   // the binaries of the C libraries (spec 22): given to clang after the generated C
+    var runFiles = new List<string>();      // ... and the ones copied next to the program
     try {
       // the preprocessor (spec 19.1) builds the code that is compiled; its variables come from the options
       var variables = PpVariables.Build(os, cpu, nativeInt, build, optLevel, optMode, LanguageVersion);
@@ -202,6 +236,10 @@ public static class Program {
       try {
         tree = loader.Load(path, multiFile, project.Includes, projectFile);
         importedLibraries = loader.ImportedLibraries;
+        if (loader.CLibraries.Count > 0) {
+          string libFolder = project.LibPath ?? Path.GetDirectoryName(Path.GetFullPath(projectFile ?? path))!;
+          LibraryBinaries(loader.CLibraries, effective, libFolder, Path.GetDirectoryName(Path.GetFullPath(projectFile ?? path))!, os, libraryArgs, runFiles, loader.Warnings);
+        }
       } finally {
         foreach (var warning in loader.Warnings) {
           Console.Error.WriteLine(warning);
@@ -259,6 +297,7 @@ public static class Program {
       ccArgs.Add(cSource);   // the C functions declared with extern fun (spec 15.9)
     }
     ccArgs.AddRange(native.Args);
+    ccArgs.AddRange(libraryArgs);
     if (build == "release") {
       ccArgs.Insert(0, "-DDF_RELEASE");   // an index outside a collection is a panic (spec 6.1)
     }
@@ -275,10 +314,25 @@ public static class Program {
         ccArgs.Add("-lm");
       }
     }
-    int code = RunProcess(clang, ccArgs);
+    // the system headers (windows.h above all) come from a header precompiled once for this clang and these flags: parsing them is
+    // a large part of the time of a small program. Only for a program alone (no C files, no libraries, no CL: target)
+    string? pch = custom || project.CSources.Count > 0 || native.Args.Count > 0 ? null : SystemHeaderPch(clang, ccArgs, cPath, output);
+    int code;
+    if (pch != null) {
+      code = RunProcess(clang, new List<string>(ccArgs) { "-include-pch", pch });
+      if (code != 0) {
+        code = RunProcess(clang, ccArgs);   // a precompiled header that does not fit: the plain build
+      }
+    } else {
+      code = RunProcess(clang, ccArgs);
+    }
     if (code != 0) {
       Console.Error.WriteLine($"clang failed with exit code {code}");
       return 1;
+    }
+    foreach (string runFile in runFiles) {
+      // a dynamic library goes next to the program, which loads it from there (spec 22)
+      File.Copy(runFile, Path.Combine(Path.GetDirectoryName(Path.GetFullPath(output))!, Path.GetFileName(runFile)), true);
     }
     Console.WriteLine($"Executable: {output}");
 
@@ -528,6 +582,9 @@ public static class Program {
           case "vulkan-sdk":
             settings.VulkanSdk = Path.GetFullPath(Path.Combine(folder, value));
             break;
+          case "libpath":
+            settings.LibPath = Path.GetFullPath(Path.Combine(folder, value));
+            break;
           case "glfw":
             settings.Glfw = Path.GetFullPath(Path.Combine(folder, value));
             break;
@@ -616,9 +673,165 @@ public static class Program {
   }
 
   // the name of a target, as in the folder build.<target>: win-x64, win-x32, linux-arm64, ...
+  // the binaries of the imported C libraries for the target (spec 22): the LibName lines that match it (the most specific pattern, then the
+  // first written), the kind (written in the import, or the only one there is, or static with a warning), the files in libpath/<target>/.
+  // A file in square brackets is part of the system: given to the linker by its name, never looked for and never copied
+  static void LibraryBinaries(List<CLibrary> libraries, string target, string libFolder, string projectFolder, string os, List<string> args, List<string> runFiles,
+      List<string> warnings) {
+    static int Wildcards(string pattern) => pattern.Count(c => c == '*');
+    static bool Matches(string pattern, string target) =>
+      System.Text.RegularExpressions.Regex.IsMatch(target, "^" + System.Text.RegularExpressions.Regex.Escape(pattern).Replace(@"\*", ".*") + "$");
+    foreach (var library in libraries) {
+      var matching = library.Binaries.Where(binary => Matches(binary.Target, target)).ToList();
+      if (matching.Count == 0) {
+        throw new CompileException($"the library {library.Name} has no binary for {target}: its .dflib has no LibName line for it (spec 22)", library.Line);
+      }
+      var kinds = matching.Select(binary => binary.Kind).Distinct().ToList();
+      string kind;
+      if (library.Kind != null) {
+        kind = kinds.Contains(library.Kind) ? library.Kind
+          : throw new CompileException($"the library {library.Name} has no {library.Kind} binary for {target} (spec 22)", library.Line);
+      } else if (kinds.Count == 1) {
+        kind = kinds[0];
+      } else {
+        kind = "static";
+        warnings.Add(SourceMap.Fix($"({library.Line}): warning L1: the library {library.Name} is static and dynamic for {target}: static is used; "
+          + $"write import lib static {library.Name} or import lib dynamic {library.Name} (spec 22)"));
+      }
+      var chosen = matching.Where(binary => binary.Kind == kind).OrderBy(binary => Wildcards(binary.Target)).First();
+      string Found(string file) {
+        string full = Path.Combine(libFolder, target, file);
+        return File.Exists(full) ? full
+          : throw new CompileException($"the library {library.Name} needs {file} for {target}: it is not in "
+            + $"{Path.GetRelativePath(projectFolder, Path.Combine(libFolder, target)).Replace(Path.DirectorySeparatorChar, '/')} (spec 22)", chosen.Line);
+      }
+      static bool IsSystem(string file) => file.StartsWith('[') && file.EndsWith(']');
+      string LinkName(string file) {
+        string bare = file.Trim('[', ']');
+        if (os == "windows") {
+          return bare;   // the linker looks for it in its own folders
+        }
+        string stem = Path.GetFileNameWithoutExtension(bare);
+        return "-l" + (stem.StartsWith("lib") ? stem[3..] : stem);
+      }
+      if (chosen.Kind == "static" || chosen.Files.Count == 1) {
+        if (chosen.Files.Count != 1) {
+          throw new CompileException($"LibName, {chosen.Target}, static: takes one file (spec 22)", chosen.Line);
+        }
+        string file = chosen.Files[0];
+        if (IsSystem(file)) {
+          args.Add(LinkName(file));
+        } else {
+          args.Add(Found(file));
+          if (chosen.Kind == "dynamic") {
+            runFiles.Add(Found(file));   // .so, .dylib: linked and loaded at run time
+          }
+        }
+      } else {
+        if (chosen.Files.Count != 2) {
+          throw new CompileException($"LibName, {chosen.Target}, dynamic: takes one file, or the file to link and the file to run (spec 22)", chosen.Line);
+        }
+        args.Add(IsSystem(chosen.Files[0]) ? LinkName(chosen.Files[0]) : Found(chosen.Files[0]));
+        if (!IsSystem(chosen.Files[1])) {
+          runFiles.Add(Found(chosen.Files[1]));
+        }
+      }
+    }
+    if (runFiles.Count > 0 && os != "windows") {
+      args.Add("-Wl,-rpath,$ORIGIN");   // the program finds its libraries in its own folder
+    }
+  }
+
   static string TargetName(string os, string cpu) {
     string system = os == "windows" ? "win" : os;
     return $"{system}-{(cpu == "x86" ? "x32" : cpu)}";
+  }
+
+  // the system headers of the runtime (the same #include lines as the generated C, which then skips them through their guards)
+  const string SystemHeaders = """
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 200809L
+#endif
+#include <stddef.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+#include <time.h>
+#include <errno.h>
+#ifdef _WIN32
+#include <windows.h>
+#include <conio.h>
+#include <io.h>
+#include <shellapi.h>
+#else
+#include <termios.h>
+#include <unistd.h>
+#include <signal.h>
+#endif
+
+""";
+
+  // the precompiled system headers for this clang and these compile flags: made once in the temporary folder (dfcompiler-pch) and
+  // reused; null when it cannot be made. Two compilers making it at the same time each write their own file and keep the first
+  static string? SystemHeaderPch(string clang, List<string> ccArgs, string cPath, string output) {
+    try {
+      var flags = new List<string>();
+      for (int i = 0; i < ccArgs.Count; i++) {
+        if (ccArgs[i] == "-o") {
+          i++;   // the executable
+          continue;
+        }
+        if (ccArgs[i] == cPath || ccArgs[i].StartsWith("-l")) {
+          continue;
+        }
+        flags.Add(ccArgs[i]);
+      }
+      string identity = string.Join("\n", new[] { clang, File.GetLastWriteTimeUtc(clang).Ticks.ToString(), SystemHeaders }.Concat(flags));
+      string key = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(identity)))[..20];
+      string folder = Path.Combine(Path.GetTempPath(), "dfcompiler-pch");
+      string pch = Path.Combine(folder, key + ".pch");
+      if (File.Exists(pch)) {
+        return pch;
+      }
+      Directory.CreateDirectory(folder);
+      // the header stays next to its precompiled form: clang checks that it has not changed
+      string header = Path.Combine(folder, key + ".h");
+      if (!File.Exists(header)) {
+        string headerTemp = header + "." + Environment.ProcessId + ".tmp";
+        File.WriteAllText(headerTemp, SystemHeaders);
+        try {
+          File.Move(headerTemp, header);
+        } catch (IOException) {
+          File.Delete(headerTemp);   // another compiler wrote it first
+        }
+      }
+      string temp = pch + "." + Environment.ProcessId + ".tmp";
+      var args = new List<string>(flags) { "-x", "c-header", header, "-o", temp };
+      var psi = new ProcessStartInfo(clang) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+      foreach (var a in args) {
+        psi.ArgumentList.Add(a);
+      }
+      using (var p = Process.Start(psi)!) {
+        p.StandardOutput.ReadToEnd();
+        p.StandardError.ReadToEnd();
+        p.WaitForExit();
+        if (p.ExitCode != 0) {
+          File.Delete(temp);
+          return null;
+        }
+      }
+      try {
+        File.Move(temp, pch);
+      } catch (IOException) {
+        File.Delete(temp);   // another compiler made it first
+      }
+      return File.Exists(pch) ? pch : null;
+    } catch (Exception) {
+      return null;   // no precompiled header: the plain build
+    }
   }
 
   static int RunProcess(string file, List<string> args) {

@@ -25,7 +25,8 @@ public sealed partial class CodeGen {
     if (IsMap(type) && s.Text == "-=" && MapKeysToRemove(s, scope, type) is Node loop) {
       return loop;
     }
-    return IsMap(type) ? Synthetic("ExprStmt", s).Add(MapOperatorCall(s, scope)) : IsSet(type) ? SetOperator(s, scope) : null;
+    // a custom map gets them from its members too (spec 6.6, 6.9)
+    return IsMap(type) || CustomMapTypes(type) != null ? Synthetic("ExprStmt", s).Add(MapOperatorCall(s, scope)) : IsSet(type) ? SetOperator(s, scope) : null;
   }
 
   // m -= s with s a set or an hset of the key type (a variable or a field, spec 6.6): a loop over s that calls m.removeAt(key), so every key of s
@@ -90,8 +91,9 @@ public sealed partial class CodeGen {
   // declared as a map or a set (a parameter, a local of the function, a field); other targets keep the arithmetic, so a number += does not look
   // like a call to add
   bool FlowTargetIsCollection(Node target, FunSig? fun) {
-    static bool CollectionTypeNode(Node? type) => type is { Kind: "Type", Text: "map" or "hmap" or "bmap" or "set" or "bset" or "hset" };
-    bool IsKept(string type) => IsMap(type) || IsSet(type);
+    bool CollectionTypeNode(Node? type) => type is { Kind: "Type", Text: "map" or "hmap" or "bmap" or "set" or "bset" or "hset" }
+      || (type is { Kind: "Type", Children.Count: 0 } && CustomMapTypes(type.Text!) != null);   // a custom map (spec 6.9)
+    bool IsKept(string type) => IsMap(type) || IsSet(type) || CustomMapTypes(type) != null;
     if (target.Kind == "Member") {
       return classes.Values.Any(cls => cls.Fields.Any(field => field.Name == target.Text && IsKept(field.Type)));
     }

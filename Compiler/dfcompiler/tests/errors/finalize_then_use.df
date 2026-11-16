@@ -1,0 +1,6 @@
+// using a variable after its finalizer in the same block is a compile error, as after a move (spec 12.4)
+import Root
+class Dog { public string name = "rex" }
+Dog d = Dog()
+d is atEnd.
+Console.log(d.name)

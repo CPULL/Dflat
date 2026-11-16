@@ -1,0 +1,20 @@
+// Lambda lifetimes (spec 13.3.4): a borrowing lambda can be assigned to a local declared after everything it borrows, in the same block
+// or an inner one, also through another variable that holds it
+import Root
+fun run() {
+  i32 count = 1
+  string word = "hi"
+  fun() show
+  show = () { Console.log($"{word} {count}") }
+  show()
+  count = 2
+  if count > 1 {
+    fun() inner
+    inner = () { Console.log($"inner {word}") }
+    inner()
+    fun() again = show
+    again = inner
+    again()
+  }
+}
+run()

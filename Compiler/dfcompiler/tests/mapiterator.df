@@ -1,0 +1,23 @@
+// map.getIterator() and hmap.getIterator(): MapIterator<K, V>, next() gives (key, value, isValid) (spec 6.7)
+import Root
+map<string, i32> ages = ["bob": 30, "al": 25]
+var it = ages.getIterator()
+var e = it.next()
+while e.isValid {
+  Console.log($"{e.key} {e.value}")
+  e = it.next()
+}
+it is atEnd.
+hmap<i32, string> names = [1: "one"]
+var hi = names.getIterator()
+var h = hi.next()
+Console.log($"{h.key} {h.value} {h.isValid}")
+// a read-only map can be walked: getIterator() is unrestricted
+fun show(map<string, i32> m) {
+  var walk = m.getIterator()
+  var first = walk.next()
+  Console.log($"first {first.key} {first.value}")
+}
+show(ages)
+ages.add("cy", 1)
+Console.log(ages.len)

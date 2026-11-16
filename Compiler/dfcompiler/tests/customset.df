@@ -1,0 +1,135 @@
+// SetCollection<Item> and SetIterator<Item> (spec 6.7.3): a custom set written in Dflat, and getIterator() on set and hset
+import Root
+
+// the small numbers below a limit that are multiples of a stride: each item once
+public class Multiples(i32 stride, i32 limit) : SetCollection<i32> {
+  replace fun uns get_len() { (uns)((limit - 1) / stride + 1) }
+  replace fun bool has(i32 value) { value >= 0 && value < limit && value % stride == 0 }
+  replace fun clear() { }
+  replace fun ->SetIterator<i32> getIterator() {
+    return MultiplesIterator(stride, limit)
+  }
+}
+
+public class MultiplesIterator(i32 stride, i32 limit) : SetIterator<i32> {
+  i32 cursor = 0
+
+  replace fun (i32 value, bool isValid) next() {
+    if cursor >= limit {
+      return (0, false)
+    }
+    i32 item = cursor
+    cursor += stride
+    return (item, true)
+  }
+}
+
+Multiples threes = Multiples(3, 10)
+Console.log($"len {threes.len} has 6 {threes.has(6)} has 7 {threes.has(7)}")
+for i32 n in threes {
+  Console.log(n)
+}
+
+// the iterator of a set: sorted, read-only items
+set<string> words = ["pear", "apple", "fig"]
+var it = words.getIterator()
+var s = it.next()
+while s.isValid {
+  Console.log(s.value)
+  s = it.next()
+}
+Console.log($"after the end: {it.next().isValid}")
+
+// the set is lent to its iterator until the iterator ends (errors/setiter_open.df)
+it is atEnd.
+words.add("kiwi")
+Console.log(words.len)
+
+// a set with the null item: the null comes first
+set<i32?> maybe = [5, null, 1]
+var mi = maybe.getIterator()
+var m = mi.next()
+while m.isValid {
+  Console.log(m.value)
+  m = mi.next()
+}
+mi is atEnd.
+
+// hset: the order of the table, so the items are summed
+hset<i64> numbers = [10, 20, 30, 40]
+var hi = numbers.getIterator()
+i64 total = 0
+uns count = 0
+var h = hi.next()
+while h.isValid {
+  total += h.value
+  count += 1
+  h = hi.next()
+}
+Console.log($"{count} items, total {total}")
+hi is atEnd.
+
+// an empty set
+set<u8> nothing = []
+var ni = nothing.getIterator()
+Console.log(ni.next().isValid)
+
+// the other kinds of items: strings in an hset, tuples, objects
+hset<string> tags = ["x"]
+var ti = tags.getIterator()
+Console.log(ti.next().value)
+ti is atEnd.
+
+set<(i32, string)> pairs = [(2, "b"), (1, "a")]
+var pi = pairs.getIterator()
+var p = pi.next()
+while p.isValid {
+  Console.log($"{p.value.0} {p.value.1}")
+  p = pi.next()
+}
+pi is atEnd.
+
+public class Tag(string name) : Keyable { public string name }
+hset<Tag> objects = []
+objects.add(Tag("only"))
+var oi = objects.getIterator()
+var o = oi.next()
+Console.log(o.value.name)
+oi is atEnd.
+
+// a generic custom set over a vec, with an iterator of its own
+public class Bag<Item> : SetCollection<Item> {
+  public vec<Item> items = []
+  replace fun uns get_len() { items.len }
+  replace fun bool has(Item value) { items.has(value) }
+  replace fun clear() { }
+  public fun put(Item value) {
+    if !items.has(value) {
+      items.add(value)
+    }
+  }
+  replace fun ->SetIterator<Item> getIterator() {
+    return BagIterator<Item>(this)
+  }
+}
+
+public class BagIterator<Item>(Bag<Item> bag as parent) : SetIterator<Item> {
+  uns cursor = 0
+  replace fun (Item value, bool isValid) next() {
+    Item none
+    if cursor >= bag.len {
+      return (none, false)
+    }
+    Item item = bag.items[cursor]
+    cursor += 1
+    return (item, true)
+  }
+}
+
+Bag<string> bag = Bag<string>()
+bag.put("one")
+bag.put("two")
+bag.put("one")
+for string word in bag {
+  Console.log(word)
+}

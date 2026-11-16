@@ -68,7 +68,7 @@ public sealed partial class CodeGen {
       return true;
     }
     return AllTraits(cls).Any(trait => trait.Name is "Collection" or "Iterator"
-      || (classInstanceArgs.TryGetValue(trait.Name, out var copy) && copy.Template.Name is "Collection" or "IndexIterator"));
+      || (classInstanceArgs.TryGetValue(trait.Name, out var copy) && copy.Template.Name is "Collection" or "IndexIterator" or "SetIterator"));
   }
 
   // the override of get_hash() that a class uses: its own or the nearest one of its parents

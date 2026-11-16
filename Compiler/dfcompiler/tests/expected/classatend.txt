@@ -1,0 +1,12 @@
+Base(string) body
+scope ends
+Child() fragment
+Child end
+Base(string) fragment
+Base end
+trait Tagged end
+Named fragment x!
+trait Named end x
+trait Root2 end
+done
+---- exit code 0 ----

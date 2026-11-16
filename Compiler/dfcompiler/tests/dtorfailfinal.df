@@ -1,0 +1,15 @@
+// x is atEnd. with a destructor that throws: the object is released completely, then the panic (spec 11.4)
+import Root
+class Part(string name) {
+} atEnd {
+  Console.log($"Part {name} end")
+}
+class Thrower {
+  Part inner = Part("inner")
+} atEnd {
+  throw Exception("boom")
+}
+Thrower t = Thrower()
+Part other = Part("other")
+t is atEnd.
+Console.log("not reached")

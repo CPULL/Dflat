@@ -1,0 +1,10 @@
+// a variable of an outer block outlives the locals of an inner block: the lambda that borrows them cannot be kept in it (spec 13.3.4)
+import Root
+fun run() {
+  fun() keep
+  if true {
+    i32 n = 1
+    keep = () { Console.log(n) }
+  }
+}
+run()

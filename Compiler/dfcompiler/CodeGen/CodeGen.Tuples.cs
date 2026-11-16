@@ -33,6 +33,10 @@ public sealed partial class CodeGen {
         }
         elems.Add((value.Type, null));
       }
+      if (n.Text?.StartsWith("group:") == true && n.Text[6..].Split(',') is var names && names.Length == elems.Count) {
+        // a field group read as a value: the tuple has the names of its fields (spec 11.1.4.1)
+        elems = elems.Select((elem, index) => (elem.Type, (string?)names[index])).ToList();
+      }
     }
     string tupleType = MakeTuple(elems);
     var declarations = new StringBuilder();

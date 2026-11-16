@@ -1,0 +1,1 @@
+custommap_missing.df(3): error: Half implements MapCollection: it writes set_key (read_key(Key k) for c[k], set_key(Key k, Value value) for c[k] = v, move_out(Key k) for ->c[k], spec 6.7.2)

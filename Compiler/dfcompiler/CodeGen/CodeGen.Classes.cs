@@ -945,7 +945,7 @@ public sealed partial class CodeGen {
     var fragment = trailing.Children[0];
     var body = member.Children.FirstOrDefault(child => child.Kind == "Block");
     int number = cls.Fragments.Count;
-    string Hidden(string name) => $"__f{number}_{name}";
+    string Hidden(string name) => FragmentField(cls, number, name);
     var used = new HashSet<string>();
     CollectNames(fragment, used);
     var renames = new Dictionary<string, string>();
@@ -1014,27 +1014,55 @@ public sealed partial class CodeGen {
     }
     RenameToFields(fragment, renames);
 
-    if (FindField(cls, "__fseq") == null) {
-      AddHiddenField(cls, "__fseq", "i32", member);
+    string seq = FragmentSeq(cls);
+    if (FindField(cls, seq) == null) {
+      AddHiddenField(cls, seq, "i32", member);
     }
     AddHiddenField(cls, Hidden("at"), "i32", member);
     Node Field(string name) => Synthetic("Member", member, name).Add(Synthetic("Name", member, "this"));
-    statements.Insert(0, Assignment("__fseq", Synthetic("Binary", member, "+").Add(Field("__fseq")).Add(Synthetic("Int", member, "1")), member, false));
-    statements.Insert(1, Assignment(Hidden("at"), Field("__fseq"), member, false));
+    statements.Insert(0, Assignment(seq, Synthetic("Binary", member, "+").Add(Field(seq)).Add(Synthetic("Int", member, "1")), member, false));
+    statements.Insert(1, Assignment(Hidden("at"), Field(seq), member, false));
     cls.Fragments.Add(fragment);
     return statements;
   }
 
-  // while __fseq > 0 { if __f0_at == __fseq { fragment 0 } ... __fseq = __fseq - 1 }: the fragments in reverse order of registration
+  // the hidden fields of the fragments carry the name of their class or trait, so a class, its parents and its traits do not mix them up
+  static string FragmentTag(ClassInfo owner) => new string(owner.Name.Select(c => char.IsLetterOrDigit(c) ? c : '_').ToArray());
+  static string FragmentField(ClassInfo owner, int number, string name) => $"__f_{FragmentTag(owner)}_{number}_{name}";
+  static string FragmentSeq(ClassInfo owner) => $"__fseq_{FragmentTag(owner)}";
+
+  // while seq > 0 { if f0_at == seq { fragment 0 } ... seq = seq - 1 }: the fragments in reverse order of registration. Each fragment is a
+  // function of its own (__frag<n>), so one that throws does not stop the others (spec 11.4)
   Node FragmentRunner(ClassInfo cls, Node at) {
     Node Field(string name) => Synthetic("Member", at, name).Add(Synthetic("Name", at, "this"));
+    string seq = FragmentSeq(cls);
     var loop = Synthetic("Block", at);
     for (int number = 0; number < cls.Fragments.Count; number++) {
-      var test = Synthetic("Binary", at, "==").Add(Field($"__f{number}_at")).Add(Field("__fseq"));
-      loop.Add(Synthetic("If", at).Add(test).Add(cls.Fragments[number]));
+      var test = Synthetic("Binary", at, "==").Add(Field(FragmentField(cls, number, "at"))).Add(Field(seq));
+      var run = FragmentFun(cls, number, cls.Fragments[number], at);
+      loop.Add(Synthetic("If", at).Add(test).Add(Synthetic("Block", at).Add(Synthetic("RawC", at, $"{run.CName}(self);"))));
     }
-    loop.Add(Assignment("__fseq", Synthetic("Binary", at, "-").Add(Field("__fseq")).Add(Synthetic("Int", at, "1")), at, false));
-    return Synthetic("While", at).Add(Synthetic("Binary", at, ">").Add(Field("__fseq")).Add(Synthetic("Int", at, "0"))).Add(loop);
+    loop.Add(Assignment(seq, Synthetic("Binary", at, "-").Add(Field(seq)).Add(Synthetic("Int", at, "1")), at, false));
+    return Synthetic("While", at).Add(Synthetic("Binary", at, ">").Add(Field(seq)).Add(Synthetic("Int", at, "0"))).Add(loop);
+  }
+
+  // a destructor fragment as a function of the object: a destructor, so what it lets out waits for the end of the cleanup (spec 11.4)
+  FunSig FragmentFun(ClassInfo owner, int number, Node fragment, Node at) {
+    var node = Synthetic("Fun", at, $"__frag{number}").Add(Synthetic("Params", at)).Add(fragment);
+    if (owner.IsTrait) {
+      var traitFun = RegisterFun(node, null, owner)!;
+      traitFun.Class = owner;
+      traitFun.IsDtor = true;
+      traitFun.Visibility = Vis.Private;
+      return traitFun;
+    }
+    var f = new FunSig($"{owner.Name}.__frag{number}", "void", new List<ParamSig>(), node, null) {
+      Class = owner,
+      IsDtor = true,
+      Visibility = Vis.Private
+    };
+    funs[f.Name] = new List<FunSig> { f };
+    return f;
   }
 
   static void AddHiddenField(ClassInfo cls, string name, string type, Node at) {

@@ -1,0 +1,9 @@
+// only the code on the right of -> calls a hidden native (spec 22)
+Name: dfcalc
+Namespace: tests.dfcalc
+LibName, win-*, static: dfcalc.lib
+LibName, linux-*, static: libdfcalc.a
+
+native i32 dfc_sum(*i32 values, u64 count)
+public fun i32 total sum(arr<i32> values) -> total = dfc_sum(pointer.to(values), values.len)
+public fun i32 sumTwo(arr<i32> values) { dfc_sum(pointer.to(values), 2) }

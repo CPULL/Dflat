@@ -1,0 +1,3 @@
+// import lib of a library with no .dflib in the project folder (spec 22)
+namespace app
+import lib nothere

@@ -45,6 +45,9 @@ public sealed class Parser {
     toks = tokens;
   }
 
+  // a .dflib (spec 22): native declarations, named results and the -> mappings of the wrapper functions are allowed
+  public bool DflibMode { get; set; }
+
   // "(line): warning L3: message"
   public List<string> Warnings { get; } = new();
 
@@ -376,6 +379,10 @@ public sealed class Parser {
 
   Node ParseStatementCore(string? ownerName, bool caseBody) {
     classMember = ownerName != null;   // a field of a class can have accessor blocks (spec 11.1.4)
+    if (DflibMode && ownerName == null && (Peek.Kind == TokenKind.Ident && Peek.Text == "native"
+        || IsOp("[") && PeekAt(1).Kind == TokenKind.Ident && PeekAt(2).Is("]") && PeekAt(3).Kind == TokenKind.Ident && PeekAt(3).Text == "native")) {
+      return ParseNative();
+    }
     if (Peek.Kind == TokenKind.Ident && Peek.Text == "unsafe" && PeekAt(1).Is("{")) {
       var word = Next();
       return new Node("Unsafe", word).Add(ParseBlock(ownerName));   // unsafe { ... } (spec 12.1)
@@ -547,9 +554,58 @@ public sealed class Parser {
     return new Node(name == "local" ? "NamespaceLocal" : "Namespace", t, name == "local" ? null : name);
   }
 
+  // [stdcall] native i32 MessageBoxW(Window owner, *u16 text) (spec 22): a C function of the library, no body; with no result type it returns
+  // nothing (native CoTaskMemFree(CoMem p)). It is a Fun with the modifier extern and a Native child (the calling convention, if written)
+  Node ParseNative() {
+    string? convention = null;
+    if (AcceptOp("[")) {
+      convention = ExpectIdent().Text;
+      ExpectOp("]");
+    }
+    var word = Next();
+    var rets = new Node("Returns", word);
+    if (!(Peek.Kind == TokenKind.Ident && PeekAt(1).Is("("))) {
+      rets.Add(ParseType(false));
+    }
+    var name = ExpectIdent();
+    var node = new Node("Fun", name, name.Text);
+    node.Add(new Node("Mods", word, "extern"));
+    if (rets.Children.Count > 0) {
+      node.Add(rets);
+    }
+    node.Add(ParseParams());
+    node.Add(new Node("NoBody", name));
+    node.Add(new Node("Native", word, convention));
+    EndStatement(false);
+    return node;
+  }
+
+  // import lib zlib | import lib static zlib 2.0beta (spec 22): a C library, its .dflib and its binaries
+  Node ParseImportLib(Token t) {
+    Next();   // lib
+    var node = new Node("ImportLib", t);
+    if (Peek.Line == t.Line && (IsKw("static") || Peek.Kind == TokenKind.Ident && Peek.Text == "dynamic") && PeekAt(1).Kind is TokenKind.Ident or TokenKind.Keyword
+        && PeekAt(1).Line == t.Line) {
+      node.Add(new Node("LibKind", Peek, Next().Text));
+    }
+    node.Text = ExpectIdent().Text;
+    var version = new System.Text.StringBuilder();
+    while (!IsNewline && !AtEnd && !IsOp(";") && Peek.Line == t.Line) {
+      version.Append(Next().Text);   // 1.2.3, 2.0beta: the tokens as written, without spaces
+    }
+    if (version.Length > 0) {
+      node.Add(new Node("LibVersion", t, version.ToString()));
+    }
+    EndStatement(false);
+    return node;
+  }
+
   // import a.b.c   |   import Root.Console   |   import gfx, Root.Math (spec 16.2): one Import node per path
   Node ParseImport() {
     var t = Next();
+    if (Peek.Kind == TokenKind.Ident && Peek.Text == "lib" && PeekAt(1).Line == t.Line && PeekAt(1).Kind is TokenKind.Ident or TokenKind.Keyword) {
+      return ParseImportLib(t);
+    }
     var imports = new List<Node> { new Node("Import", t, ParseQualifiedName()) };
     while (AcceptOp(",")) {
       imports.Add(new Node("Import", t, ParseQualifiedName()));
@@ -1293,6 +1349,7 @@ public sealed class Parser {
   // fun [type] name = lambda
   Node ParseFun() {
     var t = Next();
+    var resultNames = new List<string>();
     var rets = new Node("Returns", t);
     var marks = new List<string>();   // fun ->Dog make() gives "g0", fun &Dog at(uns i) lends read/write "w0" (spec 13.1.1)
     while (!(Peek.Kind == TokenKind.Ident && (PeekAt(1).Is("(") || PeekAt(1).Is("=") || IsGenericCallAhead(0)))
@@ -1320,6 +1377,16 @@ public sealed class Parser {
         marks.Add((readWrite ? "r" : "c") + rets.Children.Count);
       }
       rets.Add(ParseType(false));
+      if (!DflibMode && Peek.Kind == TokenKind.Ident && (PeekAt(1).Is(",") && PeekAt(2).Kind is TokenKind.Ident or TokenKind.Keyword && PeekAt(3).Kind == TokenKind.Ident
+          || PeekAt(1).Kind == TokenKind.Ident && PeekAt(2).Is("("))) {
+        throw Error("named results are written only in the mapping of a .dflib: fun T name f(...) -> ... (spec 22)");
+      }
+      // a .dflib: fun string v version(), fun ZResult res, uns written compress(...): the results have names (spec 22)
+      if (DflibMode && Peek.Kind == TokenKind.Ident && (PeekAt(1).Is(",") || PeekAt(1).Kind == TokenKind.Ident && (PeekAt(2).Is("(") || PeekAt(2).Is("<")))) {
+        resultNames.Add(Next().Text);
+      } else if (DflibMode) {
+        resultNames.Add("");
+      }
       if (!AcceptOp(",")) {
         break;
       }
@@ -1351,6 +1418,28 @@ public sealed class Parser {
     node.Add(ParseParams());
     int save = pos;
     SkipNewlines();
+    if (DflibMode && IsOp("->")) {
+      // fun string v version() -> v = string(zlibVersion())   |   -> { ... }: the mapping of a wrapper function (spec 22)
+      var arrow = Next();
+      if (resultNames.Any(n => n != "")) {
+        if (resultNames.Any(n => n == "")) {
+          throw ErrorAt("a mapping names every result or none: fun i32 res, uns written f(...)", arrow);
+        }
+        node.Add(new Node("ResultNames", arrow, string.Join(",", resultNames)));
+      }
+      node.Add(new Node("Mapping", arrow));
+      if (IsOp("{")) {
+        node.Add(ParseBlock());
+      } else {
+        var block = new Node("Block", arrow);
+        block.Add(ParseStatement());
+        node.Add(block);
+      }
+      return node;
+    }
+    if (resultNames.Any(n => n != "")) {
+      throw Error("named results are written only in the mapping of a .dflib: fun T name f(...) -> ... (spec 22)");
+    }
     if (Peek.Kind == TokenKind.Ident && Peek.Text == "where") {
       node.Add(ParseWhere());   // inline constraints and 'where' can be mixed (spec 11.3.1)
       save = pos;

@@ -1,0 +1,1 @@
+finalize_then_use.df(6): error: 'd' was ended with d is atEnd.: it cannot be used until it gets a new value (spec 12.4)

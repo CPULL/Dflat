@@ -15,6 +15,17 @@ static class SourceMap {
 
   public static int Base(int index) => index * Stride;
 
+  // a new compile in the same process (--check-each): nothing of the previous program stays
+  public static void Reset() {
+    files.Clear();
+    libraries.Clear();
+    libraryRoots.Clear();
+    namespaces.Clear();
+    hiddenNames.Clear();
+    hiddenPattern = null;
+    declNamespaces.Clear();
+  }
+
   // the library each file belongs to (its folder name), for the files of the libraries only; the program and the stdlib have none
   static readonly Dictionary<int, string> libraries = new();
   static readonly HashSet<int> libraryRoots = new();
@@ -165,6 +176,7 @@ sealed partial class SourceLoader {
     string rootNs = RootNamespace(rootFile, "the root file");
     rootFile.Namespace = rootNs;
     string rootFolder = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(rootPath))!;
+    projectFolder = projectFile != null ? System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(projectFile))! : rootFolder;   // where the .dflib files are (spec 22)
     roots.Add(new SourceRoot(rootFolder, rootNs, "the program"));
     roots.Add(new SourceRoot("", "root", "the standard library"));
 
@@ -303,6 +315,9 @@ sealed partial class SourceLoader {
       return;
     }
     CheckFile(file);
+    foreach (var importLib in file.Tree.Children.Where(statement => statement.Kind == "ImportLib").ToList()) {
+      ImportLibrary(importLib, multiFile);   // import lib zlib: its .dflib, and an import of its namespace (spec 22, Dflib.cs)
+    }
     foreach (var import in file.Tree.Children.Where(statement => statement.Kind == "Import")) {
       string path = import.Text!;
       // a path that is not a folder may name one declaration of the namespace above it (import gfx.Context, spec 16.2): its folder is loaded
@@ -332,7 +347,7 @@ sealed partial class SourceLoader {
         throw new CompileException("a global can be declared only in the root file (program.df, main.df or lib.df) (spec 18.1)", statement.Line);
       }
       bool declaration = statement.Kind is "Fun" or "Alias" or "Enum" or "Class" or "Trait" or "GenericSet" or "Struct"
-        or "Namespace" or "NamespaceLocal" or "Import" || IsConst(statement)
+        or "Namespace" or "NamespaceLocal" or "Import" or "ImportLib" || IsConst(statement)
         || statement.Kind == "Decl" && statement.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ').Contains("global") == true;   // a global of a library (spec 18.1)
       if (!isRoot && !declaration) {
         throw new CompileException("only the root file can have top-level code: this file can have only declarations", statement.Line);
@@ -354,6 +369,9 @@ sealed partial class SourceLoader {
   // quiet: a qualified name that may not be a namespace gives null instead of an error
   List<SourceFile>? Resolve(string name, int line, bool multiFile, bool quiet = false) {
     string lower = name.ToLowerInvariant();
+    if (libraryFiles.TryGetValue(lower, out var libraryFile)) {
+      return new List<SourceFile> { libraryFile };   // the namespace of an imported C library (spec 22)
+    }
     SourceRoot? best = null;
     foreach (var root in roots) {
       bool matches = root.Namespace == "" || lower == root.Namespace || lower.StartsWith(root.Namespace + ".");

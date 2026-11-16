@@ -1,0 +1,8 @@
+// the dynamic form of the test library (spec 22): the import library to link and the dll copied next to the program; one file on Linux
+Name: dfcalcd
+Namespace: tests.dfcalcd
+Convention: cdecl
+LibName, win-*, dynamic: dfcalcd.lib, dfcalcd.dll
+LibName, linux-*, dynamic: libdfcalcd.so
+
+native i32 dfc_add(i32 a, i32 b)

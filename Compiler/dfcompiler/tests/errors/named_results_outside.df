@@ -1,0 +1,5 @@
+// named results are written only in the mapping of a .dflib (spec 22)
+import Root
+fun string v name() {
+  v = "x"
+}

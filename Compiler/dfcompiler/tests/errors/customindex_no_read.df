@@ -1,0 +1,13 @@
+// a custom collection without read_pos has no c[k] (spec 6.7, 6.9)
+import Root
+public class Bare : IndexCollection<i32> {
+  replace fun uns get_len() { 0 }
+  replace fun bool has(i32 value) { false }
+  replace fun clear() { }
+  replace fun ->IndexIterator<i32> getIterator() { return BareIterator() }
+}
+public class BareIterator : IndexIterator<i32> {
+  replace fun (i32 value, bool isValid) next() { return (0, false) }
+}
+Bare b = Bare()
+Console.log(b[0])

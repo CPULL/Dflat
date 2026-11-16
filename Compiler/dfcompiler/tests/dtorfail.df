@@ -1,0 +1,39 @@
+// A destructor that throws (spec 11.4): the cleanup goes on (the other blocks, what the object owns, the other objects of the scope),
+// then the program panics with the first exception
+import Root
+
+class Part(string name) {
+} atEnd {
+  Console.log($"Part {name} end")
+}
+
+trait Logged {
+} atEnd {
+  Console.log("trait Logged end")
+}
+
+class Thrower : Logged {
+  Part inner = Part("inner")
+  public Thrower() {
+  } atEnd {
+    Console.log("fragment throws")
+    throw Exception("from the fragment")
+  }
+} atEnd {
+  Console.log("Thrower end throws")
+  throw Exception("from the class atEnd")
+}
+
+class Quiet(string name) {
+} atEnd {
+  Console.log($"Quiet {name} end")
+}
+
+fun i32 work() {
+  Quiet first = Quiet("first")
+  Thrower t = Thrower()
+  Quiet last = Quiet("last")
+  return 5
+}
+Console.log($"work {work()}")
+Console.log("not reached")

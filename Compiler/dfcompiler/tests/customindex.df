@@ -1,0 +1,79 @@
+// Custom collections (spec 6.7, 6.9): c[k] calls read_pos, c[k] = v and c[k] += v call set_pos, c[a..b], c[..b], c[a..] and c[a..=b] call
+// get_view (a missing bound is null); View<C> is the class get_view returns; loops over the collection and over its views
+import Root
+
+// a ring of 4 numbers: c[i] wraps around
+public class Ring : IndexCollection<i32> {
+  arr<i32> items = arr<i32>[4]
+
+  replace fun uns get_len() { 4 }
+  replace fun bool has(i32 value) { items.has(value) }
+  replace fun clear() { items.fill(0) }
+  replace fun ->IndexIterator<i32> getIterator() {
+    return RingIterator(this)
+  }
+  unrestricted fun i32 read_pos(uns k) { items[k % 4] }
+  public fun set_pos(uns k, i32 value) { items[k % 4] = value }
+  public fun RingView get_view(uns? start, uns? end) {
+    uns from = start ?? 0
+    uns to = end ?? 4
+    return RingView(this, from, to)
+  }
+}
+
+public class RingIterator(Ring ring as parent) : IndexIterator<i32> {
+  uns cursor = 0
+  replace fun (i32 value, bool isValid) next() {
+    if cursor >= 4 {
+      return (0, false)
+    }
+    i32 item = ring[cursor]
+    cursor += 1
+    return (item, true)
+  }
+}
+
+// the view: a start and an end on its ring, read-only
+public class RingView(Ring ring as parent, uns from, uns to) : IndexCollection<i32> {
+  replace fun uns get_len() { to - from }
+  replace fun bool has(i32 value) {
+    for uns i in from..to {
+      if ring[i] == value { return true }
+    }
+    return false
+  }
+  replace fun clear() { }
+  replace fun ->IndexIterator<i32> getIterator() {
+    return RingViewIterator(ring, from, to)
+  }
+  unrestricted fun i32 read_pos(uns k) { ring[from + k] }
+}
+
+public class RingViewIterator(Ring ring as parent, uns cursor, uns to) : IndexIterator<i32> {
+  replace fun (i32 value, bool isValid) next() {
+    if cursor >= to {
+      return (0, false)
+    }
+    i32 item = ring[cursor]
+    cursor += 1
+    return (item, true)
+  }
+}
+
+Ring r = Ring()
+r[0] = 10
+r[1] = 20
+r[2] = 30
+r[7] = 40
+r[1] += 5
+Console.log($"{r[0]} {r[1]} {r[2]} {r[3]} wraps: {r[5]}")
+for i32 n in r {
+  Console.log(n)
+}
+View<Ring> middle = r[1..3]
+Console.log($"view len {middle.len}, first {middle[0]}, has 30 {middle.has(30)}, has 10 {middle.has(10)}")
+for i32 n in r[2..] {
+  Console.log($"tail {n}")
+}
+var head = r[..=1]
+Console.log($"head len {head.len}")

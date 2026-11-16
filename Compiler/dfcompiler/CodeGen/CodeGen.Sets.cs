@@ -138,6 +138,35 @@ public sealed partial class CodeGen {
     return name;
   }
 
+  bool IsSetIterator(string type) => vecPrelude && classInstanceArgs.TryGetValue(type, out var instance) && instance.Template.Name is "setIterator" or "hsetIterator" or "mapIterator" or "hmapIterator";
+
+  // a string read under a cursor is the collection's own: the iterator gives a copy (an object stays lent)
+  static Expr OwnCopy(Expr value) => value.Type == "string" ? new Expr($"df_str_dup({value.Code})", "string", true) : value;
+
+  // the cur_ members of setIterator and hsetIterator (VecPrelude, HmapPrelude): the cursor of the tree is C memory kept in the u64 field cursor,
+  // made at the first cur_more() and freed by cur_close() in the atEnd (spec 6.7.3)
+  Expr SetIteratorMember(Expr iterator, string name, Node at) {
+    var cls = ObjInfo(iterator.Type);
+    string setType = cls.ParentField!.Type;
+    NeedMapChunk(setType);
+    string self = iterator.Code;
+    string cursor = $"{self}->{FindField(cls, "cursor")!.CName}";
+    string set = $"{self}->{cls.ParentField.CName}";
+    bool hashed = IsHmap(setType);
+    string curC = hashed ? "df_ht_cur" : "df_bt_cur";
+    string place = $"(({curC}*)(uintptr_t){cursor})";
+    string tree = MapTree(set, setType);
+    return name switch {
+      "cur_more" => new Expr($"({{ if ({cursor} == 0) {{ {curC}* df_c = ({curC}*)malloc(sizeof({curC})); *df_c = {(hashed ? "df_ht_begin" : "df_bt_begin")}({tree}); "
+        + $"{cursor} = (uint64_t)(uintptr_t)df_c; }} {(hashed ? "df_ht_valid" : "df_bt_valid")}({place}); }})", "bool"),
+      "cur_value" => OwnCopy(new Expr(CursorKey(setType, $"(*{place})"), MapKey(setType))),   // the item of a set, the key of a map
+      "cur_entry" => OwnCopy(UnboxRead(new Expr(ReadSlot(setType, CursorValue(set, setType, $"(*{place})")), MapValue(setType)))),   // the value of a map entry
+      "cur_advance" => new Expr(hashed ? $"df_ht_step({tree}, {place})" : $"df_bt_step({place})", "void"),
+      "cur_close" => new Expr($"({{ free((void*)(uintptr_t){cursor}); {cursor} = 0; }})", "void"),
+      _ => throw Error($"internal error: no set iterator member {name}", at)
+    };
+  }
+
   // the tree_ members called by the methods of the classes set and hset: the receiver is the object of the method
   Expr SetTreeMember(Expr set, string name, List<Node> args, Scope scope, Node at) {
     NeedMapChunk(set.Type);

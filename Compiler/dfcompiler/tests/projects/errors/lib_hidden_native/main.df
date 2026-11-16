@@ -1,0 +1,6 @@
+// a native with pointers, or with a fun of the same name, is seen only by the mappings (spec 22)
+namespace app
+import lib dfcalc
+import Root
+arr<i32> v = [1, 2]
+Console.log(dfc_sum(pointer.to(v), 2))

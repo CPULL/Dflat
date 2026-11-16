@@ -1,0 +1,22 @@
+len 4 has 6 true has 7 false
+0
+3
+6
+9
+apple
+fig
+pear
+after the end: false
+4
+null
+1
+5
+4 items, total 100
+false
+x
+1 a
+2 b
+only
+one
+two
+---- exit code 0 ----

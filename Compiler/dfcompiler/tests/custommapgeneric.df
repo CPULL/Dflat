@@ -1,0 +1,65 @@
+// A generic custom map whose set_key takes the key and the value (->): the default members give them copies where needed (spec 6.7.2)
+import Root
+
+// a generic map kept as two vectors in insertion order; set_key takes the key and the value (->)
+public class Pairs<K, V> : MapCollection<K, V> {
+  public vec<K> keyList = []
+  public vec<V> valueList = []
+
+  replace fun uns get_len() { keyList.len }
+  replace fun bool has(V value) { valueList.has(value) }
+  replace fun clear() { }
+  replace fun bool hasKey(K key) { keyList.has(key) }
+  unrestricted fun V read_key(K key) { valueList[keyList.indexOf(key)] }
+  public fun set_key(->K key, ->V value) {
+    if keyList.has(key) {
+      valueList[keyList.indexOf(key)] = value
+      return
+    }
+    keyList.add(->key)
+    valueList.add(->value)
+  }
+  public fun V move_out(K key) {
+    uns at = keyList.indexOf(key)
+    V gone = valueList[at]
+    keyList.removeAt(at)
+    valueList.removeAt(at)
+    return gone
+  }
+  replace fun ->MapIterator<K, V> getIterator() {
+    return PairsIterator<K, V>(this)
+  }
+}
+
+public class PairsIterator<K, V>(Pairs<K, V> pairs as parent) : MapIterator<K, V> {
+  uns cursor = 0
+  replace fun (K key, V value, bool isValid) next() {
+    K noKey
+    V noValue
+    if cursor >= pairs.len {
+      return (noKey, noValue, false)
+    }
+    uns at = cursor
+    cursor += 1
+    return (pairs.keyList[at], pairs.valueList[at], true)
+  }
+}
+
+Pairs<string, i32> scores = Pairs<string, i32>()
+scores["bob"] = 3
+scores["al"] = 5
+scores.add("cy", 7)
+scores["bob"] += 10
+Console.log($"{scores.len} items, keyOf 5 = {scores.keyOf(5)}")
+for (string name, i32 score) in scores {
+  Console.log($"{name}: {score}")
+}
+scores.swap("al", "zed")
+for string name in scores.keys {
+  Console.log(name)
+}
+Pairs<string, i32> more = Pairs<string, i32>()
+more["x"] = 1
+scores += more
+scores -= "cy"
+Console.log($"{scores.len} items, has x {scores.hasKey("x")}, has cy {scores.hasKey("cy")}")

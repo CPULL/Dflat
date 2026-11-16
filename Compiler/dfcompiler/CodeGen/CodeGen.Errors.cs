@@ -437,6 +437,9 @@ public sealed partial class CodeGen {
       for (int step = frame.AtEnds.Count; step >= 1; step--) {
         EmitAtEnd(frame, step, false, sb, indent);
       }
+      if (frame.AtEnds.Count > 0) {
+        sb.Append($"{pad}df_dtor_check();\n");   // a destructor that failed while the scope ended: the panic, now that all is released (spec 11.4)
+      }
     }
     bool hasTail = frame.Catches.Count > 0 || (!isLoop && frame.AtEnds.Count > 0);
     if (hasTail) {
@@ -630,6 +633,7 @@ public sealed partial class CodeGen {
     }
     // reached with an error of its own (an atEnd that failed at the normal end) it keeps that error
     sb.Append($"{pad}{frame.ExcLabel(0)}: if (df_err == NULL) {{ df_err = {frame.PendingVar}; }} {frame.PendingVar} = NULL;\n");
+    sb.Append($"{pad}df_dtor_check();\n");   // spec 11.4
     sb.Append($"{pad}goto {frame.OuterHandler};\n");
   }
 
@@ -802,6 +806,7 @@ public sealed partial class CodeGen {
       }
       frame = frame.Parent;
     }
+    sb.Append($"{pad}df_dtor_check();\n");   // spec 11.4
     if (fn!.IsMain) {
       sb.Append($"{pad}return (int){fn.RetVar};\n");
     } else if (fn.PairOf != null) {

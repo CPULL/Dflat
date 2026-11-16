@@ -1,0 +1,7 @@
+Name: dfcalc
+Namespace: tests.dfcalc20
+Version: 2.0
+LibName, win-*, static: dfcalc.lib
+LibName, linux-*, static: libdfcalc.a
+
+native i32 dfc_add(i32 a, i32 b)

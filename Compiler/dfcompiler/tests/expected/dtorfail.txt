@@ -1,0 +1,13 @@
+Quiet last end
+fragment throws
+Thrower end throws
+Part inner end
+trait Logged end
+Quiet first end
+from the fragment
+dtorfail.df (20) Thrower.__frag0()
+dtorfail.df (15) Thrower.__dtor()
+dtorfail.df (34) i32 work()
+dtorfail.df (38) Main()
+Panic -1000
+---- exit code -1000 ----

@@ -1,0 +1,8 @@
+// a borrowing lambda cannot be kept in a variable declared before what it borrows: the variable could outlive it (spec 13.3.4)
+import Root
+fun run() {
+  fun() show
+  i32 count = 1
+  show = () { Console.log(count) }
+}
+run()

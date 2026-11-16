@@ -1,0 +1,1 @@
+dfcalc.dflib(9): error: 'dfc_sum' is a native of a .dflib: only the code on the right of a -> mapping calls it (spec 22)

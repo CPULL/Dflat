@@ -1,0 +1,7 @@
+1 0 1 1
+11 20 2 3
+through the trait: 11 20 3
+1 8
+copy 1 8
+box at 3 4, area 10
+---- exit code 0 ----

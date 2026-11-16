@@ -26,8 +26,8 @@ trait IndexIterator<Item> : Iterator {
 // While it is above zero the size and the order of the collection cannot change (checkUnlocked)
 trait Collection<Item> {
   uns iteratorCounter
-  public fun uns get_len()
-  public fun bool has(Item value)
+  unrestricted fun uns get_len()
+  unrestricted fun bool has(Item value)
   public fun clear()
 
   fun acquireIterator() {
@@ -505,9 +505,120 @@ public class list<T> : IndexCollection<T> {
 
 // the key/value collections (spec 6.7.2); a map passes its values to Collection (has(v) searches the values)
 trait MapCollection<Key, Value> : Collection<Value> {
+  unrestricted fun bool hasKey(Key key)
+  unrestricted fun ->MapIterator<Key, Value> getIterator()
+    executeAfter {
+      acquireIterator()
+    }
+}
+
+// .keys and .values of a custom map (spec 6.7.2): views built on getIterator(), children of the map. While a view lives it holds an iterator of
+// the map (pin), so the map counts it as open (spec 6.4); a loop over the view asks the map for one more
+public class customMapKeys<C, K, V>(C collection as parent) {
+  MapIterator<K, V> pin = collection.getIterator()
+
+  public fun uns get_len() { collection.len }
+  public fun bool has(K key) { collection.hasKey(key) }
+  public fun customMapKeysIterator<K, V> getIterator() {
+    return customMapKeysIterator<K, V>(collection.getIterator())
+  }
+}
+
+public class customMapValues<C, K, V>(C collection as parent) {
+  MapIterator<K, V> pin = collection.getIterator()
+
+  public fun uns get_len() { collection.len }
+  public fun bool has(V value) { collection.has(value) }
+  public fun customMapValuesIterator<K, V> getIterator() {
+    return customMapValuesIterator<K, V>(collection.getIterator())
+  }
+}
+
+// the iterators of the views: one part of each entry of the map's own iterator
+public class customMapKeysIterator<K, V>(->MapIterator<K, V> entries) {
+  public fun (K value, bool isValid) next() {
+    K none
+    var entry = entries.next()
+    if !entry.isValid {
+      return (none, false)
+    }
+    K part = entry.key
+    return (part, true)
+  }
+}
+
+public class customMapValuesIterator<K, V>(->MapIterator<K, V> entries) {
+  public fun (V value, bool isValid) next() {
+    V none
+    var entry = entries.next()
+    if !entry.isValid {
+      return (none, false)
+    }
+    V part = entry.value
+    return (part, true)
+  }
+}
+
+// the key is always read-only; writableNext() (the value as a writable borrow, spec 6.7) waits for borrows inside tuples
+trait MapIterator<Key, Value> : Iterator {
+  public fun (Key key, Value value, bool isValid) next()
+}
+
+// the iterator of a map: a child of its map that keeps a cursor of the tree (spec 6.7, 6.7.2); the cursor is C memory made at
+// the first next() and freed by the atEnd (CodeGen.Sets.cs). writableNext() waits for borrows inside tuples
+public class mapIterator<K, V>(map<K, V> collection as parent) : MapIterator<K, V> {
+  u64 cursor
+
+  replace fun (K key, V value, bool isValid) next() {
+    K noKey
+    V noValue
+    if !this.cur_more() {
+      return (noKey, noValue, false)
+    }
+    K key = this.cur_value()
+    V value = this.cur_entry()
+    this.cur_advance()
+    return (key, value, true)
+  }
+} atEnd {
+  this.cur_close()
+  if collection != null {
+    collection.releaseIterator()
+  }
+}
+
+
+// the items of a set are read-only: no writableNext() (spec 6.7.3)
+trait SetIterator<Item> : Iterator {
+  public fun (Item value, bool isValid) next()
 }
 
 trait SetCollection<Item> : Collection<Item> {
+  public fun SetIterator<Item> getIterator()
+    executeAfter {
+      acquireIterator()
+    }
+}
+
+// the iterator of a set: a child of its set that keeps a cursor of the tree (spec 6.7.3, 6.8.4.1); the cursor is C memory made at the first next()
+// and freed by the atEnd (CodeGen.Sets.cs)
+public class setIterator<T>(set<T> collection as parent) : SetIterator<T> {
+  u64 cursor
+
+  replace fun (T value, bool isValid) next() {
+    T none
+    if !this.cur_more() {
+      return (none, false)
+    }
+    T item = this.cur_value()
+    this.cur_advance()
+    return (item, true)
+  }
+} atEnd {
+  this.cur_close()
+  if collection != null {
+    collection.releaseIterator()
+  }
 }
 
 // map<K, V> (spec 6.8.4): sorted by key, a B+ tree (spec 6.8.4.1). The methods check the rules (the counter of open iterators) and call the tree_
@@ -528,7 +639,13 @@ public class map<K, V> : MapCollection<K, V> {
     return this.tree_hasValue(value)
   }
 
-  public fun bool hasKey(K key) {
+  // the counter of open iterators comes from the executeAfter of MapCollection
+  replace fun ->MapIterator<K, V> getIterator() {
+    mapIterator<K, V> iterator = mapIterator<K, V>(this)
+    return ->iterator
+  }
+
+  replace fun bool hasKey(K key) {
     return this.tree_hasKey(key)
   }
 
@@ -683,6 +800,12 @@ public class set<T> : SetCollection<T> {
 
   replace fun bool has(T item) {
     return this.tree_has(item)
+  }
+
+  // the counter of open iterators comes from the executeAfter of SetCollection
+  replace fun SetIterator<T> getIterator() {
+    setIterator<T> iterator = setIterator<T>(this)
+    return ->iterator
   }
 
   // true when the item is new; an item already there is left as it is (spec 6.6)
@@ -1020,9 +1143,30 @@ public class set<T> : SetCollection<T> {
     return new Expr($"({{ {CType(array.Type)} {held} = {array.Code}; df_ait_open({held}.p); {UserCallCode(ctor, $"{ctor.CName}({held})")}; }})", name, true);
   }
 
-  // a class of the program that implements IndexCollection<T>: for x in c asks getIterator() once and calls next() until isValid is false (spec 6.12)
+  // a class of the program that implements IndexCollection<T>, SetCollection<T> or MapCollection<K, V>: for x in c asks getIterator() once and
+  // calls next() until isValid is false (spec 6.7, 6.9). The items of a map are its (key, value) entries
   string? CustomCollectionElem(string type) {
-    if (!vecPrelude || !classes.TryGetValue(type, out var cls) || IsVec(type)) {
+    if (CustomMapTypes(type) is (string key, string value)) {
+      return MakeTuple(new[] { (key, (string?)"key"), (value, (string?)"value") });
+    }
+    if (vecPrelude && classInstanceArgs.TryGetValue(type, out var view) && view.Template.Name is "customMapKeys" or "customMapValues") {
+      return view.Template.Name == "customMapKeys" ? view.Args[1] : view.Args[2];   // for k in m.keys, for v in m.values on a custom map
+    }
+    if (!vecPrelude || !classes.TryGetValue(type, out var cls) || IsVec(type) || IsSet(type)) {
+      return null;
+    }
+    foreach (var trait in AllTraits(cls)) {
+      if (classInstanceArgs.TryGetValue(trait.Name, out var copy) && copy.Template.Name is "IndexCollection" or "SetCollection") {
+        return copy.Args[0];
+      }
+    }
+    return null;
+  }
+
+  // a class of the program that implements IndexCollection<T> (spec 6.7.1, 6.9): its item type. c[k], c[k] = v and c[a..b] call its
+  // read_pos, set_pos and get_view (spec 6.7)
+  string? CustomIndexElem(string type) {
+    if (!vecPrelude || !classes.TryGetValue(type, out var cls) || IsVec(type) || IsList(type) || IsView(type)) {
       return null;
     }
     foreach (var trait in AllTraits(cls)) {
@@ -1032,6 +1176,32 @@ public class set<T> : SetCollection<T> {
     }
     return null;
   }
+
+  Expr CustomIndexCall(Expr collection, string name, List<Node> args, Scope scope, Node at, string written) {
+    string missing = $"{DisplayName(collection.Type)} has no {name}: a custom collection writes {written} for this operator (spec 6.7, 6.9)";
+    try {
+      return ObjectCall(collection, name, args, scope, at) ?? throw Error(missing, at);
+    } catch (CompileException e) when (e.Message.Contains($"has no function '{name}'")) {
+      throw Error(missing, at);
+    }
+  }
+
+  // a class of the program that implements MapCollection<K, V> (spec 6.7.2): its key and value types
+  (string Key, string Value)? CustomMapTypes(string type) {
+    if (!vecPrelude || !classes.TryGetValue(type, out var cls) || IsMap(type) || IsSet(type)) {
+      return null;
+    }
+    foreach (var trait in AllTraits(cls)) {
+      if (classInstanceArgs.TryGetValue(trait.Name, out var copy) && copy.Template.Name == "MapCollection") {
+        return (copy.Args[0], copy.Args[1]);
+      }
+    }
+    return null;
+  }
+
+  // c[k], c[k] = v and ->c[k] on a custom map: its read_key, set_key and move_out (spec 6.7)
+  Expr CustomMapCall(Expr map, string name, List<Node> args, Scope scope, Node at) =>
+    ObjectCall(map, name, args, scope, at) ?? throw Error($"a custom map writes {name} (spec 6.7.2)", at);
 
   // ->v[i]: the item goes to the receiver and the slot is zeroed (spec 6.6); a basic value is copied
   Expr GiftIndex(Node gift, Node operand, Scope scope) {
@@ -1045,6 +1215,10 @@ public class set<T> : SetCollection<T> {
       throw Error($"'{operand.Children[0].Text}' is a read-only reference: its items cannot be moved out", gift);
     }
     var obj = ExprOf(operand.Children[0], scope);
+    if (CustomMapTypes(obj.Type) != null) {
+      var movedOut = CustomMapCall(obj, "move_out", new List<Node> { operand.Children[1] }, scope, gift);   // spec 6.7
+      return new Expr(movedOut.Code, movedOut.Type, true);
+    }
     if (IsMap(obj.Type) || IsSet(obj.Type)) {
       // the value leaves the map with its entry, the key ends; the item leaves a set (spec 6.6)
       var mapValue = ObjectCall(obj, "takeAt", new List<Node> { operand.Children[1] }, scope, gift) ?? throw Error("no takeAt", gift);

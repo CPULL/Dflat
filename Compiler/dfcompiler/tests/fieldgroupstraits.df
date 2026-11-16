@@ -1,0 +1,43 @@
+// Field groups in traits (spec 11.1.4.1): the classes that implement the trait have the group; it is used through the class, through the
+// trait type, in the code of the trait and of its sub-traits; read as a value it is a tuple with the names of its fields
+import Root
+trait Node2D {
+  public pos { r32 x, r32 y }
+  public scale { r32 x = 1, r32 y = 1 }
+
+  public fun nudge() {
+    pos.x += 1
+    scale = (2.0, 3.0)
+  }
+}
+class Sprite : Node2D {
+  public string name = "s"
+}
+Sprite s = Sprite()
+s.pos.x++
+Console.log($"{s.pos.x} {s.pos.y} {s.scale.x} {s.scale.y}")
+s.pos = (10.0, 20.0)
+s.nudge()
+Console.log($"{s.pos.x} {s.pos.y} {s.scale.x} {s.scale.y}")
+fun show(Node2D n) {
+  var p = n.pos
+  Console.log($"through the trait: {n.pos.x} {p.y} {n.scale.y}")
+}
+show(s)
+Node2D any = Sprite()
+any.pos.y = 4
+any.pos = (any.pos.x + 1, any.pos.y * 2)
+Console.log($"{any.pos.x} {any.pos.y}")
+var copy = any.pos
+Console.log($"copy {copy.x} {copy.y}")
+
+trait Body : Node2D {
+  public fun r32 area() { scale.x * scale.y }
+}
+class Box : Body {
+  public fun place() { pos = (3.0, 4.0) }
+}
+Box b = Box()
+b.place()
+b.scale = (2.0, 5.0)
+Console.log($"box at {b.pos.x} {b.pos.y}, area {b.area()}")

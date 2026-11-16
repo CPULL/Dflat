@@ -1,0 +1,6 @@
+Part inner end
+boom
+dtorfailfinal.df (10) Thrower.__dtor()
+dtorfailfinal.df (14) Main()
+Panic -1000
+---- exit code -1000 ----

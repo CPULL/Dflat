@@ -1,0 +1,1 @@
+named_results_outside.df(3,12): error: named results are written only in the mapping of a .dflib: fun T name f(...) -> ... (spec 22), found 'v'

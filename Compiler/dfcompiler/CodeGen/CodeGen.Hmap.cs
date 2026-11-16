@@ -30,7 +30,13 @@ public class hmap<K, V> : MapCollection<K, V> {
     return this.tree_hasValue(value)
   }
 
-  public fun bool hasKey(K key) {
+  // the counter of open iterators comes from the executeAfter of MapCollection
+  replace fun ->MapIterator<K, V> getIterator() {
+    hmapIterator<K, V> iterator = hmapIterator<K, V>(this)
+    return ->iterator
+  }
+
+  replace fun bool hasKey(K key) {
     return this.tree_hasKey(key)
   }
 
@@ -185,6 +191,49 @@ public class hmapValues<K, V>(hmap<K, V> collection as parent) {
   }
 }
 
+// the iterator of an hmap: a child of its map that keeps a cursor of the table (spec 6.7, 6.7.2); the cursor is C memory made at
+// the first next() and freed by the atEnd (CodeGen.Sets.cs). writableNext() waits for borrows inside tuples
+public class hmapIterator<K, V>(hmap<K, V> collection as parent) : MapIterator<K, V> {
+  u64 cursor
+
+  replace fun (K key, V value, bool isValid) next() {
+    K noKey
+    V noValue
+    if !this.cur_more() {
+      return (noKey, noValue, false)
+    }
+    K key = this.cur_value()
+    V value = this.cur_entry()
+    this.cur_advance()
+    return (key, value, true)
+  }
+} atEnd {
+  this.cur_close()
+  if collection != null {
+    collection.releaseIterator()
+  }
+}
+
+// the iterator of an hset: the same as setIterator (VecPrelude), in the order of the table
+public class hsetIterator<T>(hset<T> collection as parent) : SetIterator<T> {
+  u64 cursor
+
+  replace fun (T value, bool isValid) next() {
+    T none
+    if !this.cur_more() {
+      return (none, false)
+    }
+    T item = this.cur_value()
+    this.cur_advance()
+    return (item, true)
+  }
+} atEnd {
+  this.cur_close()
+  if collection != null {
+    collection.releaseIterator()
+  }
+}
+
 // hset<T> (spec 6.8.7): a hash set, the table of hmap with an empty value (spec 6.8.5.1); the tree_ members are C emitted by the compiler
 // (CodeGen.Hset.cs)
 public class hset<T> : SetCollection<T> {
@@ -201,6 +250,12 @@ public class hset<T> : SetCollection<T> {
 
   replace fun bool has(T item) {
     return this.tree_has(item)
+  }
+
+  // the counter of open iterators comes from the executeAfter of SetCollection
+  replace fun SetIterator<T> getIterator() {
+    hsetIterator<T> iterator = hsetIterator<T>(this)
+    return ->iterator
   }
 
   // true when the item is new; an item already there is left as it is (spec 6.6)

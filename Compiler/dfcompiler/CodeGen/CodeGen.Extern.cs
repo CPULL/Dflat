@@ -51,6 +51,9 @@ public sealed partial class CodeGen {
     bool copied = arg.Kind == "Copy";
     var operand = owned || copied ? arg.Children[0] : arg;
     var value = ExprOf(operand, scope);
+    if (IsPointer(value.Type) && PointedType(value.Type) is "char" or "u8" or "i8" && !owned) {
+      value = new Expr($"((void*)({value.Code}).cur)", "addr");   // a C text a native gave as *char (spec 22): its address
+    }
     if (value.Type is not ("addr" or "null")) {
       throw Error($"string(...) takes an addr, not {value.Type}: {forms}", at);
     }
@@ -83,6 +86,8 @@ public sealed partial class CodeGen {
     return new Expr($"df_str_from_c_opt({code}, {(owned ? "true" : "false")})", "string?", true);   // a null addr is null (spec 7.1)
   }
 
+  readonly HashSet<string> conventionsDefined = new();   // the DF_CC_ macros already written
+
   // the prototype of the C function and the wrapper the program calls
   string ExternDeclarations(FunSig f) {
     foreach (var pointerType in f.Params.Where(p => p.Pointer == 0 && IsPointer(p.Type)).Select(p => p.Type).Append(f.Ret).Where(IsPointer)) {
@@ -106,7 +111,14 @@ public sealed partial class CodeGen {
       }
     }
     var sb = new StringBuilder();
-    sb.Append($"extern {cRet} {f.Name}({(cParams.Count == 0 ? "void" : string.Join(", ", cParams))});\n");
+    string symbol = f.CSymbol ?? f.Name;
+    string convention = f.Convention is null or "cdecl" ? "" : $"DF_CC_{f.Convention} ";   // the calling convention of a native (spec 22)
+    if (convention != "" && conventionsDefined.Add(f.Convention!)) {
+      // only 32-bit x86 has several conventions; vectorcall exists on x64 Windows too. Elsewhere the keyword means nothing (spec 22)
+      string condition = f.Convention == "vectorcall" ? "defined(_WIN32) && (defined(__i386__) || defined(__x86_64__))" : "defined(__i386__)";
+      sb.Append($"#if {condition}\n#define DF_CC_{f.Convention} __attribute__(({f.Convention}))\n#else\n#define DF_CC_{f.Convention}\n#endif\n");
+    }
+    sb.Append($"extern {cRet} {convention}{symbol}({(cParams.Count == 0 ? "void" : string.Join(", ", cParams))});\n");
     string wrapperParams = f.Params.Count == 0 ? "void" : string.Join(", ", f.Params.Select(p =>
       p.Pointer != 0 ? $"{(p.Pointer == 1 ? "const " : "")}{CType(p.Type)}* v_{p.Name}" : $"{CType(p.Type)} v_{p.Name}"));
     sb.Append($"static {ret} {f.CName}({wrapperParams}) {{\n");
@@ -126,7 +138,7 @@ public sealed partial class CodeGen {
         args.Add($"v_{p.Name}");
       }
     }
-    string call = $"{f.Name}({string.Join(", ", args)})";
+    string call = $"{symbol}({string.Join(", ", args)})";
     if (ret == "void") {
       sb.Append($"  {call};\n");
       frees.ForEach(free => sb.Append(free));

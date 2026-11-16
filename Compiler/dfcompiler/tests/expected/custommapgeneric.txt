@@ -1,0 +1,9 @@
+3 items, keyOf 5 = al
+bob: 13
+al: 5
+cy: 7
+bob
+cy
+zed
+3 items, has x true, has cy false
+---- exit code 0 ----

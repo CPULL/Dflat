@@ -1872,6 +1872,26 @@ static void df_exc_release(df_exception* exception) {
   df_exc_live--;
 }
 
+/* a destructor (class atEnd, constructor fragment, trait atEnd) that lets an exception out: the cleanup goes on, releasing as much as possible,
+   and the program panics with the first such exception when the scope that ended the objects is done (spec 11.4) */
+static df_exception* df_dtor_err = NULL;
+
+static void df_dtor_fail(df_exception* error) {
+  if (df_dtor_err == NULL) {
+    df_dtor_err = error;
+  } else {
+    df_exc_release(error);
+  }
+}
+
+static void df_dtor_check(void) {
+  if (df_dtor_err != NULL) {
+    df_exception* error = df_dtor_err;
+    df_dtor_err = NULL;
+    df_panic_unhandled(error);
+  }
+}
+
 static df_string df_str_obj(const void* obj) {
   return obj ? ((const df_object*)obj)->cls->str(obj) : df_str_lit("null", 4);
 }

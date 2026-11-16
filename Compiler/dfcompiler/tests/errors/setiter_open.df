@@ -1,0 +1,9 @@
+// a set cannot be passed as & while its iterator lives (spec 6.4, 12)
+import Root
+
+fun grow(&set<string> target) { target.add("kiwi") }
+
+set<string> words = ["pear", "apple"]
+var it = words.getIterator()
+grow(&words)
+Console.log(it.next().value)

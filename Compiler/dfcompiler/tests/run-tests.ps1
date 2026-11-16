@@ -70,7 +70,7 @@ function Start-Compiler([string]$file, [string]$option) {
   $info = New-Object System.Diagnostics.ProcessStartInfo
   $info.FileName = $compiler
   if ($clang) { $info.EnvironmentVariables['DFLAT_CC'] = $clang }
-  $info.Arguments = '"' + $file + '" ' + $option
+  $info.Arguments = if ($file) { '"' + $file + '" ' + $option } else { $option }   # no file: a batch, the files are in the option
   $info.UseShellExecute = $false
   $info.RedirectStandardInput = $true
   $info.RedirectStandardOutput = $true
@@ -273,9 +273,41 @@ function Test-Serial($test) {
   }
   return $false
 }
-$parallel = @($all | Where-Object { -not (Test-Serial $_) })
+# the programs and projects that must not compile never reach clang: their time is the start of the compiler. They go in batches, one
+# compiler for many of them (--check-each), so .NET starts once per batch; the output of each is split back to its test below
+$checks = @($all | Where-Object { $_.Kind -in @('error', 'errorProject') })
+$batches = @()
+if ($checks.Count -gt 0) {
+  $size = [Math]::Min(60, [Math]::Max(1, [Math]::Ceiling($checks.Count / [Math]::Max(1, $Jobs))))
+  for ($start = 0; $start -lt $checks.Count; $start += $size) {
+    $members = @($checks[$start..([Math]::Min($start + $size, $checks.Count) - 1)])
+    $option = '--check-each ' + (($members | ForEach-Object { '"' + $_.Path + '"' }) -join ' ')
+    $batches += @{ Name = 'batch'; Path = ''; Option = $option; Kind = 'batch'; Members = $members }
+  }
+}
+$parallel = @($all | Where-Object { $_.Kind -notin @('error', 'errorProject') -and -not (Test-Serial $_) }) + $batches
 $serial = @($all | Where-Object { Test-Serial $_ })
 Invoke-Pool $parallel ([Math]::Max(1, $Jobs)) $serial
+foreach ($batch in $batches) {
+  foreach ($member in $batch.Members) { $member.Run = $null }   # a batch that timed out: its tests report the timeout
+  if ($null -eq $batch.Run) { continue }
+  $current = $null
+  $text = New-Object System.Text.StringBuilder
+  foreach ($line in ($batch.Run.Out -split "`r?`n")) {
+    if ($line.StartsWith('==== exit ')) {
+      if ($current) { $current.Run = @{ Out = $text.ToString(); Err = '' } }
+      $current = $null
+      continue
+    }
+    if ($line.StartsWith('==== ')) {
+      $path = $line.Substring(5)
+      $current = $batch.Members | Where-Object { $_.Path -eq $path } | Select-Object -First 1
+      [void]$text.Clear()
+      continue
+    }
+    if ($current) { [void]$text.AppendLine($line) }
+  }
+}
 
 foreach ($test in $all) {
   $result = switch ($test.Kind) {

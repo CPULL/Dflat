@@ -1,0 +1,4 @@
+namespace app
+import lib ghost
+import Root
+Console.log(ghost_value())

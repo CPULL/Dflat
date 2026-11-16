@@ -8,7 +8,7 @@ Tags: TOBEDISCUSSED (open, needed shortly), UNDERDISCUSSION (being discussed), P
 
 ### NEXT WEEK (from 2026-11-02): custom collections (Specs6.9, marked "partial")
 
-- The members and the cursor types of the map iterator (`MapIterator`); subclassing of the default collections (`vec`, `list`, `map`, `hmap`, `set`, `hset`; `arr` cannot) and the dispatch of the overridden methods; how a custom class receives the literals; `get_view` for custom collections (point 34); lists of pointers and references (with the pointers work).
+- Subclassing of the default collections (`vec`, `list`, `map`, `hmap`, `set`, `hset`; `arr` cannot) and the dispatch of the overridden methods; how a custom class receives the literals; `get_view` for custom collections (point 34); lists of pointers and references (with the pointers work).
 
 ### 45. [DECIDED 2026-11-07] Code size of the generic maps
 
@@ -18,9 +18,9 @@ Closed: the heavy code is the shared runtime C (df_bt, df_ht); the limits stay a
 
 Specs13.4, Specs99: the position of a variadic parameter and passing an existing collection (`f(...v)`). A `vec` as the variadic argument is the natural case.
 
-### 1 / 50. [TOBEDISCUSSED] The members of MapIterator
+### 1 / 50. [DECIDED 2026-11-16, Specs6.7, 6.7.2, 6.9, built 0.0.144alpha except writableNext()] The members of MapIterator and what a custom map writes
 
-Specs6.7, 6.7.2, Specs99: the shape of `MapIterator` and its `next()` (the cursors of `map` and `hmap` are defined in Specs6.8.4.1 and 6.8.5.1; `SetIterator` is decided in Specs6.7.3).
+`MapIterator<Key, Value>`: `next()` → `(Key key, Value value, bool isValid)`, `writableNext()` → `(Key key, &Value value, bool isValid)`. Non-public `read_key(k)`, `set_key(k, v)`, `move_out(k)`. A custom map writes `get_len`, `has`, `clear`, `hasKey`, `read_key`, `set_key`, `move_out`, `getIterator`; the other members have default bodies in the trait; `.keys` / `.values` are views of the trait built on `getIterator()`.
 
 ### 79. [DECIDED 2026-11-07, declared 0.0.78alpha; Keyable built 0.0.88alpha] The name of the Keyable exception: ModifiedObjectUsedAsKeyException, ID 52 (Specs11.2.1, 15.3)
 
@@ -125,12 +125,13 @@ What the specification decides and the compiler does not build. The point number
 
 ### Traits and iterators
 
-- 1, 56. `MapIterator` (members open) and `SetIterator<Item>` (Specs6.7.3: `next()` returns `(Item value, bool isValid)`) do not exist; `Iterator` is a marker trait and `IndexIterator<Item>` has `next()`.
-- 2, 65. The traits `MapCollection` and `SetCollection` (Specs6.7) do not exist, so a custom class cannot be a map or a set; only `IndexCollection<Item>` with `getIterator()` is built.
+- 1, 56. `MapIterator` is built (0.0.144alpha) without `writableNext()` (item 5: a borrow inside a tuple), so `for (k, &v) in m` and `for &v in m.values` do not work on a custom map yet. `SetIterator<Item>` is built (0.0.142alpha), with the iterators of `set` and `hset`.
+- 2, 65. `MapCollection` is built (0.0.144alpha): mandatory members, default bodies, `.keys` / `.values` views, `+=` / `-=`. Not yet: `m -= s` with a set on a custom map, literals for custom classes. `SetCollection<Item>` with `getIterator()` is built (0.0.142alpha), as `IndexCollection<Item>`.
 - 4, 32. The iterator of `vec` and `list` is a child object of its collection; the kind of pointer it holds waits for pointers.
 - 5. `writableNext()` and `for (&)Item x in c` (Specs3.2, 6.4, 6.7): a borrow inside a tuple is not a type the compiler has.
 - 9. The `executeBefore` / `executeAfter` chain over a hierarchy of traits: built 0.0.130alpha (a sub-trait redeclares the method with its block). Still open: the changing methods (`add`, `remove`, ...) are not trait methods, so they carry no iterator check in custom collections (Specs11.2, 6.9). Needed by `Keyable`.
-- 11. The non-public methods `get_view` and `read_pos` for custom collections (Specs6.7); only `get_len()` is built.
+- 11. `read_pos`, `set_pos` and `get_view` for custom collections are built (0.0.145alpha); `move_out(uns k)` (`->c[i]`) is not.
+- Field groups in traits (Specs11.1.4.1): built 0.0.145alpha. A subclass does not see the groups of its parent class by their bare name yet (only through a receiver).
 
 ### Rules shared by the collections
 

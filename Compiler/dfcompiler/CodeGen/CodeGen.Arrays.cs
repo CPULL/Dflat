@@ -179,6 +179,9 @@ public sealed partial class CodeGen {
     if (IsMap(obj.Type)) {
       return MapIndex(obj, n.Children[1], scope);
     }
+    if (CustomMapTypes(obj.Type) != null) {
+      return CustomMapCall(obj, "read_key", new List<Node> { n.Children[1] }, scope, n);   // spec 6.7
+    }
     var index = ExprOf(n.Children[1], scope, "u64");
     if (obj.Type == "string") {
       string call = $"df_str_char_at({StrRead(obj)}, {IndexValue(index, n)}, {fn!.NameConst})";
@@ -192,6 +195,9 @@ public sealed partial class CodeGen {
     }
     if (IsSet(obj.Type)) {
       throw Error("a set has no s[k]: has(item) tells whether an item is there, ->s[item] takes it out (spec 6.6)", n);
+    }
+    if (CustomIndexElem(obj.Type) != null) {
+      return CustomIndexCall(obj, "read_pos", new List<Node> { n.Children[1] }, scope, n, "read_pos(uns k)");   // spec 6.7
     }
     if (!IsArr(obj.Type)) {
       throw NotSupported("Collections", n);
@@ -227,6 +233,16 @@ public sealed partial class CodeGen {
     }
     if (IsMap(obj.Type)) {
       return MapIndexAssign(s, scope, obj, target);
+    }
+    if (CustomIndexElem(obj.Type) != null) {
+      // c[k] = v calls set_pos; c[k] += v reads with read_pos first (spec 6.7)
+      var item = s.Text == "=" ? s.Children[1] : Synthetic("Binary", s, s.Text![..^1]).Add(target).Add(s.Children[1]);
+      return CustomIndexCall(obj, "set_pos", new List<Node> { target.Children[1], item }, scope, s, "set_pos(uns k, Item value)").Code;
+    }
+    if (CustomMapTypes(obj.Type) != null) {
+      // c[k] = v calls set_key; c[k] += v reads with read_key first (spec 6.7)
+      var assigned = s.Text == "=" ? s.Children[1] : Synthetic("Binary", s, s.Text![..^1]).Add(target).Add(s.Children[1]);
+      return CustomMapCall(obj, "set_key", new List<Node> { target.Children[1], assigned }, scope, s).Code;
     }
     if (IsSet(obj.Type)) {
       throw Error("a set has no s[k] = v: add(item) adds an item (spec 6.6)", s);
@@ -900,7 +916,7 @@ public sealed partial class CodeGen {
       EmitBlock(DestructuredLoop(s, varNode, collection.Type), sb, scope, indent);   // for (i32 a, string b) in pairs (spec 6.4)
       return;
     }
-    if (overMap && !destructure && mapPart == null) {
+    if ((overMap || (CustomMapTypes(collection.Type) != null && varNode.Text?.StartsWith("__item") != true)) && !destructure && mapPart == null) {
       throw Error("a map gives (key, value) entries: for (k, v) in m, for (K k, V v) in m or for var (k, v) in m (spec 6.4)", s);
     }
     bool overList = IsList(collection.Type);
@@ -1074,7 +1090,9 @@ public sealed partial class CodeGen {
       var iterator = ExprOf(Synthetic("Name", s, counted.Counter!), scope);
       var step = ObjectCall(iterator, "next", new List<Node>(), scope, s) ?? throw Error("no next()", s);
       string tuple = $"df_step{tempCounter}";
-      iteration = $"({{ {CType(step.Type)} {tuple} = {step.Code}; if (!{tuple}.e1) {{ break; }} {tuple}.e0; }})";
+      iteration = CustomMapTypes(collection.Type) != null
+        ? $"({{ {CType(step.Type)} {tuple} = {step.Code}; if (!{tuple}.e2) {{ break; }} ({CType(customElem)}){{ {tuple}.e0, {tuple}.e1 }}; }})"   // (key, value)
+        : $"({{ {CType(step.Type)} {tuple} = {step.Code}; if (!{tuple}.e1) {{ break; }} {tuple}.e0; }})";
     }
     string itemCode;
     string loop;

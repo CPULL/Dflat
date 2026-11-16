@@ -28,6 +28,8 @@ sealed class FunSig {
   // an extern C function is called through its wrapper dfx_<name>, which converts strings and arrays (spec 15.9)
   public string CName => IsExtern ? "dfx_" + Name : "f_" + Name.Replace('.', '_').Replace("==", "op_eq") + (OverloadIndex > 0 ? "_" + OverloadIndex : "");
   public bool IsExtern { get; init; }       // extern fun: a C function of a library, no body, never returns an error (spec 15.8, 15.9)
+  public string? CSymbol { get; init; }     // a native of a .dflib: the name of the C function (its Dflat name may differ, spec 22)
+  public string? Convention { get; init; }  // ... and its calling convention: cdecl, stdcall, fastcall, vectorcall
   public string Ret { get; }
   public HashSet<int> Gives { get; init; } = new();   // the results written ->T: the caller owns them (spec 13.1.1)
   public HashSet<int> Writes { get; init; } = new();  // the results written &T: lent read/write, the caller changes them in place
@@ -131,6 +133,7 @@ sealed class VarInfo {
   public bool FnWrites { get; set; }       // a function value with a & capture (spec 13.3.3)
   public bool FnBorrows { get; set; }      // a function value that may borrow (a lambda with a borrowed capture, or a parameter): it is not
                                            // stored past its variables or returned (spec 13.3.4)
+  public List<VarInfo>? FnBorrowed { get; set; }   // ... and the variables it borrows, when they are known (null: not known)
   public bool CapturedReadOnly { get; set; } // inside a lambda: an unlisted capture, a read-only borrow (spec 13.3.1)
   public string? HeapName { get; set; }      // a local struct above 64 KB: the C pointer to its block on the heap (spec 11.1.5.5)
   public bool OwnsStruct { get; set; }       // a struct variable that owns its strings and objects: they end with it (spec 11.1.5.3)
@@ -590,7 +593,9 @@ public sealed partial class CodeGen {
         Warn($"-> on a {DisplayName(givenType)} result is ignored: a basic value is a copy (spec 13.1.1)", rets!, 1);
       }
     }
-    var fun = new FunSig(name, ret, ps, funNode, enumName) { OverloadIndex = overloads.Count, IsExtern = isExtern, RetWritable = rets?.Text == "counted-rw", Gives = gives, Writes = writes, WritableCounted = writableCounted };
+    var native = funNode.Children.FirstOrDefault(child => child.Kind == "Native");   // a native of a .dflib (spec 22)
+    var fun = new FunSig(name, ret, ps, funNode, enumName) { OverloadIndex = overloads.Count, IsExtern = isExtern, RetWritable = rets?.Text == "counted-rw", Gives = gives, Writes = writes, WritableCounted = writableCounted,
+      CSymbol = native?.Children.FirstOrDefault(child => child.Kind == "CSymbol")?.Text, Convention = native?.Text };
     overloads.Add(fun);
     return fun;
   }
@@ -737,6 +742,9 @@ public sealed partial class CodeGen {
       sb.Append($"  {fn.FailLabel}: return {PairError(f)};\n");
     } else {
       sb.Append($"  return{failValue};\n  {fn.FailLabel}: df_panic_unhandled(df_err);\n");
+    }
+    if (f.IsDtor) {
+      sb.Replace($"  {fn.FailLabel}: df_panic_unhandled(df_err);\n", $"  {fn.FailLabel}: df_dtor_fail(df_err);\n  return;\n");   // the cleanup goes on, the panic waits for the end of the scope (spec 11.4)
     }
     sb.Append($"  {fn.PanicLabel}: df_panic_unhandled(df_err);\n");
     if (fn.PairOf != null) {
@@ -1145,6 +1153,7 @@ public sealed partial class CodeGen {
     }
     variable.IsWeak = weak;
     variable.FnBorrows = IsFunType(type) && init != null && FnMayBorrow(init.Children[0], scope);
+    variable.FnBorrowed = variable.FnBorrows ? FnBorrowedOf(init!.Children[0], scope) : null;
     variable.FnWrites = IsFunType(type) && init != null && FnMayWrite(init.Children[0], scope);
     if (type == "string" && init?.Children[0] is { Kind: "Name" } source && scope.Find(source.Text!) is VarInfo { Type: "string" } original) {
       variable.AliasOf = original.AliasOf ?? original;
@@ -1987,6 +1996,9 @@ public sealed partial class CodeGen {
         if (IsArr(copied.Type)) {
           cloneUsed = true;   // the items that are objects are cloned through their classes
           return new Expr($"{ArrCloneHelper(copied.Type, n)}({copied.Code})", copied.Type, true);   // a! of an array: a new block, items cloned (12.6)
+        }
+        if (IsNumeric(copied.Type) || copied.Type is "bool" or "char" || enums.ContainsKey(copied.Type)) {
+          return new Expr(copied.Code, copied.Type, true);   // x! of a native value: the value itself (spec 13.1)
         }
         return CopyObject(n, copied, scope);   // a! of an object: a clone (spec 12.6)
       }
@@ -2866,6 +2878,9 @@ public sealed partial class CodeGen {
     }
     // log(...) where the stdlib has Root.Console.log: the member is reached through its class (spec 16.2)
     string? member = path != null && !path.Contains('.') ? StdlibPaths().Where(full => full.EndsWith("." + path) && full.Count(c => c == '.') == 2).OrderBy(full => full).FirstOrDefault() : null;
+    if (path != null && funs.Keys.Any(key => key == "__n_" + path || key.EndsWith(".__n_" + path))) {
+      throw Error($"'{path}' is a native of a .dflib: only the code on the right of a -> mapping calls it (spec 22)", n);
+    }
     throw Error($"unknown function '{path ?? callee.Kind}'" + (member != null ? $": the standard library has {member}, written {member[5..]} with import Root or import {member[..member.LastIndexOf('.')]}" : ""), n);
   }
 

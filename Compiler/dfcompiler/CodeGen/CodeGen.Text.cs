@@ -343,6 +343,9 @@ public sealed partial class CodeGen {
     if (IsMap(receiver.Type) && MapMember(receiver, name, args, scope, at) is Expr mapCall) {
       return mapCall;
     }
+    if (IsSetIterator(receiver.Type) && name.StartsWith("cur_") && at.Line >= LibraryLine) {
+      return SetIteratorMember(receiver, name, at);   // the cursor of setIterator and hsetIterator: only their own code calls them
+    }
     if (IsSet(receiver.Type) && name.StartsWith("tree_") && at.Line >= LibraryLine) {
       return SetTreeMember(receiver, name, args, scope, at);   // the C of the methods of the classes set and hset: only their own code calls them
     }
@@ -498,7 +501,7 @@ public sealed partial class CodeGen {
       source.AppendLine(ExecPrelude);
     }
     // vec<T> (spec 6.8) is a generic class written in Dflat, with the collection traits (CodeGen.Vec.cs)
-    if (!userTypes.Contains("vec") && !userTypes.Contains("list") && !userTypes.Contains("map") && Mentions(program, node => node.Text is "vec" or "list" or "map" or "bmap" or "hmap" or "hset" or "View" or "getIterator" or "IndexIterator" or "IndexCollection" or "MapCollection" or "SetCollection" or "Iterator"
+    if (!userTypes.Contains("vec") && !userTypes.Contains("list") && !userTypes.Contains("map") && Mentions(program, node => node.Text is "vec" or "list" or "map" or "bmap" or "hmap" or "hset" or "View" or "getIterator" or "IndexIterator" or "SetIterator" or "IndexCollection" or "MapCollection" or "SetCollection" or "Iterator"
           || (node.Kind == "Type" && node.Text is "set" or "bset")
           || (node.Kind == "Index" && node.Children.Count > 1 && node.Children[1].Kind == "Range"))) {
       // its lines are numbered from LibraryLine so that no warning of this code is shown (Warn) and the errors can be told apart
@@ -510,6 +513,7 @@ public sealed partial class CodeGen {
       var vecLibrary = new Parser(new Lexer(prelude, LibraryLine).Tokenize()).ParseProgram();
       program.Children.InsertRange(0, vecLibrary.Children);
       vecPrelude = true;
+      AddMapDefaults(program);   // the default members of the custom maps (spec 6.7.2, CodeGen.CustomMaps.cs)
     }
     if (source.Length == 0) {
       return;

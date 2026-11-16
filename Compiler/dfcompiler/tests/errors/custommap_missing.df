@@ -1,0 +1,11 @@
+// a custom map writes read_key, set_key and move_out (spec 6.7.2)
+import Root
+public class Half : MapCollection<i32, i32> {
+  replace fun uns get_len() { 0 }
+  replace fun bool has(i32 value) { false }
+  replace fun clear() { }
+  replace fun bool hasKey(i32 key) { false }
+  unrestricted fun i32 read_key(i32 key) { 0 }
+  replace fun ->MapIterator<i32, i32> getIterator() { return null }
+}
+Half h = Half()

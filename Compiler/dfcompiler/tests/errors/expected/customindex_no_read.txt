@@ -1,0 +1,1 @@
+customindex_no_read.df(13): error: Bare has no read_pos: a custom collection writes read_pos(uns k) for this operator (spec 6.7, 6.9)

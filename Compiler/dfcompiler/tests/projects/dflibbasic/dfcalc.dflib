@@ -1,0 +1,37 @@
+// a tiny C library for the tests of import lib (spec 22): csrc/dfcalc.c, built into libs/<target>/
+Name: dfcalc
+Namespace: tests.dfcalc
+Description: integer helpers written in C
+Version: 1.0
+Convention: cdecl
+LibName, win-*, static: dfcalc.lib
+LibName, linux-*, static: libdfcalc.a
+
+// its types match 1 to 1: the program calls it by its name
+native i32 dfc_add(i32 a, i32 b)
+
+// stdcall on 32-bit x86, the same call elsewhere
+[stdcall] native i32 dfc_mul(i32 a, i32 b)
+public fun i32 r times(i32 a, i32 b) -> r = dfc_mul(a, b)
+
+// a pointer and a count: seen only by the mapping
+native i32 dfc_sum(*i32 values, u64 count)
+public fun i32 total sum(arr<i32> values) -> total = dfc_sum(pointer.to(values), values.len)
+
+// a static C text: borrowed
+native *char dfc_name()
+public unsafe fun string n name() -> n = string(dfc_name())
+
+// the rest comes back through a pointer to a local
+native i32 dfc_div(i32 a, i32 b, &*i32 rest)
+public fun i32 q, i32 r divide(i32 a, i32 b) -> {
+  i32 rest = 0
+  q = dfc_div(a, b, &*rest)
+  r = rest
+}
+
+// the wrapper can have classes too
+public class Calc(i32 start) {
+  public i32 value = start
+  public fun add(i32 n) { value = dfc_add(value, n) }
+}

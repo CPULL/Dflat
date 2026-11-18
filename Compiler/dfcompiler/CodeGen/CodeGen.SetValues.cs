@@ -27,7 +27,7 @@ public sealed partial class CodeGen {
   List<string> SetValueMembers(string set, Node at) {
     var members = SetMembers(set);
     foreach (string member in members.Where(member => !IsStage1Member(member))) {
-      throw NotSupported($"Set values with a {DisplayName(member)} member (built: numbers up to 64 bits, bool, char, enums, bitfields, their nullable forms, date, time, clock, lapse, addr; strings, objects and tuples come later)", at);
+      throw NotSupported($"Set values with a {DisplayName(member)} member (built: numbers up to 64 bits, bool, char, enums, bitfields, their nullable forms, date, time, clock, lapse, addr, string, objects, tuples)", at);
     }
     return members;
   }
@@ -37,7 +37,7 @@ public sealed partial class CodeGen {
   // numbers up to 64 bits, bool, char, enums, bitfields, their nullable forms, date, time, clock, lapse, addr
   bool IsStage1Member(string type) {
     string plain = type.EndsWith('?') ? type[..^1] : type;
-    return SetValueNatives.Contains(plain) || IsEnumType(plain) || SetValueNullableNatives.Contains(type);
+    return SetValueNatives.Contains(plain) || IsEnumType(plain) || SetValueNullableNatives.Contains(type) || IsOwnedSetMember(type);
   }
 
   string SetValueCType() {
@@ -53,18 +53,43 @@ public sealed partial class CodeGen {
   Expr WrapSetValue(Expr value, string set, Node at) {
     var members = SetValueMembers(set, at);
     int tag = members.IndexOf(value.Type) + 1;
+    if (tag == 0 && IsClass(value.Type)) {
+      tag = members.FindIndex(member => IsClass(member) && IsSubtype(value.Type, member)) + 1;   // a Puppy in Pets has the tag of Dog (spec 11.3.6.1)
+    }
+    if (tag == 0 && IsTuple(value.Type)) {
+      // a tuple takes the tuple member whose items it fits, the names aside: (1, "a") into (i32 id, string name)
+      var fitting = members.Select((member, index) => (member, index)).Where(pair => IsTuple(pair.member) && Assignable(pair.member, value.Type)).ToList();
+      if (fitting.Count > 1) {
+        throw Error($"the tuple fits more than one member of the set {DisplayName(set)} ({string.Join(", ", fitting.Select(pair => DisplayName(pair.member)))}): cast it (spec 11.3.6.1)", at);
+      }
+      tag = fitting.Count == 1 ? fitting[0].index + 1 : 0;
+    }
     if (tag == 0) {
       throw Error($"{DisplayName(value.Type)} is not a member of the set {DisplayName(set)} (spec 11.3.6.1)", at);
     }
     string held = NewTemp();
     string result = NewTemp();
-    return new Expr($"({{ {CType(value.Type)} {held} = {value.Code}; {SetValueCType()} {result} = {{ {{ 0, 0 }}, {tag}u }}; memcpy({result}.bits, &{held}, sizeof {held}); {result}; }})", set);
+    string member = members[tag - 1];
+    if (IsTuple(member)) {
+      // a tuple member: a box of its own on the heap, with its own strings, objects and arrays (spec 11.3.6.1)
+      string box = NewTemp();
+      string boxed = $"({{ {CType(member)}* {box} = ({CType(member)}*)malloc(sizeof({CType(member)})); if (!{box}) {{ df_out_of_memory(); }} *{box} = {Convert(value, member, at)}; "
+        + $"{TupleDeepClone(member, $"(*{box})", value.Fresh, at)}{box}; }})";
+      return new Expr($"({{ {CType(member)}* {held} = {boxed}; {SetValueCType()} {result} = {{ {{ 0, 0 }}, {tag}u }}; memcpy({result}.bits, &{held}, sizeof {held}); {result}; }})", set, true);
+    }
+    string code = IsOwnedSetMember(member) && !value.Fresh ? OwnedMemberClone(member, $"(({CType(member)})({value.Code}))", at)   // the value owns its copy (spec 11.3.6.1)
+      : $"(({CType(member)})({value.Code}))";
+    return new Expr($"({{ {CType(member)} {held} = {code}; {SetValueCType()} {result} = {{ {{ 0, 0 }}, {tag}u }}; memcpy({result}.bits, &{held}, sizeof {held}); {result}; }})", set, SetOwns(set));
   }
 
   // the value of a member read from a set value whose tag is that member
   string UnwrapSetValue(string code, string member) {
     string held = NewTemp();
     string result = NewTemp();
+    if (IsTuple(member)) {
+      // a tuple is boxed on the heap: the value read is the tuple itself, lent (spec 11.3.6.1)
+      return $"({{ {SetValueCType()} {held} = {code}; {CType(member)}* {result}; memcpy(&{result}, {held}.bits, sizeof {result}); *{result}; }})";
+    }
     return $"({{ {SetValueCType()} {held} = {code}; {CType(member)} {result}; memcpy(&{result}, {held}.bits, sizeof {result}); {result}; }})";
   }
 
@@ -118,6 +143,8 @@ public sealed partial class CodeGen {
 
   // k1 == k2: the same tag and the same value (a real compares as a real: 0.0 and -0.0 are equal)
   string SetValueEquals(Expr l, Expr r, Node at) {
+    l = SetTemp(l, at);
+    r = SetTemp(r, at);
     if (l.Type == "null" || r.Type == "null") {
       // k == null: the null of the member it holds; the generic null of a value never assigned is not one (spec 11.3.6.1)
       var value = l.Type == "null" ? r : l;
@@ -150,12 +177,14 @@ public sealed partial class CodeGen {
 
   // $"{k}": the text of the value of its member
   string SetValueStr(Expr e, Node at) {
+    e = SetTemp(e, at);
     var members = SetValueMembers(e.Type, at);
     string held = NewTemp();
     string text = NewTemp();
     var sb = new StringBuilder($"({{ {SetValueCType()} {held} = {e.Code}; df_string {text} = NULL; switch ({held}.tag) {{ case 0u: {text} = df_str_lit(\"null\", 4); break; ");
     for (int index = 0; index < members.Count; index++) {
-      sb.Append($"case {index + 1}u: {text} = {StrOf(new Expr(UnwrapSetValue(held, members[index]), members[index]), at)}; break; ");
+      string member = members[index] == "string" ? $"df_str_dup({UnwrapSetValue(held, "string")})" : StrOf(new Expr(UnwrapSetValue(held, members[index]), members[index]), at);   // the text is a new string: the value keeps its own
+      sb.Append($"case {index + 1}u: {text} = {member}; break; ");
     }
     sb.Append($"}} {text}; }})");
     return sb.ToString();
@@ -173,6 +202,7 @@ public sealed partial class CodeGen {
 
   // if k is i32 i { }: the tag of k is the one of i32; i is a copy of the value, only in the block
   (string Condition, Scope BlockScope) SetIsBinding(Node n, Expr subject, Scope scope) {
+    subject = SetTemp(subject, n);
     string member = ResolveType(n.Children[1]);
     int tag = SetMemberTag(subject.Type, n.Children[1], n);
     CheckNotShadowing(n.Text!, scope, n);
@@ -188,6 +218,7 @@ public sealed partial class CodeGen {
 
   // k is ? { i32 x: ..., u64 x: ..., default: ... } on a set value: chosen at run time by the tag; every member needs a case or default
   Expr SetTypeSwitch(Node n, Expr subject, Scope scope, string? expected) {
+    subject = SetTemp(subject, n);
     var members = SetValueMembers(subject.Type, n);
     var covered = new HashSet<int>();
     var arms = new List<(List<int> Tags, Node Arm, bool IsDefault)>();
@@ -234,12 +265,16 @@ public sealed partial class CodeGen {
       var value = ExprOf(arm.Children[1], armScope, type);
       type ??= value.Type;
       string labels = isDefault ? "default:" : string.Join(" ", tags.Select(tag => $"case {tag}u:"));
-      cases.Append($"{labels} {{ {bind}{result} = {Convert(value, type, arm)}; break; }} ");
+      string armCode = Convert(value, type, arm);
+      if (type == "string" && !value.Fresh) {
+        armCode = $"df_str_dup({armCode})";   // the result is always a string of its own: an arm that borrows is copied (a literal costs nothing)
+      }
+      cases.Append($"{labels} {{ {bind}{result} = {armCode}; break; }} ");
     }
     if (!arms.Any(arm => arm.IsDefault)) {
       // a value never assigned and no default: UnassignedTypeException (spec 11.3.6.1, 15.3)
       cases.Append($"case 0u: {{ df_raise(&df_desc_UnassignedTypeException, {fn!.NameConst}); {RaiseJump} }} ");
     }
-    return new Expr($"({{ {SetValueCType()} {held} = {subject.Code}; {CType(type!)} {result} = {ZeroValue(type!)}; switch ({held}.tag) {{ {cases}}} {result}; }})", type!);
+    return new Expr($"({{ {SetValueCType()} {held} = {subject.Code}; {CType(type!)} {result} = {ZeroValue(type!)}; switch ({held}.tag) {{ {cases}}} {result}; }})", type!, type == "string");
   }
 }

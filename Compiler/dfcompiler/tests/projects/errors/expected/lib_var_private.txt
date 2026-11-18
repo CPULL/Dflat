@@ -1,0 +1,1 @@
+main.df(5): error: 'totalTaken' of the namespace 'libs.fun.counters' has no visibility keyword: only its own namespace sees it (mark it internal or public to use it from the namespace 'app')

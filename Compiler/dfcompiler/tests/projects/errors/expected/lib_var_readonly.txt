@@ -1,0 +1,1 @@
+main.df(5): error: 'counter' is a read-only C variable: &i32 counter -> native ... makes it writable (spec 22)

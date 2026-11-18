@@ -1,6 +1,7 @@
 // Multi-file program (spec 16): the root file imports a folder of the program and a library
 namespace app
 import app.util
+import lib shapes
 import shapes
 import shapes.extra
 import Root

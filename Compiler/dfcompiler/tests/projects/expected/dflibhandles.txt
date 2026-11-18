@@ -1,0 +1,26 @@
+1
+scope end: closed 1, last 1
+102 true
+close: closed 2, last 2
+took 3
+true
+given: closed 3, last 3
+reassigned: closed 4, last 4
+null: closed 5, last 5
+dropped: closed 6, last 6
+7
+field replaced: closed 7, last 7
+field: closed 8, last 11
+returned: closed 8, last 11
+lent 8
+true
+9 90
+true 8
+later: closed 10, last 8
+true
+42
+true 1
+true
+true
+1
+---- exit code 0 ----

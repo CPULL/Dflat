@@ -5,7 +5,7 @@ import Root
 
 class D {
   i32 n = 0
-  public fun i32 bump() { n += 1; n }
+  public fun i32 bump() { n += 1; return n }
 }
 
 class C {
@@ -29,7 +29,7 @@ class A {
   public fun update() { for &B b in bs { b.update() } }
   public fun note(i32 id) { notes += id }
   unrestricted fun i32 total() { notes }
-  unrestricted fun i32 sneaky() { poke(); notes }
+  unrestricted fun i32 sneaky() { poke(); return notes }
 }
 
 fun poke() { a.note(100) }

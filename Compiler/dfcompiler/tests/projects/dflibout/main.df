@@ -1,0 +1,21 @@
+// =out parameters, C variables and target blocks of a .dflib (spec 22)
+namespace app
+import lib dfout
+import Root
+
+bool ok, i32 half, i32 rest = split(7)
+Console.log($"{ok} {half} {rest}")
+Conn c, i32 res = open(3)
+Console.log($"{res} {c != null}")
+Conn none, i32 bad = open(0)
+Console.log($"{bad} {none == null}")
+Console.log(counter)
+Console.log(limit)
+limit = 7
+limit += 1
+Console.log(tests.dfout.limit)
+Console.log(magic)
+Console.log(platform())
+Console.log(bits())
+close(c)
+Console.log($"{dfo_closes()} {c == null}")

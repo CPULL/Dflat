@@ -1,0 +1,40 @@
+// lib.df: the root file of the library (spec 16)
+namespace libs.fun.counters
+import Root
+import Root.IO
+
+
+class Sequence {
+  i32 next = 0
+  internal fun start(i32 first) { next = first }
+  public fun i32 take() {
+    i32 taken = next
+    next++
+    return taken
+  }
+	internal fun i32 getCurrent() { next }
+}
+
+
+public global Sequence Numbers = Sequence() // it is a global, better to start PascalCase
+
+
+atLibStart {
+  Numbers.start(1000)
+}
+
+
+atEnd {
+  File("/root/log.txt").writeAllText($"counters ended {Time.now()} with {totalTaken} public taken and {(u64)(Numbers.getCurrent() - 1000) - totalTaken} globally taken. \n", String.StringEncoding.UTF8, FileWriteMode.CreateAppend)
+  catch Exception { }                         // an exception leaving an atEnd is a panic (11.4); the (u64) cast: i32 and u64 do not mix (spec 3.5)
+}
+
+u64 totalTaken = 0
+
+public fun string version() { $"3.14.{getBuild()}" }
+public fun i32 nextNumber() {
+  totalTaken++
+	return Numbers.take()
+}
+public fun string add(i32 a, i32 b) { $"{a + b}" }
+fun string getBuild() { "15926" }

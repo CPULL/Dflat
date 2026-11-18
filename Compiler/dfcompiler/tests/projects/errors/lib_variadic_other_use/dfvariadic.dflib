@@ -1,0 +1,20 @@
+// variadic natives (spec 22): csrc/dfvariadic.c
+Name: dfvariadic
+Namespace: tests.dfvariadic
+Convention: cdecl
+LibName, win-*, static: dfvariadic.lib
+LibName, linux-*, static: libdfvariadic.a
+
+Generic CArg { i8, i16, i32, i64, u8, u16, u32, u64, r32, r64, addr, string }
+
+// the '...' of C: each argument any type of CArg; the mapping gives its own args on
+native *char dfv_format(*char kinds, CArg args...)
+public unsafe fun string s format(string kinds, CArg args...) -> s = string(dfv_format(kinds, args)!)
+
+// one type only, mapped 1 to 1
+native i32 dfv_sum(i32 count, i32 values...)
+
+public unsafe fun string s count(string kinds, CArg args...) -> {
+  s = string(dfv_format(kinds, args)!)
+  Root.Console.log(args.len)
+}

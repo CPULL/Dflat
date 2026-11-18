@@ -29,12 +29,15 @@ public sealed partial class CodeGen {
     return name;
   }
 
-  string PointerMangle(string pointed) => IsPointer(pointed) ? "p_" + PointerMangle(PointedType(pointed)) : Mangle(pointed);
+  string PointerMangle(string pointed) => IsCallbackPointee(pointed) ? $"cb{CallbackId(pointed)}" : IsPointer(pointed) ? "p_" + PointerMangle(PointedType(pointed)) : Mangle(pointed);
 
   // *T, &*T, pointer<T>, pointer<&T>: the pointed type must be a plain value
   string ResolvePointerType(Node n, Node pointedNode, bool writable, bool ownDepth) {
     if (nestedTypeDepth - (ownDepth ? 1 : 0) - pointerTypeNests > 0) {
       throw NotSupported("pointers inside collections, tuples and other generic types", n);
+    }
+    if (CallbackPointee(pointedNode, n, writable) is string callback) {
+      return PointerType(callback, false);   // pointer<WndProc>, pointer<fun i32(i32)>: a callback (spec 22)
     }
     if (ownDepth) {
       pointerTypeNests++;
@@ -46,6 +49,9 @@ public sealed partial class CodeGen {
       if (ownDepth) {
         pointerTypeNests--;
       }
+    }
+    if (callbackSignatureDepth > 0 && IsArr(pointed)) {
+      pointed = ArrElem(pointed);   // *arr<char> in a callback: C never passes an array by value, it is *char (spec 22)
     }
     CheckPointee(pointed, n);
     return PointerType(pointed, writable);
@@ -90,6 +96,9 @@ public sealed partial class CodeGen {
       return null;
     }
     var args = n.Children[1].Children;
+    if (args.Count == 1 && args[0].Kind == "FunRef") {
+      return FunRefPointer(args[0], scope, null);   // pointer.to(onKey(i32)): a callback (spec 22)
+    }
     if (args.Count != 1 || args[0].Kind == "Named") {
       throw Error("pointer.to takes one value: pointer.to(x), or pointer.to(&x) for a writable pointer (spec 12.1)", n);
     }
@@ -237,6 +246,9 @@ public sealed partial class CodeGen {
 
   // the address of item i (p[] is item 0), checked: NullPointerException, IndexOutOfRangeException (spec 12.1)
   string PointerItemAddress(Expr pointer, Node indexNode, Scope scope, Node at) {
+    if (IsCallbackPointer(pointer.Type)) {
+      throw Error($"{DisplayName(pointer.Type)} points to a function: a callback pointer is only given to C (spec 22)", at);
+    }
     string pointed = PointedType(pointer.Type);
     string elemC = CType(pointed);
     var index = indexNode.Kind == "Empty" ? new Expr("0", "i64") : ExprOf(indexNode, scope, "i64");
@@ -367,7 +379,7 @@ public sealed partial class CodeGen {
       var arg = init.Children[1].Children[0];
       place = arg.Kind == "WritableAddressOf" ? arg.Children[0] : arg;
     }
-    if (place == null) {
+    if (place == null || place.Kind == "FunRef") {
       return;
     }
     var collNode = place.Kind == "Index" ? place.Children[0] : place;
@@ -462,6 +474,9 @@ public sealed partial class CodeGen {
     var args = n.Children[1].Children;
     string name = member.Text!;
     var pointer = ExprOf(member.Children[0], scope);
+    if (IsCallbackPointer(pointer.Type)) {
+      throw Error($"{DisplayName(pointer.Type)} points to a function: it has no {name}, a callback pointer is only given to C (spec 22)", n);
+    }
     string elemC = CType(PointedType(pointer.Type));
     bool raw = name.EndsWith("Raw");
     string unit = raw ? "1" : $"(int64_t)sizeof({elemC})";
@@ -642,6 +657,9 @@ public sealed partial class CodeGen {
       throw Error(IsPointer(e.Type) ? $"a pointer becomes {DisplayName(to)} only with a transmute: [{DisplayName(to)}]p (spec 12.1, 3.5)"
         : $"{DisplayName(e.Type)} becomes a pointer only with a transmute, in unsafe code: [{DisplayName(to)}]x (spec 12.1)", n);
     }
+    if (IsCallbackPointer(to) || IsCallbackPointer(e.Type)) {
+      throw Error("a callback pointer is not cast: it points to a function (spec 22)", n);
+    }
     if (IsWritablePointer(to) && !IsWritablePointer(e.Type)) {
       throw Error($"a read-only pointer ({DisplayName(e.Type)}) cannot be cast to a writable one ({DisplayName(to)}) (spec 12.1)", n);
     }
@@ -665,6 +683,9 @@ public sealed partial class CodeGen {
     }
     if (!IsPointer(to)) {
       return null;
+    }
+    if (IsCallbackPointer(to)) {
+      throw Error("a callback pointer is made only by pointer.to(f(...)) (spec 22)", n);
     }
     if (e.Type != "addr" && !IsInt(e.Type)) {
       throw Error($"a pointer is made by a transmute only from an addr or an integer, not from {DisplayName(e.Type)} (spec 12.1)", n);
@@ -711,6 +732,9 @@ public sealed partial class CodeGen {
     }
     if (layout == null) {
       throw NotSupported("pointer fields outside a struct<fixed> or struct<compact> (spec 12.1)", at);
+    }
+    if (IsCallbackPointer(type)) {
+      throw NotSupported("a callback pointer in a struct field (spec 22)", at);
     }
     if (IsPointer(PointedType(type)) || PointedType(type) == "string") {
       throw NotSupported($"a field {DisplayName(type)} (a pointer field points to a plain value or a struct)", at);

@@ -1,2 +1,2 @@
-Generic Texts { string, i32 }
-Texts t = "a"
+Generic Nums { i32, i64 }
+Nums n = "a"

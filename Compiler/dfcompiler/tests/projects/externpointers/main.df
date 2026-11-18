@@ -22,7 +22,7 @@ unsafe fun string run(arr<u8> input, &arr<u8> output) {
   s.nextOut = pointer.to(&output)
   i32 done = stream_run(&*s)
   pointer<&u8> after = s.nextOut
-  $"{done} {s.availIn} {s.availOut} {after.toStr().contains(",")}"
+  return $"{done} {s.availIn} {s.availOut} {after.toStr().contains(",")}"
 }
 
 arr<i32> items = [1, 2, 3, 4, 5]

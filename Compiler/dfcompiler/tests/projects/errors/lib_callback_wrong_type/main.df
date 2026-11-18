@@ -1,0 +1,7 @@
+// a pointer of another callback type is not given to the native (spec 22)
+namespace app
+import lib dfcallbacks
+import Root
+fun i32 add(i32 a, i32 b) { a + b }
+pointer<Combine> kept = pointer.to(add(i32, i32))
+dfc_notify(kept, 1.5)

@@ -1318,7 +1318,7 @@ public class set<T> : SetCollection<T> {
         + (ownsArray && target.Variable?.ArrFlag is string flag
           ? $"if ({flag} && {old}.p != {target.Code}.p) {{ {ArrDropHelper(target.Type)}({old}); }} {flag} = true; "   // a mixed local: its own old array ends, it owns the new one
           : ownsArray ? $"if ({old}.p != {target.Code}.p) {{ {ArrDropHelper(target.Type)}({old}); }} " : "")   // the old array of an owner ends (spec 6.8.1)
-        + (IsTupleOwner(target) ? TupleDropCode(target.Type, old) : "");   // the old parts of a tuple owner end (spec 3.2)
+        + (IsTupleOwner(target) ? OwnedTupleDrop(target.Type, old) : "");   // the old parts of a tuple owner end (spec 3.2)
     string code = $"({{ {CType(vec.Type)} {held} = {NullChecked(vec.Code, vec.Type)}; bool {ok} = false; {CType(elem)} {incoming} = {zero}; {LockCheck(held, vec.Type)}"
       + $"if ({held}->{count} > 0) {{ {held}->{count} -= 1; {incoming} = {held}->{items}.p[{held}->{count}]; {held}->{items}.p[{held}->{count}] = {zero}; {ok} = true; }} "
       + assignCode

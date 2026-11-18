@@ -111,6 +111,13 @@ public sealed partial class CodeGen {
     if (values.Count == 1 && values[0].Kind == "GroupValue") {
       var source = values[0].Children[0];
       var sourceValue = ExprOf(source, scope);
+      if (IsClass(sourceValue.Type) || IsCountedType(sourceValue.Type)) {
+        // an object is not a group of values: its fields are written one by one (spec 11.1.4.1)
+        var names = values[0].Text!.Split(',');
+        bool hasFields = classes.TryGetValue(sourceValue.Type, out var sourceClass) && names.All(field => FindField(sourceClass, field) != null);
+        throw Error($"a field group takes a tuple, a struct or another field group, not the object {DisplayName(sourceValue.Type)}"
+          + (hasFields ? $": write ({string.Join(", ", names.Select(field => SourceText(source) + "." + field))})" : "") + " (spec 11.1.4.1)", s);
+      }
       if (!IsStruct(sourceValue.Type)) {
         // a tuple variable: by the names of the fields of the group
         if (!IsSimpleReceiver(source)) {

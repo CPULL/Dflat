@@ -132,7 +132,7 @@ public sealed class Parser {
   }
 
   Token ExpectMember() {
-    if (Peek.Kind != TokenKind.Ident && Peek.Kind != TokenKind.Int) {
+    if (Peek.Kind != TokenKind.Ident && Peek.Kind != TokenKind.Int && Peek.Kind != TokenKind.Keyword) {   // libs.fun.counters.f(): a keyword segment of a path (spec 16)
       throw Error("expected member name");
     }
     return Next();
@@ -259,10 +259,11 @@ public sealed class Parser {
     }
   }
 
-  string ParseQualifiedName() {
-    var first = ExpectIdent();
+  // a.b.c; a segment after a dot can be a keyword (libs.fun.counters, spec 16). namespacePath: the first one too (namespace, import, alias)
+  string ParseQualifiedName(bool namespacePath = false) {
+    var first = namespacePath && Peek.Kind == TokenKind.Keyword ? Next() : ExpectIdent();
     string name = first.Text;
-    while (IsOp(".") && PeekAt(1).Kind == TokenKind.Ident) {
+    while (IsOp(".") && PeekAt(1).Kind is TokenKind.Ident or TokenKind.Keyword) {
       Next();
       name += "." + Next().Text;
     }
@@ -379,15 +380,28 @@ public sealed class Parser {
 
   Node ParseStatementCore(string? ownerName, bool caseBody) {
     classMember = ownerName != null;   // a field of a class can have accessor blocks (spec 11.1.4)
+    if (ownerName == null && Peek.Kind == TokenKind.Ident && Peek.Text == "atLibStart" && PeekAt(1).Is("{")) {
+      var start = Next();
+      return new Node("AtLibStart", start).Add(ParseBlock());   // the startup code of a library, in lib.df (spec 15.8)
+    }
     if (DflibMode && ownerName == null && (Peek.Kind == TokenKind.Ident && Peek.Text == "native"
         || IsOp("[") && PeekAt(1).Kind == TokenKind.Ident && PeekAt(2).Is("]") && PeekAt(3).Kind == TokenKind.Ident && PeekAt(3).Text == "native")) {
       return ParseNative();
+    }
+    if (DflibMode && ownerName == null && Peek.Kind == TokenKind.Ident && Peek.Text == "handle" && PeekAt(1).Kind == TokenKind.Ident && PeekAt(1).Line == Peek.Line) {
+      return ParseHandle();
+    }
+    if (DflibMode && ownerName == null && IsTargetBlock()) {
+      return ParseTargetBlock();
     }
     if (Peek.Kind == TokenKind.Ident && Peek.Text == "unsafe" && PeekAt(1).Is("{")) {
       var word = Next();
       return new Node("Unsafe", word).Add(ParseBlock(ownerName));   // unsafe { ... } (spec 12.1)
     }
     var mods = ParseModifiers();
+    if (DflibMode && ownerName == null && IsVariableMapping()) {
+      return WithMods(ParseVariableMapping(), mods);
+    }
     if (IsOp("_") && PeekAt(2).Kind == TokenKind.Ident && PeekAt(2).Line == Peek.Line) {
       CheckUnderscoreName();   // _Texture2D t: the old weak marker
     }
@@ -549,7 +563,7 @@ public sealed class Parser {
   // namespace a.b.c   |   namespace local
   Node ParseNamespace() {
     var t = Next();
-    var name = ParseQualifiedName();
+    var name = ParseQualifiedName(true);
     EndStatement(false);
     return new Node(name == "local" ? "NamespaceLocal" : "Namespace", t, name == "local" ? null : name);
   }
@@ -580,6 +594,80 @@ public sealed class Parser {
     return node;
   }
 
+  // linux-x64, osx-arm64 { ... } | *-x64 { ... } | linux-* { ... } (spec 22): the items of some targets
+  bool IsTargetBlock() =>
+    (Peek.Kind == TokenKind.Ident || IsOp("*")) && PeekAt(1).Is("-") && (PeekAt(2).Kind == TokenKind.Ident || PeekAt(2).Is("*"))
+    && PeekAt(1).Line == Peek.Line && PeekAt(2).Line == Peek.Line;
+
+  Node ParseTargetBlock() {
+    var start = Peek;
+    var patterns = new List<string>();
+    do {
+      string system = IsOp("*") ? Next().Text : ExpectIdent().Text;
+      ExpectOp("-");
+      string cpu = IsOp("*") ? Next().Text : ExpectIdent().Text;
+      patterns.Add(system + "-" + cpu);
+    } while (AcceptOp(","));
+    var node = new Node("TargetBlock", start, string.Join(",", patterns));
+    node.Add(ParseBlock());
+    return node;
+  }
+
+  // i32 total -> native i32 total | &i32 shared -> native i32 shared | i32 timezone -> _get_timezone(=timezone) (spec 22): a C variable
+  bool IsVariableMapping() {
+    int at = IsOp("&") ? 1 : 0;
+    return PeekAt(at).Kind is TokenKind.Ident or TokenKind.Keyword && PeekAt(at + 1).Kind == TokenKind.Ident && PeekAt(at + 2).Is("->");
+  }
+
+  Node ParseVariableMapping() {
+    bool writable = AcceptOp("&");
+    var type = ParseType(false);
+    var name = ExpectIdent();
+    var arrow = ExpectOp("->");
+    var node = new Node("VarMapping", name, name.Text).Add(type);
+    if (writable) {
+      node.Add(new Node("ReadWrite", name));
+    }
+    if (Peek.Kind == TokenKind.Ident && Peek.Text == "native") {
+      Next();
+      var cType = ParseType(false);
+      var symbol = ExpectIdent();
+      node.Add(new Node("NativeVar", symbol, symbol.Text).Add(cType));
+      EndStatement(false);
+      return node;
+    }
+    if (writable) {
+      throw ErrorAt("a variable read through a function is read-only: write it without & (spec 22)", arrow);
+    }
+    node.Add(new Node("Mapping", arrow));
+    if (IsOp("{")) {
+      node.Add(ParseBlock());
+    } else {
+      var block = new Node("Block", arrow);
+      block.Add(ParseStatement());
+      node.Add(block);
+    }
+    return node;
+  }
+
+  // handle Db addr | handle File i32 invalid -1 (spec 22): a C handle, a type of the program
+  Node ParseHandle() {
+    var word = Next();
+    var name = ExpectIdent();
+    var node = new Node("Handle", name, name.Text);
+    node.Add(new Node("Mods", word, "public"));
+    if (Peek.Kind == TokenKind.Ident && Peek.Text == "struct" && PeekAt(1).Is("{")) {
+      throw Error("a handle made of a struct (handle T struct { ... }) is not built yet (spec 22)");
+    }
+    node.Add(ParseType(false));
+    if (Peek.Kind == TokenKind.Ident && Peek.Text == "invalid" && Peek.Line == name.Line) {
+      var invalid = Next();
+      node.Add(new Node("Invalid", invalid).Add(ParseExpr()));
+    }
+    EndStatement(false);
+    return node;
+  }
+
   // import lib zlib | import lib static zlib 2.0beta (spec 22): a C library, its .dflib and its binaries
   Node ParseImportLib(Token t) {
     Next();   // lib
@@ -606,9 +694,9 @@ public sealed class Parser {
     if (Peek.Kind == TokenKind.Ident && Peek.Text == "lib" && PeekAt(1).Line == t.Line && PeekAt(1).Kind is TokenKind.Ident or TokenKind.Keyword) {
       return ParseImportLib(t);
     }
-    var imports = new List<Node> { new Node("Import", t, ParseQualifiedName()) };
+    var imports = new List<Node> { new Node("Import", t, ParseQualifiedName(true)) };
     while (AcceptOp(",")) {
-      imports.Add(new Node("Import", t, ParseQualifiedName()));
+      imports.Add(new Node("Import", t, ParseQualifiedName(true)));
     }
     EndStatement(false);
     if (imports.Count == 1) {
@@ -625,6 +713,33 @@ public sealed class Parser {
   Node ParseAlias() {
     Next();
     var start = Peek;
+    // alias [stdcall] fun i64(Hwnd, u32) as WndProc (spec 22): a function type, the type of a callback; the convention only in a .dflib
+    if (IsKw("fun") || IsOp("[") && PeekAt(1).Kind == TokenKind.Ident && PeekAt(2).Is("]")) {
+      string? convention = null;
+      if (AcceptOp("[")) {
+        var conv = ExpectIdent();
+        if (!DflibMode) {
+          throw ErrorAt("a calling convention is written only in a .dflib, on a native or a callback type (spec 22)", conv);
+        }
+        convention = conv.Text;
+        ExpectOp("]");
+      }
+      if (!IsKw("fun")) {
+        throw Error("expected a function type after the calling convention: alias [stdcall] fun i32(i32) as Name (spec 22)");
+      }
+      var funType = ParseType(false);
+      if (!IsKw("as")) {
+        throw Error("expected 'as' in alias");
+      }
+      Next();
+      var aliasName = ExpectIdent();
+      var funAlias = new Node("Alias", aliasName, aliasName.Text).Add(funType);
+      if (DflibMode) {
+        funAlias.Add(new Node("Native", start, convention));   // the library convention fills it when none is written
+      }
+      EndStatement(false);
+      return funAlias;
+    }
     string original = ParseQualifiedName();
     if (!IsKw("as")) {
       throw Error("expected 'as' in alias");
@@ -1077,7 +1192,7 @@ public sealed class Parser {
       throw ErrorAt("'_' alone is only valid as an assignment target", start);
     }
     if (first.Kind is "Tuple" or "List" or "Map" or "MapLit") {
-      // valid only as the last expression of a function, its result (spec 13): the compiler decides
+      // valid only as the single expression of a function body, its result (spec 13): the compiler decides
       return new Node("ExprStmt", start, "literal").Add(first);
     }
     return new Node("ExprStmt", start).Add(first);
@@ -1549,6 +1664,12 @@ public sealed class Parser {
     if (!IsOp(")")) {
       do {
         SkipNewlines();
+        bool frees = false;
+        if (DflibMode && IsOp("[") && PeekAt(1).Is("~")) {
+          Next();
+          Next();
+          frees = true;   // [~Db db]: the function that frees the handle (spec 22)
+        }
         bool isVariadic = AcceptOp("...");
         bool isVolatile = false;
         if (Peek.Kind == TokenKind.Ident && Peek.Text == "volatile" && PeekAt(1).Kind == TokenKind.Ident && PeekAt(2).Kind == TokenKind.Ident) {
@@ -1596,6 +1717,13 @@ public sealed class Parser {
           throw Error("a copy is chosen by the caller: f(x!)");
         }
         var p = new Node(kind, name, name.Text).Add(type);
+        if (frees) {
+          ExpectOp("]");
+          if (kind != "Param") {
+            throw ErrorAt("the handle to free is written [~T name], with no other marker (spec 22)", name);
+          }
+          p.Add(new Node("Frees", name));
+        }
         if (countedParam) {
           if (kind != "Param" || weakParam) {
             throw ErrorAt("a counted parameter is @T name, with no other marker", name);
@@ -2298,7 +2426,8 @@ public sealed class Parser {
       }
       switch (t.Text) {
         case "(":
-          e = new Node("Call", t).Add(e).Add(ParseArgs());
+          e = new Node("Call", t).Add(e).Add(e is { Kind: "Member", Text: "to" } && e.Children[0] is { Kind: "Name", Text: "pointer" } && TryParseFunRef() is Node funRef
+            ? new Node("Args", t).Add(funRef) : ParseArgs());
           break;
         case ".":
         case "?.":
@@ -2479,8 +2608,9 @@ public sealed class Parser {
     if (close < 0) {
       return false;
     }
-    var name = toks[close + 1];
-    var after = toks[close + 2];
+    int at = toks[close + 1].Is("?") ? close + 2 : close + 1;   // fun (Dog, i32)? find(): a nullable tuple result
+    var name = toks[at];
+    var after = toks[at + 1];
     return !(name.Kind == TokenKind.Ident && (after.Is("(") || after.Is("<")));
   }
 
@@ -2607,6 +2737,37 @@ public sealed class Parser {
   }
 
   // (a, b, name: c)
+  // pointer.to(onKey(i32, *char)) (spec 22): a function named with the types of its parameters, a callback for C; null (nothing consumed)
+  // when the argument is not one. A pointer to the result of a call is never valid, so a name followed by types is always a function
+  Node? TryParseFunRef() {
+    int save = pos;
+    try {
+      var open = ExpectOp("(");
+      SkipNewlines();
+      if (Peek.Kind != TokenKind.Ident) {
+        pos = save;
+        return null;
+      }
+      var start = Peek;
+      string name = ParseQualifiedName();
+      if (!IsOp("(")) {
+        pos = save;
+        return null;
+      }
+      var types = ParseTypeList();
+      SkipNewlines();
+      if (!IsOp(")")) {
+        pos = save;
+        return null;
+      }
+      Next();
+      return new Node("FunRef", start, name).Add(types);
+    } catch (DfException) {
+      pos = save;
+      return null;
+    }
+  }
+
   Node ParseArgs() {
     var open = ExpectOp("(");
     var args = new Node("Args", open);
@@ -2621,6 +2782,10 @@ public sealed class Parser {
           Next();
           SkipNewlines();
           args.Add(new Node("Named", n, n.Text).Add(ParseExpr()));
+        } else if (DflibMode && IsOp("=") && PeekAt(1).Kind == TokenKind.Ident) {
+          var eq = Next();
+          var target = ExpectIdent();
+          args.Add(new Node("OutArg", eq, target.Text));   // =res: the native fills the named result res (spec 22)
         } else {
           args.Add(ParseExpr());
         }

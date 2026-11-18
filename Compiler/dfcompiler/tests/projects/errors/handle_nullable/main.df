@@ -1,0 +1,5 @@
+// a handle is already nullable (spec 22)
+namespace app
+import lib dfhandles
+import Root
+Res? a = null

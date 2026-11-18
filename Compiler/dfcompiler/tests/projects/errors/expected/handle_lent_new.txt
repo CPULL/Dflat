@@ -1,0 +1,1 @@
+main.df(8): error: a new handle given to 'r', which only borrows it, would never be freed: keep it in a variable first (spec 22)

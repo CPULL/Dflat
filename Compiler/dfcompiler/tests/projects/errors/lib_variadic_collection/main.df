@@ -1,0 +1,6 @@
+// the '...' of a native takes the values one by one (spec 22)
+namespace app
+import lib dfvariadic
+import Root
+arr<i32> values = [1, 2]
+Console.log(dfv_sum(2, values))

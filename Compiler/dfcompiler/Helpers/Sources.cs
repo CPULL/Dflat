@@ -124,6 +124,7 @@ sealed partial class SourceLoader {
     }
 
     public string Folder { get; }
+    public string? LibName { get; init; }   // a library: the name of its .dsprj, used by import lib (spec 16)
     public string Namespace { get; }    // lower case; "" for a program without a namespace line
     public string What { get; }         // for the messages
   }
@@ -137,6 +138,7 @@ sealed partial class SourceLoader {
 
     public int Index { get; }
     public string Path { get; }
+    public HashSet<string> ImportedLibs { get; } = new(StringComparer.OrdinalIgnoreCase);   // import lib <name> of a Dflat library (spec 16)
     public Node Tree { get; }
     public string Namespace { get; set; } = "";
   }
@@ -290,7 +292,20 @@ sealed partial class SourceLoader {
     }
     string ns = RootNamespace(file, "the root file of a library");
     file.Namespace = ns;
-    roots.Add(new SourceRoot(System.IO.Path.GetFullPath(folder), ns, "the library " + folder));
+    // its own project file gives its name: import lib <name> (spec 16, 15.8)
+    string? libName = null;
+    foreach (string project in Directory.GetFiles(folder, "*.dsprj")) {
+      foreach (string line in File.ReadAllLines(project)) {
+        string text = line.Trim();
+        if (text.StartsWith("name=", StringComparison.OrdinalIgnoreCase)) {
+          libName = text["name=".Length..].Trim();
+        }
+      }
+    }
+    if (string.IsNullOrEmpty(libName)) {
+      throw new SourceException($"{projectFile}: error: the library {folder} needs its own project file (.dsprj) with its name: name=<name> (spec 16)");
+    }
+    roots.Add(new SourceRoot(System.IO.Path.GetFullPath(folder), ns, "the library " + folder) { LibName = libName });
   }
 
   // two roots with the same namespace, or one inside the other (the stdlib included), are an error
@@ -316,10 +331,16 @@ sealed partial class SourceLoader {
     }
     CheckFile(file);
     foreach (var importLib in file.Tree.Children.Where(statement => statement.Kind == "ImportLib").ToList()) {
+      if (roots.FirstOrDefault(root => string.Equals(root.LibName, importLib.Text, StringComparison.OrdinalIgnoreCase)) is SourceRoot dflatLibrary) {
+        file.ImportedLibs.Add(dflatLibrary.LibName!);   // a Dflat library: its namespaces can be imported in this file (spec 16)
+        file.Tree.Children.Remove(importLib);
+        continue;
+      }
       ImportLibrary(importLib, multiFile);   // import lib zlib: its .dflib, and an import of its namespace (spec 22, Dflib.cs)
     }
     foreach (var import in file.Tree.Children.Where(statement => statement.Kind == "Import")) {
       string path = import.Text!;
+      CheckLibraryImported(file, path, import.Line);
       // a path that is not a folder may name one declaration of the namespace above it (import gfx.Context, spec 16.2): its folder is loaded
       var files = Resolve(path, import.Line, multiFile, quiet: path.Contains('.'))
         ?? Resolve(path[..path.LastIndexOf('.')], import.Line, multiFile, quiet: true)
@@ -339,16 +360,35 @@ sealed partial class SourceLoader {
         StringComparison.OrdinalIgnoreCase)).OrderByDescending(root => root.Folder.Length).FirstOrDefault();
     bool isLibraryRoot = library != null && string.Equals(file.Path, System.IO.Path.Combine(library.Folder, "lib.df"), StringComparison.OrdinalIgnoreCase);
     if (library != null) {
-      SourceMap.SetLibrary(file.Index, System.IO.Path.GetFileName(library.Folder), isLibraryRoot);
+      SourceMap.SetLibrary(file.Index, library.LibName ?? System.IO.Path.GetFileName(library.Folder), isLibraryRoot);
+    }
+    // atLibStart { } and the top-level atEnd { } of lib.df: hidden functions of the library, run at program start and end (spec 15.8, 14.2)
+    for (int index = 0; index < file.Tree.Children.Count; index++) {
+      var statement = file.Tree.Children[index];
+      if (statement.Kind == "AtLibStart" && !isLibraryRoot) {
+        throw new CompileException("atLibStart is the startup code of a library: it is written only in lib.df (spec 15.8)", statement.Line);
+      }
+      if (isLibraryRoot && statement.Kind is "AtLibStart" or "AtEnd") {
+        bool start = statement.Kind == "AtLibStart";
+        if (file.Tree.Children.Take(index).Any(other => start ? other.Kind == "Fun" && other.Text == "__libstart" : other.Kind == "Fun" && other.Text == "__libend")) {
+          throw new CompileException($"a library has one {(start ? "atLibStart" : "atEnd")} block (spec 15.8)", statement.Line);
+        }
+        var fun = new Node("Fun", new Token(TokenKind.Ident, "", statement.Line, 0), start ? "__libstart" : "__libend");
+        fun.Add(new Node("Params", new Token(TokenKind.Op, "(", statement.Line, 0)));
+        fun.Add(statement.Children.First(child => child.Kind == "Block"));
+        fun.Add(new Node(start ? "LibStart" : "LibEnd", new Token(TokenKind.Ident, "", statement.Line, 0), library!.LibName ?? System.IO.Path.GetFileName(library.Folder)));
+        file.Tree.Children[index] = fun;
+      }
     }
     foreach (var statement in file.Tree.Children) {
       if (!isRoot && !isLibraryRoot && statement.Kind == "Decl"
           && statement.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ').Contains("global") == true) {
         throw new CompileException("a global can be declared only in the root file (program.df, main.df or lib.df) (spec 18.1)", statement.Line);
       }
-      bool declaration = statement.Kind is "Fun" or "Alias" or "Enum" or "Class" or "Trait" or "GenericSet" or "Struct"
+      bool declaration = statement.Kind is "Fun" or "Alias" or "Enum" or "Class" or "Trait" or "GenericSet" or "Struct" or "Handle"
         or "Namespace" or "NamespaceLocal" or "Import" or "ImportLib" || IsConst(statement)
-        || statement.Kind == "Decl" && statement.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ').Contains("global") == true;   // a global of a library (spec 18.1)
+        || statement.Kind == "Decl" && statement.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ').Contains("global") == true   // a global of a library (spec 18.1)
+        || isLibraryRoot && statement.Kind == "Decl";   // a variable of a library: its state (spec 16)
       if (!isRoot && !declaration) {
         throw new CompileException("only the root file can have top-level code: this file can have only declarations", statement.Line);
       }
@@ -367,6 +407,17 @@ sealed partial class SourceLoader {
 
   // import a.b.c: the root whose namespace starts the path, then down its folders; all the .df files of the folder
   // quiet: a qualified name that may not be a namespace gives null instead of an error
+  // a namespace of a library is known to a file only after import lib <name> (spec 16); the files of the library itself see it
+  void CheckLibraryImported(SourceFile file, string path, int line) {
+    string lower = path.ToLowerInvariant();
+    var root = roots.Where(root => root.LibName != null && (lower == root.Namespace || lower.StartsWith(root.Namespace + "."))).OrderByDescending(root => root.Namespace.Length).FirstOrDefault();
+    if (root == null || file.ImportedLibs.Contains(root.LibName!)
+        || file.Path.StartsWith(root.Folder + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) {
+      return;
+    }
+    throw new CompileException($"unknown namespace '{path}': if it is the namespace of a library, import the library first: import lib <name> (spec 16)", line);
+  }
+
   List<SourceFile>? Resolve(string name, int line, bool multiFile, bool quiet = false) {
     string lower = name.ToLowerInvariant();
     if (libraryFiles.TryGetValue(lower, out var libraryFile)) {

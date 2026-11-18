@@ -188,6 +188,10 @@ public sealed partial class CodeGen {
       if (classes.ContainsKey(root)) {
         return hops >= 1;
       }
+      // p.x of a struct parameter: a value, never null (spec 11.1.5); a field of a field may be an object
+      if (hops == 0 && currentFlowFun?.Params.FirstOrDefault(p => p.Name == root) is ParamSig param && IsStruct(param.Type) && !IsNullable(param.Type)) {
+        return false;
+      }
       return true;
     }
     return current.Kind is not ("String" or "Interp" or "Int" or "Real" or "Char" or "Bool");

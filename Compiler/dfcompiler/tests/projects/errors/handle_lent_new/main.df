@@ -1,0 +1,8 @@
+// a new handle lent to a function would never be freed (spec 22)
+namespace app
+import lib dfhandles
+import Root
+fun show(Res r) {
+  Console.log(dfh_id(r))
+}
+show(dfh_open(1))

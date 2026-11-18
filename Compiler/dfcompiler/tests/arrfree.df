@@ -12,7 +12,7 @@ public class Dog(string name) {
 fun show(arr<Dog> dogs) { Console.log($"  {dogs.len} dogs") }
 fun i32 count(arr<Dog> dogs) {
   show(dogs)                          // passed on to another reader
-  (i32)dogs.len
+  return (i32)dogs.len
 }
 fun ->arr<Dog> pack(string name) {
   arr<Dog> made = [Dog(name + "1"), Dog(name + "2")]

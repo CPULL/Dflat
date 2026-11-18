@@ -1,0 +1,1 @@
+main.df(5): error: feature not supported: a handle inside a tuple or a collection (spec 22)

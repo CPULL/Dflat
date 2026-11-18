@@ -2,7 +2,7 @@
 class Cache(i32 start) {
   i32 hits = start
   Cache2 other = Cache2()
-  public fun i32 add(i32 k) { hits += k; hits }
+  public fun i32 add(i32 k) { hits += k; return hits }
   public fun &Cache2 inner() { other }
   unrestricted fun Cache2 peek() { other }
 }

@@ -1,0 +1,1 @@
+main.df(5): error: the '...' of format takes i8, i16, i32, i64, u8, u16, u32, u64, r32, r64, addr, string, not bool (spec 22)

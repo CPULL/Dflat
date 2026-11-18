@@ -1,0 +1,1 @@
+atlibstart_program.df(3): error: atLibStart is the startup code of a library: it is written only in lib.df (spec 15.8)

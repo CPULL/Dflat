@@ -1,0 +1,7 @@
+import Root
+class Dog(string name) {
+  public string name = name
+}
+Generic Pets { i32, Dog }
+set<Pets> all = set<Pets>()
+all.add(1)

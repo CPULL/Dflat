@@ -1,0 +1,13 @@
+Dog { name: rex } Dog { name: rex }
+Dog { name: rex } Dog { name: rex2 }
+dog bit true
+null Dog { name: rex }
+end rex2
+replaced
+Dog { name: fido }
+end lost
+dropped
+end fido
+end rex
+end bit
+---- exit code 0 ----

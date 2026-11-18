@@ -1,0 +1,1 @@
+main.df(6): error: a handle cannot be copied, only moved with -> (spec 22)

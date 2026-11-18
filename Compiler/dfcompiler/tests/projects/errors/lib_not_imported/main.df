@@ -1,0 +1,4 @@
+// a namespace of a library is known only after import lib (spec 16)
+namespace app
+import libs.fun.counters
+Root.Console.log(version())

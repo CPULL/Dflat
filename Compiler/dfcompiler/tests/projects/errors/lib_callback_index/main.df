@@ -1,0 +1,7 @@
+// a callback pointer is only given to C (spec 22)
+namespace app
+import lib dfcallbacks
+import Root
+fun i32 add(i32 a, i32 b) { a + b }
+pointer<Combine> kept = pointer.to(add(i32, i32))
+Console.log(kept[0])

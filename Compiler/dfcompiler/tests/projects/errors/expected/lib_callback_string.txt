@@ -1,0 +1,1 @@
+dfcallbacks.dflib(20): error: a callback takes numbers, bool, addr, handles, pointers and struct<fixed> / <compact>, not string (spec 22)

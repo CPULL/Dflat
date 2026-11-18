@@ -1,0 +1,44 @@
+// =out parameters, C variables and target blocks (spec 22): csrc/dfout.c
+Name: dfout
+Namespace: tests.dfout
+Convention: cdecl
+LibName, win-*, static: dfout.lib
+LibName, linux-*, static: libdfout.a
+
+handle Conn addr
+
+// numbers given back through pointers
+native i32 dfo_split(i32 value, &*i32 half, &*i32 rest)
+public fun bool ok, i32 half, i32 rest split(i32 value) -> ok = dfo_split(value, =half, =rest) != 0
+
+// a handle given back through &Conn
+native i32 dfo_open(i32 id, &Conn c)
+public fun Conn c, i32 res open(i32 id) -> res = dfo_open(id, =c)
+native i32 dfo_close(Conn c)
+public fun close([~Conn c]) -> dfo_close(c)
+native i32 dfo_closes()
+
+// C variables: read-only, read/write, read through a function
+i32 counter -> native i32 dfo_counter
+&i32 limit -> native i32 dfo_limit
+native i32 dfo_get_magic(&*i32 out)
+public i32 magic -> dfo_get_magic(=magic)
+
+// target blocks: the most specific block wins, then the first one in the file
+public fun string p platform() -> p = "default"
+win-* {
+  public fun string p platform() -> p = "windows"
+}
+linux-* {
+  public fun string p platform() -> p = "linux"
+}
+*-x64 {
+  public fun string p bits() -> p = "x64"
+}
+win-x64, linux-x64 {
+  public fun string p bits() -> p = "exact"
+}
+public fun string p bits() -> p = "default"
+osx-arm64 {
+  public fun string p onlyMac() -> p = "mac"
+}

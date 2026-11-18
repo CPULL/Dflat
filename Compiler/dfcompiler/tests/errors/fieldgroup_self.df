@@ -1,0 +1,7 @@
+// a field group takes a tuple, a struct or another field group, not an object (spec 11.1.4.1)
+import Root
+class Sprite {
+  public pos { r32 x, r32 y }
+}
+Sprite s = Sprite()
+s.pos = s

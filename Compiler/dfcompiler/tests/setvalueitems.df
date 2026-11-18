@@ -1,0 +1,45 @@
+// set values that own a string or an object inside vec, list, arr, map values, tuples and structs (spec 11.3.6.1)
+import Root
+class Dog(string name) {
+  public string name = name
+}
+Generic Key { i32, string, Dog }
+
+struct Pair { Key k, i32 n }
+
+vec<Key> v = vec<Key>()
+v.add("a")
+v.add(1)
+v.add(Dog("rex"))
+string s = "b"
+v.add(s)
+Key one = "one"
+v.add(one)
+Console.log(v)
+Key first = v[0]
+v[0] = "z"
+Console.log($"{first} {v[0]} {v.len}")
+v.removeAt(1)
+Console.log(v)
+
+list<Key> l = list<Key>()
+l.add("x")
+l.add(2)
+Console.log(l)
+
+arr<Key> a = ["p", 3]
+Console.log(a)
+
+map<i32, Key> m = map<i32, Key>()
+m[1] = "uno"
+m[2] = Dog("max")
+m[1] = "one"
+Console.log(m)
+
+(Key k, i32 n) t = ("tuple", 5)
+(Key k, i32 n) u = t
+Console.log($"{t} {u}")
+
+Pair p = Pair("pair", 1)
+Pair q = p
+Console.log($"{p.k} {q.n}")

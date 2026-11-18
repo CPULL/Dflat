@@ -8,7 +8,8 @@ namespace dfcompiler;
 // the locks, the rank checks and the lambda rule come later.
 public sealed partial class CodeGen {
   sealed record GlobalInfo(string Name, string CName, string Type, int Rank, Node Decl) {
-    public string? Library => SourceMap.LibraryOf(Decl.Line);   // a global of a library: visible only inside it (spec 18.1)
+    public string? Library => SourceMap.LibraryOf(Decl.Line);   // a global of a library: visible only inside it unless public (spec 18.1)
+    public bool IsPublic => ModsOf(Decl).Contains("public");
   }
 
   readonly Dictionary<string, GlobalInfo> globals = new();
@@ -19,20 +20,46 @@ public sealed partial class CodeGen {
 
   // the top-level globals of the root file: registered, their initializers moved to the function __globals, run at program start
   void DeclareGlobals(Node program) {
-    var decls = program.Children.Where(IsGlobalDecl).ToList();
-    if (decls.Count == 0) {
+    // the libraries in the order they start (spec 15.8): each one creates its globals, then runs its atLibStart, before the program's globals
+    foreach (var statement in program.Children) {
+      string? library = statement.Kind == "Fun" && statement.Children.FirstOrDefault(child => child.Kind is "LibStart" or "LibEnd") is Node marker ? marker.Text
+        : IsGlobalDecl(statement) ? SourceMap.LibraryOf(statement.Line) : null;
+      if (library != null && !libraryOrder.Contains(library)) {
+        libraryOrder.Add(library);
+      }
+      if (statement.Kind == "Fun" && statement.Children.FirstOrDefault(child => child.Kind is "LibStart" or "LibEnd") is Node libMarker) {
+        (libMarker.Kind == "LibStart" ? libraryStarts : libraryEnds)[libMarker.Text!] = statement.Text!;
+      }
+    }
+    var decls = program.Children.Where(IsGlobalDecl)
+      .OrderBy(decl => SourceMap.LibraryOf(decl.Line) is string library ? libraryOrder.IndexOf(library) : int.MaxValue).ToList();   // stable
+    if (decls.Count == 0 && libraryStarts.Count == 0) {
       return;
     }
-    var at = decls[0];
+    var at = decls.Count > 0 ? decls[0] : program.Children.First(statement => statement.Kind == "Fun" && libraryStarts.ContainsValue(statement.Text!));
     var block = Synthetic("Block", at);
+    void StartLibrary(string library) {
+      if (libraryStarts.TryGetValue(library, out var start)) {
+        block.Add(Synthetic("ExprStmt", at).Add(Synthetic("Call", at).Add(Synthetic("Name", at, start)).Add(Synthetic("Args", at))));
+      }
+    }
+    var started = new HashSet<string>();
+    foreach (string library in libraryOrder.Where(library => !decls.Any(decl => SourceMap.LibraryOf(decl.Line) == library))) {
+      StartLibrary(library);   // a library without globals starts first
+      started.Add(library);
+    }
     allGlobalNames.UnionWith(decls.Select(decl => decl.Text!));
     foreach (var decl in decls) {
       string name = decl.Text!;
       if (decl.Line >= SourceMap.Stride && !SourceMap.IsLibraryRoot(decl.Line)) {
         throw Error("a global can be declared only in the root file (program.df, main.df or lib.df) (spec 18.1)", decl);
       }
-      if (ModsOf(decl).Length > 1) {
-        throw Error("a global takes no other modifier: global <Class> <name> = <Class>(...) (spec 18.1)", decl);
+      var mods = ModsOf(decl).Where(mod => mod != "global").ToList();
+      if (mods is ["public"] && !SourceMap.IsLibraryRoot(decl.Line)) {
+        throw Error("public global is for the globals of a library (lib.df): the globals of a program are seen by all its files already (spec 18.1)", decl);
+      }
+      if (mods.Count > 0 && mods is not ["public"]) {
+        throw Error("a global takes no other modifier: [public] global <Class> <name> = <Class>(...) (spec 18.1)", decl);
       }
       if (globals.ContainsKey(name) || globalConsts.ContainsKey(name)) {
         throw Error($"'{name}' is already declared in this scope", decl);
@@ -57,6 +84,12 @@ public sealed partial class CodeGen {
       classGlobals.Append($"static {CType(type)} {info.CName};\n");
       block.Add(Synthetic("Assign", decl, "=").Add(Synthetic("Name", decl, name)).Add(init.Children[0]));
       program.Children.Remove(decl);
+      // the last global of a library: its atLibStart runs now
+      string? declLibrary = SourceMap.LibraryOf(decl.Line);
+      if (declLibrary != null && !started.Contains(declLibrary) && decls.LastOrDefault(other => SourceMap.LibraryOf(other.Line) == declLibrary) == decl) {
+        StartLibrary(declLibrary);
+        started.Add(declLibrary);
+      }
     }
     var node = Synthetic("Fun", at, "__globals").Add(Synthetic("Params", at)).Add(block);
     globalsInit = new FunSig("__globals", "void", new List<ParamSig>(), node, null) { IsStaticInit = true };
@@ -327,12 +360,25 @@ static void df_gl_exit(void) {
   // C code at program end: the globals in the reverse order, before the statics end (their atEnd may use them)
   string GlobalsEndCode() {
     var sb = new StringBuilder();
-    for (int index = globalOrder.Count - 1; index >= 0; index--) {
-      var global = globalOrder[index];
-      sb.Append($"  {{ void* gone = (void*){global.CName}; {global.CName} = NULL; df_drop(gone); }}\n");
+    void Drop(GlobalInfo global) => sb.Append($"  {{ void* gone = (void*){global.CName}; {global.CName} = NULL; df_drop(gone); }}\n");
+    foreach (var global in Enumerable.Reverse(globalOrder).Where(global => global.Library == null)) {
+      Drop(global);   // the program's globals first
+    }
+    // then each library, in the reverse order of its start: its atEnd, then its globals (spec 15.8, 14.2)
+    foreach (string library in Enumerable.Reverse(libraryOrder)) {
+      if (libraryEnds.TryGetValue(library, out var end) && funs.TryGetValue(end, out var ends)) {
+        sb.Append(PairReturn(ends[0]) ? $"  {{ df_exception* error = {ends[0].CName}(); if (error) {{ df_panic_unhandled(error); }} }}\n" : $"  {ends[0].CName}();\n");
+      }
+      foreach (var global in Enumerable.Reverse(globalOrder).Where(global => global.Library == library)) {
+        Drop(global);
+      }
     }
     return sb.ToString();
   }
+
+  readonly List<string> libraryOrder = new();                        // the libraries, in the order they start (spec 15.8)
+  readonly Dictionary<string, string> libraryStarts = new();         // library → the function of its atLibStart
+  readonly Dictionary<string, string> libraryEnds = new();           // library → the function of its atEnd
 
   // the global a name means here, or null (a local, a parameter or a field with the same name hides it)
   GlobalInfo? GlobalNamed(Node n, Scope scope) {
@@ -385,7 +431,7 @@ static void df_gl_exit(void) {
       return;
     }
     LowerAccesses(program, new List<Node>(), new HashSet<string>());
-    foreach (var assign in globalsInit!.Node.Children.First(child => child.Kind == "Block").Children) {
+    foreach (var assign in globalsInit!.Node.Children.First(child => child.Kind == "Block").Children.Where(statement => statement.Kind == "Assign")) {   // not the atLibStart calls
       LowerAccesses(assign.Children[1], new List<Node> { assign }, new HashSet<string>());
     }
   }
@@ -675,7 +721,7 @@ static void df_gl_exit(void) {
       return;
     }
     CheckUses(program, null, -1, new HashSet<string>());
-    foreach (var assign in globalsInit!.Node.Children.First(child => child.Kind == "Block").Children) {
+    foreach (var assign in globalsInit!.Node.Children.First(child => child.Kind == "Block").Children.Where(statement => statement.Kind == "Assign")) {   // not the atLibStart calls
       CheckUses(assign.Children[1], assign, 1, new HashSet<string>());   // global B b = B(a): the initializers follow the same rules
     }
   }
@@ -735,8 +781,8 @@ static void df_gl_exit(void) {
   // the globals of a library are used only by the code of that library, and a library cannot name the globals of the program (spec 18.1)
   void CheckGlobalVisible(GlobalInfo global, Node use) {
     string? here = SourceMap.LibraryOf(use.Line);
-    if (global.Library == here) {
-      return;
+    if (global.Library == here || global.Library != null && here == null && global.IsPublic) {
+      return;   // public global of a library: the program uses it too (spec 18.1)
     }
     throw global.Library != null
       ? Error($"global '{global.Name}' belongs to library '{global.Library}' and is not visible outside it (spec 18.1)", use)

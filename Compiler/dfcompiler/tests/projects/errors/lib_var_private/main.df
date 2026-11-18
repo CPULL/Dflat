@@ -1,0 +1,5 @@
+// a variable of a library without public is its own (spec 16)
+namespace app
+import lib counters
+import libs.fun.counters
+Root.Console.log(totalTaken)

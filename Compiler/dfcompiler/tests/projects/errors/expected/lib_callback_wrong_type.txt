@@ -1,0 +1,1 @@
+main.df(7): error: cannot convert pointer<Combine> to pointer<Notify> (spec 12.1)

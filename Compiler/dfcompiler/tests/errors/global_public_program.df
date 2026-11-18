@@ -1,0 +1,5 @@
+// public global is only for a library (spec 18.1)
+import Root
+class Box { }
+public global Box box = Box()
+Console.log(1)

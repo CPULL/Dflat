@@ -1,0 +1,1 @@
+main.df(8): error: 'Ops.add' is a method: a callback is a plain function or a static method (spec 22)

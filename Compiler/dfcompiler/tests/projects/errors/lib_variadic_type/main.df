@@ -1,0 +1,5 @@
+// the '...' of a native takes the types of its set (spec 22)
+namespace app
+import lib dfvariadic
+import Root
+Console.log(format("i", true))

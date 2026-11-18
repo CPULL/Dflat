@@ -1,0 +1,5 @@
+// =x fills a named result of the mapping (spec 22)
+namespace app
+import lib dfout
+import Root
+Console.log(counter)

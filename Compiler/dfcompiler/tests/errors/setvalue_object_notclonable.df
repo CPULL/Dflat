@@ -1,0 +1,6 @@
+notclonable class Dog {
+  public i32 n
+}
+Generic Pets { Dog, i32 }
+Pets p = Dog()
+Pets q = p

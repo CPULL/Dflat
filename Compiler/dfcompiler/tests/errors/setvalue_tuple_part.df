@@ -1,0 +1,3 @@
+import Root
+Generic Calls { i32, (i32 n, fun() f) }
+Calls c = (1, () { Console.log("x") })

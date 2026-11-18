@@ -1,5 +1,6 @@
 // A library global (spec 18): created before the program's globals, destroyed after them, ranked below them
 namespace app
+import lib stats
 import stats
 import Root
 

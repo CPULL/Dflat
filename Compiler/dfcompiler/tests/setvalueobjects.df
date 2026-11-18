@@ -1,0 +1,34 @@
+// set values with an object member (spec 11.3.6.1): owned, copied as a struct (= clones), a subclass takes the tag of its listed class
+import Root
+class Dog(string name) {
+  public string name = name
+} atEnd {
+  Console.log($"end {name}")
+}
+class Puppy : Dog {
+  public Puppy(string name) : Dog(name) {
+  }
+}
+Generic Pets { Dog, i32, string }
+
+fun Pets adopt(string name) {
+  Pets p = Dog(name)
+  return p
+}
+
+Pets a = Dog("rex")
+Pets b = a
+Console.log($"{a} {b}")
+if b is Dog d { d.name = "rex2" }
+Console.log($"{a} {b}")
+Pets c = Puppy("bit")
+string kind = c is ? { Dog x: $"dog {x.name} {x is Puppy}", default: "other" }
+Console.log(kind)
+Pets m = ->a
+Console.log($"{a} {m}")
+b = 3
+Console.log("replaced")
+Pets n = adopt("fido")
+Console.log(n)
+adopt("lost")
+Console.log("dropped")

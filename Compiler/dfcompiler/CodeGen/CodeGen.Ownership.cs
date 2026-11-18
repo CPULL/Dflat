@@ -55,6 +55,7 @@ public sealed partial class CodeGen {
     "Gift" or "Copy" => true,
     "List" => IsArr(type),
     "Interp" => type == "string",
+    "TypeSwitch" => type == "string",   // a string type switch always gives a string of its own (TypeSwitch, SetTypeSwitch)
     "Binary" => type == "string" && value.Text == "+",
     "Call" => value.Children[0] is { Kind: "Name" } callee && classes.ContainsKey(callee.Text!)
       || CalleesOf(value) is { Count: > 0 } callees && callees.All(f => f.Gives.Contains(0)) || IsArr(type) && IsNewArray(value)
@@ -332,6 +333,20 @@ public sealed partial class CodeGen {
     foreach (var statement in statements.Where(statement => statement.Kind == "Decl" && (IsStringDecl(statement) || IsOptStringDecl(statement) || IsFunDecl(statement)))) {
       owners.Add(statement);
       drops.Add(StrDropNode(statement.Text!, statement));
+    }
+    foreach (var statement in statements.Where(IsOwnedSetDecl)) {
+      owners.Add(statement);   // a set value that owns a string ends with its scope (spec 11.3.6.1)
+      drops.Add(SetDropNode(statement.Text!, statement));
+    }
+    foreach (var statement in statements.Where(IsHandleDecl)) {
+      owners.Add(statement);   // an owned handle is freed when it ends (spec 22)
+      drops.Add(HandleDropNode(statement.Text!, statement));
+    }
+    foreach (var target in statements.Where(statement => statement.Kind == "MultiAssign" && handles.Count > 0).SelectMany(statement => statement.Children[0].Children)
+               .Where(target => target.Kind == "Decl" && target.Children.FirstOrDefault(child => TypeNodeKinds.Contains(child.Kind)) is Node typeNode
+                 && TryResolveType(typeNode) is string type && IsHandle(type))) {
+      owners.Add(target);   // Db db, i32 res = open(...): the handle is the variable's (spec 22)
+      drops.Add(HandleDropNode(target.Text!, target));
     }
     foreach (var statement in statements.Where(IsPointerDecl)) {
       owners.Add(statement);   // a pointer to a vec gives back its count when it ends (spec 12.1)
@@ -1860,8 +1875,8 @@ public sealed partial class CodeGen {
       foreach (var field in cls.Fields.Where(field => IsArr(field.Type) && !field.IsStatic)) {
         ArrDropHelper(field.Type);   // the helpers are written before the drop function that calls them
       }
-      foreach (var field in cls.Fields.Where(field => TupleHoldsArrays(field.Type) && !field.IsStatic)) {
-        TupleDropCode(field.Type, "self");   // the same for the arrays of a tuple field
+      foreach (var field in cls.Fields.Where(field => (TupleHoldsArrays(field.Type) || IsOwningNullableTuple(field.Type)) && !field.IsStatic)) {
+        OwnedTupleDrop(field.Type, "self");   // the same for the arrays of a tuple field
       }
       foreach (var field in cls.Fields.Where(field => StructHoldsObjects(field.Type) && !field.IsStatic)) {
         StructDropHelper(field.Type);   // and for a struct field that holds strings or objects (spec 11.1.5.3)
@@ -1893,6 +1908,12 @@ public sealed partial class CodeGen {
     }
     foreach (var field in cls.Fields.Where(field => !field.IsStatic && field.Type == "string?" && !field.IsCounted)) {
       sb.Append($"  df_opt_str_drop(&self->{field.CName});\n");   // spec 7.1
+    }
+    foreach (var field in cls.Fields.Where(field => !field.IsStatic && SetOwns(field.Type))) {
+      sb.Append($"  {SetDropCode(field.Type, "self->" + field.CName, cls.Node)}\n");   // a set value that owns a string (spec 11.3.6.1)
+    }
+    foreach (var field in cls.Fields.Where(field => !field.IsStatic && IsHandle(field.Type))) {
+      sb.Append($"  {HandleEndCode(field.Type, "self->" + field.CName)}\n");   // an owned handle (spec 22)
     }
     EmitArrayFieldDrops(cls, sb);   // spec 6.8.1 (CodeGen.ArrOwnership.cs)
     foreach (var field in cls.Fields.Where(field => field.IsCounted && !field.IsStatic)) {

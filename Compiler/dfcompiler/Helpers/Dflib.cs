@@ -25,6 +25,8 @@ sealed partial class SourceLoader {
 
   // the C libraries imported by the program, and their files by namespace (import, qualified names)
   public List<CLibrary> CLibraries { get; } = new();
+  public string Target { get; set; } = "";   // the --target name (win-x64): it picks the target blocks of a .dflib (spec 22)
+  public Dictionary<string, string> OtherTargetNames { get; } = new();   // a name defined only in blocks of other targets -> those targets
   readonly Dictionary<string, SourceFile> libraryFiles = new();
   string projectFolder = "";
 
@@ -122,6 +124,8 @@ sealed partial class SourceLoader {
     var parser = new Parser(lexer.Tokenize()) { DflibMode = true };
     var tree = parser.ParseProgram();
     Warnings.AddRange(lexer.Warnings.Concat(parser.Warnings).Select(SourceMap.Fix));
+    ResolveTargetBlocks(tree, Target, OtherTargetNames);
+    LowerVariables(tree);
     LowerDflib(tree, convention);
     var file = new SourceFile(full, tree, index) { Namespace = library.Namespace };
     parsed[full] = file;
@@ -136,6 +140,15 @@ sealed partial class SourceLoader {
     var natives = tree.Children.Where(statement => statement.Kind == "Fun" && statement.Children.Any(child => child.Kind == "Native")).ToList();
     var funNames = tree.Children.Where(statement => statement.Kind == "Fun" && !natives.Contains(statement)).Select(statement => statement.Text).ToHashSet();
     var hidden = new HashSet<string>();
+    // a callback type, alias [stdcall] fun ... as Name: the library convention when none is written (spec 22)
+    foreach (var callbackType in tree.Children.Where(statement => statement.Kind == "Alias")) {
+      if (callbackType.Children.FirstOrDefault(child => child.Kind == "Native") is Node conv) {
+        conv.Text ??= convention;
+        if (!Conventions.Contains(conv.Text)) {
+          throw new CompileException($"unknown calling convention '{conv.Text}': cdecl, stdcall, fastcall or vectorcall (spec 22)", callbackType.Line);
+        }
+      }
+    }
     foreach (var native in natives) {
       string cName = native.Text!;
       var marker = native.Children.First(child => child.Kind == "Native");
@@ -154,6 +167,17 @@ sealed partial class SourceLoader {
     foreach (var fun in tree.Children.Where(statement => statement.Kind == "Fun" && statement.Children.Any(child => child.Kind == "Mapping"))) {
       var body = fun.Children.First(child => child.Kind == "Block");
       RenameNatives(body, hidden);
+      var outTargets = fun.Children.FirstOrDefault(child => child.Kind == "ResultNames")?.Text?.Split(',') ?? Array.Empty<string>();
+      // a variadic parameter given on to a native: the mapping gets a copy for each shape of its calls (spec 22)
+      if (fun.Children.FirstOrDefault(child => child.Kind == "Params")?.Children.LastOrDefault() is { Kind: "VariadicParam" } variadic
+          && Descendants(body).Any(node => node.Kind == "Args" && node.Children.Any(arg => arg.Kind == "Name" && arg.Text == variadic.Text))) {
+        fun.Add(new Node("CVariadicForward", TokenAt(fun), variadic.Text));
+      }
+      foreach (var outArg in Descendants(body).Where(node => node.Kind == "OutArg")) {
+        if (!outTargets.Contains(outArg.Text)) {
+          throw new CompileException($"={outArg.Text} fills a named result of the mapping: {outArg.Text} is not one (spec 22)", outArg.Line);
+        }
+      }
       if (fun.Children.FirstOrDefault(child => child.Kind == "ResultNames") is Node names) {
         var types = fun.Children.First(child => child.Kind == "Returns").Children;
         var resultNames = names.Text!.Split(',');
@@ -171,6 +195,103 @@ sealed partial class SourceLoader {
     }
     // only the code of a mapping calls a hidden native (spec 22): elsewhere its name is not known
   }
+
+  // the target blocks (spec 22): a block that matches the target replaces the default definitions of the same names, the most specific
+  // block first (a pattern without *), then the first one in the file; the blocks of other targets are dropped
+  static void ResolveTargetBlocks(Node tree, string target, Dictionary<string, string> otherTargets) {
+    static bool Matches(string pattern, string target) =>
+      Regex.IsMatch(target, "^" + Regex.Escape(pattern).Replace(@"\*", ".*") + "$");
+    var blocks = tree.Children.Where(statement => statement.Kind == "TargetBlock").ToList();
+    if (blocks.Count == 0) {
+      return;
+    }
+    var chosen = blocks.Select((block, order) => (Block: block, Order: order,
+        Specific: block.Text!.Split(',').Where(pattern => Matches(pattern, target)).Select(pattern => pattern.Contains('*') ? 1 : 2).DefaultIfEmpty(0).Max()))
+      .Where(entry => entry.Specific > 0).OrderByDescending(entry => entry.Specific).ThenBy(entry => entry.Order).ToList();
+    var taken = new HashSet<string>();
+    var replacing = new Dictionary<string, Node>();   // key -> the definition from a block
+    foreach (var (block, _, _) in chosen) {
+      foreach (var item in block.Children[0].Children) {
+        if (DefinitionKey(item) is string key && taken.Add(key)) {
+          replacing[key] = item;
+        }
+      }
+    }
+    var result = new List<Node>();
+    foreach (var statement in tree.Children) {
+      if (statement.Kind == "TargetBlock") {
+        continue;
+      }
+      if (DefinitionKey(statement) is string key && replacing.ContainsKey(key)) {
+        continue;   // the block of the target replaces it
+      }
+      result.Add(statement);
+    }
+    result.AddRange(replacing.Values);
+    foreach (var (block, _, _) in chosen) {
+      result.AddRange(block.Children[0].Children.Where(item => DefinitionKey(item) == null));
+    }
+    // a function or variable with no definition for this target is an error only where it is used (spec 22)
+    var defined = result.Select(DefinitionKey).Where(key => key != null).ToHashSet();
+    foreach (var block in blocks.Where(block => !chosen.Any(entry => entry.Block == block))) {
+      foreach (var item in block.Children[0].Children.Where(item => item.Text != null && DefinitionKey(item) is string key && !defined.Contains(key))) {
+        otherTargets[item.Text!] = otherTargets.TryGetValue(item.Text!, out var known) ? known + ", " + block.Text : block.Text!;
+      }
+    }
+    tree.Children.Clear();
+    tree.Children.AddRange(result);
+  }
+
+  // what a definition replaces: a native by its C name, a function or a variable by its name
+  static string? DefinitionKey(Node item) => item.Kind switch {
+    "Fun" when item.Children.Any(child => child.Kind == "Native") => "native " + item.Text,
+    "Fun" or "VarMapping" => "name " + item.Text,
+    "Handle" or "Struct" or "Enum" or "Class" or "Alias" => "type " + item.Text,
+    "Decl" => "name " + item.Text,
+    _ => null
+  };
+
+  // a C variable (spec 22): T x -> native T x reads (and with &T, writes) the C variable itself, public as a 1 to 1 native; T x -> code
+  // reads it through a function, a mapping whose named result is x
+  static void LowerVariables(Node tree) {
+    for (int index = 0; index < tree.Children.Count; index++) {
+      var mapping = tree.Children[index];
+      if (mapping.Kind != "VarMapping") {
+        continue;
+      }
+      var at = TokenAt(mapping);
+      var type = mapping.Children.First(child => child.Kind is "Type" or "Nullable" or "Pointer" or "WritablePointer");
+      var fun = new Node("Fun", at, mapping.Text);
+      var mods = mapping.Children.FirstOrDefault(child => child.Kind == "Mods");
+      if (mapping.Children.FirstOrDefault(child => child.Kind == "NativeVar") is Node native) {
+        if (TypeText(native.Children[0]) != TypeText(type)) {
+          throw new CompileException($"the C variable {native.Text} is mapped 1 to 1: write the same type on both sides of -> (spec 22)", mapping.Line);
+        }
+        fun.Add(new Node("Mods", at, "public"));
+        fun.Add(new Node("Returns", at).Add(CloneTree(type)));
+        fun.Add(new Node("Params", at));
+        fun.Add(new Node("NoBody", at));
+        var marker = new Node("NativeVar", at, native.Text);
+        if (mapping.Children.Any(child => child.Kind == "ReadWrite")) {
+          marker.Add(new Node("ReadWrite", at));
+        }
+        fun.Add(marker);
+      } else {
+        if (mods != null) {
+          fun.Add(mods);
+        }
+        fun.Add(new Node("Returns", at).Add(CloneTree(type)));
+        fun.Add(new Node("ResultNames", at, mapping.Text));
+        fun.Add(new Node("Params", at));
+        fun.Add(new Node("Mapping", at));
+        fun.Add(mapping.Children.First(child => child.Kind == "Block"));
+        fun.Add(new Node("VarGetter", at));
+      }
+      tree.Children[index] = fun;
+    }
+  }
+
+  static string TypeText(Node type) => type.Kind + ":" + type.Text + "<" + string.Join(",", type.Children.Select(TypeText)) + ">";
 
   static bool HasPointers(Node native) =>
     native.Children.Where(child => child.Kind is "Returns" or "Params").SelectMany(Descendants).Any(node => node.Kind is "Pointer" or "WritablePointer");

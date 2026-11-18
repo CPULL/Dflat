@@ -1,0 +1,9 @@
+[a, 1, Dog { name: rex }, ...] (5 items)
+a z 5
+[z, Dog { name: rex }, b, ...] (4 items)
+[x, 2]
+[p, 3]
+[1: one, 2: Dog { name: max }]
+(tuple, 5) (tuple, 5)
+pair 1
+---- exit code 0 ----

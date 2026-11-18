@@ -1,0 +1,5 @@
+// a callback type takes plain C values (spec 22)
+namespace app
+import lib dfcallbacks
+import Root
+Console.log(1)

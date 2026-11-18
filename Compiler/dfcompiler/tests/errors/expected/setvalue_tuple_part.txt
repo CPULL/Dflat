@@ -1,0 +1,1 @@
+setvalue_tuple_part.df(3): error: feature not supported: a fun() inside a tuple member of a set (spec 11.3.6.1)

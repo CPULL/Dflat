@@ -1,0 +1,5 @@
+// a handle inside a collection is not built (spec 22)
+namespace app
+import lib dfhandles
+import Root
+vec<Res> all = vec<Res>()

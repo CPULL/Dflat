@@ -1,0 +1,4 @@
+// a calling convention is written only in a .dflib (spec 22)
+import Root
+alias [stdcall] fun(i32) as Handler
+Console.log(1)

@@ -13,7 +13,7 @@ fun i64 walk(arr<i32> items) {
     p.add(1)
     total += p[]
   }
-  total
+  return total
 }
 
 fun main() {

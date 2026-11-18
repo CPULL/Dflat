@@ -148,12 +148,12 @@ public sealed partial class CodeGen {
   bool MapValueBuilt(string value) {
     string inner = BaseOf(value);
     return IsInt(inner) || inner is "bool" or "char" or "r32" or "r64" or "date" or "time" or "clock" or "lapse" || IsEnum(inner) || value == "string"
-      || IsMapObjectValue(value) || IsFunType(value) || IsArr(value) || IsMapValueItem(value);
+      || IsMapObjectValue(value) || IsFunType(value) || IsArr(value) || IsMapValueItem(value) || IsSetName(value);
   }
 
   // a tuple or a struct as the value of a map or an hmap: stored in the entry; the map owns what it holds (spec 3.2, 11.1.5.3)
-  // a nullable tuple of plain values too ((i32, i32)?: a missing key reads null); one that owns objects or arrays is not built
-  bool IsMapValueItem(string value) => !IsNullable(value) ? IsTuple(value) || IsStruct(value) : IsTuple(BaseOf(value)) && !TupleHoldsArrays(BaseOf(value));
+  // a nullable tuple too ((i32, i32)?, (Dog, i32)?: a missing key reads null; the parts of one that holds a value are owned)
+  bool IsMapValueItem(string value) => !IsNullable(value) ? IsTuple(value) || IsStruct(value) : IsTuple(BaseOf(value));
 
   // an object value of a map or an hmap: the map owns it (spec 6.6), it ends when it is replaced or removed or with the map
   bool IsMapObjectValue(string value) => !IsNullable(value) && IsClass(value) && !IsArr(value);
@@ -174,7 +174,7 @@ public sealed partial class CodeGen {
       if (!HmapKeyBuilt(args[0])) {
         throw Error($"hmap keys of type {DisplayName(args[0])} are not built yet (this version: integers, bool, char, enums, reals, date, time, clock, lapse, string, string?, string1k, string1k?, tuples of them, strings and Keyable objects, structs of exact natives, strings and Keyable objects, sets of exact natives, Keyable classes)", at);
       }
-      if (IsSetValue(args[0])) {
+      if (IsSetValue(args[0]) && !SetOwns(args[0])) {
         SetKeyHelpers(args[0], at);
       }
       if (IsObjectKey(args[0])) {
@@ -191,7 +191,7 @@ public sealed partial class CodeGen {
     if (!MapKeyBuilt(args[0])) {
       throw Error($"map keys of type {DisplayName(args[0])} are not built yet (this version: integers, bool, char, enums, reals, date, time, string, string?, string1k, string1k?, tuples of them, strings and Keyable objects, structs of exact natives, strings and Keyable objects, sets of exact natives, Keyable classes)", at);
     }
-    if (IsSetValue(args[0])) {
+    if (IsSetValue(args[0]) && !SetOwns(args[0])) {
       SetKeyHelpers(args[0], at);
     }
     if (IsObjectKey(args[0])) {
@@ -232,7 +232,7 @@ public sealed partial class CodeGen {
   bool HObjKeyOf(string type) => IsHmap(type) && IsObjectKey(MapKey(type));
 
   // a set value key of a map: the tag as the sort key and the sort key of the value in the key word, inline (spec 6.8.4.1, CodeGen.SetValueKeys.cs)
-  bool SetKeyOf(string type) => !IsHmap(type) && IsSetValue(MapKey(type));
+  bool SetKeyOf(string type) => !IsHmap(type) && IsSetValue(MapKey(type)) && !SetOwns(MapKey(type));
 
   // the map's own copy of a key that has a pointer (a declaration), and the C that frees it
   string KeyCopyCode(string type, string key, string owned) => TKeyOf(type)
@@ -323,6 +323,13 @@ public sealed partial class CodeGen {
         key = TempObject(key);   // m[Person("a")]: the key of a lookup ends with the statement
       }
     }
+    if (IsSetName(keyType) && SetOwns(keyType)) {
+      // m["abc"], m[make(1)]: a new set value used as a key ends with the statement; the collection keeps its own copy (df_tk_box_)
+      var keyValue = key.Type == keyType ? key
+        : node.Kind == "Tuple" ? new Expr(SetOwnedValue(node, keyType, scope, node), keyType, true)   // a tuple literal takes the member it fits
+        : new Expr(Convert(key, keyType, node), keyType, true);
+      key = SetTemp(keyValue, node);
+    }
     if (IsCompositeKey(keyType) && key.Type == keyType) {
       key = TempStruct(key);   // m[Named("a", 1)]: a new struct ends with the statement, the collection keeps a clone (df_tk_box_)
     }
@@ -390,7 +397,7 @@ public sealed partial class CodeGen {
   // a value for a map whose values are valueType
   Expr CheckedMapValue(Node node, Scope scope, string valueType) {
     var value = ExprOf(node, scope, valueType);
-    if (value.Type != valueType && !Assignable(valueType, value.Type)) {
+    if (value.Type != valueType && !Assignable(valueType, value.Type) && !IsSetName(valueType)) {
       throw Error($"the values of this map are {DisplayName(valueType)}, not {DisplayName(value.Type)}", node);
     }
     return value;
@@ -400,6 +407,9 @@ public sealed partial class CodeGen {
   string MapValueRead(Node node, Scope scope, string valueType) {
     var value = CheckedMapValue(node, scope, valueType);
     string converted = Convert(value, valueType, node);
+    if (SetOwns(valueType) && !LibraryCode) {
+      return SetTemp(new Expr(converted, valueType, value.Fresh || value.Type != valueType), node).Code;   // a new value only compared ends with the statement
+    }
     return valueType == "string" ? StrRead(new Expr(converted, "string", FreshCode(value, converted) == "true" && !IsStaticStr(converted))) : converted;
   }
 
@@ -432,6 +442,9 @@ public sealed partial class CodeGen {
     if (IsArr(valueType)) {
       cloneUsed = true;
       return CloneValue(Convert(CheckedMapValue(node, scope, valueType), valueType, node), valueType, node);   // a copy of its own (spec 6.8.1)
+    }
+    if (SetOwns(valueType)) {
+      return SetOwnedValue(node, valueType, scope, node);   // a set value of its own (spec 11.3.6.1)
     }
     if (ItemOwnsParts(valueType)) {
       // a copy with its own objects and arrays (spec 3.2, 11.1.5.3)

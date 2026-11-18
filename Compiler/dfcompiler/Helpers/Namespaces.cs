@@ -171,7 +171,7 @@ sealed partial class SourceLoader {
           continue;
         }
         var scope = new NameScope(file, statement, null);
-        if (file == rootFile && TopLevelName(statement) == null && statement.Kind is not ("Alias" or "Class" or "Trait" or "Struct" or "Enum" or "GenericSet")) {
+        if (file == rootFile && TopLevelName(statement) == null && statement.Kind is not ("Alias" or "Class" or "Trait" or "Struct" or "Enum" or "GenericSet" or "Handle")) {
           scope.Bound.UnionWith(RootBindings());   // the top-level code of the root file: its variables
         }
         Walk(statement, scope);
@@ -217,7 +217,7 @@ sealed partial class SourceLoader {
   HashSet<string> RootBindings() {
     var names = new HashSet<string>();
     foreach (var statement in rootFile!.Tree.Children) {
-      if (TopLevelName(statement) == null && statement.Kind is not ("Alias" or "Class" or "Trait" or "Struct" or "Enum" or "GenericSet" or "Fun")) {
+      if (TopLevelName(statement) == null && statement.Kind is not ("Alias" or "Class" or "Trait" or "Struct" or "Enum" or "GenericSet" or "Fun" or "Handle")) {
         CollectBindings(statement, names);
       }
     }
@@ -228,7 +228,7 @@ sealed partial class SourceLoader {
     if (statement.Text == null) {
       return null;
     }
-    if (statement.Kind is "Class" or "Trait" or "Enum" or "Struct" or "GenericSet") {
+    if (statement.Kind is "Class" or "Trait" or "Enum" or "Struct" or "GenericSet" or "Handle") {
       return statement.Text;
     }
     if (statement.Kind == "Fun" && statement.Text != "main") {
@@ -236,7 +236,8 @@ sealed partial class SourceLoader {
     }
     if (statement.Kind == "Decl") {
       var mods = statement.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ') ?? Array.Empty<string>();
-      return mods.Contains("const") && !mods.Contains("global") ? statement.Text : null;
+      // a const, or a variable of a library (its state, in lib.df, spec 16)
+      return !mods.Contains("global") && (mods.Contains("const") || SourceMap.IsLibraryRoot(statement.Line)) ? statement.Text : null;
     }
     return null;
   }
@@ -386,6 +387,20 @@ sealed partial class SourceLoader {
           }
         }
         return;
+      case "FunRef":
+        // pointer.to(onKey(i32)), pointer.to(Keys.onKey(i32)) (spec 22): the function is found like a name, a static method like a type
+        if (node.Text != null && !resolvedNodes.Contains(node)) {
+          int dot = node.Text.LastIndexOf('.');
+          if (dot > 0) {
+            string owner = node.Text[..dot];
+            if (!owner.Contains('.') && !scope.IsBound(owner) && nsDecls.ContainsKey(owner)) {
+              node.Text = Unqualified(owner, scope, node.Line).Internal + node.Text[dot..];
+            }
+          } else if (!scope.IsBound(node.Text) && nsDecls.ContainsKey(node.Text)) {
+            node.Text = Unqualified(node.Text, scope, node.Line).Internal;
+          }
+        }
+        break;
       case "Member":
         if (ResolveChain(node, scope)) {
           return;

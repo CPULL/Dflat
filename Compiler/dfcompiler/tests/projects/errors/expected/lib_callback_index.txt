@@ -1,0 +1,1 @@
+main.df(7): error: pointer<Combine> points to a function: a callback pointer is only given to C (spec 22)

@@ -751,3 +751,22 @@
 - 22 Libraries: a project folder holds its .dflib files, found by Name:; libpath has one subfolder per target (--target names); no C sources (C code is a prebuilt binary); a .dflib is Dflat source (wrappers, classes, visibility rules, natives called only on the right of ->); no C headers (prototypes from the native lines); one kind available: used with no warning; a missing .dflib or binary is a compile error; hiding code is for compiled libraries (15.8)
 - 15.8 Compiled Dflat libraries: a generated interface of the public declarations, as `.dfi` (binaries in libpath/<target>/) or `.dfc` (binaries inside), chosen with `--embed-binaries`; the COM-style query interface is dropped; 11.3.14 and 22 point to it
 - 22 A mapping the program calls is written public; a 1 to 1 native is public by itself; the draft .dflib files write public
+- 6.7 `read_pos`, `set_pos` and `get_view` of an `IndexCollection` are needed only when their operator is used (a compile error then)
+- 11.1.5.8 An object assigned to a field group is a compile error
+- 11.3.6.1 A tuple value takes the tuple member it fits, names aside; more than one is a compile error
+- 11.3.6.1 A set value is copied as a struct: `=` and `!` clone its string, object or tuple, `->k` moves it, a plain parameter lends it
+- 22 Variadic natives: a string given to a `*char` native parameter is a C text until the end of the statement; integer literals in `...` are `i32` when they fit, real literals `r64`; a mapping only gives its variadic parameter on to the native
+- 22 A handle declaration is public by itself
+- 22 A C variable mapped 1 to 1 is public by itself and is the only form that can be `&`; one read through a function is written public; a handle given to a `&T` native parameter ends first
+- 22 Callbacks: the callback type is `alias [conv] fun R(T...) as Name` in a .dflib (library convention without brackets; brackets only in a .dflib); `pointer.to(f(types))` takes the convention of the expected callback type, cdecl otherwise; plain C values only (no char, strings, objects, modes); a function that can let a non-silent exception out is a compile error, a silent one stops in the C wrapper; a callback pointer has no index, methods or casts
+- 15.8 Compiled libraries: static only for now (no runtime of their own, the program's runtime is shared); the interface records the compiler version (another version is a compile error); the interface is Dflat source with the class and struct layouts (hidden fields marked), signatures and the call facts (given and writable results, taken parameters, unrestricted, locks); class and exception ids given when the program is built; public generics travel as source until 11.3.14
+- 16 A library has no top-level code: lib.df holds only declarations, a main there is a compile error
+- 15.8 The name of a compiled library comes from its project file; only its public items are exported (classes, functions, variables, constants, enums); open: the project keys of a library, when its globals start (first use or an init call)
+- 15.8, 16 `atLibStart() { ... }` in lib.df: the startup code of a library, called automatically when it is loaded (a static library: at program start, before the program's globals); it creates the library's globals first; a generated one when it is missing
+- 15.8 A library is unloaded only at program end: `atEnd { ... }` in lib.df runs after the program has ended, then the library's globals are destroyed; libraries end in reverse order of their start
+- 14.2 Sixth atEnd form: `atEnd { }` at the top level of lib.df, the end of a library
+- 18.1 A global of a library can be `public global ...`: the program uses it too, through the same lock; without `public` it stays the library's own
+- 16 lib.df can declare top-level variables, the state of the library: internal unless public, created before atLibStart, no protection added by the language
+- 16 A namespace path segment can be any word of ASCII letters, digits and `_`, keywords included
+- 15.8, 16 The startup code of a library is written `atLibStart { ... }` (no parentheses, as atEnd)
+- 16, 15.8 Every library has its own .dsprj with `name=`; a file uses a library only after `import lib <name>`, then imports its namespaces; a library namespace without `import lib` is an unknown namespace (compile error); `include=` only says where the library folders are

@@ -1,0 +1,1 @@
+main.df(5): error: 'onlyMac' has no definition for this target in its .dflib, only for osx-arm64 (spec 22)

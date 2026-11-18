@@ -20,7 +20,7 @@ fun ->string throughParam() {
     if x > 2 {
       throw Bad("too big")
     }
-    x
+    return x
   }, 5).toStr()
   catch Bad ex { return "Bad: " + ex.message }
 }
@@ -31,7 +31,7 @@ fun ->string inSort() {
     if a == 2 || b == 2 {
       throw Bad("no twos")
     }
-    a - b
+    return a - b
   })
   return "sorted"
   catch Bad ex { return "sort: " + ex.message }
@@ -43,7 +43,7 @@ fun ->string inFilter() {
     if s == "C" {
       throw Bad("C")
     }
-    true
+    return true
   })
   return "kept " + kept.len.toStr()
   catch Bad ex { return "filter: " + ex.message }
@@ -55,7 +55,7 @@ fun ->string inMap() {
     if x == 3 {
       throw Bad("three")
     }
-    "#" + x.toStr()
+    return "#" + x.toStr()
   })
   return "mapped"
   catch Bad ex { return "map: " + ex.message }
@@ -67,7 +67,7 @@ fun ->string inReduce() {
     if x == 3 {
       throw Bad("three")
     }
-    t + x.toStr()
+    return t + x.toStr()
   })
   return s
   catch Bad ex { return "reduce: " + ex.message }

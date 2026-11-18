@@ -150,8 +150,8 @@ public sealed partial class CodeGen {
       sb.Append($"  {ArrDropHelper(field.Type)}(self->{field.CName});\n");
       sb.Append($"  self->{field.CName}.p = NULL;\n  self->{field.CName}.len = 0;\n");
     }
-    foreach (var field in cls.Fields.Where(field => TupleHoldsArrays(field.Type) && !field.IsStatic)) {
-      sb.Append($"  {TupleDropCode(field.Type, "self->" + field.CName)}\n");
+    foreach (var field in cls.Fields.Where(field => (TupleHoldsArrays(field.Type) || IsOwningNullableTuple(field.Type)) && !field.IsStatic)) {
+      sb.Append($"  {OwnedTupleDrop(field.Type, "self->" + field.CName)}\n");   // (Dog, i32)?: only when it holds a value
     }
     foreach (var field in cls.Fields.Where(field => StructHoldsObjects(field.Type) && !field.IsStatic)) {
       sb.Append($"  {StructDropCode(field.Type, "self->" + field.CName)}\n");   // spec 11.1.5.3
@@ -165,13 +165,13 @@ public sealed partial class CodeGen {
   string StaticEndCode() {
     var sb = new System.Text.StringBuilder();
     sb.Append(GlobalsEndCode());   // the globals first, in reverse order: their atEnd may use the statics (spec 18.2)
-    var statics = staticOrder.Where(field => (IsArr(field.Type) || TupleHoldsArrays(field.Type) || StructHoldsObjects(field.Type) || field.IsCounted) && field.Owner.Node.Line < LibraryLine).ToList();
+    var statics = staticOrder.Where(field => (IsArr(field.Type) || TupleHoldsArrays(field.Type) || IsOwningNullableTuple(field.Type) || StructHoldsObjects(field.Type) || field.IsCounted) && field.Owner.Node.Line < LibraryLine).ToList();
     for (int index = statics.Count - 1; index >= 0; index--) {
       var field = statics[index];
       sb.Append(field.IsCounted ? $"  df_rc_release({field.CName});\n  {field.CName} = NULL;\n"   // a counted static: its usage (spec 12.7)
         : IsArr(field.Type) ? $"  {ArrDropHelper(field.Type)}({field.CName});\n  {field.CName}.p = NULL;\n  {field.CName}.len = 0;\n"
         : StructHoldsObjects(field.Type) ? $"  {StructDropCode(field.Type, field.CName)}\n"
-        : $"  {TupleDropCode(field.Type, field.CName)}\n");
+        : $"  {OwnedTupleDrop(field.Type, field.CName)}\n");
     }
     return sb.ToString();
   }

@@ -1,0 +1,7 @@
+(1, ab) (1, ab) 5 true false
+1 ab
+(7, rec 7)
+(pet, Dog { name: rex }) (pet, Dog { name: max })
+null (7, rec 7) 9
+false
+---- exit code 0 ----

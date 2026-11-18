@@ -1,0 +1,1 @@
+main.df(6): error: 'r' is lent to this function: only its owner moves it (a parameter ->Res r takes it) (spec 22)

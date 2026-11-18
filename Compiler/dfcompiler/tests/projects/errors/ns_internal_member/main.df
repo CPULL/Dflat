@@ -1,4 +1,5 @@
 namespace app
+import lib mylib
 import mylib
 
 Root.Console.log(Box().count())

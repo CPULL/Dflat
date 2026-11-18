@@ -17,7 +17,7 @@ fun @i32 five() { 5 }
 fun @string greet(string who) { "hi " + who }
 fun &@i32 counter() {
   &@i32 c = 0
-  c                                              // the variable gives its usage
+  return c                                              // the variable gives its usage
 }
 
 fun fields() {

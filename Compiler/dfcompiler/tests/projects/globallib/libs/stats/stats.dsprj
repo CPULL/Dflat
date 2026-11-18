@@ -1,0 +1,2 @@
+; the project file of the library: its name, for import lib (spec 16)
+name=stats

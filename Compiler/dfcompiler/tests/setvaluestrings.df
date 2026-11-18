@@ -1,0 +1,50 @@
+// set values with a string member (spec 11.3.6.1): owned by the value, copied as a struct (= and ! clone, -> moves)
+import Root
+Generic Key { i32, string }
+
+fun Key make(i32 n) {
+  if n > 0 then return $"made {n}"
+  return n
+}
+
+fun Key pass() {
+  Key local = "local"
+  return local
+}
+
+fun string describe() {
+  Key k = make(3)
+  return k is ? { i32 x: $"int {x}", string s: $"text {s}" }
+}
+
+class Box {
+  public Key k = "start"
+  public fun set(string v) { k = v }
+}
+
+Key a = "hello"
+Key b = a
+Key c = 5
+Console.log($"{a} {b} {c} {a == b} {a == c}")
+string base = "built"
+Key d = base + " here"
+Console.log(d)
+b = 7
+Console.log($"{a} {b}")
+Console.log(describe())
+Console.log(pass())
+Key moved = ->a
+Console.log($"{a} {moved}")
+Key e = d!
+Console.log(e)
+if d is string s { Console.log($"is {s}") }
+Box box = Box()
+Console.log(box.k)
+box.set("set")
+Console.log(box.k)
+box.k = make(9)
+Console.log(box.k)
+box.k = d
+Console.log(box.k)
+make(4)
+Console.log(d.hash == e.hash)

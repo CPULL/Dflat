@@ -48,7 +48,8 @@ public sealed partial class CodeGen {
 
   // a tuple or a struct this version takes as a key
   bool IsCompositeKey(string type) =>
-    type is "string1k" or "string?" or "string1k?"
+    IsSetName(type) && SetOwns(type)
+    || type is "string1k" or "string?" or "string1k?"
     || IsTuple(type) && TupleElems(type).All(elem => IsKeyLeafOrNested(elem.Type))
     || IsStruct(type) && structs[type].Fields.Count > 0
       && structs[type].Fields.All(field => field.Buffer == null && IsKeyLeafOrNested(field.Type));
@@ -63,6 +64,9 @@ public sealed partial class CodeGen {
 
   // the C helpers of a composite key type, emitted once: the copy the collection keeps, its end, the order, the hash, the equality
   string CompositeKeyHelpers(string keyType, Node? at = null) {
+    if (IsSetName(keyType) && SetOwns(keyType)) {
+      return SetKeyBoxHelpers(keyType, at);   // a set value that owns a string, an object or a tuple (CodeGen.SetValueOwned.cs)
+    }
     string name = SanitizeName(keyType);
     if (!compositeKeyHelpers.Add(keyType)) {
       return name;
@@ -176,6 +180,9 @@ public sealed partial class CodeGen {
   // the tables of equals
   string CompositeKeyEquality(string keyType) {
     string name = CompositeKeyHelpers(keyType);
+    if (IsSetName(keyType) && SetOwns(keyType)) {
+      return name;   // its equality is written with its helpers
+    }
     if (!compositeKeyHelpers.Add("$eq " + keyType)) {
       return name;
     }
@@ -219,6 +226,9 @@ public sealed partial class CodeGen {
 
   // the sort key of a composite key held in key: the one of its first component (6.8.4.1)
   string CompositeSortKey(string keyType, string key) {
+    if (IsSetName(keyType) && SetOwns(keyType)) {
+      return $"df_svk_tag_{SanitizeName(keyType)}({key})";   // the tag first (spec 6.2.2, 11.3.6.1); the value on a tie
+    }
     var (cname, type) = KeyComponents(keyType)[0];
     if (type == "string1k") {
       return $"df_bt_key_s1k(&({ValuePart($"({key})", cname)}))";

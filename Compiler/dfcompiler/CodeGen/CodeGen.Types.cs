@@ -68,12 +68,16 @@ public sealed partial class CodeGen {
 
   bool IsKnownType(string t) {
     return SignedTypes.Contains(t) || UnsignedTypes.Contains(t) || RealTypes.Contains(t)
-      || t is "bool" or "char" or "string" or "string1k" or "byte" or "uns" or "int" or "date" or "time" or "clock" or "lapse" or "Exception" or "addr" || IsEnum(t) || IsClass(t) || IsStruct(t);
+      || t is "bool" or "char" or "string" or "string1k" or "byte" or "uns" or "int" or "date" or "time" or "clock" or "lapse" or "Exception" or "addr" || IsEnum(t) || IsClass(t) || IsStruct(t)
+      || IsHandle(t);
   }
 
   // the native integer types (spec 2.1): int and uns, and the unsuffixed integer literals; the size of the cpu or of --native-int, set
   // for each compilation (i64 / u64 on x64, i32 / u32 on x86)
   public static string NativeInt { get; set; } = "i64";
+
+  // the names a .dflib defines only in the target blocks of other targets (spec 22): set from the loader
+  public static Dictionary<string, string> OtherTargetNames { get; set; } = new();
   public static string NativeUns { get; set; } = "u64";
 
   // true in a release build: an index outside a collection is a panic (spec 6.1)
@@ -187,11 +191,20 @@ public sealed partial class CodeGen {
   }
 
   string CType(string type) {
+    if (handles.TryGetValue(type, out var handle)) {
+      return CType(handle.Base);   // a handle is the value it is made of (spec 22)
+    }
     if (IsSetValue(type)) {
       return SetValueCType();   // spec 11.3.6.1
     }
     if (IsValueLend(type)) {
       return CType(type[1..]) + "*";   // a &T result of a value: the address of the place (spec 13.1.1)
+    }
+    if (IsCallbackPointee(type)) {
+      if (definedTypes.Add("df_cbfn")) {
+        typeDefs.Append("typedef unsigned char df_cbfn;   /* what a callback pointer points to: a C function (spec 22) */\n");
+      }
+      return "df_cbfn";
     }
     if (IsFunType(type)) {
       return "df_fn";   // a function value { code, ctx } (spec 13.3.5)
@@ -285,6 +298,9 @@ public sealed partial class CodeGen {
 
   // value of a declared variable without initializer
   string ZeroValue(string type) {
+    if (handles.TryGetValue(type, out var handle)) {
+      return handle.Invalid;   // null (spec 22)
+    }
     if (IsSetValue(type)) {
       return $"(({SetValueCType()}){{ {{ 0, 0 }}, 0u }})";   // the generic null of a value never assigned (spec 11.3.6.1)
     }
@@ -341,11 +357,23 @@ public sealed partial class CodeGen {
 
   string ResolveType(Node n) {
     bool nests = n.Kind == "TupleType" || n.Kind == "Type" && n.Children.Count > 0;
+    if (nests && handles.Count > 0 && n.Children.Any(child => child.Kind switch {
+          "Type" => child.Text != null && IsHandle(child.Text),
+          "Field" or "TupleField" => child.Children.Count > 0 && child.Children[0] is { Kind: "Type", Text: string field } && IsHandle(field),
+          _ => false
+        })) {
+      // checked as written, before the collection is made
+      bool handle = n.Children.Any(child => child.Text != null && IsHandle(child.Text) || child.Children.Count > 0 && child.Children[0].Text is string inner && IsHandle(inner));
+      throw NotSupported(handle ? "a handle inside a tuple or a collection (spec 22)" : "a set value with a string or object member inside a tuple or a collection (spec 11.3.6.1)", n);
+    }
     if (nests) {
       nestedTypeDepth++;
     }
     try {
       string resolved = ResolveTypeCore(n);
+      if (nests) {
+        CheckHandleHolder(resolved, n);   // spec 22
+      }
       if (nests && structs.Count > 0 && !LibraryCode && n.Line < LibraryLine) {
         CheckStructItems(resolved, n);   // spec 11.1.5.3, not built yet
       }
@@ -381,6 +409,9 @@ public sealed partial class CodeGen {
         }
         if (IsPointer(inner)) {
           throw Error($"pointers are already nullable; '{inner}?' is not allowed (spec 12.1)", n);
+        }
+        if (IsHandle(inner)) {
+          throw Error($"handles are already nullable; '{inner}?' is not allowed (spec 22)", n);
         }
         return inner + "?";
       }
@@ -508,6 +539,16 @@ public sealed partial class CodeGen {
     if (to == from) {
       return true;
     }
+    if (handles.TryGetValue(from, out var fromHandle)) {
+      return !IsHandle(to) && Assignable(to, fromHandle.Base);   // used where the type it is made of is expected, it is lent (spec 22)
+    }
+    if (IsHandle(to)) {
+      return from == "null";
+    }
+    if (IsSetName(to) && from != "null" && !IsSetName(from) && SetMembers(to).Any(member => member == from || IsClass(from) && IsClass(member) && IsSubtype(from, member)
+        || IsTuple(member) && IsTuple(from) && Assignable(member, from))) {
+      return true;   // a member value converts to a set value (spec 11.3.6.1)
+    }
     if (to == "string1k" && from == "string" || to == "string" && from == "string1k") {
       return true;   // string1k converts to and from string (spec 4.5)
     }
@@ -568,6 +609,12 @@ public sealed partial class CodeGen {
   string Convert(Expr e, string to, Node at) {
     if (e.Type == to) {
       return e.Code;
+    }
+    if (handles.TryGetValue(e.Type, out var fromHandle) && !IsHandle(to)) {
+      return Convert(new Expr(e.Code, fromHandle.Base), to, at);   // lent as the value it is made of (spec 22)
+    }
+    if (handles.TryGetValue(to, out var toHandle) && e.Type == "null") {
+      return toHandle.Invalid;
     }
     if (to == "string1k" && e.Type == "string") {
       // cut to 1021 bytes at a whole character, with the silent StringTruncatedException (spec 4.5)
@@ -832,6 +879,10 @@ public sealed partial class CodeGen {
     if (e.Type == "string?") {
       // always a new string, as for the other types: the text is copied (a null prints as null)
       return WithTemp(e, temp => $"({temp}.has ? df_str_dup({temp}.val) : df_str_lit(\"null\", 4))");
+    }
+    if (handles.TryGetValue(e.Type, out var handle)) {
+      // a handle prints as the value it is made of, or null (spec 22)
+      return WithTemp(e, temp => $"({temp} == {handle.Invalid} ? df_str_lit(\"null\", 4) : {StrOf(new Expr(temp, handle.Base), at)})");
     }
     if (IsNullable(e.Type)) {
       return WithTemp(e, temp =>

@@ -1,0 +1,5 @@
+// a C variable mapped 1 to 1 has the same type on both sides (spec 22)
+namespace app
+import lib dfout
+import Root
+Console.log(counter)

@@ -1,0 +1,14 @@
+hello hello 5 true false
+built here
+hello 7
+text made 3
+local
+null hello
+built here
+is built here
+start
+set
+made 9
+built here
+true
+---- exit code 0 ----

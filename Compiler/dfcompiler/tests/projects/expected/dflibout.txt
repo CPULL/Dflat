@@ -1,0 +1,11 @@
+true 3 1
+0 true
+-1 true
+5
+100
+8
+50
+windows
+exact
+1 true
+---- exit code 0 ----

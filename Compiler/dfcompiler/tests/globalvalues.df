@@ -12,7 +12,7 @@ class Item(i32 n) {
 }
 class Source(i32 start) {
   i32 v = start
-  public fun i32 next() { v += 1; v }
+  public fun i32 next() { v += 1; return v }
 }
 
 global Box box = Box()

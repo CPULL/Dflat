@@ -1,0 +1,11 @@
+// a program that uses a library with its own state, start and end code (spec 15.8, 16, 18.1)
+namespace app
+import Root
+import lib counters
+import libs.fun.counters
+
+Console.log(version())
+Console.log(nextNumber())
+Console.log(nextNumber())
+Console.log(Numbers.take())                     // the public global of the library, through its lock
+Console.log(add(2, 3))

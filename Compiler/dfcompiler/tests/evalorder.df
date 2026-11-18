@@ -3,11 +3,11 @@
 import Root
 fun i32 bump(&i32 n) {
   n += 10
-  n
+  return n
 }
 fun ->string twice(&string s) {
   s = s + s
-  s
+  return s
 }
 fun i32 pair(i32 a, i32 b) {
   a * 100 + b

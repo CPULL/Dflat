@@ -372,6 +372,10 @@ public sealed partial class CodeGen {
       }
     }
     failingFuns.Clear();
+    nonSilentLeakers.Clear();
+    foreach (var fun in allFuns.Where(fun => leaks[fun].Any(leaked => leaked != SilentLeak))) {
+      nonSilentLeakers.Add(fun);   // a callback cannot be one: C cannot receive the exception (spec 22)
+    }
     foreach (var fun in allFuns) {
       if (leaks[fun].Count > 0 && !fun.IsDtor && !fun.IsAccessor) {   // a destructor (an atEnd of a class) and an accessor: what they raise is a panic
         failingFuns.Add(fun);

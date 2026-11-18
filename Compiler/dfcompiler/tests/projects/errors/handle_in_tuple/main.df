@@ -1,0 +1,5 @@
+// a handle inside a tuple is not built (spec 22)
+namespace app
+import lib dfhandles
+import Root
+(Res r, i32 n) t = (null, 1)

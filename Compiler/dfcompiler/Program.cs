@@ -4,7 +4,7 @@ using dfparser;
 namespace dfcompiler;
 
 public static class Program {
-  public const string Version = "0.0.149alpha";
+  public const string Version = "0.0.165alpha";
 
   // the version of the specification this compiler was built for: the variable `version` of the preprocessor (spec 19.1)
   public const string LanguageVersion = "0.0.40";
@@ -230,12 +230,13 @@ public static class Program {
         return 1;
       }
       // the root file and the files it imports (spec 16), merged into one program
-      var loader = new SourceLoader(variables, projectVariables);
+      var loader = new SourceLoader(variables, projectVariables) { Target = effective };
       bool multiFile = SourceLoader.IsMultiFile(projectFile, path);
       Node tree;
       try {
         tree = loader.Load(path, multiFile, project.Includes, projectFile);
         importedLibraries = loader.ImportedLibraries;
+        CodeGen.OtherTargetNames = loader.OtherTargetNames;
         if (loader.CLibraries.Count > 0) {
           string libFolder = project.LibPath ?? Path.GetDirectoryName(Path.GetFullPath(projectFile ?? path))!;
           LibraryBinaries(loader.CLibraries, effective, libFolder, Path.GetDirectoryName(Path.GetFullPath(projectFile ?? path))!, os, libraryArgs, runFiles, loader.Warnings);

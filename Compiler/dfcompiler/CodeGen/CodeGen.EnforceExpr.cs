@@ -6,7 +6,7 @@ namespace dfcompiler;
 //   T r
 //   enforce <the variables of E> { r = E } clauses
 // where each clause gives its value to r: a single expression is the value, a longer block gives it with return (the return becomes
-// r = value and leaves the clause). return enforce E ... (and an enforce expression that is the last expression of a function) goes through a
+// r = value and leaves the clause). return enforce E ... (and an enforce expression that is the single expression of a function body) goes through a
 // variable of the return type. The variables of E that cannot be checked (functions, types, plain values) are skipped by EmitEnforce.
 public sealed partial class CodeGen {
   int enforceTemps;
@@ -45,7 +45,7 @@ public sealed partial class CodeGen {
     }
     bool lastOfFunction = fun != null && holder.Kind == "Block" && fun.Children.Contains(holder) && index == holder.Children.Count - 1;
     bool returns = statement.Kind == "Return" && statement.Children.Count == 1 && statement.Children[0].Kind == "EnforceExpr";
-    bool lastExpression = lastOfFunction && statement.Kind == "ExprStmt" && statement.Children[0].Kind == "EnforceExpr";
+    bool lastExpression = lastOfFunction && holder.Children.Count == 1 && statement.Kind == "ExprStmt" && statement.Children[0].Kind == "EnforceExpr";   // the single expression of the body
     if (returns || lastExpression) {
       var rets = fun?.Children.FirstOrDefault(child => child.Kind == "Returns");
       if (rets == null || rets.Children.Count != 1) {

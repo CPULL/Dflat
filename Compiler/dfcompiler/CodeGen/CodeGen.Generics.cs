@@ -162,7 +162,11 @@ public sealed partial class CodeGen {
       return true;
     }
     var ps = fun.Children.FirstOrDefault(child => child.Kind == "Params");
-    return ps != null && ps.Children.Any(p => p.Children.Count > 0 && p.Children[0] is { Kind: "Type", Children.Count: 0 } type && IsSetName(type.Text!));
+    // the '...' of a native, and of a mapping that gives it on to a native, takes each set member as it comes: a copy per shape of
+    // the call, not per type (spec 22)
+    bool cVariadic = fun.Children.Any(child => child.Kind is "Native" or "CVariadicForward");
+    return ps != null && ps.Children.Any(p => p.Children.Count > 0 && p.Children[0] is { Kind: "Type", Children.Count: 0 } type && IsSetName(type.Text!)
+      && !(cVariadic && p.Kind == "VariadicParam" && p == ps.Children[^1]));
   }
 
   // a set declared inside a class (spec 11.3.6) is a type of the class: it becomes the set Class.Name of the program, and the bare name
@@ -795,7 +799,12 @@ public sealed partial class CodeGen {
     if (chosen == null) {
       throw Error($"no case of the type switch matches {DisplayName(type)}: add a case for it or a 'default'", n);
     }
-    return ExprOf(chosen.Children[1], scope, expected);
+    var value = ExprOf(chosen.Children[1], scope, expected);
+    if (value.Type == "string" && !value.Fresh) {
+      // a string type switch always gives a string of its own (a borrowed arm is copied; a literal costs nothing), as the set value one
+      return new Expr($"df_str_dup({value.Code})", "string", true);
+    }
+    return value;
   }
 
   static string TypeNodeText(Node type) => type.Kind + ":" + type.Text + "(" + string.Join(",", type.Children.Select(TypeNodeText)) + ")";

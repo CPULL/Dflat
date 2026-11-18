@@ -1,0 +1,1 @@
+global_public_program.df(4): error: public global is for the globals of a library (lib.df): the globals of a program are seen by all its files already (spec 18.1)

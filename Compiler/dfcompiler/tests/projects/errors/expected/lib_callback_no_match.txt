@@ -1,0 +1,1 @@
+main.df(6): error: no function add(i64, i32): the types in pointer.to(...) are the types of its parameters, in order (spec 22)

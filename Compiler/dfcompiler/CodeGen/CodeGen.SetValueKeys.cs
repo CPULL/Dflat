@@ -27,6 +27,7 @@ public sealed partial class CodeGen {
 
   // k.hash: tag $ the hash of the value; the generic null hashes as null
   string SetValueHash(Expr e, Node at) {
+    e = SetTemp(e, at);
     var members = SetValueMembers(e.Type, at);
     string held = NewTemp();
     string hash = NewTemp();

@@ -1,0 +1,5 @@
+// a C variable read through a function is read-only (spec 22)
+namespace app
+import lib dfout
+import Root
+magic = 3

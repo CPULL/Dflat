@@ -1,0 +1,1 @@
+dfhandles.dflib(39): error: the handle Res already has its freeing function, close: one per handle type (spec 22)

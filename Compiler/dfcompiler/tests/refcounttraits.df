@@ -25,7 +25,7 @@ fun ->string early(@Animal a) {
   if a is Dog d {
     return $"early {d.name}, users {d.usersCount}"   // d is released on the way out
   }
-  "not a dog"
+  return "not a dog"
 }
 
 fun f() {

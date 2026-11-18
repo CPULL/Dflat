@@ -1,0 +1,1 @@
+setvalue_key_not_keyable.df(5): error: Dog is not Keyable: the set Pets is a key, so its classes implement the trait Keyable (spec 6.2, 11.2.1)

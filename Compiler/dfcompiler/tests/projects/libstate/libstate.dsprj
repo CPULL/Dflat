@@ -1,0 +1,3 @@
+; a library with a public global, top-level variables and a keyword in its namespace (spec 16, 18.1)
+source=main.df
+include=counters

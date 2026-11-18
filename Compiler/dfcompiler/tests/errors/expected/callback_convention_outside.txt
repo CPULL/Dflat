@@ -1,0 +1,1 @@
+callback_convention_outside.df(3,8): error: a calling convention is written only in a .dflib, on a native or a callback type (spec 22)

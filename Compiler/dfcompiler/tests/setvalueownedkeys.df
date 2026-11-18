@@ -1,0 +1,52 @@
+// set values with string, object or tuple members as keys (spec 11.3.6.1, 6.8.4.1, 6.8.5.1): the collection keeps a boxed copy
+import Root
+class Tag(string name) : Keyable {
+  public string name = name
+}
+Generic Key { i32, string }
+Generic Mixed { i32, (i32 x, string y), Tag }
+
+map<Key, i32> m = map<Key, i32>()
+m["b"] = 2
+m[5] = 50
+string a = "a"
+m[a] = 1
+m[3] = 30
+Console.log(m)
+i32 va = m["a"]
+bool hb = m.hasKey("b")
+bool hz = m.hasKey("z")
+Console.log($"{va} {m[5]} {hb} {hz}")
+for (Key k, i32 v) in m {
+  Console.log($"{k} -> {v}")
+}
+m.removeAt("b")
+Console.log(m.len)
+
+set<Key> s = set<Key>()
+s.add("x")
+s.add(1)
+s.add("x")
+Console.log(s.len)
+
+hmap<Key, string> h = hmap<Key, string>()
+h["k"] = "v"
+h[7] = "seven"
+string hk = h["k"]
+bool hq = h.hasKey("q")
+Console.log($"{hk} {h[7]} {hq}")
+
+hset<Mixed> hs = hset<Mixed>()
+hs.add((1, "one"))
+hs.add(Tag("t"))
+hs.add((1, "one"))
+hs.add(4)
+Console.log(hs.len)
+
+map<Mixed, i32> mm = map<Mixed, i32>()
+mm[(2, "b")] = 2
+mm[(1, "a")] = 1
+mm[9] = 9
+for (Mixed k, i32 v) in mm {
+  Console.log($"{k} {v}")
+}

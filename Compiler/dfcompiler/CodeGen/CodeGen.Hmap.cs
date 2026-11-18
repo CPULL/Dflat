@@ -544,7 +544,7 @@ public class hset<T> : SetCollection<T> {
 
   bool HmapValueBuilt(string value) {
     string inner = BaseOf(value);
-    return IsInt(inner) || inner is "bool" or "char" or "r32" or "r64" || IsTimeType(inner) || IsEnum(inner) || value == "string" || IsMapObjectValue(value) || IsFunType(value) || IsArr(value) || IsMapValueItem(value);
+    return IsInt(inner) || inner is "bool" or "char" or "r32" or "r64" || IsTimeType(inner) || IsEnum(inner) || value == "string" || IsMapObjectValue(value) || IsFunType(value) || IsArr(value) || IsMapValueItem(value) || IsSetName(value);
   }
 
   // the C type and the width in bits of the value of a native key (an enum: its value type)
@@ -668,7 +668,7 @@ public class hset<T> : SetCollection<T> {
         arrayCode.Append($"static const df_ht_shape {shape} = {{ sizeof(df_ht_skey), {MapValueSize(type)}, df_ht_skey_hash, df_ht_skey_eq, true }};\n\n");
         return "&" + shape;
       }
-      if (IsSetValue(keyType)) {
+      if (IsSetValue(keyType) && !SetOwns(keyType)) {
         arrayCode.Append($"static const df_ht_shape {shape} = {{ 16, {MapValueSize(type)}, df_hk_setv_{SetCName(keyType)}, NULL, false }};\n\n");
         return "&" + shape;
       }

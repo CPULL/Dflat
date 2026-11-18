@@ -1,4 +1,5 @@
 namespace app
+import lib stats
 import stats
 
 class Shop {

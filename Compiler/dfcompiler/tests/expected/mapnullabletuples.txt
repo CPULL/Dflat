@@ -1,0 +1,35 @@
+(Dog { name: a1 }, 1)
+true true 3
+replace a
+  end a1
+a to null
+  end a2
+remove b
+  end b1
+c (Dog { name: k1 }, 9)
+  a: null
+  c: (Dog { name: k1 }, 9)
+  n: null
+clear
+  end k1
+  end d1
+end of run
+  end e1
+  end k1
+([1, 2, 3], x) true ([4, 5], y)
+([9], z) 2
+  end n1
+end of arrays
+  end n2
+got (Dog { name: f1 }, 1)
+  end f1
+got null
+end of locals
+  end g2
+  end g2
+  end x1
+(Dog { name: x2 }, [3]) (Dog { name: s1 }, 1)
+end of fields
+  end x2
+  end s1
+---- exit code 0 ----

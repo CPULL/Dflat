@@ -1,0 +1,9 @@
+// a lent handle cannot be moved (spec 22)
+namespace app
+import lib dfhandles
+import Root
+fun keep(Res r) {
+  Res mine = ->r
+}
+Res a = dfh_open(1)
+keep(a)

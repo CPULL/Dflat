@@ -1,0 +1,1 @@
+fieldgroup_object.df(12): error: a field group takes a tuple, a struct or another field group, not the object Other: write (o.x, o.y) (spec 11.1.4.1)

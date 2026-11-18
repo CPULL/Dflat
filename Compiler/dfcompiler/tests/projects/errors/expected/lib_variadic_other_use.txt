@@ -1,0 +1,1 @@
+dfvariadic.dflib(19): error: 'args...' of a mapping is only given on to a native, f(..., args) (spec 22)

@@ -1,0 +1,77 @@
+// nullable tuples that hold objects or arrays as map values (spec 3.2, 6.6): a value that holds a tuple owns its parts; null owns nothing;
+// replaced, removed and cleared values end their parts, a copy clones them, and they end with the map
+namespace mapnullabletuples
+import Root
+public class Dog(string name) {
+  public string name
+} atEnd {
+  Console.log("  end " + name)
+}
+fun run() {
+  map<string, (Dog, i32)?> m = ["a": (Dog("a1"), 1), "n": null]
+  m["b"] = (Dog("b1"), 2)
+  Console.log(m["a"])
+  Console.log($"{m["n"] == null} {m["zz"] == null} {m.len}")
+  Console.log("replace a")
+  m["a"] = (Dog("a2"), 3)
+  Console.log("a to null")
+  m["a"] = null
+  Console.log("remove b")
+  m.removeAt("b")
+  (Dog, i32)? kept = (Dog("k1"), 9)
+  m["c"] = kept                                 // a copy: the map clones the dog
+  Console.log($"c {m["c"]}")
+  for (k, v) in m {
+    Console.log($"  {k}: {v}")
+  }
+  Console.log("clear")
+  m["d"] = (Dog("d1"), 4)
+  m.clear()
+  m["e"] = (Dog("e1"), 5)
+  Console.log("end of run")
+}
+run()
+fun arrays() {
+  hmap<i32, (arr<i32>, string)?> h = [1: ([1, 2, 3], "x")]
+  h[2] = null
+  h[3] = ([4, 5], "y")
+  Console.log($"{h[1]} {h[2] == null} {h[3]}")
+  h[1] = ([9], "z")
+  h.removeAt(3)
+  Console.log($"{h[1]} {h.len}")
+  map<i32, ((Dog, i32), string)?> nested = [1: ((Dog("n1"), 1), "deep")]
+  nested[1] = null
+  nested[2] = ((Dog("n2"), 2), "deep2")
+  Console.log("end of arrays")
+}
+arrays()
+fun (Dog, i32)? find(bool found) {
+  if found {
+    return (Dog("f1"), 1)
+  }
+  return null
+}
+fun locals() {
+  (Dog, i32)? got = find(true)
+  Console.log($"got {got}")
+  got = find(false)                             // f1 ends
+  Console.log($"got {got}")
+  got = (Dog("g2"), 2)
+  map<i32, (Dog, i32)?> m = [1: got]            // a copy of g2
+  Console.log("end of locals")
+}
+locals()
+class Box {
+  public (Dog, arr<i32>)? pair = null
+}
+class Holder {
+  public static (Dog, i32)? shared = (Dog("s1"), 1)
+}
+fun fields() {
+  Box b = Box()
+  b.pair = (Dog("x1"), [1, 2])
+  b.pair = (Dog("x2"), [3])                     // x1 ends
+  Console.log($"{b.pair} {Holder.shared}")
+  Console.log("end of fields")
+}
+fields()

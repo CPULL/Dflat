@@ -11,7 +11,7 @@ class Kennel {
   vec<Dog> dogs = []
   i32 visits
   string label = "k"
-  unrestricted fun bool f() { boss.bark(); i32 local = visits; local++; dogs.has(boss) || local == 1 }
+  unrestricted fun bool f() { boss.bark(); i32 local = visits; local++; return dogs.has(boss) || local == 1 }
 }
 import Root
 fun f() {

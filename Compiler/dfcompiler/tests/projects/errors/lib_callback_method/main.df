@@ -1,0 +1,8 @@
+// a callback is a plain function or a static method (spec 22)
+namespace app
+import lib dfcallbacks
+import Root
+class Ops {
+  public fun i32 add(i32 a, i32 b) { a + b }
+}
+Console.log(dfc_apply(pointer.to(Ops.add(i32, i32)), 1, 2))

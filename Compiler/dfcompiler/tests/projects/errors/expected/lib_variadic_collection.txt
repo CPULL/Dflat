@@ -1,0 +1,1 @@
+main.df(6): error: the '...' of dfv_sum takes the values one by one, not a collection (arr<i32>) (spec 22)

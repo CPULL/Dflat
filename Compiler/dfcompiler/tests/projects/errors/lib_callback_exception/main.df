@@ -1,0 +1,6 @@
+// a callback cannot let an exception out: C cannot receive it (spec 22)
+namespace app
+import lib dfcallbacks
+import Root
+fun i32 divide(i32 a, i32 b) { a / b }
+Console.log(dfc_apply(pointer.to(divide(i32, i32)), 6, 0))

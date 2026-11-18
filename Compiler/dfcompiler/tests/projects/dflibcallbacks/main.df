@@ -1,0 +1,28 @@
+// callbacks (spec 22): Dflat functions that C calls
+namespace app
+import lib dfcallbacks
+import Root
+
+fun i32 add(i32 a, i32 b) { a + b }
+fun i32 add(i64 a, i64 b) { 0 }                 // another overload: the types choose
+fun i64 visit(*char name, i64 data) {
+  Console.log($"visit {string(name)} {data}")
+  if data == 11 { return 0 }                    // C stops here
+  return 1
+}
+fun notify(r64 value) { Console.log($"notified {value}") }
+fun r32 area(Point p) { p.x * p.y }
+
+class Ops {
+  public static fun i32 sub(i32 a, i32 b) { a - b }
+}
+
+Console.log(dfc_apply(pointer.to(add(i32, i32)), 2, 3))
+Console.log(dfc_apply(pointer.to(Ops.sub(i32, i32)), 10, 4))
+pointer<Combine> kept = pointer.to(add(i32, i32))
+Console.log(dfc_apply(kept, 20, 22))
+pointer plain = pointer.to(add(i32, i32))       // pointer<fun i32(i32, i32)>: the same type as Combine
+Console.log(dfc_apply(plain, 1, 1))
+Console.log(dfc_each(pointer.to(visit(*char, i64)), 10))
+dfc_notify(pointer.to(notify(r64)), 1.5)
+Console.log(dfc_measure(pointer.to(area(Point)), 3, 4))

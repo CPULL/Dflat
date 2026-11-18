@@ -32,7 +32,7 @@ public sealed partial class CodeGen {
     if (!hashed && !MapKeyBuilt(args[0])) {
       throw Error($"set items of type {DisplayName(args[0])} are not built yet (this version: integers, bool, char, enums, reals, date, time, string, string?, string1k, string1k?, tuples of them, strings and Keyable objects, structs of exact natives, strings and Keyable objects, sets of exact natives, Keyable classes)", at);
     }
-    if (IsSetValue(args[0])) {
+    if (IsSetValue(args[0]) && !SetOwns(args[0])) {
       SetKeyHelpers(args[0], at);   // the C helpers of set value keys (CodeGen.SetValueKeys.cs)
     }
     if (IsObjectKey(args[0])) {

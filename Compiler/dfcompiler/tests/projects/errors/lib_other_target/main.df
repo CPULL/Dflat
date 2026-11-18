@@ -1,0 +1,5 @@
+// a function defined only for another target cannot be used (spec 22)
+namespace app
+import lib dfout
+import Root
+Console.log(onlyMac())

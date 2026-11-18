@@ -1,0 +1,5 @@
+// a global of a library without public is its own (spec 18.1)
+namespace app
+import lib secret
+import secret
+Root.Console.log(hidden.get())

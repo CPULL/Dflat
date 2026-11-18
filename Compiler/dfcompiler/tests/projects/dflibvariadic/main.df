@@ -1,0 +1,16 @@
+// variadic natives (spec 22): one wrapper for each shape of the calls
+namespace app
+import lib dfvariadic
+import Root
+
+string name = "Ada"
+i8 small = -5
+u64 big = 18000000000
+r32 ratio = 0.25
+Console.log(format("sid", name, 42, 1.80))
+Console.log(format("iuld", small, big, 5000000000, ratio))
+Console.log(format("sid", "Bob", 7, 2.5))
+Console.log(format(""))
+Console.log(format("is", -3, $"{name}!"))
+Console.log(dfv_sum(3, 1, 2, 3))
+Console.log(dfv_sum(0))

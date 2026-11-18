@@ -1,0 +1,36 @@
+// handles (spec 22): csrc/dfhandles.c counts what is opened and freed
+Name: dfhandles
+Namespace: tests.dfhandles
+Convention: cdecl
+LibName, win-*, static: dfhandles.lib
+LibName, linux-*, static: libdfhandles.a
+
+handle Res addr
+handle Buf u64
+handle Fd i32 invalid -1
+
+native Res dfh_open(i32 id)
+native i32 dfh_id(Res r)
+
+// the freeing function of Res
+native i32 dfh_close(Res r)
+public fun i32 res close([~Res r]) -> res = dfh_close(r)
+
+native i32 dfh_closed()
+native i32 dfh_last()
+
+native Buf dfh_buf(u64 n)
+native dfh_buf_free(Buf b)
+public fun release([~Buf b]) -> dfh_buf_free(b)
+native i32 dfh_bufs_freed()
+
+native Fd dfh_file(i32 ok)
+native dfh_file_close(Fd f)
+public fun shut([~Fd f]) -> dfh_file_close(f)
+native i32 dfh_files_closed()
+
+// a handle and a number as named results
+public fun Res r, i32 code openWith(i32 id) -> {
+  r = dfh_open(id)
+  code = id * 10
+}

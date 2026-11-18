@@ -1,0 +1,1 @@
+setvalue_object_notclonable.df(6): error: a value of the set holds a Dog, which cannot be cloned (Dog is notclonable): move it with -> (spec 11.3.6.1)

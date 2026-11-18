@@ -1,0 +1,6 @@
+// the types in pointer.to(f(...)) are the types of the parameters (spec 22)
+namespace app
+import lib dfcallbacks
+import Root
+fun i32 add(i32 a, i32 b) { a + b }
+Console.log(dfc_apply(pointer.to(add(i64, i32)), 1, 2))

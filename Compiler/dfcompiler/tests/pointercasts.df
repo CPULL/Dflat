@@ -11,13 +11,13 @@ fun *i32 limit() { *LIMIT }
 
 unsafe fun i32 peek(addr where) {
   *i32 p = [*i32]where
-  p[]
+  return p[]
 }
 
 unsafe class Device(addr base) {
   public fun i32 first() {
     *i32 p = [*i32]base
-    p[]
+    return p[]
   }
 }
 

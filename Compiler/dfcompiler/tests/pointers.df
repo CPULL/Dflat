@@ -72,5 +72,5 @@ fun main() {
 fun i32 viaParam(i32 v, Point pt) {
   *i32 p = *v
   *i32 q = pointer.to(pt.y)
-  p[] + q[]
+  return p[] + q[]
 }

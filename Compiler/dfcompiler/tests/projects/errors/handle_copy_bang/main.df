@@ -1,0 +1,6 @@
+// a handle cannot be copied, only moved with -> (spec 22)
+namespace app
+import lib dfhandles
+import Root
+Res a = dfh_open(1)
+Res b = a!

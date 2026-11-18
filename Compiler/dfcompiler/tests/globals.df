@@ -11,7 +11,7 @@ class Logger(string prefix) {
 class Cache(u64 start) {
   u64 hits = start
   public string name = "cache"
-  public fun u64 getOrAdd(u64 k) { hits += k; log.write($"add {k}"); hits }
+  public fun u64 getOrAdd(u64 k) { hits += k; log.write($"add {k}"); return hits }
   unrestricted fun string label() { name }
 } atEnd { Console.log($"cache end {hits}") }
 

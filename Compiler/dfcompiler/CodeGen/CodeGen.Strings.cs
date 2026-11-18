@@ -22,6 +22,7 @@ public sealed partial class CodeGen {
       ? e.Fresh : true,
     "Binary" => n.Text == "+" || (n.Text == "??" && e.Fresh),
     "Paren" or "Gift" => e.Fresh,
+    "TypeSwitch" => e.Fresh,   // a string type switch gives a string of its own
     "Member" => e.Fresh && e.Code.StartsWith("df_str_dup_cstr("),   // ex.message, ex.function: a new string made from the C text of the exception
     _ => false
   };

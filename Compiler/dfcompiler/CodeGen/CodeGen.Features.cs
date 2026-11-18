@@ -175,6 +175,9 @@ public sealed partial class CodeGen {
       }
     }
     if (IsSetValue(paramType)) {
+      if (valueNode.Kind == "Tuple" && SetMembers(paramType).Any(member => IsTuple(member) && TryFits(valueNode, scope, member))) {
+        return 0;   // a tuple literal fits a tuple member of the set (spec 11.3.6.1)
+      }
       // a value of the set, a member value (a literal by the rule of 11.3.6.1): it fits; anything else does not
       try {
         var given = ExprOf(valueNode, scope, paramType);

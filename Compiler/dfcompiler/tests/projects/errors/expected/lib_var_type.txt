@@ -1,0 +1,1 @@
+dfout.dflib(22): error: the C variable dfo_counter is mapped 1 to 1: write the same type on both sides of -> (spec 22)

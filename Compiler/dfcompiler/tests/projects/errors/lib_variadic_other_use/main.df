@@ -1,0 +1,5 @@
+// the '...' of a mapping is only given on to the native (spec 22)
+namespace app
+import lib dfvariadic
+import Root
+Console.log(count("ii", 1, 2))

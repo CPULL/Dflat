@@ -66,6 +66,7 @@ sealed class FunSig {
   public string? GenericT { get; set; } // a copy of equals(T other) made for this T
   public FunSig Root { get; set; }
   public int GroupSize { get; set; }   // on a root: how many functions override it
+  public int? CVariadicFixed { get; set; }   // the copy of a C variadic function for one shape: how many parameters are not the '...' (spec 22)
   public int InstanceDepth { get; set; }      // a copy of a generic function: how deep the chain of copies is
   public string InstanceChain { get; set; } = "";
   internal List<TypeParam>? TemplateParams { get; set; }   // a copy of a generic function: the type parameters of its template (spec 12.4)
@@ -96,6 +97,8 @@ sealed class ParamSig {
   public bool IsWeak { get; init; }       // _T name (spec 12): a weak reference, used through enforce
   public bool IsWritable { get; init; }   // &@T name, &%T name (spec 12.7): read/write, the object has a lock
   public int Pointer { get; init; }       // an extern function: 1 for *S name (the address, read-only), 2 for &*S name (writable) (spec 11.1.5.6)
+  public bool Frees { get; init; }        // [~T name]: the function that frees the handle T (spec 22)
+  public bool IsHandleGift { get; init; } // ->T name of a handle: the function owns it (spec 22)
 }
 
 sealed class VarInfo {
@@ -266,6 +269,7 @@ public sealed partial class CodeGen {
         DeclareEnum(statement);
       }
     }
+    DeclareHandles(program);   // spec 22
     RewriteSizedArrays(program);
     DeclareStructs(program);
     RegisterGenerics(program);
@@ -283,12 +287,16 @@ public sealed partial class CodeGen {
     RegisterStructs();
     RegisterClasses();
     RegisterStructMethods();
+    CountOwnedSets();   // set values that own strings (spec 11.3.6.1): once the classes of the members are known
     CheckClassInstances();
     DeclareGlobalConsts(program);
     DeclareGlobals(program);   // spec 18
     CheckGlobalUses(program);
     foreach (var statement in program.Children) {
       if (statement.Kind == "Fun") {
+        if (RegisterNativeVariable(statement)) {
+          continue;   // T x -> native T x: a C variable (spec 22)
+        }
         if (IsGenericFunNode(statement)) {
           RegisterGenericFun(statement);
         } else {
@@ -297,6 +305,8 @@ public sealed partial class CodeGen {
       }
     }
 
+    LinkFreeingFunctions();   // [~T name] (spec 22)
+    CheckCallbackAliases();   // spec 22
     InferGivenResults();   // spec 13.1.1: a plain result that is built here is given
     CollectArgsOfReadCalls(program, null);   // spec 6.8.1: new arrays lent to calls whose result is only read
     ClassifyReturns();
@@ -306,12 +316,16 @@ public sealed partial class CodeGen {
     FindFailingFunctions();
 
     var protos = new StringBuilder();
+    protos.Append(nativeVarDecls);   // the C variables of the .dflib files (spec 22)
     var bodies = new StringBuilder();
     // (a snapshot: compiling a body can make copies of generic functions, which are added to funs)
     foreach (var fun in funs.Values.SelectMany(overloads => overloads).Where(fun => !fun.IsAbstract).ToList()) {
       if (fun.IsExtern) {
         protos.Append(ExternDeclarations(fun));   // the C prototype and the wrapper (CodeGen.Extern.cs)
         continue;
+      }
+      if (IsCVariadic(fun) && fun.CVariadicFixed == null) {
+        continue;   // a mapping that gives its '...' on to a native: only its copies for each shape are compiled (spec 22)
       }
       protos.Append(Signature(fun)).Append(";\n");
       string emitted = fun.IsCtor ? EmitConstructor(fun) : EmitFun(fun);
@@ -320,7 +334,7 @@ public sealed partial class CodeGen {
 
     // a main function is the entry point (spec 14.1); otherwise the top-level statements are
     var topLevel = program.Children.Where(statement =>
-      statement.Kind is not ("Fun" or "Alias" or "Enum" or "Class" or "Trait" or "GenericSet" or "Namespace" or "NamespaceLocal" or "Struct")).ToList();
+      statement.Kind is not ("Fun" or "Alias" or "Enum" or "Class" or "Trait" or "GenericSet" or "Namespace" or "NamespaceLocal" or "Struct" or "Handle")).ToList();
     if (funs.TryGetValue("main", out var mains)) {
       if (topLevel.Count > 0) {
         throw Error("a program starts either from top-level code or from a main function, not both", topLevel[0]);
@@ -332,7 +346,7 @@ public sealed partial class CodeGen {
     fn = NewFunctionContext("main()", "i32", true);
     assign = new AssignState();
     currentRet = null;
-    var statements = program.Children.Where(statement => statement.Kind is not ("Fun" or "Alias" or "Enum" or "Class" or "Trait" or "GenericSet" or "Struct")).ToList();
+    var statements = program.Children.Where(statement => statement.Kind is not ("Fun" or "Alias" or "Enum" or "Class" or "Trait" or "GenericSet" or "Struct" or "Handle")).ToList();
     var root = PrepareFrame(statements, new Scope(null), FrameKind.Function);
     root.OuterHandler = fn.PanicLabel;
     var mainBody = new StringBuilder();
@@ -367,13 +381,15 @@ public sealed partial class CodeGen {
       protos.Append(Signature(instance)).Append(";\n");
       bodies.Append(EmitFun(instance)).Append('\n');
     }
+    protos.Append(variadicWrappers);   // the wrappers of the shapes of the C variadic calls, after every prototype (spec 22)
+    protos.Append(callbackWrappers);   // the C functions that C calls back, which call the Dflat functions (CodeGen.Callbacks.cs)
     KeyableFieldWarnings();   // spec 11.2.1
     EmitClassTables();
     var output = new StringBuilder();
     output.Append("/* generated by dfcompiler */\n");
     output.Append($"#define DF_UNS_BITS {Bits(NativeUns)}\n");
-    output.Append(Runtime.Source).Append('\n');
-    output.Append(OptionalRuntime());
+    output.Append(RuntimeLinkage.Apply(Runtime.Source, RuntimeMode)).Append('\n');   // spec 15.8: one runtime per program
+    output.Append(RuntimeLinkage.Apply(OptionalRuntime(), RuntimeMode));
     output.Append("/* ---- program ---- */\n\n");
     output.Append(literalCode).Append('\n');
     output.Append(typeDefs);
@@ -438,6 +454,10 @@ public sealed partial class CodeGen {
 
   void RegisterAlias(Node a) {
     var target = a.Children[0];
+    if (target.Kind == "FunType") {
+      RegisterFunAlias(a, target);   // alias [stdcall] fun i32(i32) as Name: a function type, the type of a callback (spec 22)
+      return;
+    }
     if (target.Kind != "Type" || target.Children.Count > 0) {
       throw Error("alias target must be a plain name or type", a);
     }
@@ -542,12 +562,18 @@ public sealed partial class CodeGen {
       ps.Add(new ParamSig(p.Text!, variadic ? "arr<" + paramType + ">" : paramType, def?.Children[0]) {
         IsWritable = p.Children.Any(child => child.Kind == "ReadWrite"),
         IsVariadic = variadic,
-        IsGift = p.Kind == "GiftParam" && (IsClass(paramType) || paramType == "string" || IsArr(paramType) || StructHoldsObjects(paramType)),
+        IsGift = p.Kind == "GiftParam" && (IsClass(paramType) || paramType == "string" || IsArr(paramType) || StructHoldsObjects(paramType) || SetOwns(paramType)),
         IsTupleGift = p.Kind == "GiftParam" && TupleHoldsArrays(paramType),
         Ref = reference,
         IsWeak = weakParam,
-        Pointer = pointer
+        Pointer = pointer,
+        Frees = p.Children.Any(child => child.Kind == "Frees"),
+        IsHandleGift = p.Kind == "GiftParam" && IsHandle(paramType)
       });
+      bool nativeOut = reference == 2 && funNode.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ').Contains("extern") == true;
+      if (IsHandle(paramType) && (reference != 0 && !nativeOut || weakParam || variadic || p.Children.Any(child => child.Kind is "Counted" or "ReadWrite"))) {
+        throw NotSupported("a handle parameter other than T name, ->T name or [~T name] (spec 22)", p);
+      }
     }
     bool isExtern = funNode.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ').Contains("extern") == true;
     bool noBody = funNode.Children.Any(child => child.Kind == "NoBody");
@@ -625,9 +651,10 @@ public sealed partial class CodeGen {
   static string Article(string type) =>
     type.Length > 0 && ("aeioAEIO".Contains(type[0]) || type[0] == 'r' && type.Length > 1 && char.IsDigit(type[1])) ? "an" : "a";
 
-  // the last expression of a body is its result (spec 13): written as a return, so it is checked, moved and cleaned up like one
+  // a body that is a single expression returns its value (spec 13): written as a return, so it is checked, moved and cleaned up like one.
+  // A longer body returns only with return
   static void MarkImplicitReturn(Node funNode) {
-    if (funNode.Children.FirstOrDefault(child => child.Kind == "Block") is not Node block || block.Children.Count == 0) {
+    if (funNode.Children.FirstOrDefault(child => child.Kind == "Block") is not Node block || block.Children.Count != 1) {
       return;
     }
     var last = block.Children[^1];
@@ -681,7 +708,7 @@ public sealed partial class CodeGen {
       // a reference parameter is a pointer in C; the body reads and writes through it, a read-only one cannot be assigned
       scope.Vars[p.Name] = IsByPointer(p)
         ? new VarInfo(p.Type, $"(*{ParamName(p)})", p.Ref == 1) { ReadOnlyStruct = p.Ref == 1 && IsStruct(p.Type), ReadOnlyRef = p.Ref == 1 && IsArr(p.Type), RefSlot = p.Ref == 2 && (IsClass(p.Type) || IsArr(p.Type) || p.Type == "string"), BorrowsArray = p.Ref == 2 && IsArr(p.Type) }
-        : StringVar(new VarInfo(p.Type, "v_" + p.Name, false) { Own = p.IsGift, ReadOnlyRef = PlainLend(p), ReadOnlyString = p.Type == "string" && !p.IsGift, IsWeak = p.IsWeak, BorrowsArray = IsArr(p.Type) && !p.IsGift, OwnsArray = OwnsGivenArray(f, p), ReadOnlyStruct = IsStruct(p.Type) && !p.IsGift, OwnsStruct = p.IsGift && IsStruct(p.Type) });
+        : StringVar(new VarInfo(p.Type, "v_" + p.Name, false) { Own = p.IsGift || p.IsHandleGift, ReadOnlyRef = PlainLend(p), ReadOnlyString = p.Type == "string" && !p.IsGift, IsWeak = p.IsWeak, BorrowsArray = IsArr(p.Type) && !p.IsGift, OwnsArray = OwnsGivenArray(f, p), ReadOnlyStruct = IsStruct(p.Type) && !p.IsGift, OwnsStruct = p.IsGift && IsStruct(p.Type) });
       scope.Vars[p.Name].IsParam = true;
       scope.Vars[p.Name].FnBorrows = IsFunType(p.Type);   // a function parameter may borrow (spec 13.3.4)
       if (scope.Vars[p.Name].OwnFlag is string flag) {
@@ -696,7 +723,10 @@ public sealed partial class CodeGen {
     if (trailing != null) {
       statements.Insert(0, Synthetic("AtEnd", trailing).Add(trailing.Children[0]));
     }
-    foreach (var p in f.Params.Where(p => p.IsGift && !IsArr(p.Type) && !(p.Type == "string" && !IsByPointer(p)) && !IsStruct(p.Type))) {
+    foreach (var p in f.Params.Where(p => p.IsGift && SetOwns(p.Type) && f.Node.Line < LibraryLine)) {
+      statements.Insert(0, SetDropNode(p.Name, f.Node));   // ->Pets p: its value ends with the function (spec 11.3.6.1)
+    }
+    foreach (var p in f.Params.Where(p => p.IsGift && !IsArr(p.Type) && !(p.Type == "string" && !IsByPointer(p)) && !IsStruct(p.Type) && !SetOwns(p.Type))) {
       statements.Insert(0, DropNode(p.Name, f.Node));
     }
     foreach (var p in f.Params.Where(p => p.IsGift && StructHoldsObjects(p.Type))) {
@@ -705,6 +735,9 @@ public sealed partial class CodeGen {
     foreach (var p in f.Params.Where(p => OwnsGivenArray(f, p))) {
       // ->arr<T> p: the array ends with the function, unless it was moved on (spec 6.8.1)
       statements.Insert(0, Synthetic("AtEnd", f.Node, "drop").Add(Synthetic("Block", f.Node).Add(Synthetic("ArrDrop", f.Node, p.Name))));
+    }
+    foreach (var p in f.Params.Where(p => p.IsHandleGift)) {
+      statements.Insert(0, HandleDropNode(p.Name, f.Node));   // ->Db db: the handle ends with the function (spec 22)
     }
     foreach (var p in f.Params.Where(p => IsCountedType(p.Type) || IsWeakType(p.Type))) {
       statements.Insert(0, DoneDropNode(p.Name, f.Node));   // the usage or weak reference of the parameter is released when the function ends
@@ -722,6 +755,10 @@ public sealed partial class CodeGen {
     EmitFrameBody(root, body, 1);
     if (f.GenericT != null && !assign.Unreachable) {
       throw Error($"every path of equals must return a value (checked for T = {f.GenericT})", f.Node);
+    }
+    if (f.Ret != "void" && !assign.Unreachable && !f.IsCtor && !f.IsInit && !f.IsStaticInit && !f.IsDtor) {
+      // a body longer than one expression gives its result only with return (spec 13)
+      throw Error($"this function must return {Article(f.Ret)} {DisplayName(f.Ret)}: the end of its body is reached without return (only a body that is a single expression returns it by itself, spec 13)", f.Node);
     }
 
     var sb = new StringBuilder();
@@ -812,10 +849,16 @@ public sealed partial class CodeGen {
       case "PtrDrop":
         EmitPointerDrop(s, sb, scope, pad);   // spec 12.1
         return;
+      case "HandleDrop":
+        EmitHandleDrop(s, sb, scope, pad);   // spec 22
+        return;
+      case "SetDrop":
+        EmitSetDrop(s, sb, scope, pad);   // spec 11.3.6.1
+        return;
 
       case "TupleDrop":
-        if (scope.Find(s.Text!) is VarInfo tuple && TupleHoldsArrays(tuple.Type)) {
-          sb.Append(pad).Append(TupleDropCode(tuple.Type, tuple.CName)).Append('\n');   // spec 6.8.1
+        if (scope.Find(s.Text!) is VarInfo tuple && (TupleHoldsArrays(tuple.Type) || IsOwningNullableTuple(tuple.Type))) {
+          sb.Append(pad).Append(OwnedTupleDrop(tuple.Type, tuple.CName)).Append('\n');   // spec 6.8.1
         }
         return;
 
@@ -852,6 +895,14 @@ public sealed partial class CodeGen {
       }
 
       case "Assign":
+        if (SetOwnedAssignCode(s, scope) is string setAssign) {
+          sb.Append(pad).Append(setAssign).Append(";\n");   // the old value ends (spec 11.3.6.1)
+          return;
+        }
+        if (HandleAssignCode(s, scope) is string handleAssign) {
+          sb.Append(pad).Append(handleAssign).Append(";\n");   // the old handle ends (spec 22)
+          return;
+        }
         if (CollectionOperator(s, scope) is Node written) {
           EmitStmt(written, sb, scope, indent);   // m += x, s -= x ...: the calls of the members (spec 6.6)
           return;
@@ -865,7 +916,7 @@ public sealed partial class CodeGen {
 
       case "ExprStmt": {
         if (s.Text == "literal") {
-          throw Error("a literal must be assigned, passed or returned (or be the last expression of a function that returns it)", s);
+          throw Error("a literal must be assigned, passed or returned (or be the single expression of a function that returns it)", s);
         }
         if (s.Children[0].Kind == "Finalize") {
           EmitFinalize(s.Children[0], sb, scope, pad);
@@ -889,6 +940,14 @@ public sealed partial class CodeGen {
           return;
         }
         string k = s.Children[0].Kind;
+        if (DroppedSetCode(e, s) is string droppedSet) {
+          sb.Append(pad).Append(droppedSet).Append('\n');   // a new set value nobody keeps ends here (spec 11.3.6.1)
+          return;
+        }
+        if (DroppedHandleCode(e) is string droppedHandle) {
+          sb.Append(pad).Append(droppedHandle).Append('\n');   // a new handle nobody keeps ends here (spec 22)
+          return;
+        }
         if (DroppedStructCode(e) is string droppedStruct) {
           sb.Append(pad).Append(droppedStruct).Append(";\n");   // a struct nobody keeps: its strings and objects end here (spec 11.1.5.3)
         } else if (DroppedResultCode(s.Children[0], e) is string dropped) {
@@ -1054,6 +1113,14 @@ public sealed partial class CodeGen {
       CheckNotShadowing(s.Text!, scope, s);   // the temporary usage of enforce w { } has the name of w (spec 12.7)
     }
     var init = s.Children.FirstOrDefault(c => c.Kind is "Init" or "WeakInit");
+    if (IsHandle(type)) {
+      EmitHandleDecl(s, type, init, sb, scope, pad, isConst);   // spec 22
+      return;
+    }
+    if (setOwnedTypes > 0 && !LibraryCode && SetOwns(type) && !isConst) {
+      EmitSetOwnedDecl(s, type, init, sb, scope, pad);   // spec 11.3.6.1
+      return;
+    }
     if (s.Children.Any(c => c.Kind == "ReadWrite") && !IsCountedDecl(s) && !s.Children.Any(c => c.Kind is "Weak" or "WeakInit")
         && LendsAsAddress(ResolveDeclType(s, scope))) {
       EmitLendDecl(s, ResolveDeclType(s, scope), s.Children.FirstOrDefault(c => c.Kind == "Init"), sb, scope, pad);   // &i32 s = f() (spec 13.1.1)
@@ -1366,7 +1433,7 @@ public sealed partial class CodeGen {
 
   void EmitReturn(Node s, StringBuilder sb, Scope scope, int indent) {
     string pad = Pad(indent);
-    string? value = ReturnValueCode(s, scope, sb, pad);
+    string? value = HandleReturnValue(s, scope) ?? SetOwnedReturnValue(s, scope) ?? ReturnValueCode(s, scope, sb, pad);
     if (value != null && !fn!.IsMain && currentRet != null && currentRet != "void" && UsesTemporaries(value)) {
       // the temporaries of the value end before the function returns (they would stay on the stack of temporaries otherwise)
       string kept = NewTemp();
@@ -1490,14 +1557,14 @@ public sealed partial class CodeGen {
         ? $"({{ {CType(owned.Type)} {moved}; if ({flag}) {{ {moved} = {owned.CName}; {owned.CName}.p = NULL; {owned.CName}.len = 0; }} else {{ {moved} = {ArrCloneHelper(owned.Type, s)}({owned.CName}); }} {moved}; }})"
         : $"({{ {CType(owned.Type)} {moved} = {owned.CName}; {owned.CName}.p = NULL; {owned.CName}.len = 0; {moved}; }})" };
     }
-    if (TupleHoldsArrays(currentRet!) && !LibraryCode) {
+    if ((TupleHoldsArrays(currentRet!) || IsOwningNullableTuple(currentRet!)) && !LibraryCode) {
       returned = new Expr(TupleOwnedCode(s.Children[0], returned, currentRet!, s), currentRet!);   // the caller gets its own arrays (spec 6.8.1)
     }
     if (StructHoldsObjects(currentRet!) && !LibraryCode) {
       returned = new Expr(StructOwnedCode(returned, currentRet!, s), currentRet!, true);   // the caller gets its own strings and objects (spec 11.1.5.3)
     }
     if (returned.Type == "void" && s.Text == "implicit") {
-      throw Error($"this function must return {Article(currentRet!)} {currentRet}: its last expression gives nothing", s);
+      throw Error($"this function must return {Article(currentRet!)} {currentRet}: its single expression gives nothing", s);
     }
     returned = CheckReturnOwnership(returned, s.Children[0], scope, s);
     if (currentRet == "string") {
@@ -1543,10 +1610,13 @@ public sealed partial class CodeGen {
         return new LValueInfo(bare.Code, bare.Type, ownField.IsConst && !initializing, null, !ownField.IsStatic, ownField.IsWeak, ownField.IsStatic);
       }
       if (variable == null && globalConsts.TryGetValue(target.Text!, out var global)) {
-        return new LValueInfo(global.CName, global.Type, !initializing);
+        return new LValueInfo(global.CName, global.Type, !initializing && !libraryVars.Contains(target.Text!));   // a library variable is written
       }
       if (variable == null && globals.TryGetValue(target.Text!, out var globalObject)) {
         return GlobalLValue(globalObject, target);   // spec 18.3
+      }
+      if (variable == null && NativeVariablePlace(target) is LValueInfo nativePlace) {
+        return nativePlace;   // &i32 x -> native i32 x (spec 22)
       }
       if (variable == null) {
         throw Error($"unknown variable '{target.Text}'", target);
@@ -1757,6 +1827,9 @@ public sealed partial class CodeGen {
     if (prebuilt.TryGetValue(n, out var built)) {
       return built;   // a value evaluated before the lock of a global, held in a C temporary (spec 18.5)
     }
+    if (n.Kind == "Call" && n.Children.Count > 1 && n.Children[1].Children is [{ Kind: "FunRef" } funRef] && PointerToCallNode(n, scope)) {
+      return FunRefPointer(funRef, scope, expected);   // pointer.to(onKey(i32)): the expected callback type gives the convention (spec 22)
+    }
     if (globalReads.TryGetValue(n, out var readGlobal) && wrappingGlobal.Add(n)) {
       try {
         return GlobalReadExpr(n, readGlobal.Global, readGlobal.Write, scope, expected);   // g.f under the lock (spec 18.3)
@@ -1837,6 +1910,12 @@ public sealed partial class CodeGen {
         if (globals.TryGetValue(n.Text!, out var globalObject)) {
           return new Expr(globalObject.CName, globalObject.Type);   // spec 18: the object of the global, borrowed
         }
+        if (NativeVariableRead(n, scope) is Expr nativeVariable) {
+          return nativeVariable;   // a C variable of a .dflib (spec 22)
+        }
+        if (BareEnumEntry(n.Text!) == null && OtherTargetNames.TryGetValue(n.Text!, out var otherTargets)) {
+          throw Error($"'{n.Text}' has no definition for this target in its .dflib, only for {otherTargets} (spec 22)", n);
+        }
         if (traits.TryGetValue(n.Text!, out var viewed) && scope.Find("this") != null && IsSubtype(scope.Find("this")!.Type, viewed.Name)) {
           return new Expr("self", viewed.Name);   // TraitName.member inside a class that implements it
         }
@@ -1853,7 +1932,7 @@ public sealed partial class CodeGen {
         return new Expr($"({e.Code})", e.Type, e.Fresh);
       }
       case "Gift":
-        return GiftExpr(n, scope);
+        return HandleGift(n, scope) ?? (setOwnedTypes > 0 ? SetGift(n, scope) : null) ?? GiftExpr(n, scope);   // ->h of a handle: it leaves h (spec 22)
       case "Lambda":
         return LambdaExpr(n, scope, expected);   // spec 13.3
       case "CountedOf":
@@ -1867,7 +1946,7 @@ public sealed partial class CodeGen {
       case "Interp":
         return Interpolated(n, scope);
       case "Binary":
-        return Binary(n, scope, expected);
+        return HandleCompare(n, scope) ?? Binary(n, scope, expected);   // h == null (spec 22)
       case "Not":
         return new Expr($"(!{BoolOf(ExprOf(n.Children[0], scope), n)})", "bool");
       case "Neg": {
@@ -1964,6 +2043,12 @@ public sealed partial class CodeGen {
       case "WritablePointerOf":
         return PointerOf(n.Children[0], true, scope, n);   // &*x (spec 12.1)
       case "Copy": {
+        if (HandlePlaceType(n.Children[0], scope) != null) {
+          throw Error("a handle cannot be copied, only moved with -> (spec 22)", n);
+        }
+        if (setOwnedTypes > 0 && SetCopy(n, scope) is Expr setCopy) {
+          return setCopy;   // k!: its own copy of the string (spec 11.3.6.1)
+        }
         // m.keys! and m.values!: a vec with a copy of them (spec 6.6)
         if (MapViewOf(n.Children[0], scope) is (Expr viewMap, bool viewKeys)) {
           return MapViewCopy(viewMap, viewKeys, n);
@@ -2881,6 +2966,9 @@ public sealed partial class CodeGen {
     if (path != null && funs.Keys.Any(key => key == "__n_" + path || key.EndsWith(".__n_" + path))) {
       throw Error($"'{path}' is a native of a .dflib: only the code on the right of a -> mapping calls it (spec 22)", n);
     }
+    if (path != null && OtherTargetNames.TryGetValue(path.Split('.')[^1], out var otherTargets)) {
+      throw Error($"'{path}' has no definition for this target in its .dflib, only for {otherTargets} (spec 22)", n);
+    }
     throw Error($"unknown function '{path ?? callee.Kind}'" + (member != null ? $": the standard library has {member}, written {member[5..]} with import Root or import {member[..member.LastIndexOf('.')]}" : ""), n);
   }
 
@@ -2891,6 +2979,9 @@ public sealed partial class CodeGen {
     || p.Ref == 0 && !p.IsGift && !p.IsWeak && !p.IsParent && (IsClass(p.Type) || IsArr(p.Type));
 
   Expr UserCall(FunSig f, List<Node> args, Scope scope, Node at, string? self = null) {
+    if (CVariadicCall(f, args, scope, at, self) is Expr shaped) {
+      return shaped;   // printf(format, name, 42): the copy for the types of the extra arguments (spec 22)
+    }
     CheckUnsafeClassUse(f.Class, at);   // spec 12.1
     if (f.IsExtern && IsPointer(f.Ret)) {
       CheckUnsafeCPointer($"'{f.Name}' returns a pointer from C", at);   // pointers from outside are always unsafe (spec 12.1)
@@ -2921,7 +3012,7 @@ public sealed partial class CodeGen {
       codes.Insert(0, self);   // a method of a struct: the address of the struct (spec 11.1.5.2)
     }
     string call = $"{f.CName}({string.Join(", ", codes)})";
-    return ArgsFirst(new Expr(UserCallCode(f, call), f.Ret, IsClass(f.Ret) && (f.IsCtor || f.ReturnsOwned) || StructHoldsObjects(f.Ret)), prefix);
+    return ArgsFirst(new Expr(UserCallCode(f, call), f.Ret, IsClass(f.Ret) && (f.IsCtor || f.ReturnsOwned) || StructHoldsObjects(f.Ret) || SetOwns(f.Ret)), prefix);
   }
 
   Expr MemberValue(Node n, Scope scope) {

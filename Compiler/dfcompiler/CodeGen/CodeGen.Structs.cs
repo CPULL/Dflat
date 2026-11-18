@@ -144,6 +144,9 @@ public sealed partial class CodeGen {
       cloneUsed = true;
       return;
     }
+    if (IsSetName(type)) {
+      return;   // a set value: what it owns is cloned and ended with the struct (spec 11.3.6.1)
+    }
     throw NotSupported($"{type} inside a struct", at);
   }
 

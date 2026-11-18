@@ -1,0 +1,87 @@
+// handles (spec 22): owned, moved with ->, lent, freed by their freeing function when they end
+namespace app
+import lib dfhandles
+import Root
+
+fun report(string what) {
+  Console.log($"{what}: closed {dfh_closed()}, last {dfh_last()}")
+}
+
+fun scopeEnd() {
+  Res r = dfh_open(1)
+  Console.log(dfh_id(r))
+}
+
+fun take(->Res r) {
+  Console.log($"took {dfh_id(r)}")
+}
+
+fun show(Res r) {
+  Console.log($"lent {dfh_id(r)}")
+}
+
+fun Res make(i32 id) {
+  Res r = dfh_open(id)
+  return ->r
+}
+
+class Holder {
+  public Res r = dfh_open(7)
+  public fun swap(i32 id) {
+    r = dfh_open(id)
+  }
+}
+
+fun holder() {
+  Holder h = Holder()
+  Console.log(dfh_id(h.r))
+  h.swap(11)
+  report("field replaced")
+}
+
+fun later() {
+  Res m = make(8)
+  report("returned")
+  show(m)
+  Console.log(m != null)
+  Res w, i32 code = openWith(9)
+  Console.log($"{dfh_id(w)} {code}")
+  Res moved = ->m
+  Console.log($"{m == null} {dfh_id(moved)}")
+}
+
+scopeEnd()
+report("scope end")
+Res a = dfh_open(2)
+i32 res = close(a)
+Console.log($"{res} {a == null}")
+report("close")
+Res b = dfh_open(3)
+take(->b)
+Console.log(b == null)
+report("given")
+Res c = dfh_open(4)
+c = dfh_open(5)
+report("reassigned")
+c = null
+report("null")
+dfh_open(6)
+report("dropped")
+holder()
+report("field")
+later()
+report("later")
+Res none = dfh_open(0)
+Console.log(none == null)
+
+Buf buf = dfh_buf(42)
+u64 n = buf
+Console.log(n)
+release(buf)
+Console.log($"{buf == null} {dfh_bufs_freed()}")
+Fd bad = dfh_file(0)
+Console.log(bad == null)
+Fd good = dfh_file(1)
+Console.log(good != null)
+shut(good)
+Console.log(dfh_files_closed())

@@ -1,0 +1,30 @@
+// set values with a tuple member (spec 11.3.6.1): boxed, with their own strings, objects and arrays; copied as a struct
+import Root
+class Dog(string name) {
+  public string name = name
+}
+Generic Rec { i32, (i32 id, string name), (string tag, Dog dog) }
+
+fun Rec make(i32 n) {
+  Rec r = (n, $"rec {n}")
+  return r
+}
+
+string base = "a"
+base += "b"
+Rec a = (1, base)
+Rec b = a
+Rec c = 5
+Console.log($"{a} {b} {c} {a == b} {a == c}")
+if a is (i32 id, string name) t { Console.log($"{t.id} {t.name}") }
+Rec d = make(7)
+Console.log(d)
+Rec e = ("pet", Dog("rex"))
+Rec f = e!
+if f is (string tag, Dog dog) p { p.dog.name = "max" }
+Console.log($"{e} {f}")
+b = 9
+Rec m = ->d
+Console.log($"{d} {m} {b}")
+make(3)
+Console.log(a.hash == make(1).hash)

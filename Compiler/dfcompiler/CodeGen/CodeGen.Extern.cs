@@ -7,9 +7,12 @@ namespace dfcompiler;
 // which takes the Dflat values and calls the C function: a string becomes a const char* (UTF-8, ended by a 0, valid during the call), an
 // arr<T> becomes a T* and a size_t length. The other types go as they are; addr is a void*.
 public sealed partial class CodeGen {
-  bool IsExternValueType(string type) => IsNumeric(type) || type is "bool" or "addr" || IsStruct(type) && structs[type].Layout != null || IsPointer(type);   // a pointer: its cursor (spec 12.1)
+  bool IsExternValueType(string type) => IsNumeric(type) || type is "bool" or "addr" || IsHandle(type) || IsStruct(type) && structs[type].Layout != null || IsPointer(type);   // a pointer: its cursor (spec 12.1)
 
   void CheckExtern(Node funNode, ClassInfo? cls, string? enumName, string ret, List<ParamSig> ps, bool noBody) {
+    if (IsCallbackPointer(ret)) {
+      throw NotSupported("a callback pointer returned by a C function (spec 22: callbacks go from the program to C)", funNode);
+    }
     if (cls != null || enumName != null) {
       throw Error("an extern function is declared at the top level, not in a class or an enum", funNode);
     }
@@ -23,7 +26,11 @@ public sealed partial class CodeGen {
     }
     var paramsNode = funNode.Children.First(child => child.Kind == "Params");
     foreach (var (param, node) in ps.Zip(paramsNode.Children)) {
-      if (node.Kind != "Param" || param.IsWeak) {
+      if (param.IsVariadic && param == ps[^1]) {
+        CheckCVariadicParam(param, node);   // the C '...' (spec 22)
+        continue;
+      }
+      if (node.Kind != "Param" && !(node.Kind == "WritableRefParam" && IsHandle(param.Type)) || param.IsWeak) {
         throw Error($"the parameters of an extern function are plain values: '{param.Name}'", node);
       }
       bool ok = IsExternValueType(param.Type) || param.Type == "string"
@@ -95,12 +102,17 @@ public sealed partial class CodeGen {
     }
     string ret = f.Ret == "void" ? "void" : CType(f.Ret);
     string cRet = IsPointer(f.Ret) ? CType(PointedType(f.Ret)) + "*" : ret;   // a C pointer; the program gets it unbounded
+    bool variadicPrototype = f.Params.Count > 0 && f.Params[^1].IsVariadic;   // the C function with '...': its prototype, no wrapper (spec 22)
     var cParams = new List<string>();
-    foreach (var p in f.Params) {
-      if (IsPointer(p.Type)) {
+    foreach (var p in (variadicPrototype ? f.Params.Take(f.Params.Count - 1) : f.CVariadicFixed is int fixedCount ? f.Params.Take(fixedCount) : f.Params)) {
+      if (IsCallbackPointer(p.Type)) {
+        cParams.Add(CallbackFnType(PointedType(p.Type)));   // a callback: the C function pointer with its convention (spec 22)
+      } else if (IsPointer(p.Type)) {
         cParams.Add((IsWritablePointer(p.Type) ? "" : "const ") + CType(PointedType(p.Type)) + "*");   // only the cursor crosses (spec 12.1)
       } else if (p.Pointer != 0) {
         cParams.Add((p.Pointer == 1 ? "const " : "") + CType(p.Type) + "*");
+      } else if (p.Ref == 2) {
+        cParams.Add(CType(p.Type) + "*");   // &Db db: C writes the handle (spec 22)
       } else if (p.Type == "string") {
         cParams.Add("const char*");
       } else if (IsArr(p.Type)) {
@@ -112,15 +124,16 @@ public sealed partial class CodeGen {
     }
     var sb = new StringBuilder();
     string symbol = f.CSymbol ?? f.Name;
-    string convention = f.Convention is null or "cdecl" ? "" : $"DF_CC_{f.Convention} ";   // the calling convention of a native (spec 22)
-    if (convention != "" && conventionsDefined.Add(f.Convention!)) {
-      // only 32-bit x86 has several conventions; vectorcall exists on x64 Windows too. Elsewhere the keyword means nothing (spec 22)
-      string condition = f.Convention == "vectorcall" ? "defined(_WIN32) && (defined(__i386__) || defined(__x86_64__))" : "defined(__i386__)";
-      sb.Append($"#if {condition}\n#define DF_CC_{f.Convention} __attribute__(({f.Convention}))\n#else\n#define DF_CC_{f.Convention}\n#endif\n");
+    string convention = ConventionKeyword(f.Convention);   // the calling convention of a native (spec 22), defined with the types
+    if (variadicPrototype) {
+      sb.Append($"extern {cRet} {convention}{symbol}({string.Join(", ", cParams.Append("..."))});\n");
+      return sb.ToString();
     }
-    sb.Append($"extern {cRet} {convention}{symbol}({(cParams.Count == 0 ? "void" : string.Join(", ", cParams))});\n");
+    if (f.CVariadicFixed == null) {
+      sb.Append($"extern {cRet} {convention}{symbol}({(cParams.Count == 0 ? "void" : string.Join(", ", cParams))});\n");
+    }
     string wrapperParams = f.Params.Count == 0 ? "void" : string.Join(", ", f.Params.Select(p =>
-      p.Pointer != 0 ? $"{(p.Pointer == 1 ? "const " : "")}{CType(p.Type)}* v_{p.Name}" : $"{CType(p.Type)} v_{p.Name}"));
+      p.Pointer != 0 ? $"{(p.Pointer == 1 ? "const " : "")}{CType(p.Type)}* v_{p.Name}" : p.Ref == 2 ? $"{CType(p.Type)}* v_{p.Name}" : $"{CType(p.Type)} v_{p.Name}"));
     sb.Append($"static {ret} {f.CName}({wrapperParams}) {{\n");
     var args = new List<string>();
     var frees = new List<string>();
@@ -132,6 +145,8 @@ public sealed partial class CodeGen {
       } else if (IsArr(p.Type)) {
         args.Add($"v_{p.Name}.p");
         args.Add($"(size_t)v_{p.Name}.len");
+      } else if (IsCallbackPointer(p.Type)) {
+        args.Add($"({CallbackFnType(PointedType(p.Type))})(void*)v_{p.Name}.cur");
       } else if (IsPointer(p.Type)) {
         args.Add($"v_{p.Name}.cur");
       } else {
@@ -153,5 +168,63 @@ public sealed partial class CodeGen {
     }
     sb.Append("}\n");
     return sb.ToString();
+  }
+}
+
+// C variables of a .dflib (spec 22): T x -> native T x is read (and with &T written) in place; T x -> code is read through its getter
+public sealed partial class CodeGen {
+  sealed record NativeVariable(string Type, string Symbol, bool Writable);
+
+  readonly Dictionary<string, NativeVariable> nativeVars = new();
+  readonly StringBuilder nativeVarDecls = new();
+
+  // the Fun nodes LowerVariables made for T x -> native T x: a variable, not a function
+  bool RegisterNativeVariable(Node statement) {
+    if (statement.Children.FirstOrDefault(child => child.Kind == "NativeVar") is not Node marker) {
+      return false;
+    }
+    string type = ResolveType(statement.Children.First(child => child.Kind == "Returns").Children[0]);
+    if (!IsExternValueType(type) || IsPointer(type) || IsStruct(type)) {
+      throw Error($"a C variable is a number, bool, addr or a handle, not {DisplayName(type)} (spec 22)", statement);
+    }
+    nativeVars[statement.Text!] = new NativeVariable(type, marker.Text!, marker.Children.Any(child => child.Kind == "ReadWrite"));
+    nativeVarDecls.Append($"extern {CType(type)} {marker.Text};\n");
+    return true;
+  }
+
+  // x of a C variable: the variable itself, or a call of its getter
+  Expr? NativeVariableRead(Node name, Scope scope) {
+    if (nativeVars.TryGetValue(name.Text!, out var variable)) {
+      return new Expr(variable.Symbol, variable.Type);
+    }
+    if (funs.TryGetValue(name.Text!, out var overloads) && overloads.Count == 1 && overloads[0].Node.Children.Any(child => child.Kind == "VarGetter")) {
+      return ExprOf(Synthetic("Call", name).Add(Synthetic("Name", name, name.Text)).Add(Synthetic("Args", name)), scope);
+    }
+    return null;
+  }
+
+  LValueInfo? NativeVariablePlace(Node name) {
+    if (!nativeVars.TryGetValue(name.Text!, out var variable)) {
+      if (funs.TryGetValue(name.Text!, out var overloads) && overloads.Any(f => f.Node.Children.Any(child => child.Kind == "VarGetter"))) {
+        throw Error($"'{name.Text}' is a C variable read through a function: it is read-only (spec 22)", name);
+      }
+      return null;
+    }
+    if (!variable.Writable) {
+      throw Error($"'{name.Text}' is a read-only C variable: &{DisplayName(variable.Type)} {name.Text} -> native ... makes it writable (spec 22)", name);
+    }
+    return new LValueInfo(variable.Symbol, variable.Type, false);
+  }
+
+  // =res in the native call of a mapping (spec 22): the address of the named result, as the native parameter wants it
+  Node OutArgument(ParamSig param, Node arg) {
+    var name = Synthetic("Name", arg, arg.Text);
+    if (IsPointer(param.Type)) {
+      return Synthetic("WritablePointerOf", arg).Add(name);   // &*i32 res
+    }
+    if (param.Ref == 2) {
+      return Synthetic("WritableAddressOf", arg).Add(name);   // &Db db
+    }
+    throw Error($"={arg.Text} needs a native parameter that C writes: &*T or &T of a handle, not '{param.Name}' (spec 22)", arg);
   }
 }

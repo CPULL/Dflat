@@ -13,7 +13,7 @@ public sealed partial class CodeGen {
   bool TupleHoldsArrays(string type) => IsTuple(type) && TupleElems(type).Any(elem => IsTupleOwnedPart(elem.Type) || TupleHoldsArrays(elem.Type));
 
   // the parts a tuple owns: arrays, function values, objects (spec 3.2) and counted usages (spec 12.7)
-  bool IsTupleOwnedPart(string type) => IsArr(type) || IsFunType(type) || IsClass(type) || IsCountedType(type) || StructHoldsObjects(type);
+  bool IsTupleOwnedPart(string type) => IsArr(type) || IsFunType(type) || IsClass(type) || IsCountedType(type) || StructHoldsObjects(type) || SetOwns(type);
 
   // the end of one part of a tuple
   string TuplePartDrop(string type, string code) =>
@@ -21,13 +21,26 @@ public sealed partial class CodeGen {
     : IsFunType(type) ? $"df_fn_drop(&{code}); "
     : IsCountedType(type) ? $"df_rc_release({code}); {code} = NULL; "
     : IsClass(type) ? $"if ({code} != NULL) {{ void* o = (void*){code}; {code} = NULL; df_drop(o); }} "
+    : SetOwns(type) ? SetDropCode(type, code, genericSets[type]) + " "   // a set value part ends what it owns (spec 11.3.6.1)
     : StructHoldsObjects(type) ? StructDropCode(type, code) + " "   // a struct part ends its strings and objects (spec 11.1.5.3)
     : TupleHoldsArrays(type) ? TupleDropCode(type, code)
     : "";
 
+  // the end of what a tuple owner holds; a nullable one ends its parts only when it holds a value
+  string OwnedTupleDrop(string type, string code) =>
+    IsOwningNullableTuple(type) ? $"if ({code}.has) {{ {TupleDropCode(BaseOf(type), code + ".val")}}} " : TupleDropCode(type, code);
+
   // the value a tuple owner takes: its arrays are its own (also those of the tuples inside it)
   string TupleOwnedCode(Node valueNode, Expr value, string type, Node at) {
     string converted = Convert(value, type, at);
+    if (IsOwningNullableTuple(type) && !LibraryCode) {
+      if (value.Type == "null") {
+        return converted;
+      }
+      string box = NewTemp();
+      string parts = TupleCopies(valueNode, BaseOf(type), $"{box}.val", at);
+      return parts == "" ? converted : $"({{ {CType(type)} {box} = {converted}; if ({box}.has) {{ {parts}}} {box}; }})";
+    }
     if (LibraryCode || !TupleHoldsArrays(type)) {
       return converted;
     }
@@ -59,6 +72,10 @@ public sealed partial class CodeGen {
         }
         cloneUsed = true;
         copies += $"{code}.e{index} = {CloneValue($"{code}.e{index}", elems[index].Type, at)}; ";   // a copy clones the object (spec 3.2)
+      } else if (SetOwns(elems[index].Type)) {
+        if (item == null || item.Kind is "Name" or "Member" or "Index") {
+          copies += $"{code}.e{index} = {SetCloneCode(elems[index].Type, $"{code}.e{index}", at)}; ";   // a set value that is not new is cloned (spec 11.3.6.1)
+        }
       } else if (StructHoldsObjects(elems[index].Type)) {
         if (!(item is { Kind: "Call" or "Copy" or "Gift" })) {
           copies += $"{code}.e{index} = {StructCloneHelper(elems[index].Type)}({code}.e{index}); ";   // a copy clones the struct (spec 11.1.5.3)
@@ -88,11 +105,11 @@ public sealed partial class CodeGen {
     string code = TupleOwnedCode(value, assigned, target.Type, at);
     MarkAssigned(target.Variable);
     string old = NewTemp();
-    return $"({{ {CType(target.Type)} {old} = {target.Code}; {target.Code} = {code}; {TupleDropCode(target.Type, old)}}})";
+    return $"({{ {CType(target.Type)} {old} = {target.Code}; {target.Code} = {code}; {OwnedTupleDrop(target.Type, old)}}})";
   }
 
   bool IsTupleOwner(LValueInfo target) =>
-    !LibraryCode && TupleHoldsArrays(target.Type) && (target.IsField || target.IsStatic || target.Variable is { OwnsTuple: true });
+    !LibraryCode && (TupleHoldsArrays(target.Type) || IsOwningNullableTuple(target.Type)) && (target.IsField || target.IsStatic || target.Variable is { OwnsTuple: true });
 
   // t.0 = a where t owns its arrays: the item follows the rule of an array field
   bool IsOwnedTupleItem(Node targetNode, Scope scope) {
@@ -121,7 +138,8 @@ public sealed partial class CodeGen {
       return init is { Kind: "Tuple" } && init.Children.Any(item => item.Kind is "List" or "Name" or "Copy" or "Gift" or "Call" or "Member" or "Index" or "Tuple")
         || init is { Kind: "Call" } && CalleesOf(init) is { Count: > 0 } callees && callees.All(f => f.Node.Line < LibraryLine && TupleHoldsArrays(f.Ret));
     }
-    return typeNode is { Kind: "TupleType" or "ResolvedType" } && TryResolveType(typeNode) is string type && TupleHoldsArrays(type);
+    return typeNode is { Kind: "TupleType" or "ResolvedType" } && TryResolveType(typeNode) is string type && TupleHoldsArrays(type)
+      || typeNode is { Kind: "Nullable" } && TryResolveType(typeNode) is string nullable && IsOwningNullableTuple(nullable);   // (Dog, i32)? t
   }
 
   // the values of a call of functions of the program that return several values: their arrays are new (MultiReturnCode)
@@ -150,7 +168,11 @@ public sealed partial class CodeGen {
   bool IsTupleItem(string elem) => !LibraryCode && ItemOwnsParts(elem);
 
   // a tuple or a struct item that owns what it holds: the collection ends it with the item (the C does not depend on the code that asks)
-  bool ItemOwnsParts(string elem) => TupleHoldsArrays(elem) || StructHoldsObjects(elem);
+  bool ItemOwnsParts(string elem) => TupleHoldsArrays(elem) || StructHoldsObjects(elem) || SetOwns(elem) || IsOwningNullableTuple(elem);
+
+  // (Dog, i32)?: a nullable tuple that owns objects or arrays (the value of a map, spec 3.2, 6.6): its parts end and are copied only when it
+  // holds a value
+  bool IsOwningNullableTuple(string type) => IsNullable(type) && TupleHoldsArrays(BaseOf(type));
 
   Node? tupleItemAt;   // a place for the errors of the helpers below (the first declaration of such a collection)
 
@@ -159,7 +181,9 @@ public sealed partial class CodeGen {
     string name = "df_tidrop_" + System.Text.RegularExpressions.Regex.Replace(type, @"[^A-Za-z0-9_]", "_");
     if (tupleItemHelpers.Add(name)) {
       structProtos.Append($"static void {name}({CType(type)} v);\n");
-      string drops = StructHoldsObjects(type) ? StructDropCode(type, "v") : TupleDropCode(type, "v");   // the helpers of the parts come first
+      string drops = IsOwningNullableTuple(type) ? $"if (v.has) {{ {TupleDropCode(BaseOf(type), "v.val")}}}"
+        : SetOwns(type) ? SetDropCode(type, "v", tupleItemAt ?? genericSets[type])   // a set value that owns (spec 11.3.6.1)
+        : StructHoldsObjects(type) ? StructDropCode(type, "v") : TupleDropCode(type, "v");   // the helpers of the parts come first
       tupleItemCode.Append($"static void {name}({CType(type)} v) {{\n  {drops}\n}}\n\n");
     }
     return name;
@@ -170,7 +194,9 @@ public sealed partial class CodeGen {
     string name = "df_tidup_" + System.Text.RegularExpressions.Regex.Replace(type, @"[^A-Za-z0-9_]", "_");
     if (tupleItemHelpers.Add(name)) {
       structProtos.Append($"static {CType(type)} {name}({CType(type)} v);\n");
-      string copies = StructHoldsObjects(type) ? $"c = {StructCloneHelper(type)}(c);" : TupleCopies(null, type, "c", at ?? tupleItemAt!);
+      string copies = IsOwningNullableTuple(type) ? $"if (c.has) {{ {TupleCopies(null, BaseOf(type), "c.val", at ?? tupleItemAt!)}}}"
+        : SetOwns(type) ? $"c = {SetCloneCode(type, "c", at ?? tupleItemAt ?? genericSets[type])};"   // spec 11.3.6.1
+        : StructHoldsObjects(type) ? $"c = {StructCloneHelper(type)}(c);" : TupleCopies(null, type, "c", at ?? tupleItemAt!);
       tupleItemCode.Append($"static {CType(type)} {name}({CType(type)} v) {{\n  {CType(type)} c = v;\n  {copies}\n  return c;\n}}\n\n");
     }
     return name;
@@ -181,6 +207,23 @@ public sealed partial class CodeGen {
 
   // the value a tuple item takes: a new tuple as it is, the parts of any other one copied (as TupleOwnedCode)
   string TupleItemAs(Expr value, Node? node, string type, string converted) {
+    if (IsOwningNullableTuple(type)) {
+      // null as it is; a tuple literal or a new tuple of the program keeps its new parts; any other value is copied
+      if (value.Type == "null" || node is { Kind: "Null" }) {
+        return converted;
+      }
+      if (node == null) {
+        return $"{TupleItemDupHelper(type)}({converted})";
+      }
+      tupleItemAt ??= node;
+      string box = NewTemp();
+      string parts = TupleCopies(node, BaseOf(type), $"{box}.val", node);
+      return parts == "" ? converted : $"({{ {CType(type)} {box} = {converted}; if ({box}.has) {{ {parts}}} {box}; }})";
+    }
+    if (SetOwns(type)) {
+      // a set value item: a new value or a member value (wrapped: a new value) as it is, any other one cloned (spec 11.3.6.1)
+      return value.Fresh || value.Type != type ? converted : SetCloneCode(type, converted, node ?? genericSets[type]);
+    }
     if (StructHoldsObjects(type)) {
       return value.Fresh ? converted : $"{StructCloneHelper(type)}({converted})";   // a new struct as it is, any other one cloned
     }
@@ -214,6 +257,7 @@ public sealed partial class CodeGen {
       bool isNew = IsArr(part) ? item.Kind != "Null" && GivesOwnArray(item)
         : IsFunType(part) ? item is { Kind: "Lambda" or "Call" or "Copy" }
         : IsCountedType(part) ? false
+        : SetOwns(part) ? item.Kind is not ("Name" or "Member" or "Index" or "Null")
         : IsClass(part) || StructHoldsObjects(part) ? item is { Kind: "Call" or "Copy" or "Gift" }
         : false;
       if (isNew) {

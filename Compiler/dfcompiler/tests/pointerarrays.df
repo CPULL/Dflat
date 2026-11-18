@@ -10,13 +10,13 @@ fun i32 sum(*i32 p, i32 n) {
   for i = 0..n {
     total += p[i]
   }
-  total
+  return total
 }
 
 fun string tail(string text) {
   i64 comma = text.lastIndexOf(",")
   if comma < 0 { return "no count" }
-  text.substr((u32)comma, (u32)text.len - (u32)comma)
+  return text.substr((u32)comma, (u32)text.len - (u32)comma)
 }
 
 fun main() {

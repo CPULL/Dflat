@@ -14,13 +14,13 @@ fun i32 lastExpr() { 2 }
 fun i32 lastAfterStatements() {
   i32 x = 1
   x += 2
-  x
+  return x
 }
 fun i32 early(i32 v) {
   if v < 0 {
     return -1
   }
-  v * 10
+  return v * 10
 }
 fun i32 viaIf(bool b) { b ? { 4, 5 } }
 fun bool flag(i32 v) { v > 3 }
@@ -28,7 +28,7 @@ fun r64 real() { 1.5 }
 fun char letter() { 'z' }
 fun ->string text() {
   string s = "ab"
-  s + "c"
+  return s + "c"
 }
 fun string literal() { "lit" }
 fun i32? maybe(bool b) {
@@ -40,7 +40,7 @@ fun i32? maybe(bool b) {
 fun ->Box newBox(string l) { Box(l) }
 fun ->Box newBoxAfter(string l) {
   string full = "box " + l
-  Box(full)
+  return Box(full)
 }
 fun ->Box moveOut() {
   Box b = Box("moved")
@@ -63,10 +63,10 @@ fun string, string strings() { return "left", "right" }
 
 // a tuple
 fun (i32 id, string name) pair() { return (2, "bob") }
-fun (i32, i32) plainPair() { (3, 4) }                 // a literal as the last expression is the result
+fun (i32, i32) plainPair() { (3, 4) }                 // a literal as the single expression is the result
 fun vec<i32> listResult() {
   i32 x = 1
-  [x, 2]
+  return [x, 2]
 }
 fun map<string, i32> mapResult() { ["a": 1] }
 

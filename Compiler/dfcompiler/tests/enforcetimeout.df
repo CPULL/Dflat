@@ -2,7 +2,7 @@
 import Root
 public class Player(string name) {
   public i32 score
-  public fun i32 bump(i32 n) { score += n; score }
+  public fun i32 bump(i32 n) { score += n; return score }
 }
 fun i32 inside(&@Player p) {
   enforce p {

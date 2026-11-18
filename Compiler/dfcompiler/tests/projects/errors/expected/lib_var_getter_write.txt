@@ -1,0 +1,1 @@
+main.df(5): error: 'magic' is a C variable read through a function: it is read-only (spec 22)

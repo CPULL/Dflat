@@ -1,0 +1,5 @@
+// a C variable without & is read-only (spec 22)
+namespace app
+import lib dfout
+import Root
+counter = 3

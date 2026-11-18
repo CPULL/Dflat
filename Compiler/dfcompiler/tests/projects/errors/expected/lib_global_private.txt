@@ -1,0 +1,1 @@
+main.df(5): error: global 'hidden' belongs to library 'secret' and is not visible outside it (spec 18.1)

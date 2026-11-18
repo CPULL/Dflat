@@ -1272,11 +1272,14 @@ public sealed partial class CodeGen {
     }
   }
 
+  readonly HashSet<string> libraryVars = new();   // the variables of a library: written by its code (spec 16)
+
   // top-level const: C globals set at program start, in source order, before the statics (which may read them);
   // they leave the top-level code, so their values can use literals, other consts, functions and statics only
   void DeclareGlobalConsts(Node program) {
     var decls = program.Children.Where(statement => statement.Kind == "Decl" && !IsGlobalDecl(statement)   // global const: an error of DeclareGlobals
-      && statement.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ').Contains("const") == true).ToList();
+      && (statement.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ').Contains("const") == true
+        || SourceMap.IsLibraryRoot(statement.Line))).ToList();   // the variables of a library: its state, written by its code (spec 16)
     if (decls.Count == 0) {
       return;
     }
@@ -1287,15 +1290,24 @@ public sealed partial class CodeGen {
       if (globalConsts.ContainsKey(name)) {
         throw Error($"'{name}' is already declared in this scope", decl);
       }
-      var init = decl.Children.FirstOrDefault(child => child.Kind == "Init") ?? throw Error("a const needs a value", decl);
+      bool libraryVar = ModsOf(decl).Contains("const") == false;
+      var init = decl.Children.FirstOrDefault(child => child.Kind == "Init") ?? (libraryVar ? null : throw Error("a const needs a value", decl));
       string type = ResolveDeclType(decl, null);
+      if (libraryVar) {
+        if (!(IsNumeric(type) || type is "bool" or "char" || IsEnum(type) || IsTimeType(type))) {
+          throw NotSupported($"a library variable of type {DisplayName(type)} (this version: numbers, bool, char, enums, date and time)", decl);
+        }
+        libraryVars.Add(name);
+      }
       globalConsts[name] = ($"g_{name}", type);
       if (IntLiteralValue(init.Children[0]) is System.Numerics.BigInteger constValue) {
         globalConstValues[name] = constValue;   // a tuple index can use it (spec 3.2)
       }
       globalConstOrder.Add(name);
       classGlobals.Append($"static {CType(type)} g_{name};\n");
-      block.Add(Synthetic("Assign", decl, "=").Add(Synthetic("Name", decl, name)).Add(init.Children[0]));
+      if (init != null) {
+        block.Add(Synthetic("Assign", decl, "=").Add(Synthetic("Name", decl, name)).Add(init.Children[0]));
+      }
       program.Children.Remove(decl);
     }
     var node = Synthetic("Fun", at, "__consts").Add(Synthetic("Params", at)).Add(block);
@@ -1766,11 +1778,34 @@ public sealed partial class CodeGen {
 
   // one argument: an object given to a parameter written ->T moves (the call writes ->x); the others only borrow
   string ArgCode(ParamSig param, Node arg, Scope scope, FunSig? callee = null, int position = -1) {
+    if (arg.Kind == "OutArg") {
+      MarkAssigned(scope.Find(arg.Text!));   // the native fills it
+      arg = OutArgument(param, arg);   // =res: the native writes the named result (spec 22)
+    }
     if (arg.Kind == "WritableAddressOf" && arg.Children.Count > 0 && arg.Children[0].Kind is not ("CountedOf" or "WeakOf")) {
       CheckUnrestrictedWrite(arg.Children[0], scope);   // f(&field) can change the object (spec 1.6.2)
     }
     if (param.Pointer != 0) {
       return StructPointerArg(param, arg, scope);   // f(*v), f(&*v) (spec 11.1.5.6)
+    }
+    if (IsHandle(param.Type)) {
+      return HandleArgCode(param, arg, scope);   // lent, taken with ->, or freed with [~T name] (spec 22)
+    }
+    if (setOwnedTypes > 0 && callee?.Node.Line >= LibraryLine && LibrarySetArg(param, arg, scope, callee) is string librarySetArg) {
+      return librarySetArg;   // s.add((1, "a")): a new value for the call; the collection keeps its own copy (spec 11.3.6.1)
+    }
+    if (setOwnedTypes > 0 && callee?.Node.Line < LibraryLine && SetOwnedArgCode(param, arg, scope) is string setArg) {
+      return setArg;   // lent, or taken with -> (spec 11.3.6.1)
+    }
+    if (callee?.IsExtern == true && IsPointer(param.Type) && !IsWritablePointer(param.Type) && PointedType(param.Type) is "char" or "u8" or "i8"
+        && TryExprType(arg, scope) is "string") {
+      // a string given to *char of a native: its C text (UTF-8 ended by a 0), alive until the end of the statement (spec 22)
+      var text = ExprOf(arg, scope, "string");
+      string keep = NewTemp();
+      string view = NewTemp();
+      string elem = CType(PointedType(param.Type));
+      return $"({{ char* {keep} = NULL; df_sv {view} = df_view_keep({StrRead(text)}, &{keep}); if ({keep}) {{ df_tmpf({keep}, free); }} "
+        + $"({CType(param.Type)}){{ ({elem}*){view}.p, ({elem}*){view}.p, -1, NULL }}; }})";
     }
     if (BoxInner(param.Type) != null) {
       if (!param.IsGift) {

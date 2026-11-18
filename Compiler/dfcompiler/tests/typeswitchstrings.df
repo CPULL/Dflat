@@ -1,0 +1,27 @@
+// a string type switch always gives a string of its own (a new arm is taken, a borrowed one copied): kept, returned or only read, it ends once
+import Root
+class Dog(string name) {
+  public string name = name
+}
+Generic Pets { Dog, i32 }
+Generic Key { i32, string }
+
+fun string describe() {
+  Key k = 3
+  return k is ? { i32 x: $"int {x}", string s: $"text {s}" }
+}
+
+fun string pick(string s) {
+  return s is ? { string: s, default: "o" }
+}
+
+Pets a = Dog("x")
+string k = a is ? { Dog x: $"dog {x.name}", default: "other" }
+Console.log(k)
+Console.log(describe())
+string d = describe()
+string b = "b"
+b += "c"
+string e = b is ? { string: b, default: "o" }
+Console.log($"{d} {e} {pick(b)}")
+Console.log(a is ? { Dog x: x.name, default: "other" })

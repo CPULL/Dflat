@@ -1,0 +1,5 @@
+dog x
+int 3
+int 3 bc bc
+x
+---- exit code 0 ----

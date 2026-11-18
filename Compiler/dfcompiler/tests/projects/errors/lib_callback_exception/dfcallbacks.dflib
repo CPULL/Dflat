@@ -1,0 +1,19 @@
+// callbacks (spec 22): csrc/dfcallbacks.c
+Name: dfcallbacks
+Namespace: tests.dfcallbacks
+Convention: cdecl
+LibName, win-*, static: dfcallbacks.lib
+LibName, linux-*, static: libdfcallbacks.a
+
+public struct<fixed> Point { r32 x, r32 y }
+
+// the types of the callbacks: the library convention, or the one in brackets
+alias fun i32(i32, i32) as Combine
+alias [stdcall] fun i64(*char, i64) as Visit
+alias fun(r64) as Notify
+alias fun r32(Point) as Measure
+
+native i32 dfc_apply(pointer<Combine> fn, i32 a, i32 b)
+native i32 dfc_each(pointer<Visit> fn, i64 data)
+native dfc_notify(pointer<Notify> fn, r64 value)
+native r32 dfc_measure(pointer<Measure> fn, r32 x, r32 y)

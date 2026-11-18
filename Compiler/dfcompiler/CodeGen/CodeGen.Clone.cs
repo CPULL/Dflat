@@ -154,6 +154,9 @@ public sealed partial class CodeGen {
 
   // the C that copies one value of a type for a clone
   string CloneValue(string source, string type, Node at) {
+    if (SetOwns(type)) {
+      return SetCloneCode(type, source, at);   // spec 11.3.6.1
+    }
     if (type == "string") {
       return $"df_str_dup({source})";
     }

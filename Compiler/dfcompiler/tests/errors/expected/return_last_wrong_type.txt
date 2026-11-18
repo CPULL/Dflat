@@ -1,1 +1,1 @@
-return_last_wrong_type.df(4): error: cannot convert string to i32 implicitly; use a cast
+return_last_wrong_type.df(2): error: this function must return an i32: the end of its body is reached without return (only a body that is a single expression returns it by itself, spec 13)

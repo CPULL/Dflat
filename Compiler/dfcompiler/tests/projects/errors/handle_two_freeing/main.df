@@ -1,0 +1,5 @@
+// one freeing function per handle type (spec 22)
+namespace app
+import lib dfhandles
+import Root
+Console.log(dfh_closed())

@@ -1,0 +1,4 @@
+// main.df and lib.df in one folder: a compile error (spec 16)
+namespace app
+import Root
+Console.log("never")

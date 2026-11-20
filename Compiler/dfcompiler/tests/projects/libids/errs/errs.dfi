@@ -1,0 +1,17 @@
+DFI {
+ compiler: 0.0.188alpha
+ library: errs
+ namespace: tests.errs
+ runtime: 
+ stdlib: 
+}
+namespace tests.errs
+class BadInput : Exception -> df_cls_tests__errs__BadInput {
+  layout-win-x64: { const df_class* cls; uint64_t id; const df_descriptor* descriptor; char* message; char* function; uint64_t line; df_trace_item* trace; uint64_t traceLen; }
+  public BadInput(string message = "") -> f_errs_BadInput
+}
+public fun i32 check(i32 n) -> f_errs_check error
+public fun ->string inside(i32 n) -> f_errs_inside
+ids -> df_libids_errs
+atLibStart -> df_libstart_errs
+atEnd -> df_libend_errs

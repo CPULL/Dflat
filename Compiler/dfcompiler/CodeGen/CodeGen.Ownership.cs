@@ -115,6 +115,8 @@ public sealed partial class CodeGen {
     bool? result = null;
     if (f.IsCtor) {
       result = true;
+    } else if (f.IsImported) {
+      result = f.Gives.Contains(0);   // a function of a compiled library: its .dfi writes ->T on a result it gives (spec 15.8)
     } else if (IsClass(f.Ret) && f.Node.Children.Any(child => child.Kind == "Block")) {
       var locals = new Dictionary<string, Node>();
       CollectDeclarations(f.Node, locals);
@@ -721,7 +723,7 @@ public sealed partial class CodeGen {
     }
     int count = call.Children.Count > 1 ? call.Children[1].Children.Count : 0;
     return funs.Values.SelectMany(list => list)
-      .Where(f => (f.Name == name || f.Name.EndsWith("." + name)) && f.Params.Count == count && !f.IsExtern && !f.IsAbstract).ToList();
+      .Where(f => (f.Name == name || f.Name.EndsWith("." + name)) && f.Params.Count == count && !f.IsExtern && !f.IsImported && !f.IsAbstract).ToList();
   }
 
   // plain: the array has plain items, so a ->arr<T> (or ->T) parameter gets a copy of it and the argument is only read

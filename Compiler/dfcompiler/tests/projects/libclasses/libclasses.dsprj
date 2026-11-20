@@ -1,0 +1,4 @@
+; a program that links two compiled libraries: functions, enums, bitfields, classes, variables, errors (spec 15.8)
+source=main.df
+include=forms
+include=shapes

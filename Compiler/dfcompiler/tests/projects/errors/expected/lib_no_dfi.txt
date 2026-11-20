@@ -1,0 +1,1 @@
+lib_no_dfi.dsprj: error: the library folder notbuilt has no .dfi or .dfc: build the library first (its lib.df), a program links a compiled library (spec 15.8)

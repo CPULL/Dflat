@@ -1,3 +1,2 @@
-; a library that names a global of the program (spec 18.1)
-source=main.df
-include=libs/stats
+; a library cannot see the globals of a program: it is built alone (spec 18.1, 15.8)
+name=stats

@@ -32,7 +32,7 @@ public sealed partial class CodeGen {
   // or nothing) and its result cannot lend from it, so the array can end with the statement
   bool TempArrayArg(ParamSig param, Node arg, FunSig? callee, int position) =>
     callee != null && position >= 0 && !LibraryCode && IsArr(param.Type) && !param.IsGift && param.Ref == 0 && !param.IsVariadic && !IsByPointer(param)
-    && callee.Node.Line < LibraryLine && !callee.IsExtern && IsNewArray(arg)
+    && callee.Node.Line < LibraryLine && !callee.IsExtern && !callee.IsImported && IsNewArray(arg)
     && (callee.Ret == "void" || IsPlainValueType(callee.Ret) || callee.Gives.Contains(0) && (IsClass(callee.Ret) || callee.Ret == "string")
       || argsOfReadCalls.Contains(arg));
 

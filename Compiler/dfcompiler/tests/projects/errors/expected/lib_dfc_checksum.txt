@@ -1,0 +1,1 @@
+lib_dfc_checksum.dsprj: error: damaged/damaged.dfc: the binary of win-x64 (damaged.lib) does not match its sha-256: the .dfc is damaged or was changed after the build (spec 15.8)

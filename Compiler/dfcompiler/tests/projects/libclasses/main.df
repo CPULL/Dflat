@@ -1,0 +1,57 @@
+// a program that uses compiled libraries through their .dfi (spec 15.8)
+namespace app
+import Root
+import lib forms
+import lib shapes
+import tests.forms
+import shapes
+import shapes.extra
+
+// functions, enums and bitfields, a sub-namespace
+Console.log(area(3, 4))
+Console.log(perimeter(3, 4))
+Kind k = Kind.Circle
+Console.log(k)
+Console.log(scaled(5))
+Console.log(scaled(5, 3))
+i32 q, i32 r = divide(17, 5)
+Console.log($"{q} {r}")
+Access a = Access.Read | Access.Run
+Console.log(a)
+
+// classes: fields, methods, overloads, static methods, constructors, subclasses
+Point p = Point(2, 3)
+Console.log(p.x)
+Console.log(p.sum())
+Console.log(p.sum(10))
+Console.log(p.show())
+Console.log(p)
+p.x = 7
+Console.log(p.sum())
+grow(&p)
+Console.log(p.x)
+Console.log(describe(p))
+Point o = Point.origin()
+Console.log(o.sum())
+Labeled l = Labeled(1, 1, "one")
+Console.log(l.label)
+Console.log(l.sum())
+Point asPoint = Labeled(4, 4, "four")
+Console.log(asPoint.sum())
+Console.log(asPoint is Labeled)
+keep(->o)
+Console.log(o == null)
+
+// a variable of a library, started by its library
+Console.log(greeting)
+greeting = "changed by the program"
+fun show() { Console.log($"in a function: {greeting}") }
+show()
+
+// an exception raised in a library
+fun tryDivide() {
+  i32 q2, i32 r2 = divide(1, 0)
+  Console.log($"{q2} {r2}")
+  catch DivisionByZeroException { Console.log("caught division by zero from the library") }
+}
+tryDivide()

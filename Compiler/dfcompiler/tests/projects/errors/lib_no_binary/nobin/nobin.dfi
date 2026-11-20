@@ -1,0 +1,9 @@
+DFI {
+ compiler: 0.0.1alpha
+ library: nobin
+ namespace: nobin
+ runtime: 
+ stdlib: 
+}
+namespace nobin
+public fun i32 one() -> f_nobin_one

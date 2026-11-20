@@ -278,8 +278,11 @@ public sealed partial class CodeGen {
     foreach (var fun in allFuns) {
       var flow = new FunFlow();
       currentFlowFun = fun;
-      if (!fun.IsAbstract && !fun.IsExtern) {
+      if (!fun.IsAbstract && !fun.IsExtern && !fun.IsImported) {
         FlowNode(fun.Node, new FlowContext(flow, Cover.None, false));
+      }
+      if (fun.Node.Children.Any(child => child.Kind == "ImportedError")) {
+        flow.Raises.Add((AnyException, Cover.None));   // the .dfi says it returns an error part, not which exceptions (spec 15.8)
       }
       if (lockedMethods.Contains(fun)) {
         // the wrapper takes the lock of a global (spec 18.5)
@@ -393,11 +396,18 @@ public sealed partial class CodeGen {
     if (silentBit.Count == 0) {
       return "";
     }
-    var sb = new System.Text.StringBuilder("static uint64_t df_obs_bit(const df_exception* e) {\n  switch (e->id) {\n");
-    foreach (var (id, bit) in silentBit) {
-      sb.Append($"    case {id}: return UINT64_C({1UL << bit});\n");
+    // the ids of exception classes are read from their descriptors (a library gets them from the program, spec 15.8): declared here
+    var sb = new System.Text.StringBuilder();
+    foreach (var (id, _) in silentBit) {
+      if (customExceptionIds.FirstOrDefault(pair => pair.Value == id).Key is string name && classes.TryGetValue(name, out var cls) && !cls.IsImported) {
+        sb.Append($"static {RecordConst}df_descriptor {cls.ExcDescriptor};\n");
+      }
     }
-    sb.Append("  }\n  return 0;\n}\n\n");
+    sb.Append("static uint64_t df_obs_bit(const df_exception* e) {\n");
+    foreach (var (id, bit) in silentBit) {
+      sb.Append($"  if (e->id == {ExceptionIdCode(id)}) return UINT64_C({1UL << bit});\n");
+    }
+    sb.Append("  return 0;\n}\n\n");
     return sb.ToString();
   }
 

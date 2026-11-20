@@ -1,0 +1,14 @@
+DFC 1
+interface 145
+DFI {
+ compiler: 0.0.1alpha
+ library: damaged
+ namespace: damaged
+ runtime: 
+ stdlib: 
+}
+namespace damaged
+public fun i32 one() -> f_damaged_one
+targets 1
+binary win-x64 damaged.lib 29 0000000000000000000000000000000000000000000000000000000000000000
+not the binary that was built

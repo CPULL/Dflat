@@ -210,6 +210,9 @@ public class Viewport3D : Viewport {
 
 public class ViewportUI : Viewport {
   public vec<&@UINode> children         // no camera
+
+	public fun replaceDOM(string dom) { ... } // You pass a DOM string and the nodes will be generated
+	public fun string getDOM() { ... } // Returns a serialized representation of the DOM
 }
 ```
 Possibilities and open points:
@@ -460,9 +463,6 @@ public trait Node3D : GfxNode {
   public Matrix4 globalMatrix { R: ... }
 }
 
-public trait UINode : GfxNode {
-  // Not yet defined
-}
 ```
 - A field group is set as a whole from a tuple or a `Vec2`, or one field at a time:
 ```
@@ -1130,7 +1130,7 @@ trait UINode {
    vec<UINode> children
    UINodeType type
 	 %UIStyle style
-	 public fun replaceDOM(srting dom) { ... }
+	 public fun replaceDOM(string dom) { ... }
 	 public string getDOM() { ... }
 }
 class UILayout : UINode {
@@ -1171,16 +1171,7 @@ d.main {
 No decision has been made.
 
 ### 6.4 DOM
-```
-class UIViewport {
-   ...
-   vec<UINode> nodes
-	 ...
-
-   public fun replaceDOM(string dom) { ... } // You pass a DOM string and the nodes will be generated
-   public fun string getDOM() { ... } // Returns a serialized representation of the DOM
-}
-```
+check ViewportUI
 
 
 ### 6.5 Styles
@@ -1196,6 +1187,14 @@ class UIStyle {
 	hmap<StyleProperty, UIStyleValue> compiled
 }
 
+Generic UIStyleValue {
+	string, i32, r32, bool, Color,
+	Unit,
+  Placement, BorderStyle, BackgroundImageMode, ContentAlignH, ContentAlignV, 
+  TextAlign, TextWrap, ContentMode, ContentFillDirection, Overflow, 
+  Visibility, Cursor, Enabled
+}
+
 ```
 d.full {
   label.center { Hello world! }
@@ -1203,7 +1202,7 @@ d.full {
 }
 full: {
  width:100%vp, nooverflow, scale
- heigth:100%vp, nooverflow, keepaspect 16:9
+ height:100%vp, nooverflow, keepaspect 16:9
 }
 center: {
   position: hcenter, vcenter
@@ -1222,6 +1221,188 @@ center: {
 =>
 UIStyle center = UIStyle([StyleProperty.PositionH:UIPosition.center, StyleProperty.PositionV:UIPosition.center, StyleProperty.FontFace:"roboto", StyleProperty.FontSize: 0.04, StyleProperty.FontSizeUnit:UIUnit.HeightPercent, StyleProperty.Color:Colors.blue])
 ```
+
+Updated:
+# UI System Properties
+
+UINode will have a link to a UIStyle but they also need an `hmap<StyleProperty, Value>` for local styles and probably another one for the compiled style that applies.
+
+Box sizing: Width/Height cover everything up to and including the border; margins are excluded.
+
+All unit props use the same values: Screen%, AvailableSpace%, Pixels, OwnSize%, CharSize.
+
+| Group | Property | Type | Applies to |
+|---|---|---|---|
+| Size/position | Width | number | both |
+| | WidthUnit | unit | both |
+| | Height | number | both |
+| | HeightUnit | unit | both |
+| | MinWidth | number | both |
+| | MaxWidth | number | both |
+| | MinHeight | number | both |
+| | MaxHeight | number | both |
+| | Placement | Normal/AbsoluteScreen/AbsolutePage/Sticky | both |
+| | Left / LeftUnit | number / unit | both |
+| | Right / RightUnit | number / unit | both |
+| | Top / TopUnit | number / unit | both |
+| | Bottom / BottomUnit | number / unit | both |
+| | KeepAspect | bool | both |
+| | Scale | number | both |
+| | Rotation | number (degrees) | control |
+| | RotationOffsetX / RotationOffsetXUnit | number / unit | control |
+| | RotationOffsetY / RotationOffsetYUnit | number / unit | control |
+| Padding | Padding | number | both |
+| | PaddingUnit | unit | both |
+| | PaddingLeft / PaddingLeftUnit | number / unit | both |
+| | PaddingRight / PaddingRightUnit | number / unit | both |
+| | PaddingTop / PaddingTopUnit | number / unit | both |
+| | PaddingBottom / PaddingBottomUnit | number / unit | both |
+| Margin | Margin | number | both |
+| | MarginUnit | unit | both |
+| | MarginLeft / MarginLeftUnit | number / unit | both |
+| | MarginRight / MarginRightUnit | number / unit | both |
+| | MarginTop / MarginTopUnit | number / unit | both |
+| | MarginBottom / MarginBottomUnit | number / unit | both |
+| Border | BorderColor | color | both |
+| | BorderSize | number | both |
+| | BorderSizeUnit | unit | both |
+| | BorderStyle | None/Solid/Dashed/Dotted | both |
+| | BorderTop{Color,Size,Unit,Style} | same as above | both |
+| | BorderRight{Color,Size,Unit,Style} | same as above | both |
+| | BorderBottom{Color,Size,Unit,Style} | same as above | both |
+| | BorderLeft{Color,Size,Unit,Style} | same as above | both |
+| | CornerRadius | number | both |
+| | CornerRadiusUnit | unit | both |
+| | CornerRadiusTopLeft / TopRight / BottomRight / BottomLeft | number | both |
+| Background | BackgroundColor | color | both |
+| | BackgroundImage | int | both |
+| | BackgroundImageMode | None/Tiled/Stretch/ScaleFitHeight/ScaleFitWidth/ScaleToFit/ScaleToFill | both |
+| | ShadowColor | color | both |
+| | ShadowOpacity | number 0-1 | both |
+| | ShadowXOffset / ShadowXOffsetUnit | number / unit | both |
+| | ShadowYOffset / ShadowYOffsetUnit | number / unit | both |
+| | ShadowHSize / ShadowHSizeUnit | number / unit | both |
+| | ShadowVSize / ShadowVSizeUnit | number / unit | both |
+| Content | ContentAlignH | Left/Center/Right/Distributed | both |
+| | ContentAlignV | Top/Center/Bottom/Distributed | both |
+| | Opacity | number 0-1 | both |
+| Text | FontFace | int | control |
+| | FontSize | float | control |
+| | FontSizeUnit | unit | control |
+| | Color | color | control |
+| | TextAlign | Left/Center/Right/Justify | control |
+| | LineHeight | number | control |
+| | Bold | float | control |
+| | Italic | float | control |
+| | FontOutlineSize | float | control |
+| | FontOutlineColor | color | control |
+| | FontOutlineOffsetX | float | control |
+| | FontOutlineOffsetY | float | control |
+| | FontOutlineOffsetXUnit | unit | control |
+| | FontOutlineOffsetYUnit | unit | control |
+| | TextWrap | SingleLine/WrapWords/BreakWords | control |
+| | TextEllipsis | string (text shown when text is cut, e.g. "…") | control |
+| Children layout | ContentMode | Linear/Grid/Flex | layout |
+| | ContentFillDirection | TL/LT/BL/LB/TR/RT/BR/RB/R2L/L2R/T2B/B2T | layout |
+| | MaxContentsPerLine | int (Linear/Grid/Flex) | layout |
+| | Gap | number | layout |
+| | GapUnit | unit | layout |
+| | GapH / GapHUnit | number / unit | layout |
+| | GapV / GapVUnit | number / unit | layout |
+| Overflow | Overflow | Visible/Hidden/WhenNeeded | layout |
+| Misc | Visibility | Visible/None/Ghosted (Ghosted keeps its space but is not rendered) | both |
+| | ZOrder | int | both |
+| | Cursor | Normal/Pointer/Text | control |
+| | Enabled | Enabled/Disabled/Active | control |
+
+## Enums
+
+```
+enum StyleProperty {
+	Width,
+	WidthUnit,
+	Height,
+	HeightUnit,
+	MinWidth,
+	MaxWidth,
+	MinHeight,
+	MaxHeight,
+	Placement,
+	Left, LeftUnit,
+	Right, RightUnit,
+	Top, TopUnit,
+	Bottom, BottomUnit,
+	KeepAspect,
+	Scale,
+	Rotation,
+	RotationOffsetX, RotationOffsetXUnit,
+	RotationOffsetY, RotationOffsetYUnit,
+	Padding,
+	PaddingUnit,
+	PaddingLeft, PaddingLeftUnit,
+	PaddingRight, PaddingRightUnit,
+	PaddingTop, PaddingTopUnit,
+	PaddingBottom, PaddingBottomUnit,
+	Margin,
+	MarginUnit,
+	MarginLeft, MarginLeftUnit,
+	MarginRight, MarginRightUnit,
+	MarginTop, MarginTopUnit,
+	MarginBottom, MarginBottomUnit,
+	BorderColor, BorderSize, BorderSizeUnit, BorderStyle,
+	BorderTopColor, BorderTopSize, BorderTopSizeUnit, BorderTopStyle,
+	BorderRightColor, BorderRightSize, BorderRightSizeUnit, BorderRightStyle,
+	BorderBottomColor, BorderBottomSize, BorderBottomSizeUnit, 	BorderBottomStyle,
+	BorderLeftColor, BorderLeftSize, BorderLeftSizeUnit, BorderLeftStyle,
+	CornerRadius,
+	CornerRadiusUnit,
+	CornerRadiusTopLeft, CornerRadiusTopRight, CornerRadiusBottomRight, 	CornerRadiusBottomLeft,
+	BackgroundColor,
+	BackgroundImage,
+	BackgroundImageMode,
+	ShadowColor,
+	ShadowOpacity,
+	ShadowXOffset, ShadowXOffsetUnit,
+	ShadowYOffset, ShadowYOffsetUnit,
+	ShadowHSize, ShadowHSizeUnit,
+	ShadowVSize, ShadowVSizeUnit,
+	ContentAlignH,
+	ContentAlignV,
+	Opacity,
+	FontFace, FontSize, FontSizeUnit,
+	Color,
+	TextAlign, LineHeight,
+	Bold, Italic,
+	FontOutlineSize, FontOutlineColor, FontOutlineOffsetX, FontOutlineOffsetY, FontOutlineOffsetXUnit, FontOutlineOffsetYUnit,
+	TextWrap, TextEllipsis, ContentMode,
+	ContentFillDirection,
+	MaxContentsPerLine,
+	Gap,GapUnit,
+	GapH, GapHUnit,
+	GapV, GapVUnit,
+	Overflow,
+	Visibility,
+	ZOrder,
+	Cursor,
+	Enabled
+}
+
+enum Unit { ScreenPercent, AvailableSpacePercent, Pixels, OwnSizePercent, CharSize }
+enum Placement { Normal, AbsoluteScreen, AbsolutePage, Sticky }
+enum BorderStyle { None, Solid, Dashed, Dotted }
+enum BackgroundImageMode { None, Tiled, Stretch, ScaleFitHeight, ScaleFitWidth, ScaleToFit, ScaleToFill }
+enum ContentAlignH { Left, Center, Right, Distributed }
+enum ContentAlignV { Top, Center, Bottom, Distributed }
+enum TextAlign { Left, Center, Right, Justify }
+enum TextWrap { SingleLine, WrapWords, BreakWords }
+enum ContentMode { Linear, Grid, Flex }
+enum ContentFillDirection { TL, LT, BL, LB, TR, RT, BR, RB, R2L, L2R, T2B, B2T }
+enum Overflow { Visible, Hidden, WhenNeeded }
+enum Visibility { Visible, None, Ghosted }
+enum Cursor { Normal, Pointer, Text }
+enum Enabled { Enabled, Disabled, Active }
+```
+
 
 - the map used will be a hmap
 - "The only need is to update all child nodes when something changes. And that can have an heavy cost when changing a style"

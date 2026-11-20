@@ -1,3 +1,0 @@
-namespace stats
-
-public fun i32 peek() { shop.count() }

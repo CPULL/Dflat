@@ -1,1 +1,1 @@
-main.df(5): error: global 'tally' belongs to library 'stats' and is not visible outside it (spec 18.1)
+main.df(5): error: unknown function 'tally.sum'

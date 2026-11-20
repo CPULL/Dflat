@@ -1,0 +1,13 @@
+DFC 1
+interface 145
+DFI {
+ compiler: 0.0.1alpha
+ library: onlyx32
+ namespace: onlyx32
+ runtime: 
+ stdlib: 
+}
+namespace onlyx32
+public fun i32 one() -> f_onlyx32_one
+targets 1
+binary win-x32 onlyx32.lib 0 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855

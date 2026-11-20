@@ -1,4 +1,0 @@
-namespace app
-import lib mylib
-import root.gfx
-Root.Console.log(1)

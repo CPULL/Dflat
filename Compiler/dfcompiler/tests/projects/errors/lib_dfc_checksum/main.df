@@ -1,0 +1,4 @@
+namespace app
+import Root
+import lib damaged
+Console.log(1)

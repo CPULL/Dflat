@@ -1,1 +1,1 @@
-main.df(5): error: 'secret' of the namespace 'mylib' is internal: only its namespace and the sub-namespaces see it (mark it public to use it from the namespace 'app')
+main.df(5): error: unknown function 'secret'

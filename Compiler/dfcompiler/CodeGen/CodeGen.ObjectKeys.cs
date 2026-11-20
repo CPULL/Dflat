@@ -104,7 +104,7 @@ public sealed partial class CodeGen {
       lambdaHelpers.Append($"static bool {name}(const void* a, const void* b) {{\n  const uint64_t* x = (const uint64_t*)a;\n  const uint64_t* y = (const uint64_t*)b;\n"
         + $"  if (x[0] != y[0]) {{\n    return false;\n  }}\n  {ct} l = ({ct})(uintptr_t)x[1];\n  {ct} r = ({ct})(uintptr_t)y[1];\n"
         + $"  if (l == r) {{\n    return true;\n  }}\n  if (l == NULL || r == NULL) {{\n    return false;\n  }}\n"
-        + $"  {pair} p = (({pair}(*)(void*, {ct}))({table}[l->cls->id - 256]))((void*)l, r);\n"
+        + $"  {pair} p = (({pair}(*)(void*, {ct}))({table}(l->cls)))((void*)l, r);\n"
         + "  if (p.err) {\n    df_exc_release(p.err);\n    return false;\n  }\n  return p.value;\n}\n\n");
     }
     return name;

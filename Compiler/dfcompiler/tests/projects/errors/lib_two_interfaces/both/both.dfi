@@ -1,0 +1,8 @@
+DFI {
+ compiler: 0.0.1alpha
+ library: both
+ namespace: both
+ runtime: 
+ stdlib: 
+}
+namespace both

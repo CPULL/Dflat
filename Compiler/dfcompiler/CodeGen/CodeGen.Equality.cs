@@ -170,7 +170,7 @@ public sealed partial class CodeGen {
     string left = NewTemp();
     string right = NewTemp();
     string valueType = CType(r.Type);
-    string call = $"(({ResultPair("bool")}(*)(void*, {valueType}))({table}[{left}->cls->id - 256]))((void*){left}, {right})";
+    string call = $"(({ResultPair("bool")}(*)(void*, {valueType}))({table}({left}->cls)))((void*){left}, {right})";
     string code = $"({{ {CType(cls.Name)} {left} = {l.Code}; {valueType} {right} = {r.Code}; {NullGuarded(left, right, r.Type, call, true)}; }})";
     return PairCheck(code, "bool");
   }
@@ -230,17 +230,22 @@ public sealed partial class CodeGen {
     return true;
   }
 
-  // the tables: one function per class for each type T, found through the class number
+  // the tables: for each type T, the equals of the class of an object, found through its record (the record of a class of a compiled
+  // library has the id the program gave, not a number of this unit, spec 15.8): the class itself, then its parents, the first that
+  // defines equals(T)
   void EmitEqualsTables() {
-    var ordered = classes.Values.OrderBy(cls => cls.Index).ToList();
+    var definers = classes.Values.Where(cls => cls.EqualsNode != null && !cls.IsImported).OrderBy(cls => cls.Index).ToList();
+    foreach (var cls in definers) {
+      classCode.Append($"static {RecordConst}df_class {cls.Descriptor};\n");
+    }
     foreach (string type in equalsTables) {
       string valueType = CType(type);
-      var entries = new List<string>();
-      foreach (var cls in ordered) {
-        var definer = FindEqualsClass(cls);
-        entries.Add(definer == null ? "NULL" : $"({ResultPair("bool")}(*)(void*, {valueType})){equalsInstances[(definer, type)].CName}");
+      string fn = $"{ResultPair("bool")} (*)(void*, {valueType})";
+      classCode.Append($"static void* df_eqt_{SanitizeName(type)}(const df_class* c) {{\n  for (; c != NULL; c = c->parent) {{\n");
+      foreach (var cls in definers) {
+        classCode.Append($"    if (c == &{cls.Descriptor}) {{\n      return (void*)({fn}){equalsInstances[(cls, type)].CName};\n    }}\n");
       }
-      classCode.Append($"static {ResultPair("bool")} (*const df_eqt_{SanitizeName(type)}[])(void*, {valueType}) = {{ {string.Join(", ", entries)} }};\n");
+      classCode.Append("  }\n  return NULL;\n}\n");
     }
     classCode.Append('\n');
   }

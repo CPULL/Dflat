@@ -1,0 +1,4 @@
+namespace app
+import Root
+import lib notbuilt
+Console.log(1)

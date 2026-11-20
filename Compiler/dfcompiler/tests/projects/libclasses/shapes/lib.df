@@ -1,0 +1,5 @@
+namespace shapes
+
+public enum Kind { Square, Circle }
+
+public fun i32 area(i32 w, i32 h) { w * h }

@@ -295,7 +295,7 @@ public sealed partial class CodeGen {
     var receiver = target.Kind == "Member" && target.Children.Count == 1 ? target.Children[0] : null;
     // a name that is not a value (Shape.count, a static through its class) is never an object with properties
     // any other receiver (blocks[i].pos.x) is a property too, so the setter is never skipped; it is evaluated once per use
-    if (receiver != null && !(receiver.Kind == "Name" && scope.Find(receiver.Text!) == null && receiver.Text != "this" && !globals.ContainsKey(receiver.Text!)
+    if (receiver != null && !(receiver.Kind == "Name" && scope.Find(receiver.Text!) == null && receiver.Text != "this" && !globals.ContainsKey(receiver.Text!) && !importedGlobals.ContainsKey(receiver.Text!)
         && (currentClass == null || FindField(currentClass, receiver.Text!) == null))) {
       var obj = ExprOf(receiver, scope);
       if (IsClass(obj.Type) && FindField(ObjInfo(obj.Type), target.Text!) is { HasAccessors: true } property) {

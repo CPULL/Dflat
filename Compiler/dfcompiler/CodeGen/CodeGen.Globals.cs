@@ -119,7 +119,7 @@ public sealed partial class CodeGen {
       }
     }
     foreach (var f in funs.Values.SelectMany(list => list).Where(f => f.Class != null && owners.Contains(f.Class)).Concat(answers)) {
-      if (!f.IsStatic && !f.IsCtor && !f.IsInit && !f.IsDtor && !f.IsAccessor && !f.IsAbstract && !f.IsStaticInit && !f.IsExtern
+      if (!f.IsStatic && !f.IsCtor && !f.IsInit && !f.IsDtor && !f.IsAccessor && !f.IsAbstract && !f.IsStaticInit && !f.IsExtern && !f.IsImported
           && f.Struct == null && f.LambdaCtx == null && f.Class != null) {
         lockedMethods.Add(f);
       }
@@ -167,7 +167,7 @@ public sealed partial class CodeGen {
   }
 
   bool ReachesGlobalWrite(FunSig f, HashSet<string> own, HashSet<FunSig> seen) {
-    if (!seen.Add(f) || f.IsExtern || f.IsAbstract && !f.Node.Children.Any(child => child.Kind == "Block")) {
+    if (!seen.Add(f) || f.IsExtern || f.IsImported || f.IsAbstract && !f.Node.Children.Any(child => child.Kind == "Block")) {
       return false;
     }
     return NodeReachesGlobalWrite(f.Node, f, own, seen);

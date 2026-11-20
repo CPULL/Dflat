@@ -81,11 +81,19 @@ public sealed partial class CodeGen {
     return result;
   }
 
+  // a library build writes its records and descriptors at program start (their ids are given by the program, spec 15.8): not const there
+  string RecordConst => LibraryBuild != null ? "" : "const ";
+
+  // the id of an exception in the generated code: a standard one is its number (15.3); one of a class is read from its descriptor, where
+  // the program may have put another number (a library, spec 15.8)
+  string ExceptionIdCode(int id) =>
+    customExceptionIds.FirstOrDefault(pair => pair.Value == id).Key is string name && classes.TryGetValue(name, out var cls) ? $"{cls.ExcDescriptor}.id" : id.ToString();
+
   // descriptors with the chain of parents, for catch and for the silent flag
   void EmitExceptionDescriptors() {
-    foreach (var cls in classOrder.Where(cls => cls.IsException)) {
-      string parent = cls.Parent != null ? $"&df_desc_{cls.Parent.Name}" : "&df_desc_Exception";
-      classCode.Append($"static const df_descriptor df_desc_{cls.Name} = {{ {customExceptionIds[cls.Name]}, \"{cls.Name}\", {parent}, {(IsSilentClass(cls) ? "true" : "false")} }};\n");
+    foreach (var cls in classOrder.Where(cls => cls.IsException && !cls.IsImported)) {   // the descriptor of a library class is the library's
+      string parent = cls.Parent != null ? $"&{cls.Parent.ExcDescriptor}" : "&df_desc_Exception";
+      classCode.Append($"static {RecordConst}df_descriptor {cls.ExcDescriptor} = {{ {customExceptionIds[cls.Name]}, \"{cls.Name}\", {parent}, {(IsSilentClass(cls) ? "true" : "false")} }};\n");
     }
     classCode.Append('\n');
   }

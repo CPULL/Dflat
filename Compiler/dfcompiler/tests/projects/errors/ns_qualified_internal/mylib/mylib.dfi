@@ -1,0 +1,11 @@
+DFI {
+ compiler: 0.0.188alpha
+ library: mylib
+ namespace: mylib
+ runtime: 
+ stdlib: 
+}
+namespace mylib
+ids -> df_libids_mylib
+atLibStart -> df_libstart_mylib
+atEnd -> df_libend_mylib

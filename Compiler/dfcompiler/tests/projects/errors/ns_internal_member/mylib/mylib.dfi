@@ -1,0 +1,15 @@
+DFI {
+ compiler: 0.0.188alpha
+ library: mylib
+ namespace: mylib
+ runtime: 
+ stdlib: 
+}
+namespace mylib
+class Box -> df_cls_mylib__Box {
+  layout-win-x64: { const df_class* cls; }
+  public Box() -> f_mylib_Box
+}
+ids -> df_libids_mylib
+atLibStart -> df_libstart_mylib
+atEnd -> df_libend_mylib

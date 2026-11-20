@@ -1,0 +1,1 @@
+lib_dfc_no_target.dsprj: error: the library onlyx32 has no binary for win-x64 in onlyx32.dfc: it holds win-x32 (build the library for this target, spec 15.8)

@@ -1,0 +1,3 @@
+; a .dfc without the binary of the target of the program (spec 15.8)
+source=main.df
+include=onlyx32

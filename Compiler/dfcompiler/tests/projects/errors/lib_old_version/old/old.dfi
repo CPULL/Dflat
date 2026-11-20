@@ -1,0 +1,9 @@
+DFI {
+ compiler: 0.0.1alpha
+ library: old
+ namespace: old
+ runtime: 
+ stdlib: 
+}
+namespace old
+public fun i32 one() -> f_old_one

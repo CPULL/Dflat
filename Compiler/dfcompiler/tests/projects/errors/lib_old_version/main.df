@@ -1,0 +1,4 @@
+namespace app
+import Root
+import lib old
+Console.log(1)

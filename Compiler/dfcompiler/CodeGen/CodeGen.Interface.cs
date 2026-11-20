@@ -75,6 +75,7 @@ public sealed partial class CodeGen {
   string LibraryExports() {
     var (topFuns, classes, methods, publicGlobals, publicVars) = InterfaceItems(LibraryBuild!);
     classes.ForEach(cls => exportedSymbols.Add(cls.Descriptor));
+    classes.Where(cls => cls.IsException).ToList().ForEach(cls => exportedSymbols.Add(cls.ExcDescriptor));   // a program catches them (spec 15.8)
     publicGlobals.ForEach(global => exportedSymbols.Add(global.CName));
     publicVars.ForEach(variable => exportedSymbols.Add(globalConsts[variable.Name].CName));
     var sb = new StringBuilder("/* the public functions of the library, exported with its name (spec 15.8) */\n");
@@ -85,8 +86,27 @@ public sealed partial class CodeGen {
         args.Insert(0, "self");
       }
       string call = $"{f.CName}({string.Join(", ", args)})";
+      if (f.Class != null && !f.IsStatic && !f.IsCtor && f.Slot >= 0 && f.Root.GroupSize > 0) {
+        // a method that a subclass replaces: through the record of the object, as a call inside the library (spec 15.8)
+        var types = new List<string> { CType(f.Class.Name) }.Concat(f.Params.Select(ParamCType));
+        call = $"(({RetCType(f)}(*)({string.Join(", ", types)}))(self->cls->vtable[{f.Slot}]))({string.Join(", ", args)})";
+      }
       sb.Append($"{head} {{ {(RetCType(f) == "void" ? call + ";" : "return " + call + ";")} }}\n");
     }
+    return sb.ToString();
+  }
+
+  // a library build: the program gives the ids of its classes and exceptions (spec 15.8); this function writes them in the records and the
+  // descriptors, from next on, and returns the first id it did not use. The program calls it before any library starts
+  string LibraryIdsFunction() {
+    var sb = new StringBuilder($"uint64_t df_libids_{LibraryBuild}(uint64_t next) {{\n");
+    foreach (var cls in classOrder.Where(cls => !IsStdlibClass(cls) && !cls.IsImported)) {
+      sb.Append($"  {cls.Descriptor}.id = next++;\n");
+      if (cls.IsException) {
+        sb.Append($"  {cls.ExcDescriptor}.id = next++;\n");
+      }
+    }
+    sb.Append("  return next;\n}\n");
     return sb.ToString();
   }
 
@@ -128,7 +148,7 @@ public sealed partial class CodeGen {
     }
     foreach (var cls in classes) {
       var cb = new StringBuilder();
-      string parents = string.Join(", ", new[] { cls.Parent?.Name }.Concat(cls.Traits.Select(trait => trait.Name)).Where(name => name != null).Select(name => DisplayName(name!)));
+      string parents = string.Join(", ", new[] { cls.Parent?.Name ?? (cls.IsException ? "Exception" : null) }.Concat(cls.Traits.Select(trait => trait.Name)).Where(name => name != null).Select(name => DisplayName(name!)));
       cb.Append($"class {DisplayName(cls.Name)}{(parents == "" ? "" : " : " + parents)} -> {cls.Descriptor} {{\n");
       cb.Append($"  layout-{TargetName}: {{ {Layout(cls, cCode)} }}\n");
       foreach (var field in cls.Fields.Where(field => field.Visibility == Vis.Public && !field.Hidden)) {
@@ -151,6 +171,7 @@ public sealed partial class CodeGen {
     }
     if (LibraryBuild != null) {
       // the start and the end of a built library: its statics, variables and globals with its atLibStart, then its atEnd and their end
+      entries.Add((ns, $"ids -> df_libids_{library}\n"));   // the ids of its classes and exceptions: given by the program at start
       entries.Add((ns, $"atLibStart -> df_libstart_{library}\n"));
       entries.Add((ns, $"atEnd -> df_libend_{library}\n"));
     } else {

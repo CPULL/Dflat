@@ -1,5 +1,5 @@
 DFI {
- compiler: 0.0.174alpha
+ compiler: 0.0.188alpha
  library: counters
  namespace: libs.fun.counters
  runtime: io
@@ -15,5 +15,6 @@ public global Sequence Numbers -> gl_counters_Numbers lock 0
 public fun ->string version() -> f_counters_version
 public fun i32 nextNumber() -> f_counters_nextNumber error
 public fun ->string add(i32 a, i32 b) -> f_counters_add
+ids -> df_libids_counters
 atLibStart -> df_libstart_counters
 atEnd -> df_libend_counters

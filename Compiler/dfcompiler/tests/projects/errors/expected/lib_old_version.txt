@@ -1,0 +1,1 @@
+old/old.dfi(2): error: the library old was built by the compiler <version>: this is <version>, build the library again (spec 15.8)

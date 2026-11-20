@@ -1,0 +1,7 @@
+3
+program caught BadInput: negative input
+program caught Mine
+caught inside the library
+ok 5
+caught: made by the program
+---- exit code 0 ----

@@ -781,3 +781,9 @@
 - 3.5.1, 19.3 A result of i64 with u64 going to var or a string becomes an i64 (saturated), level 1 warning
 - 14.1 The top-level variables of the root file are seen by the functions, classes and methods of that file only (not globals); each gets its value when its line runs, zero or null before; they end after the top-level code, in reverse order
 - 15.8 Building a library compiles every .df file of its folder and subfolders, not only what lib.df imports
+- 15.8, 16 A program links a compiled library through its .dfi (include= names its folder; binaries in <folder>/<target>/); lib.df is only for building the library: an included folder without a .dfi is a compile error; a missing binary for the target is a compile error
+- 16, 19 A folder has one root file only: two of program.df, main.df and lib.df are a compile error (the "skipped root file" warning is removed)
+- 15.8 A function of a compiled library that returns an error part can let any exception out: for the program it can raise Exception
+- 15.8 The .dfc format: DFC 1, interface <n> + the .dfi text, targets <count>, one binary <target> <file> <n> line per target, then the binaries in the same order
+- 15.8, 19.3 A library build keeps the other targets of its .dfi / .dfc (layouts, binaries) when the compiler and the interface are the same, otherwise drops them with a level 2 warning; a folder with both a .dfi and a .dfc: level 2 warning at the build, compile error for a program
+- 15.8 Each binary line of a .dfc ends with the SHA-256 of the binary; a binary that does not match is a compile error

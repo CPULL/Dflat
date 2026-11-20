@@ -1,0 +1,4 @@
+namespace app
+import Root
+import lib onlyx32
+Console.log(1)

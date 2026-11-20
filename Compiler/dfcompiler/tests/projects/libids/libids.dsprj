@@ -1,0 +1,3 @@
+; a program that catches the exception of a compiled library, with its own exception beside it (spec 15.8)
+source=main.df
+include=errs

@@ -1,0 +1,1 @@
+main.df: error: a folder has one root file only, program.df, main.df or lib.df: it has lib.df and main.df (spec 16)

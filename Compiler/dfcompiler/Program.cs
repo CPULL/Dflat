@@ -4,7 +4,7 @@ using dfparser;
 namespace dfcompiler;
 
 public static class Program {
-  public const string Version = "0.0.175alpha";
+  public const string Version = "0.0.189alpha";
 
   // the version of the specification this compiler was built for: the variable `version` of the preprocessor (spec 19.1)
   public const string LanguageVersion = "0.0.40";
@@ -51,6 +51,7 @@ public static class Program {
     public string? Glfw { get; set; }
     public string? Name { get; set; }                // name= of the project file: the name of a library (spec 16)
     public bool ForceLib { get; set; }               // --force-lib: build the folder as a library (spec 19)
+    public bool? EmbedBinaries { get; set; }         // --embed-binaries: a library build gives one .dfc (spec 15.8)
     public string? LibPath { get; set; }             // libpath= of the project file: the binaries of the C libraries, one subfolder per target (spec 22)
     public Dictionary<string, int> Limits { get; } = new();
     public long? DoubleGrowLimit { get; set; }   // --double-grow-limit 8mb (spec 6.8.2)
@@ -166,6 +167,9 @@ public static class Program {
     // a lib.df root builds a library (spec 19): its binary and its interface (spec 15.8); --force-lib for another root
     bool libraryBuild = string.Equals(Path.GetFileName(path), "lib.df", StringComparison.OrdinalIgnoreCase) || cli.ForceLib || project.ForceLib;
     string? libraryName = null;
+    string? libraryInterface = null;   // a library build: its interface, written with its binary
+    string? libraryFolder = null;
+    bool embedBinaries = cli.EmbedBinaries ?? project.EmbedBinaries ?? false;
     var programArgs = cli.ProgramArgs;
 
     if (!File.Exists(path)) {
@@ -246,6 +250,8 @@ public static class Program {
       try {
         tree = loader.Load(path, multiFile, project.Includes, projectFile);
         importedLibraries = loader.ImportedLibraries;
+        CodeGen.LinkedLibraries = loader.CompiledLibraries;
+        libraryArgs.AddRange(loader.CompiledLibraries.Select(library => library.Binary));   // the binaries of the compiled Dflat libraries (spec 15.8)
         CodeGen.OtherTargetNames = loader.OtherTargetNames;
         if (loader.CLibraries.Count > 0) {
           string libFolder = project.LibPath ?? Path.GetDirectoryName(Path.GetFullPath(projectFile ?? path))!;
@@ -260,8 +266,8 @@ public static class Program {
       CodeGen.TargetName = effective;
       if (libraryBuild) {
         libraryName = loader.LibraryBuildName;
-        CodeGen.LibraryBuild = libraryName;
       }
+      CodeGen.LibraryBuild = libraryName;   // null for a program: --check-each compiles many projects in one process
       string? dfiLibrary = libraryBuild ? libraryName : Environment.GetEnvironmentVariable("DFLAT_EMIT_DFI");
       (string Name, string Folder, string Namespace)? dfiRoot = dfiLibrary == null ? null : loader.DflatLibraries.Cast<(string Name, string Folder, string Namespace)?>().FirstOrDefault(lib => string.Equals(lib!.Value.Name, dfiLibrary, StringComparison.OrdinalIgnoreCase));
       CodeGen.InterfaceLibrary = dfiRoot?.Name;
@@ -273,7 +279,10 @@ public static class Program {
       }
       Directory.CreateDirectory(Path.GetDirectoryName(cPath)!);
       File.WriteAllText(cPath, c);
-      if (dfiRoot != null && CodeGen.InterfaceText != null) {
+      if (libraryBuild) {
+        libraryInterface = CodeGen.InterfaceText;   // written when the binary is built (spec 15.8)
+        libraryFolder = dfiRoot?.Folder;
+      } else if (dfiRoot != null && CodeGen.InterfaceText != null) {
         string dfiPath = Path.Combine(dfiRoot.Value.Folder, dfiRoot.Value.Name + ".dfi");
         File.WriteAllText(dfiPath, CodeGen.InterfaceText);
         Console.WriteLine($"Interface: {dfiPath}");
@@ -345,7 +354,14 @@ public static class Program {
     // the system headers (windows.h above all) come from a header precompiled once for this clang and these flags: parsing them is
     // a large part of the time of a small program. Only for a program alone (no C files, no libraries, no CL: target)
     if (libraryBuild) {
-      return BuildLibraryBinary(clang, ccArgs, output, cPath, project.LibPath ?? sourceDir, effective, libraryName!, forWindows);
+      // a .dfc takes the binary inside: it is built in .compilation; otherwise in <libpath>/<target>/ next to the .dfi
+      string binaryRoot = embedBinaries ? Path.GetDirectoryName(cPath)! : project.LibPath ?? sourceDir;
+      int built = BuildLibraryBinary(clang, ccArgs, output, cPath, binaryRoot, effective, libraryName!, forWindows, !embedBinaries, out string binaryPath);
+      if (built != 0 || libraryInterface == null || libraryFolder == null) {
+        return built;
+      }
+      WriteLibraryInterface(libraryFolder, libraryName!, effective, libraryInterface, embedBinaries ? binaryPath : null);
+      return 0;
     }
     string? pch = custom || project.CSources.Count > 0 || native.Args.Count > 0 ? null : SystemHeaderPch(clang, ccArgs, cPath, output);
     int code;
@@ -413,6 +429,9 @@ public static class Program {
           break;
         case "--force-lib":
           settings.ForceLib = true;
+          break;
+        case "--embed-binaries":
+          settings.EmbedBinaries = true;
           break;
         case "--run":
           settings.Run = true;
@@ -555,8 +574,10 @@ public static class Program {
   // yet are an error.
   // the binary of a library (spec 15.8): the generated C compiled to an object, then archived as a static library in
   // <libpath>/<target>/ (the folder of the library when there is no libpath=): <name>.lib on Windows, lib<name>.a elsewhere
-  static int BuildLibraryBinary(string clang, List<string> ccArgs, string output, string cPath, string libRoot, string target, string name, bool forWindows) {
+  static int BuildLibraryBinary(string clang, List<string> ccArgs, string output, string cPath, string libRoot, string target, string name, bool forWindows,
+      bool announce, out string binary) {
     string folder = Path.Combine(libRoot, target);
+    binary = Path.Combine(folder, forWindows ? name + ".lib" : "lib" + name + ".a");
     Directory.CreateDirectory(folder);
     string obj = Path.Combine(Path.GetDirectoryName(cPath)!, name + (forWindows ? ".obj" : ".o"));
     var args = new List<string>(ccArgs);
@@ -572,15 +593,61 @@ public static class Program {
       Console.Error.WriteLine($"error: {Path.GetFileName(tool)} not found next to {clang}: it makes the static library");
       return 1;
     }
-    string binary = Path.Combine(folder, forWindows ? name + ".lib" : "lib" + name + ".a");
     if (File.Exists(binary)) {
       File.Delete(binary);
     }
-    code = RunProcess(tool, forWindows ? new List<string> { "/out:" + binary, obj } : new List<string> { "rcs", binary, obj });
-    if (code == 0) {
+    // run in the folder of the object, named without its folder: the archive keeps the name it is given, and a library must not carry the
+    // folders of the machine that built it
+    string objName = Path.GetFileName(obj);
+    code = RunProcess(tool, forWindows ? new List<string> { "/out:" + binary, objName } : new List<string> { "rcs", binary, objName }, Path.GetDirectoryName(obj));
+    if (code == 0 && announce) {
       Console.WriteLine($"Library: {binary}");
     }
     return code;
+  }
+
+  // the interface of a library build (spec 15.8): <name>.dfi, or <name>.dfc with the binary inside (embedded: the path of the binary).
+  // What the file already holds for the other targets is kept when the same compiler built it and the interface did not change
+  static void WriteLibraryInterface(string folder, string name, string target, string built, string? embedded) {
+    string dfi = Path.Combine(folder, name + ".dfi");
+    string dfc = Path.Combine(folder, name + ".dfc");
+    string path = embedded != null ? dfc : dfi;
+    string other = embedded != null ? dfi : dfc;
+    if (File.Exists(other)) {
+      Console.Error.WriteLine($"{other}: warning L2: the folder of the library also holds {Path.GetFileName(other)}: a program accepts one interface in a library folder, remove one (spec 15.8)");
+    }
+    string text = built;
+    var binaries = new List<LibraryFiles.Binary>();
+    if (File.Exists(path)) {
+      string? oldText = null;
+      var oldBinaries = new List<LibraryFiles.Binary>();
+      try {
+        if (embedded != null) {
+          (oldText, oldBinaries) = LibraryFiles.ReadDfc(path);
+        } else {
+          oldText = File.ReadAllText(path);
+        }
+      } catch (InvalidDataException ex) {
+        Console.Error.WriteLine($"{path}: warning L2: {ex.Message}: it is replaced");
+      }
+      if (oldText != null) {
+        string? merged = LibraryFiles.MergeInterface(built, oldText, target, out var others);
+        others.UnionWith(oldBinaries.Select(binary => binary.Target).Where(other => other != target));
+        if (merged != null) {
+          text = merged;
+          binaries.AddRange(oldBinaries.Where(binary => binary.Target != target));
+        } else if (others.Count > 0) {
+          Console.Error.WriteLine($"{path}: warning L2: the interface changed, or another compiler built it: what it held for {string.Join(", ", others.OrderBy(t => t))} is dropped (spec 15.8)");
+        }
+      }
+    }
+    if (embedded != null) {
+      binaries.Add(new LibraryFiles.Binary(target, Path.GetFileName(embedded), File.ReadAllBytes(embedded)));
+      LibraryFiles.WriteDfc(dfc, text, binaries);
+    } else {
+      File.WriteAllText(dfi, text);
+    }
+    Console.WriteLine($"Interface: {path}");
   }
 
   static void ReadProject(string file, Settings settings, Dictionary<string, PpValue> variables) {
@@ -627,6 +694,9 @@ public static class Program {
             break;
           case "emit-c":
             settings.EmitC = ParseBool(value, key);
+            break;
+          case "embed-binaries":
+            settings.EmbedBinaries = ParseBool(value, key);
             break;
           case "coptlev":
             settings.OptLevel = ParseOptLevel(value);
@@ -901,10 +971,13 @@ public static class Program {
     }
   }
 
-  static int RunProcess(string file, List<string> args) {
+  static int RunProcess(string file, List<string> args, string? workingFolder = null) {
     var psi = new ProcessStartInfo(file) {
       UseShellExecute = false
     };
+    if (workingFolder != null) {
+      psi.WorkingDirectory = workingFolder;
+    }
     foreach (var a in args) {
       psi.ArgumentList.Add(a);
     }

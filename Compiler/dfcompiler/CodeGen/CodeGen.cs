@@ -28,9 +28,12 @@ sealed class FunSig {
   // an extern C function is called through its wrapper dfx_<name>, which converts strings and arrays (spec 15.9)
   // an overload after the first is named after its parameter types, not its position: the same name in every unit that declares it
   // (separately compiled libraries, spec 15.8)
-  public string CName => IsExtern ? "dfx_" + Name : "f_" + Name.Replace('.', '_').Replace("==", "op_eq")
-    + (OverloadIndex > 0 ? "_o" + CodeGen.StableId(string.Join(",", Params.Select(p => p.Type)) + "|" + GenericT + "|" + CVariadicFixed) : "");
-  public bool IsExtern { get; init; }       // extern fun: a C function of a library, no body, never returns an error (spec 15.8, 15.9)
+  public string CName => ImportedSymbol ?? (IsExtern ? "dfx_" + Name : "f_" + Name.Replace('.', '_').Replace("==", "op_eq")
+    + (OverloadIndex > 0 ? "_o" + CodeGen.StableId(string.Join(",", Params.Select(p => p.Type)) + "|" + GenericT + "|" + CVariadicFixed) : ""));
+  public bool IsExtern { get; init; }
+  // a public function of a compiled Dflat library (spec 15.8): no body here, the C symbol of its .dfi, its error part as the .dfi says
+  public string? ImportedSymbol { get; init; }
+  public bool IsImported => ImportedSymbol != null;       // extern fun: a C function of a library, no body, never returns an error (spec 15.8, 15.9)
   public string? CSymbol { get; init; }     // a native of a .dflib: the name of the C function (its Dflat name may differ, spec 22)
   public string? Convention { get; init; }  // ... and its calling convention: cdecl, stdcall, fastcall, vectorcall
   public string Ret { get; }
@@ -61,7 +64,7 @@ sealed class FunSig {
   public bool IsAccessor { get; set; }        // get_ / set_ of a property with accessor blocks: no error part, what it lets out is a Panic (spec 11.1.4)
   // can a silent throw leave this function? Constructors, init functions, destructors, == operators and the entry point never return
   // a silent exception (spec 15.7.6): there it is seen only by a catch of the same function and otherwise does nothing
-  public bool CanEmitSilent => !IsCtor && !IsInit && !IsStaticInit && !IsDtor && !IsAccessor && !IsAbstract && !IsExtern && GenericT == null && !Name.EndsWith(".==") && Name != "main";
+  public bool CanEmitSilent => !IsImported && !IsCtor && !IsInit && !IsStaticInit && !IsDtor && !IsAccessor && !IsAbstract && !IsExtern && GenericT == null && !Name.EndsWith(".==") && Name != "main";
   public bool IsAbstract { get; set; }   // a trait function without a body
   public bool IsAsParent { get; set; }   // asparent: called only by the children of the object, through their parent reference (spec 12.5)
   public bool IsUnrestricted { get; set; }   // unrestricted: public, and also callable through a read-only reference (spec 12.5)
@@ -263,7 +266,20 @@ public sealed partial class CodeGen {
     LowerCountedTypeArgs(program);
     cloneUsed = UsesClone(program);
     LowerAccessors(program);
+    // the runtime chunks and the stdlib parts the linked libraries need (spec 15.8): the program holds them for them
+    foreach (var library in LinkedLibraries) {
+      needs.UnionWith(library.Runtime.Where(chunk => !chunk.StartsWith("unicode-")));
+      unicodeNeeds.UnionWith(library.Runtime.Where(chunk => chunk.StartsWith("unicode-")).Select(chunk => chunk["unicode-".Length..]));
+    }
+    var libraryParts = new Node("LibraryParts", new Token(TokenKind.Ident, "", 0, 0));
+    // each name of a part: vec<string> mentions vec and string
+    foreach (string part in LinkedLibraries.SelectMany(library => library.Stdlib)
+        .SelectMany(part => System.Text.RegularExpressions.Regex.Matches(part, "[A-Za-z_][A-Za-z0-9_]*").Select(match => match.Value)).Distinct()) {
+      libraryParts.Add(new Node("Name", new Token(TokenKind.Ident, part, 0, 0), part));   // AddPrelude adds what a program mentions
+    }
+    program.Children.Add(libraryParts);
     AddPrelude(program);
+    program.Children.Remove(libraryParts);
     ProgramNode = program;
     definedTypes.Add("df_arr_string");   // defined by the runtime
     definedTypes.Add("df_arr_u8");
@@ -289,9 +305,11 @@ public sealed partial class CodeGen {
     }
     RegisterStructs();
     RegisterClasses();
+    LinkedGenericCopies();   // the copies of the stdlib generics the compiled libraries use (spec 15.8)
     RegisterStructMethods();
     CountOwnedSets();   // set values that own strings (spec 11.3.6.1): once the classes of the members are known
     CheckClassInstances();
+    DeclareImportedVars(program);   // the globals and variables of the compiled libraries (spec 15.8)
     DeclareGlobalConsts(program);
     DeclareGlobals(program);   // spec 18
     DeclareFileVars(program);   // the top-level variables its functions use (spec 14.1)
@@ -328,6 +346,10 @@ public sealed partial class CodeGen {
         protos.Append(ExternDeclarations(fun));   // the C prototype and the wrapper (CodeGen.Extern.cs)
         continue;
       }
+      if (fun.IsImported) {
+        protos.Append(Signature(fun)["static ".Length..]).Append(";\n");   // defined by the binary of its library (spec 15.8)
+        continue;
+      }
       if (IsCVariadic(fun) && fun.CVariadicFixed == null) {
         continue;   // a mapping that gives its '...' on to a native: only its copies for each shape are compiled (spec 22)
       }
@@ -341,6 +363,7 @@ public sealed partial class CodeGen {
       // the library with its atLibStart, then its atEnd and their end
       var library = new StringBuilder();
       library.Append(LibraryExports());
+      library.Append(LibraryIdsFunction());
       library.Append($"void df_libstart_{LibraryBuild}(void) {{\n{StaticInitCode()}}}\n");
       library.Append($"void df_libend_{LibraryBuild}(void) {{\n{StaticEndCode()}}}\n");
       return Assemble(protos, bodies, library);
@@ -369,17 +392,21 @@ public sealed partial class CodeGen {
     var main = new StringBuilder();
     main.Append("int main(int argc, char** argv) {\n");
     main.Append("  df_init();\n  df_set_args(argc, argv);\n");
+    main.Append(LinkedStartCode());   // the compiled libraries first (spec 15.8)
     main.Append(StaticInitCode());
     if (fn.UsesTmp) {
       fn.Decls.Append("  size_t df_tm = df_tmp_top;\n  (void)df_tm;\n");
     }
     main.Append(fn.Decls);
-    main.Append(DebugFrame(statements.Count > 0 ? statements[0].Line : 0, "Main()"));
+    // the first line of the root file: the namespace lines of the other files come first in the merged program
+    var firstStatement = statements.FirstOrDefault(statement => statement.Kind is not ("Namespace" or "NamespaceLocal"));
+    main.Append(DebugFrame(firstStatement?.Line ?? 0, "Main()"));
     if (fn.UsesRetVar) {
       main.Append($"  int32_t {fn.RetVar} = 0;\n");
     }
     main.Append(mainBody);
     main.Append(StaticEndCode());
+    main.Append(LinkedEndCode());   // the compiled libraries last, in reverse order (spec 15.8)
     main.Append("  return 0;\n");
     main.Append($"  {fn.PanicLabel}: df_panic_unhandled(df_err);\n");
     main.Append("  return 0;\n}\n");
@@ -445,6 +472,7 @@ public sealed partial class CodeGen {
     var main = new StringBuilder();
     main.Append("int main(int argc, char** argv) {\n");
     main.Append("  df_init();\n  df_set_args(argc, argv);\n");
+    main.Append(LinkedStartCode());   // the compiled libraries first (spec 15.8)
     main.Append(StaticInitCode());
     var entryArgs = new List<string>();
     if (entry.Params.Count == 1) {
@@ -465,6 +493,7 @@ public sealed partial class CodeGen {
       main.Append($"  int32_t code = {call};\n");
     }
     main.Append(StaticEndCode());
+    main.Append(LinkedEndCode());   // the compiled libraries last, in reverse order (spec 15.8)
     main.Append(entry.Ret == "void" ? "  return 0;\n}\n" : "  return (int)code;\n}\n");
     return main;
   }
@@ -600,7 +629,7 @@ public sealed partial class CodeGen {
     }
     if (isExtern) {
       CheckExtern(funNode, cls, enumName, ret, ps, noBody);
-    } else if (noBody && cls?.IsTrait != true) {
+    } else if (noBody && cls?.IsTrait != true && !funNode.Children.Any(child => child.Kind == "Imported")) {
       throw Error("functions without a body are only valid in traits", funNode);
     }
     if (!funs.TryGetValue(name, out var overloads)) {
@@ -637,7 +666,8 @@ public sealed partial class CodeGen {
       }
     }
     var native = funNode.Children.FirstOrDefault(child => child.Kind == "Native");   // a native of a .dflib (spec 22)
-    var fun = new FunSig(name, ret, ps, funNode, enumName) { OverloadIndex = overloads.Count, IsExtern = isExtern, RetWritable = rets?.Text == "counted-rw", Gives = gives, Writes = writes, WritableCounted = writableCounted,
+    var imported = funNode.Children.FirstOrDefault(child => child.Kind == "Imported");   // a function of a compiled library (spec 15.8)
+    var fun = new FunSig(name, ret, ps, funNode, enumName) { OverloadIndex = overloads.Count, IsExtern = isExtern, ImportedSymbol = imported?.Text, RetWritable = rets?.Text == "counted-rw", Gives = gives, Writes = writes, WritableCounted = writableCounted,
       CSymbol = native?.Children.FirstOrDefault(child => child.Kind == "CSymbol")?.Text, Convention = native?.Text };
     overloads.Add(fun);
     return fun;
@@ -1636,6 +1666,9 @@ public sealed partial class CodeGen {
       if (variable == null && globals.TryGetValue(target.Text!, out var globalObject)) {
         return GlobalLValue(globalObject, target);   // spec 18.3
       }
+      if (variable == null && importedGlobals.ContainsKey(target.Text!)) {
+        throw Error($"'{target.Text}' is a global of a library: it is never replaced (spec 18.1)", target);
+      }
       if (variable == null && NativeVariablePlace(target) is LValueInfo nativePlace) {
         return nativePlace;   // &i32 x -> native i32 x (spec 22)
       }
@@ -1930,6 +1963,9 @@ public sealed partial class CodeGen {
         }
         if (globals.TryGetValue(n.Text!, out var globalObject)) {
           return new Expr(globalObject.CName, globalObject.Type);   // spec 18: the object of the global, borrowed
+        }
+        if (importedGlobals.TryGetValue(n.Text!, out var libraryGlobal)) {
+          return new Expr(libraryGlobal.CName, libraryGlobal.Type);   // a global of a compiled library, borrowed (spec 15.8)
         }
         if (NativeVariableRead(n, scope) is Expr nativeVariable) {
           return nativeVariable;   // a C variable of a .dflib (spec 22)

@@ -1,2 +1,2 @@
-source=main.df
-include=mylib
+; a library whose namespace is inside the one of the standard library (spec 16)
+name=mylib

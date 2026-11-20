@@ -172,7 +172,8 @@ function Read-ErrorProject($run, [string]$folder) {
   $all = $run.Out + "`n" + $run.Err
   $lines = @()
   foreach ($line in ($all -split "`r?`n")) {
-    if ($line -match 'error: ') { $lines += ($line.Replace($folder + '\', '').Replace($folder, '').Replace('\', '/')).Trim() }
+    # the compiler versions (the one of a library interface, the one of the compiler) are masked: they change with every build
+    if ($line -match 'error: ') { $lines += (($line.Replace($folder + '\', '').Replace($folder, '').Replace('\', '/')).Trim() -replace '\d+\.\d+\.\d+alpha', '<version>') }
   }
   if ($lines.Count -eq 0) { return @{ Ok = $false; Text = 'NO ERROR (the project compiled)' } }
   return @{ Ok = $true; Text = ($lines -join "`n") }
@@ -182,14 +183,39 @@ function Read-ErrorProject($run, [string]$folder) {
 function Read-Library($run) {
   if ($null -eq $run) { return @{ Ok = $false; Text = "TIMEOUT after $TimeoutSeconds seconds" } }
   $all = $run.Out + "`n" + $run.Err
-  $interface = if ($all -match 'Interface: (.+\.dfi)') { $Matches[1].Trim() } else { $null }
+  $interface = if ($all -match 'Interface: (.+\.df[ic])') { $Matches[1].Trim() } else { $null }
   $binary = if ($all -match 'Library: (.+)') { $Matches[1].Trim() } else { $null }
-  if ($null -eq $interface -or $null -eq $binary -or -not (Test-Path $interface) -or -not (Test-Path $binary)) {
+  $packed = $null -ne $interface -and $interface.EndsWith('.dfc')   # a .dfc holds its binaries: no Library: line
+  if ($null -eq $interface -or -not (Test-Path $interface) -or (-not $packed -and ($null -eq $binary -or -not (Test-Path $binary)))) {
     $errors = ($all -split "`r?`n" | Where-Object { $_ -match 'error' } | Select-Object -First 5) -join "`n"
     return @{ Ok = $false; Text = "BUILD FAILED`n$errors" }
   }
-  $text = ([System.IO.File]::ReadAllText($interface, [System.Text.Encoding]::UTF8) -replace "`r`n", "`n").Trim("`n")
+  $text = if ($packed) { Read-Dfc $interface } else { [System.IO.File]::ReadAllText($interface, [System.Text.Encoding]::UTF8) }
+  $text = ($text -replace "`r`n", "`n").Trim("`n")
   return @{ Ok = $true; Text = ($text -replace '(?m)^ compiler: .*$', ' compiler: <version>') }
+}
+
+# a .dfc (spec 15.8) as text: its header and its interface, the sizes masked (they change with the compiler), the binaries left out
+function Read-Dfc([string]$path) {
+  $bytes = [System.IO.File]::ReadAllBytes($path)
+  $at = 0
+  $lines = New-Object System.Collections.ArrayList
+  $next = {
+    $end = [Array]::IndexOf($bytes, [byte]10, $script:dfcAt)
+    $line = [System.Text.Encoding]::UTF8.GetString($bytes, $script:dfcAt, $end - $script:dfcAt)
+    $script:dfcAt = $end + 1
+    $line
+  }
+  $script:dfcAt = 0
+  [void]$lines.Add((& $next))
+  $size = [int]((& $next) -split ' ')[1]
+  [void]$lines.Add('interface <n>')
+  [void]$lines.Add([System.Text.Encoding]::UTF8.GetString($bytes, $script:dfcAt, $size).TrimEnd("`n"))
+  $script:dfcAt += $size
+  $targets = & $next
+  [void]$lines.Add($targets)
+  for ($i = 0; $i -lt [int]($targets -split ' ')[1]; $i++) { [void]$lines.Add(((& $next) -replace ' \d+ [0-9a-f]{64}$', ' <n> <sha-256>')) }
+  return ($lines -join "`n")
 }
 
 $passed = 0; $failed = @(); $new = @(); $saved = 0
@@ -282,12 +308,51 @@ foreach ($test in $projects) {
     Expected = (Join-Path $projectsFolder ('expected\' + $test.Name + '.txt')) })
 }
 foreach ($test in $libraries) {
+  # a library built with embed-binaries gives a .dfc: its expected text is <name>.dfc.txt
+  $packedLibrary = @(Get-ChildItem $test.FullName -Filter '*.dsprj' | Where-Object { (Get-Content $_.FullName) -match '^\s*embed-binaries\s*=\s*true' }).Count -gt 0
   [void]$all.Add(@{ Name = 'libraries/' + $test.Name; Path = $test.FullName; Option = ''; Kind = 'library'
-    Expected = (Join-Path $librariesFolder ('expected\' + $test.Name + '.dfi')) })
+    Expected = (Join-Path $librariesFolder ('expected\' + $test.Name + $(if ($packedLibrary) { '.dfc.txt' } else { '.dfi' }))) })
 }
 foreach ($test in $errorProjects) {
   [void]$all.Add(@{ Name = 'projects/errors/' + $test.Name; Path = $test.FullName; Option = '--emit-c'; Kind = 'errorProject'
     Expected = (Join-Path $projectsFolder ('errors\expected\' + $test.Name + '.txt')) })
+}
+
+# the libraries the projects include (spec 15.8): a program links a compiled library, so every included folder with a lib.df is built
+# first, before any project runs; a library that does not build is a failed test (the projects that include it fail too)
+$prebuilt = New-Object System.Collections.ArrayList
+$seenLibraries = @{}
+foreach ($test in @($projects) + @($errorProjects)) {
+  foreach ($projectFile in Get-ChildItem $test.FullName -Filter '*.dsprj') {
+    foreach ($line in Get-Content $projectFile.FullName) {
+      if ($line -notmatch '^\s*include\s*=\s*(.+?)\s*$') { continue }
+      $folder = [System.IO.Path]::GetFullPath((Join-Path $test.FullName $Matches[1]))
+      if ($seenLibraries.ContainsKey($folder) -or -not (Test-Path (Join-Path $folder 'lib.df'))) { continue }
+      $seenLibraries[$folder] = $true
+      # a library without its own .dsprj (the fallback name of spec 16) is built from its lib.df
+      $target = if (Get-ChildItem $folder -Filter '*.dsprj') { $folder } else { Join-Path $folder 'lib.df' }
+      [void]$prebuilt.Add(@{ Name = 'prebuilt ' + $folder.Substring($projectsFolder.Length + 1).Replace('\', '/'); Path = $target; Option = ''; Kind = 'library' })
+    }
+  }
+}
+# a library test with extra-targets.txt (one target per line) is first built for those targets: its own build then adds its target to
+# the same .dfi / .dfc (spec 15.8)
+foreach ($test in $libraries) {
+  $extra = Join-Path $test.FullName 'extra-targets.txt'
+  if (-not (Test-Path $extra)) { continue }
+  foreach ($targetName in (Get-Content $extra | Where-Object { $_.Trim() -ne '' })) {
+    [void]$prebuilt.Add(@{ Name = 'prebuilt libraries/' + $test.Name + ' for ' + $targetName.Trim(); Path = $test.FullName; Option = '--target ' + $targetName.Trim(); Kind = 'library' })
+  }
+}
+if ($prebuilt.Count -gt 0) {
+  Invoke-Pool $prebuilt ([Math]::Max(1, $Jobs)) @()
+  foreach ($library in $prebuilt) {
+    $built = Read-Library $library.Run
+    if (-not $built.Ok) {
+      $failed += $library.Name
+      Write-Host ("FAIL  {0}: {1}" -f $library.Name, ($built.Text -replace "`n", ' | ')) -ForegroundColor Red
+    }
+  }
 }
 
 # a program that uses files or processes may clash with another one that runs at the same time: those run one at a time

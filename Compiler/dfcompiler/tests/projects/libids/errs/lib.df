@@ -1,0 +1,19 @@
+// lib.df: a library with a public exception class; its ids are given by the program that links it (spec 15.8)
+namespace tests.errs
+import Root
+
+public class BadInput : Exception { }
+
+public fun i32 check(i32 n) {
+  if n < 0 {
+    throw BadInput("negative input")
+  }
+  return n
+}
+
+// the library catches its own exception with the id the program gave
+public fun string inside(i32 n) {
+  i32 v = check(n)
+  return $"ok {v}"
+  catch BadInput { return "caught inside the library" }
+}

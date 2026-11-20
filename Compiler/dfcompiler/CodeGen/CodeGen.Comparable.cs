@@ -76,7 +76,7 @@ public sealed partial class CodeGen {
       return "NULL";
     }
     string name = "df_cmpc_" + cls.Name;
-    sb.Append($"static const df_class {cls.Descriptor};\n");
+    sb.Append($"static {RecordConst}df_class {cls.Descriptor};\n");
     sb.Append($"static int {name}(const void* self, const void* other, int* depth, bool run) {{\n");
     foreach (var (test, depth, method) in candidates.OrderByDescending(candidate => candidate.Depth)) {
       string declarer = CType(method.Class!.Name);

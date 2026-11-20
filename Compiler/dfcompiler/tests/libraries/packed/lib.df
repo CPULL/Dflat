@@ -1,0 +1,13 @@
+// lib.df: a library built into one .dfc, for two targets (spec 15.8)
+namespace tests.packed
+import Root
+
+public class Counter(i32 start) {
+  public i32 value = start
+  public fun i32 next() {
+    value++
+    return value
+  }
+}
+
+public fun i32 twice(i32 n) { return n * 2 }

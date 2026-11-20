@@ -1,0 +1,25 @@
+12
+14
+Circle
+10
+15
+3 2
+Read | Run
+2
+5
+15
+(2, 3)
+Point { x: 2, y: 3, tag: p }
+10
+8
+(8, 3)
+0
+one
+100
+100
+true
+true
+hello
+in a function: changed by the program
+caught division by zero from the library
+---- exit code 0 ----

@@ -1,0 +1,10 @@
+// a program that uses a library packed in a .dfc: the binary of its target is taken out and linked (spec 15.8)
+namespace app
+import Root
+import lib packed
+import tests.packed
+
+Counter c = Counter(10)
+Console.log(c.next())
+Console.log(c.next())
+Console.log(twice(c.value))

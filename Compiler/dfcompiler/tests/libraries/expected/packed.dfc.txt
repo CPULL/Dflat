@@ -1,0 +1,24 @@
+DFC 1
+interface <n>
+DFI {
+ compiler: <version>
+ library: packed
+ namespace: tests.packed
+ runtime: 
+ stdlib: 
+}
+namespace tests.packed
+class Counter -> df_cls_tests__packed__Counter {
+  layout-win-x32: { const df_class* cls; int32_t m_start; int32_t m_value; }
+  layout-win-x64: { const df_class* cls; int32_t m_start; int32_t m_value; }
+  public i32 value
+  public fun i32 next() -> f_packed_Counter_next
+  public Counter(i32 start) -> f_packed_Counter
+}
+public fun i32 twice(i32 n) -> f_packed_twice
+ids -> df_libids_packed
+atLibStart -> df_libstart_packed
+atEnd -> df_libend_packed
+targets 2
+binary win-x32 packed.lib <n> <sha-256>
+binary win-x64 packed.lib <n> <sha-256>

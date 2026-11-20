@@ -1,0 +1,32 @@
+// the ids of the classes and exceptions of a compiled library are given by the program at start (spec 15.8)
+namespace app
+import Root
+import lib errs
+import tests.errs
+
+class Mine : Exception { }
+
+fun tryIt(i32 n) {
+  Console.log(check(n))
+  catch BadInput e { Console.log($"program caught BadInput: {e.message}") }
+  catch Mine { Console.log("wrong: Mine") }
+}
+
+fun throwMine() {
+  throw Mine("mine")
+  catch BadInput { Console.log("wrong: BadInput") }
+  catch Mine { Console.log("program caught Mine") }
+}
+
+fun throwLib() {
+  throw BadInput("made by the program")
+  catch Mine { Console.log("wrong: Mine") }
+  catch BadInput e { Console.log($"caught: {e.message}") }
+}
+
+tryIt(3)
+tryIt(-1)
+throwMine()
+Console.log(inside(-5))
+Console.log(inside(5))
+throwLib()

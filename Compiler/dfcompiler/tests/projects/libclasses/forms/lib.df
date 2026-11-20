@@ -1,0 +1,35 @@
+// lib.df: public classes, fields, constructors, overloads, static methods, defaults, passing markers, two results, errors (spec 15.8)
+namespace tests.forms
+import Root
+
+public bitfield8 Access { Read: 0, Write: 1, Run: 2 }
+
+public class Point(i32 x, i32 y) {
+  public i32 x
+  public i32 y
+  string tag = "p"
+
+  public fun i32 sum() { return x + y }
+  public fun i32 sum(i32 extra) { return x + y + extra }
+  public static fun ->Point origin() { return Point(0, 0) }
+  unrestricted fun string show() { return $"({x}, {y})" }
+  fun hidden() { tag = "h" }
+}
+
+public class Labeled : Point {
+  public string label
+  public Labeled(i32 x, i32 y, string label) : Point(x, y) {
+    this.label = label
+  }
+  replace fun i32 sum() { return 100 }   // the program calls Point.sum on a Labeled: the library dispatches it (spec 15.8)
+}
+
+public string greeting = "hello"
+i32 internalCount = 0
+
+public fun i32 scaled(i32 value, i32 factor = 2) { return value * factor }
+public fun grow(&Point p) { p.x += 1 }
+public fun keep(->Point p) { internalCount += p.x }
+public fun i32, i32 divide(i32 a, i32 b) { return a / b, a % b }
+public fun string describe(Point p) { return p.show() }
+fun i32 helper() { return 1 }

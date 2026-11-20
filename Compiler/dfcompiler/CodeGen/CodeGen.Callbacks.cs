@@ -15,7 +15,12 @@ namespace dfcompiler;
 public sealed partial class CodeGen {
   // how the runtime goes into this unit (spec 15.8, RuntimeLinkage.cs)
   // a library build declares the runtime and the stdlib of the program it is linked with (spec 15.8)
-  public RuntimeLinkageMode RuntimeMode { get; set; } = LibraryBuild != null ? RuntimeLinkageMode.Imported : RuntimeLinkage.Forced ?? RuntimeLinkageMode.Static;
+  // a program that links compiled libraries defines it for them (exported)
+  public RuntimeLinkageMode RuntimeMode { get; set; } = LibraryBuild != null ? RuntimeLinkageMode.Imported
+    : RuntimeLinkage.Forced ?? (LinkedLibraries.Count > 0 ? RuntimeLinkageMode.Exported : RuntimeLinkageMode.Static);
+
+  // the compiled Dflat libraries the program links (spec 15.8, Dfi.cs): the runtime chunks and the stdlib parts they need are in the program
+  internal static IReadOnlyList<CompiledLibrary> LinkedLibraries { get; set; } = new List<CompiledLibrary>();
 
   // the stdlib written in Dflat goes with the runtime (spec 15.8): its functions (the copies of its generics included) and the records of
   // its classes are defined in the program and only declared in a compiled library. Its lambdas and pure helpers (printers, vtables, array

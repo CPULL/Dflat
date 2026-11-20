@@ -1,0 +1,1 @@
+lib_no_binary.dsprj: error: the library nobin has no binary for win-x64: nobin/win-x64/nobin.lib (build the library for this target, spec 15.8)

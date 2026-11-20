@@ -1,0 +1,12 @@
+DFI {
+ compiler: 0.0.188alpha
+ library: helpers
+ namespace: libs.extra.helpers
+ runtime: 
+ stdlib: 
+}
+namespace libs.extra.helpers
+public fun i32 twice(i32 v) -> f_helpers_twice
+ids -> df_libids_helpers
+atLibStart -> df_libstart_helpers
+atEnd -> df_libend_helpers

@@ -28,5 +28,6 @@ public fun grow(&Point p) -> f_forms_grow error
 public fun keep(->Point p) -> f_forms_keep error
 public fun i32, i32 divide(i32 a, i32 b) -> f_forms_divide error
 public fun ->string describe(Point p) -> f_forms_describe error
+ids -> df_libids_forms
 atLibStart -> df_libstart_forms
 atEnd -> df_libend_forms

@@ -125,6 +125,7 @@ sealed partial class SourceLoader {
 
     public string Folder { get; }
     public string? LibName { get; init; }   // a library: the name of its .dsprj, used by import lib (spec 16)
+    public bool Compiled { get; init; }     // a compiled library: its namespaces come from its .dfi (spec 15.8)
     public string Namespace { get; }    // lower case; "" for a program without a namespace line
     public string What { get; }         // for the messages
   }
@@ -186,6 +187,14 @@ sealed partial class SourceLoader {
     string rootNs = RootNamespace(rootFile, "the root file");
     rootFile.Namespace = rootNs;
     string rootFolder = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(rootPath))!;
+    compilationFolder = System.IO.Path.Combine(rootFolder, ".compilation");   // the binaries taken out of a .dfc (spec 15.8)
+    if (multiFile) {
+      // a folder is a program or a library: one root file only (spec 16)
+      var rootFiles = RootFileNames.Where(rootName => File.Exists(System.IO.Path.Combine(rootFolder, rootName))).OrderBy(rootName => rootName).ToList();
+      if (rootFiles.Count > 1) {
+        throw new SourceException($"{rootPath}: error: a folder has one root file only, program.df, main.df or lib.df: it has {string.Join(" and ", rootFiles)} (spec 16)");
+      }
+    }
     projectFolder = projectFile != null ? System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(projectFile))! : rootFolder;   // where the .dflib files are (spec 22)
     if (LibraryBuild) {
       if (Namespaces(rootFile).Count == 0) {
@@ -195,7 +204,7 @@ sealed partial class SourceLoader {
         LibraryBuildName = rootNs[(rootNs.LastIndexOf('.') + 1)..];   // the fallback of spec 16
         Warnings.Add($"{projectFile ?? rootPath}: warning L1: the library {rootFolder} has no name (name= in its own .dsprj): it takes {LibraryBuildName}, the last part of its namespace (spec 16)");
       }
-      roots.Add(new SourceRoot(rootFolder, rootNs, "the library " + rootFolder) { LibName = LibraryBuildName });
+      roots.Add(new SourceRoot(rootFolder, rootNs, "the library " + LibraryBuildName) { LibName = LibraryBuildName });
     } else {
       roots.Add(new SourceRoot(rootFolder, rootNs, "the program"));
     }
@@ -312,37 +321,21 @@ sealed partial class SourceLoader {
     return found[0].Text!.ToLowerInvariant();
   }
 
-  // a library: a folder with lib.df at the top, which declares the root namespace of the library
+  // a library of the program: a folder with its interface (.dfi) and its binaries (spec 15.8)
   void AddLibrary(string folder, string projectFile) {
     if (!Directory.Exists(folder)) {
       throw new SourceException($"{projectFile}: error: the library folder {folder} does not exist");
     }
-    string lib = System.IO.Path.Combine(folder, "lib.df");
-    if (!File.Exists(lib)) {
-      throw new SourceException($"{projectFile}: error: the library {folder} has no lib.df (its root file)");
+    // a program links a compiled library: its interface, a .dfi or a .dfc (spec 15.8); lib.df is only for building the library
+    var interfaces = Directory.GetFiles(folder, "*.dfi").Concat(Directory.GetFiles(folder, "*.dfc")).OrderBy(p => p, StringComparer.OrdinalIgnoreCase).ToArray();
+    if (interfaces.Length > 1) {
+      throw new SourceException($"{projectFile}: error: the library folder {folder} has more than one interface (.dfi, .dfc): {string.Join(", ", interfaces.Select(System.IO.Path.GetFileName))} (spec 15.8)");
     }
-    var file = Parse(lib, lib);
-    if (Namespaces(file).Count == 0) {
-      throw new SourceException($"{lib}: error: the root file of a library declares its root namespace");
+    if (interfaces.Length == 0) {
+      // lib.df is only for building the library: a program links it through its interface (spec 15.8)
+      throw new SourceException($"{projectFile}: error: the library folder {folder} has no .dfi or .dfc: build the library first (its lib.df), a program links a compiled library (spec 15.8)");
     }
-    string ns = RootNamespace(file, "the root file of a library");
-    file.Namespace = ns;
-    // its own project file gives its name: import lib <name> (spec 16, 15.8)
-    string? libName = null;
-    foreach (string project in Directory.GetFiles(folder, "*.dsprj")) {
-      foreach (string line in File.ReadAllLines(project)) {
-        string text = line.Trim();
-        if (text.StartsWith("name=", StringComparison.OrdinalIgnoreCase)) {
-          libName = text["name=".Length..].Trim();
-        }
-      }
-    }
-    if (string.IsNullOrEmpty(libName)) {
-      // no name defined: the last part of its namespace, as a fallback (spec 16)
-      libName = ns[(ns.LastIndexOf('.') + 1)..];
-      Warnings.Add($"{projectFile}: warning L1: the library {folder} has no name (name= in its own .dsprj): it takes {libName}, the last part of its namespace (spec 16)");
-    }
-    roots.Add(new SourceRoot(System.IO.Path.GetFullPath(folder), ns, "the library " + folder) { LibName = libName });
+    AddCompiledLibrary(folder, interfaces[0], projectFile);
   }
 
   // two roots with the same namespace, or one inside the other (the stdlib included), are an error
@@ -418,14 +411,15 @@ sealed partial class SourceLoader {
       }
     }
     foreach (var statement in file.Tree.Children) {
-      if (!isRoot && !isLibraryRoot && statement.Kind == "Decl"
+      bool compiled = library?.Compiled == true;   // the declarations of a .dfi: its globals and variables (spec 15.8)
+      if (!isRoot && !isLibraryRoot && !compiled && statement.Kind == "Decl"
           && statement.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ').Contains("global") == true) {
         throw new CompileException("a global can be declared only in the root file (program.df, main.df or lib.df) (spec 18.1)", statement.Line);
       }
       bool declaration = statement.Kind is "Fun" or "Alias" or "Enum" or "Class" or "Trait" or "GenericSet" or "Struct" or "Handle"
         or "Namespace" or "NamespaceLocal" or "Import" or "ImportLib" || IsConst(statement)
         || statement.Kind == "Decl" && statement.Children.FirstOrDefault(child => child.Kind == "Mods")?.Text?.Split(' ').Contains("global") == true   // a global of a library (spec 18.1)
-        || isLibraryRoot && statement.Kind == "Decl";   // a variable of a library: its state (spec 16)
+        || (isLibraryRoot || compiled) && statement.Kind == "Decl";   // a variable of a library: its state (spec 16)
       if (!isRoot && !declaration) {
         throw new CompileException("only the root file can have top-level code: this file can have only declarations", statement.Line);
       }
@@ -460,6 +454,9 @@ sealed partial class SourceLoader {
     if (libraryFiles.TryGetValue(lower, out var libraryFile)) {
       return new List<SourceFile> { libraryFile };   // the namespace of an imported C library (spec 22)
     }
+    if (compiledFiles.TryGetValue(lower, out var compiledFile)) {
+      return new List<SourceFile> { compiledFile };   // a namespace of a compiled Dflat library: from its .dfi (spec 15.8)
+    }
     SourceRoot? best = null;
     foreach (var root in roots) {
       bool matches = root.Namespace == "" || lower == root.Namespace || lower.StartsWith(root.Namespace + ".");
@@ -472,6 +469,9 @@ sealed partial class SourceLoader {
     }
     if (best.Namespace == "root") {
       return new List<SourceFile>();   // the stdlib is part of the compiler
+    }
+    if (best.Compiled) {
+      return quiet ? null : throw NotFound(name, line, multiFile);   // not a namespace of its .dfi
     }
     string rest = best.Namespace == "" ? lower : lower == best.Namespace ? "" : lower[(best.Namespace.Length + 1)..];
     string folder = best.Folder;

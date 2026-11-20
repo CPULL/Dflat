@@ -1,0 +1,13 @@
+DFI {
+ compiler: 0.0.188alpha
+ library: stats
+ namespace: stats
+ runtime: 
+ stdlib: 
+}
+namespace stats
+public fun record(i32 n) -> f_stats_record error
+public fun i32 recorded() -> f_stats_recorded error
+ids -> df_libids_stats
+atLibStart -> df_libstart_stats
+atEnd -> df_libend_stats

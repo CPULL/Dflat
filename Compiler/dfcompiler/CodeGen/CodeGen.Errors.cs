@@ -614,7 +614,7 @@ public sealed partial class CodeGen {
         }
         string test = id == null ? on! : (id == -2 ? "df_err->descriptor->silent"
           : id == CatchByTrait ? $"(df_err->cls != NULL && df_has_trait(df_err, &df_trait_{catchTraits[frame.Catches[next].Node].Name}))"   // an exception object whose class has the trait
-          : $"df_exc_is(df_err, {id})") + (on != null ? $" && {on}" : "");
+          : $"df_exc_is(df_err, {ExceptionIdCode(id.Value)})") + (on != null ? $" && {on}" : "");
         sb.Append($"{pad}  if ({test}) goto {frame.CatchLabel(next)};\n");
       }
       if (!caughtAll) {

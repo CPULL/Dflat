@@ -76,8 +76,14 @@ sealed class ClassInfo {
   public bool HasChildren { get; set; }                       // a parent class: it keeps the list of its adopted children
   // the class record: named by the full namespace and the name of the class, the same in every unit that uses it; its id number is
   // given when the program is built (spec 15.8)
-  public string Descriptor => SourceMap.NamespaceOf(Node.Line) is string ns && ns != ""
-    ? $"df_cls_{ns.Replace(".", "__")}__{Name}" : $"df_cls_{Name}";
+  public string Descriptor => ImportedRecord ?? (SourceMap.NamespaceOf(Node.Line) is string ns && ns != ""
+    ? $"df_cls_{ns.Replace(".", "__")}__{Name}" : $"df_cls_{Name}");
+  // a class of a compiled library (spec 15.8): its record and its C fields come from the .dfi, its methods and constructors are its symbols
+  // the descriptor of an exception class: named like the record, so a program can name the one of a library (spec 15.8)
+  public string ExcDescriptor => "df_desc_" + Descriptor["df_cls_".Length..];
+  public string? ImportedRecord { get; set; }
+  public string? ImportedLayout { get; set; }
+  public bool IsImported => ImportedRecord != null;
   public string StructName => $"c_{Name}";
 }
 
@@ -139,7 +145,10 @@ public sealed partial class CodeGen {
           || IsSetName(name) || genericClasses.ContainsKey(name)) {
         throw Error($"the name '{name}' is already used by a type", node);
       }
-      var info = new ClassInfo(name, node, classes.Count);
+      var info = new ClassInfo(name, node, classes.Count) {
+        ImportedRecord = node.Children.FirstOrDefault(child => child.Kind == "ImportedRecord")?.Text,
+        ImportedLayout = node.Children.FirstOrDefault(child => child.Kind == "ImportedLayout")?.Text
+      };
       classes[name] = info;
       typeDefs.Append($"typedef struct c_{name} c_{name};\n");
     }
@@ -236,6 +245,14 @@ public sealed partial class CodeGen {
       }
     }
     RegisterTraits();
+    foreach (var cls in classes.Values.Where(cls => !cls.IsImported)) {
+      if (cls.Parent?.IsImported == true) {
+        throw NotSupported($"a class of the program that inherits {DisplayName(cls.Parent.Name)}, a class of a compiled library", cls.Node);
+      }
+    }
+    foreach (var cls in classes.Values.Where(cls => cls.IsImported && cls.Traits.Count > 0)) {
+      throw NotSupported("the traits of a class of a compiled library", cls.Node);
+    }
     foreach (var cls in classes.Values) {
       for (var c = cls.Parent; c != null; c = c.Parent) {
         if (c == cls) {
@@ -606,7 +623,10 @@ public sealed partial class CodeGen {
         RegisterEquals(cls, member);
         continue;
       }
-      if (member.Children.Any(child => child.Kind == "NoBody")) {
+      if (member.Children.Any(child => child.Kind == "ImportedCtor")) {
+        continue;   // a constructor of a class of a compiled library (BuildConstructor)
+      }
+      if (member.Children.Any(child => child.Kind == "NoBody") && !cls.IsImported) {
         throw Error("a function without a body is virtual and can be used only in traits", member);
       }
       if (member.Children.FirstOrDefault(child => child.Kind is "ExecuteBefore" or "ExecuteAfter") is Node hook) {
@@ -640,6 +660,9 @@ public sealed partial class CodeGen {
       }
       if (member.Text == "==") {
         CheckOperatorEquals(f, member);
+      }
+      if (cls.IsImported) {
+        continue;   // called by its symbol: the library calls the replacement of a subclass (spec 15.8)
       }
 
       // the same signature higher up: an override of an instance function, an error for a static one
@@ -713,6 +736,10 @@ public sealed partial class CodeGen {
   // The primary constructor: an init function (fills the fields of one class on an existing object) and the
   // constructor that allocates the object and calls it. Construction order: parent, then the class body.
   void BuildConstructor(ClassInfo cls) {
+    if (cls.IsImported) {
+      BuildImportedConstructors(cls);
+      return;
+    }
     var at = cls.Node;
     var block = Synthetic("Block", at);
     var ctorFields = cls.Fields.Where(field => !field.IsStatic).ToList();
@@ -1196,6 +1223,10 @@ public sealed partial class CodeGen {
 
   // struct, descriptor and storage of statics
   void EmitStruct(ClassInfo cls) {
+    if (cls.IsImported) {
+      EmitImportedStruct(cls);
+      return;
+    }
     var fields = new StringBuilder();
     foreach (var field in AllInstanceFields(cls)) {
       // the first and the last node of a list are node pointers in C (CodeGen.List.cs)
@@ -1319,7 +1350,7 @@ public sealed partial class CodeGen {
     }
     foreach (var decl in decls.Where(decl => used.Contains(decl.Text!))) {
       string name = decl.Text!;
-      if (fileVars.ContainsKey(name) || globalConsts.ContainsKey(name) || globals.ContainsKey(name)) {
+      if (fileVars.ContainsKey(name) || globalConsts.ContainsKey(name) || globals.ContainsKey(name) || importedGlobals.ContainsKey(name)) {
         throw Error($"'{name}' is already declared in this scope", decl);
       }
       string type;
@@ -2178,7 +2209,7 @@ public sealed partial class CodeGen {
         // SilentException: the flag of the record; a trait of the program: the class of an exception object (spec 15.1)
         return target.Name == "SilentException" ? $"(({subject})->descriptor->silent)" : $"(({subject})->cls != NULL && df_has_trait({subject}, &df_trait_{target.Name}))";
       }
-      return target.IsException ? $"df_exc_is({subject}, {customExceptionIds[target.Name]})" : throw Error($"{target.Name} is not an exception class", at);
+      return target.IsException ? $"df_exc_is({subject}, {ExceptionIdCode(customExceptionIds[target.Name])})" : throw Error($"{target.Name} is not an exception class", at);
     }
     return target.IsTrait
       ? $"df_has_trait({subject}, &df_trait_{target.Name})"
@@ -2294,7 +2325,7 @@ public sealed partial class CodeGen {
     EmitTraitTables();
     EmitExceptionDescriptors();
     EmitEqualsTables();
-    foreach (var cls in classOrder) {
+    foreach (var cls in classOrder.Where(cls => !cls.IsImported)) {   // a class of a compiled library: its record is in the library
       // the tree of a map is a C struct: a map prints through MapStrFunction
       var all = AllInstanceFields(cls).Where(field => !field.Hidden && !((IsMap(cls.Name) || IsSet(cls.Name)) && field.Name == "tree")).ToList();
       var sb = classCode;
@@ -2349,7 +2380,7 @@ public sealed partial class CodeGen {
       string hash = hashUsed ? $"df_hash_{cls.Name}" : "NULL";
       string clone = EmitCloneFunction(cls, sb);
       string cmp = EmitCompareFunction(cls, sb);
-      sb.Append($"static const df_class {cls.Descriptor} = {{ {256 + cls.Index}, \"{DisplayName(cls.Name)}\", {parent}, {slots}, df_strp_{cls.Name}, {impls}, df_dropall_{cls.Name}, {hash}, {clone}, "
+      sb.Append($"static {RecordConst}df_class {cls.Descriptor} = {{ {256 + cls.Index}, \"{DisplayName(cls.Name)}\", {parent}, {slots}, df_strp_{cls.Name}, {impls}, df_dropall_{cls.Name}, {hash}, {clone}, "
         + $"\"{BareClassName(cls)}\", {cmp} }};\n\n");
     }
   }
@@ -2365,7 +2396,7 @@ public sealed partial class CodeGen {
     sb.Append($"  {CType(cls.Name)} self = ({CType(cls.Name)})df_calloc(1, sizeof(struct {cls.StructName}));\n");
     sb.Append($"  self->cls = &{cls.Descriptor};\n");
     if (cls.IsException) {
-      sb.Append($"  self->descriptor = &df_desc_{cls.Name};\n  self->id = df_desc_{cls.Name}.id;\n");
+      sb.Append($"  self->descriptor = &{cls.ExcDescriptor};\n  self->id = {cls.ExcDescriptor}.id;\n");
     }
     // a constructor returns the object with its exception when the init functions can let one out
     string initCall = $"{init.CName}({callArgs})";

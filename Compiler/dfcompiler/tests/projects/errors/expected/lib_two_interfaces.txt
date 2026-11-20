@@ -1,0 +1,1 @@
+lib_two_interfaces.dsprj: error: the library folder both has more than one interface (.dfi, .dfc): both.dfc, both.dfi (spec 15.8)

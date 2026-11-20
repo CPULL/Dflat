@@ -1,0 +1,16 @@
+DFI {
+ compiler: 0.0.188alpha
+ library: store
+ namespace: libs.store
+ runtime: arriter
+ stdlib: vec<string>,vecIterator<string>
+}
+namespace libs.store
+public string label -> g_store_label
+public fun rename(string text) -> f_store_rename
+public fun ->string describe() -> f_store_describe error
+public fun keep(string name, i32 amount) -> f_store_keep error
+public fun reset() -> f_store_reset
+ids -> df_libids_store
+atLibStart -> df_libstart_store
+atEnd -> df_libend_store

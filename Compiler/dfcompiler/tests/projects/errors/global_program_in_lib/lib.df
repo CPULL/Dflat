@@ -1,0 +1,4 @@
+namespace stats
+
+// shop would be a global of the program: a library is built alone, it never sees it (spec 18.1)
+public fun i32 peek() { shop.count() }

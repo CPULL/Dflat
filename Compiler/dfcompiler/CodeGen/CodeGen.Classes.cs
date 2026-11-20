@@ -74,7 +74,10 @@ sealed class ClassInfo {
   public HashSet<string> Hooked { get; } = new();             // a trait: the methods with executeBefore / executeAfter (the class implements __impl_<name>)
   public FieldInfo? ParentField { get; set; }                 // a child class: its reference to the parent (spec 12.5)
   public bool HasChildren { get; set; }                       // a parent class: it keeps the list of its adopted children
-  public string Descriptor => $"df_cls_{Name}";
+  // the class record: named by the full namespace and the name of the class, the same in every unit that uses it; its id number is
+  // given when the program is built (spec 15.8)
+  public string Descriptor => SourceMap.NamespaceOf(Node.Line) is string ns && ns != ""
+    ? $"df_cls_{ns.Replace(".", "__")}__{Name}" : $"df_cls_{Name}";
   public string StructName => $"c_{Name}";
 }
 
@@ -1274,6 +1277,84 @@ public sealed partial class CodeGen {
 
   readonly HashSet<string> libraryVars = new();   // the variables of a library: written by its code (spec 16)
 
+  // the top-level variables of the root file that its functions use (spec 14.1): C variables of the file, zero or null at program start,
+  // given their value when their line runs; seen only by the code of that file; they end after the top-level code, in reverse order
+  readonly Dictionary<string, int> fileVars = new();   // name -> line of its declaration
+  readonly List<(string Name, string Type)> fileVarOrder = new();
+
+  bool IsFileVarHere(string name, Node at) =>
+    !fileVars.TryGetValue(name, out int line) || line / SourceMap.Stride == at.Line / SourceMap.Stride;
+
+  void DeclareFileVars(Node program) {
+    var decls = program.Children.Where(statement => statement.Kind == "Decl" && statement.Text != null && statement.Line < LibraryLine
+      && !IsGlobalDecl(statement) && !ModsOf(statement).Contains("const")).ToList();
+    if (decls.Count == 0) {
+      return;
+    }
+    var names = decls.Select(decl => decl.Text!).ToHashSet();
+    var used = new HashSet<string>();
+    // the names a function, a class or a method declares itself (parameters, locals, loop and catch variables, fields): its own,
+    // not the top-level variables
+    void Bound(Node node, HashSet<string> own) {
+      if (node.Kind is "Decl" or "Param" or "GiftParam" or "Var" or "WritableVar" or "Catch" or "Is" or "Arm" or "Bind" or "Target" or "Field" or "FieldGroup"
+          && node.Text != null) {
+        own.Add(node.Text);
+      }
+      foreach (var child in node.Children) {
+        Bound(child, own);
+      }
+    }
+    void Scan(Node node, HashSet<string> own) {
+      if (node.Kind == "Name" && names.Contains(node.Text!) && !own.Contains(node.Text!)) {
+        used.Add(node.Text!);
+      }
+      foreach (var child in node.Children) {
+        Scan(child, own);
+      }
+    }
+    foreach (var code in program.Children.Where(statement => statement.Kind is "Fun" or "Class" or "Trait" or "Struct" && statement.Line < LibraryLine)) {
+      var own = new HashSet<string>();
+      Bound(code, own);
+      Scan(code, own);
+    }
+    foreach (var decl in decls.Where(decl => used.Contains(decl.Text!))) {
+      string name = decl.Text!;
+      if (fileVars.ContainsKey(name) || globalConsts.ContainsKey(name) || globals.ContainsKey(name)) {
+        throw Error($"'{name}' is already declared in this scope", decl);
+      }
+      string type;
+      try {
+        type = ResolveDeclType(decl, new Scope(null));
+      } catch (CompileException) {
+        throw NotSupported($"a top-level variable used by a function, declared with var from a value known only when the program runs: write the type of '{name}'", decl);
+      }
+      fileVars[name] = decl.Line;
+      fileVarOrder.Add((name, type));
+      globalConsts[name] = ($"g_{name}", type);
+      globalConstOrder.Add(name);   // zero or null at program start
+      classGlobals.Append($"static {CType(type)} g_{name};\n");
+      // the declaration gives the value when its line runs (spec 14.1)
+      var init = decl.Children.FirstOrDefault(child => child.Kind == "Init");
+      int index = program.Children.IndexOf(decl);
+      if (init == null) {
+        program.Children.RemoveAt(index);
+      } else {
+        program.Children[index] = Synthetic("Assign", decl, "=").Add(Synthetic("Name", decl, name)).Add(init.Children[0]);
+      }
+    }
+  }
+
+  // the end of the top-level variables of the root file, after the top-level code (reverse order)
+  string FileVarsEndCode() {
+    var sb = new StringBuilder();
+    foreach (var (name, type) in Enumerable.Reverse(fileVarOrder)) {
+      sb.Append(OwnedGlobalEnd(type, globalConsts[name].CName));
+    }
+    return sb.ToString();
+  }
+  readonly List<(string Name, string Type, string Library)> libraryVarOrder = new();
+  readonly Dictionary<string, Node> libraryVarDecls = new();   // in declaration order, with their library
+
   // top-level const: C globals set at program start, in source order, before the statics (which may read them);
   // they leave the top-level code, so their values can use literals, other consts, functions and statics only
   void DeclareGlobalConsts(Node program) {
@@ -1294,17 +1375,17 @@ public sealed partial class CodeGen {
       var init = decl.Children.FirstOrDefault(child => child.Kind == "Init") ?? (libraryVar ? null : throw Error("a const needs a value", decl));
       string type = ResolveDeclType(decl, null);
       if (libraryVar) {
-        if (!(IsNumeric(type) || type is "bool" or "char" || IsEnum(type) || IsTimeType(type))) {
-          throw NotSupported($"a library variable of type {DisplayName(type)} (this version: numbers, bool, char, enums, date and time)", decl);
-        }
         libraryVars.Add(name);
+        libraryVarOrder.Add((name, type, SourceMap.LibraryOf(decl.Line) ?? ""));
+        libraryVarDecls[name] = decl;   // they end with their library, in reverse order (spec 15.8)
       }
-      globalConsts[name] = ($"g_{name}", type);
-      if (IntLiteralValue(init.Children[0]) is System.Numerics.BigInteger constValue) {
+      string cname = LibraryPrefixed("g_", name, decl.Line);   // g_counters_label: a variable of a library (spec 15.8)
+      globalConsts[name] = (cname, type);
+      if (init != null && IntLiteralValue(init.Children[0]) is System.Numerics.BigInteger constValue) {
         globalConstValues[name] = constValue;   // a tuple index can use it (spec 3.2)
       }
       globalConstOrder.Add(name);
-      classGlobals.Append($"static {CType(type)} g_{name};\n");
+      classGlobals.Append($"static {CType(type)} {cname};\n");
       if (init != null) {
         block.Add(Synthetic("Assign", decl, "=").Add(Synthetic("Name", decl, name)).Add(init.Children[0]));
       }
@@ -1321,7 +1402,7 @@ public sealed partial class CodeGen {
     foreach (var name in globalConstOrder) {
       sb.Append($"  {globalConsts[name].CName} = {ZeroValue(globalConsts[name].Type)};\n");
     }
-    foreach (var field in staticOrder) {
+    foreach (var field in OwnStatics) {
       if (field.IsCounted && IsCountedValueType(field.Type) && field.Init == null && !IsNullable(field.Type)) {
         // static &@i32 total: a cell of its own holding the zero value (spec 12.7)
         string plain = BaseOf(field.Type);
@@ -1335,7 +1416,7 @@ public sealed partial class CodeGen {
         ? $"  {{\n    df_exception* error = {globalConstsInit.CName}();\n    if (error) {{\n      df_panic_unhandled(error);\n    }}\n  }}\n"
         : $"  {globalConstsInit.CName}();\n");
     }
-    foreach (var field in staticOrder.Where(field => field.StaticInit != null)) {
+    foreach (var field in OwnStatics.Where(field => field.StaticInit != null)) {
       if (PairReturn(field.StaticInit!)) {
         sb.Append($"  {{\n    df_exception* error = {field.StaticInit!.CName}();\n    if (error) {{\n      df_panic_unhandled(error);\n    }}\n  }}\n");
       } else {
@@ -1574,7 +1655,7 @@ public sealed partial class CodeGen {
       }
       CheckAccess(field.Visibility, field.Owner, parts[1], target);
       CheckReadOnlyWrite(field, target);
-      return new LValueInfo(field.CName, field.Type, field.IsConst && !initializing, null, false, field.IsWeak, true);   // a static: not tracked
+      return new LValueInfo(field.CName, field.Type, field.IsConst && !initializing, null, true, field.IsWeak, true);   // a static: written as a field, its old value ends
     }
     var owner = ExprOf(target.Children[0], scope);
     if (!IsClass(owner.Type)) {

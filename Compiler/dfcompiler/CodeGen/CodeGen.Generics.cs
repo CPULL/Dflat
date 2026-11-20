@@ -125,6 +125,7 @@ public sealed partial class CodeGen {
       var gen = new CodeGen(seeds);
       try {
         string c = gen.Generate(CloneNode(tree));
+        InterfaceText = InterfaceLibrary != null ? gen.BuildInterface(InterfaceLibrary, InterfaceNamespace ?? "", c) : null;   // spec 15.8
         return (c, gen.Warnings);
       } catch (NeedInstanceException) {
         if (attempt > 4096) {

@@ -1,0 +1,14 @@
+DFI {
+ compiler: <version>
+ library: shapes
+ namespace: shapes
+ runtime: 
+ stdlib: 
+}
+namespace shapes
+public enum Kind { Square: 0, Circle: 1 }
+public fun i32 area(i32 w, i32 h) -> f_shapes_area
+atLibStart -> df_libstart_shapes
+atEnd -> df_libend_shapes
+namespace shapes.extra
+public fun i32 perimeter(i32 w, i32 h) -> f_shapes_perimeter

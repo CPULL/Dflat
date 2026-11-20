@@ -1,0 +1,137 @@
+// Automatic conversions of numbers (spec 3.5.1) and the for header (spec 10)
+import Root
+
+fun i32 half(i32 v) {
+  return v / 2
+}
+
+fun u8 small(i64 v) {
+  return v   // the result converts: saturates
+}
+
+fun r32 toSingle(r64 v) {
+  return v
+}
+
+fun keepsValue() {
+  i64 big = 300
+  i32 a = big           // narrowing that fits
+  Console.log(a)
+  u8 b = big            // does not fit: saturates
+  Console.log(b)
+  i64 negative = -5
+  u32 c = negative      // sign change: saturates to 0
+  Console.log(c)
+  u64 huge = 18446744073709551615
+  i64 d = huge          // saturates to the maximum
+  Console.log(d)
+  Console.log(half(big))
+  Console.log(small(1000))
+  Console.log(small(-1))
+  char letter = 'A'
+  i32 code = letter     // char to integer: the code point
+  Console.log(code)
+  char far = '€'
+  u8 low = far          // the code point does not fit: saturates (level 2 warning)
+  Console.log(low)
+  r64 r = big           // integer to real
+  Console.log(r)
+  r32 single = 0.5      // fits exactly
+  r64 third = 1.0 / 3.0
+  single = third        // precision reduced
+  Console.log(single == (r32)third)
+  Console.log(toSingle(1e300))
+  Console.log(toSingle(-1e300))
+}
+
+fun mixed() {
+  i32 small = -10
+  u64 count = 3
+  i64 diff = small - count     // computed wide, then converted
+  Console.log(diff)
+  i32 i = 5
+  u32 n = 7
+  var sum = i + n              // i32 with u32 is done in i64
+  Console.log(sum)
+  i64 neg = -1
+  u64 top = 18446744073709551615
+  Console.log(neg < top)       // compared by value
+  Console.log(neg == top)
+  Console.log(top > neg)
+  i64 wide = top - neg         // 2^64 does not fit: saturates
+  Console.log(wide)
+  u64 back = top / 3 + neg     // 128 bits, then u64
+  Console.log(back)
+  var lowest = neg - top       // no type of its own: an i64, saturated (level 1 warning)
+  Console.log(lowest)
+  Console.log($"{neg - top}")
+  i64 five = 5
+  u64 three = 3
+  var two = five - three
+  Console.log(two)
+  arr<i32> values = [1, 2, 3]
+  i32 last = values.len - 1    // uns to i32
+  Console.log(last)
+  for i32 k = 0..values.len {
+    Console.log(k)
+  }
+}
+
+fun forHeader() {
+  arr<i64> longs = [10, 20, 3000000000]
+  for i32 x in longs {
+    Console.log(x)
+  }
+  arr<r64> reals = [1.9, -2.7]
+  for i32 x in reals {
+    Console.log(x)
+  }
+  r64 stop = 3.5
+  for i32 k = 0..stop {
+    Console.log(k)
+  }
+}
+
+fun caughtRange() {
+  i64 big = 100000
+  i16 s = big
+  Console.log("not printed")
+  catch OutOfRangeCastException ex {
+    Console.log("caught: " + ex.message)
+  }
+}
+
+fun caughtPrecision() {
+  r64 third = 1.0 / 3.0
+  r32 s = third
+  Console.log("not printed")
+  catch PrecisionLostException ex {
+    Console.log("caught: " + ex.message)
+  }
+}
+
+fun exactSingle() {
+  r64 quarter = 0.25
+  r32 s = quarter
+  Console.log(s)
+  catch PrecisionLostException {
+    Console.log("not printed: 0.25 is exact")
+  }
+}
+
+fun caughtSingleRange() {
+  r64 huge = 1e300
+  r32 s = huge
+  Console.log("not printed")
+  catch OutOfRangeCastException ex {
+    Console.log("caught: " + ex.message)
+  }
+}
+
+keepsValue()
+mixed()
+forHeader()
+caughtRange()
+caughtPrecision()
+exactSingle()
+caughtSingleRange()

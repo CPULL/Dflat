@@ -1,0 +1,6 @@
+// a top-level variable of the root file is seen only by the code of that file (spec 14.1)
+namespace app
+import Root
+
+i32 count = 3
+Console.log(twice())

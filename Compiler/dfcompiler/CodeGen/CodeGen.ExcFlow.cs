@@ -15,7 +15,7 @@ public sealed partial class CodeGen {
 
   string ResultPair(string cType) {
     if (!resultPairs.TryGetValue(cType, out var name)) {
-      name = "df_res" + resultPairs.Count;
+      name = "df_res_" + CodeGen.StableName(cType);   // named after the type it carries: the same in every unit (spec 15.8)
       resultPairs[cType] = name;
       typeDefs.Append($"typedef struct {{\n  {cType} value;\n  df_exception* err;\n}} {name};\n\n");
     }

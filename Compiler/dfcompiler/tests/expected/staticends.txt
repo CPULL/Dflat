@@ -1,0 +1,9 @@
+item none ends
+item second ends
+from a parameter
+built title
+third
+end of program
+item third ends
+item opening ends
+---- exit code 0 ----

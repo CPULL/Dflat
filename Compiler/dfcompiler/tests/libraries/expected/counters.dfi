@@ -1,0 +1,19 @@
+DFI {
+ compiler: <version>
+ library: counters
+ namespace: libs.fun.counters
+ runtime: io
+ stdlib: DeleteOptions,File,FileSystemObjectsType,FileWriteMode,OverwriteOptions,StringEncoding
+}
+namespace libs.fun.counters
+class Sequence -> df_cls_libs__fun__counters__Sequence {
+  layout-win-x64: { const df_class* cls; int32_t m_next; }
+  public fun i32 take() -> f_counters_Sequence_take error
+  public Sequence() -> f_counters_Sequence
+}
+public global Sequence Numbers -> gl_counters_Numbers lock 0
+public fun ->string version() -> f_counters_version
+public fun i32 nextNumber() -> f_counters_nextNumber error
+public fun ->string add(i32 a, i32 b) -> f_counters_add
+atLibStart -> df_libstart_counters
+atEnd -> df_libend_counters

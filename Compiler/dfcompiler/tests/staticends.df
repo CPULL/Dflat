@@ -1,0 +1,32 @@
+// Static fields of objects and strings (spec 11.4, 4): a new value ends the old one, and they end at program end in reverse order
+import Root
+
+class Item(string name) {
+  public string name
+} atEnd {
+  Console.log($"item {name} ends")
+}
+
+class Shop {
+  public static Item first = Item("opening")
+  public static string title = "t1"
+  public static Item last = Item("none")
+}
+
+fun setTitle(string text) {
+  Shop.title = text          // a lent string: the static keeps its own copy
+}
+
+fun rename() {
+  string built = "built " + "title"
+  Shop.title = built
+}
+
+Shop.last = Item("second")   // "none" ends here
+Shop.last = Item("third")    // "second" ends here
+setTitle("from a parameter")
+Console.log(Shop.title)
+rename()
+Console.log(Shop.title)
+Console.log(Shop.last.name)
+Console.log("end of program")

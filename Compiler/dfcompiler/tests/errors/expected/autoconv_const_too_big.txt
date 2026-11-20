@@ -1,0 +1,1 @@
+autoconv_const_too_big.df(4): error: the constant 300 does not fit in u8 (spec 3.5.1)

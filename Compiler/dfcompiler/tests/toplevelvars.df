@@ -1,0 +1,41 @@
+// Top-level variables of the root file are seen by its functions (spec 14.1): each gets its value when its line runs,
+// zero or null before; a function can write them; objects and strings end after the top-level code, in reverse order
+import Root
+
+class Item(string name) {
+  public string name
+} atEnd {
+  Console.log($"item {name} ends")
+}
+
+fun show() {
+  Console.log($"count {count}, title '{title}', item {item == null}")
+}
+
+fun bump() {
+  count += 1
+  title = title + "!"
+}
+
+fun replaceItem(string name) {
+  item = Item(name)              // the old item ends
+}
+
+class Counter {
+  public fun i32 read() { return count }
+}
+
+show()                           // before the lines below: zero and null
+i32 count = 10
+string title = "hello"
+Item item = Item("first")
+show()
+bump()
+bump()
+show()
+replaceItem("second")
+Console.log(item.name)
+Console.log(Counter().read())
+i32 local = 5                    // no function uses it: an ordinary variable
+Console.log(local + count)
+Console.log("end of the top-level code")

@@ -109,6 +109,7 @@ public sealed partial class CodeGen {
     ["FileNotFoundException"] = 25,
     ["InvalidFileAccessException"] = 26,
     ["StringTruncatedException"] = 56,   // spec 4.5
+    ["PrecisionLostException"] = 57,   // spec 3.5.1
     ["FileAccessException"] = 27,
     ["DirectoryNotEmptyException"] = 28,
     ["FileNameAlreadyExistsException"] = 29,

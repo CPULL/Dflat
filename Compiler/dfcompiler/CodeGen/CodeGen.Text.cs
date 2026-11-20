@@ -519,6 +519,12 @@ public sealed partial class CodeGen {
       return;
     }
     var library = new Parser(new Lexer(source.ToString()).Tokenize()).ParseProgram();
+    foreach (var child in library.Children.Where(child => child.Kind is "Class" or "Trait" or "Fun" && child.Text != null)) {
+      stdlibNames.Add(child.Text!);   // File, FileStream, ExecProcess ...: stdlib, shared with the compiled libraries (spec 15.8)
+    }
+    foreach (var child in library.Children.Where(child => child.Kind == "Enum" && child.Text != null)) {
+      stdlibEnums.Add(child.Text!);   // StringEncoding, FileWriteMode ...: listed in the interface of a library (spec 15.8)
+    }
     program.Children.InsertRange(0, library.Children);
   }
 }

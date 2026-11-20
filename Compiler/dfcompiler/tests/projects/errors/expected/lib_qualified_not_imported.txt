@@ -1,0 +1,1 @@
+main.df(3): error: unknown namespace 'libs.fun.counters': if it is the namespace of a library, import the library first: import lib <name> (spec 16)

@@ -1,0 +1,32 @@
+DFI {
+ compiler: 0.0.174alpha
+ library: forms
+ namespace: tests.forms
+ runtime: 
+ stdlib: 
+}
+namespace tests.forms
+public bitfield8 Access { Read: 0, Write: 1, Run: 2 }
+class Point -> df_cls_tests__forms__Point {
+  layout-win-x64: { const df_class* cls; int32_t m_x; int32_t m_y; df_string m_tag; }
+  public i32 x
+  public i32 y
+  public fun i32 sum() -> f_forms_Point_sum
+  public fun i32 sum(i32 extra) -> f_forms_Point_sum_o95454ea5
+  public static fun ->Point origin() -> f_forms_Point_origin
+  unrestricted fun ->string show() -> f_forms_Point_show
+  public Point(i32 x, i32 y) -> f_forms_Point
+}
+class Labeled : Point -> df_cls_tests__forms__Labeled {
+  layout-win-x64: { const df_class* cls; int32_t m_x; int32_t m_y; df_string m_tag; df_string m_label; }
+  public string label
+  public Labeled(i32 x, i32 y, string label) -> f_forms_Labeled
+}
+public string greeting -> g_forms_greeting
+public fun i32 scaled(i32 value, i32 factor = 2) -> f_forms_scaled
+public fun grow(&Point p) -> f_forms_grow error
+public fun keep(->Point p) -> f_forms_keep error
+public fun i32, i32 divide(i32 a, i32 b) -> f_forms_divide error
+public fun ->string describe(Point p) -> f_forms_describe error
+atLibStart -> df_libstart_forms
+atEnd -> df_libend_forms

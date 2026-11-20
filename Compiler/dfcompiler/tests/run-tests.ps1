@@ -16,6 +16,8 @@
 #    compiler ("name.df(line): error: message", with no folder). A program that compiles is a failure.
 #  * tests\projects\<name>\ are programs of several files (spec 16), each folder with its .dsprj: the expected output is
 #    projects\expected\<name>.txt, as for the programs.
+#  * tests\libraries\<name>\ are libraries (lib.df, spec 15.8): each is built to its binary and its interface; the expected result is
+#    libraries\expected\<name>.dfi, the interface with its compiler line masked (the build must also report the binary).
 #  * tests\projects\errors\<name>\ are projects that must NOT compile: projects\errors\expected\<name>.txt holds the error lines,
 #    with the paths relative to the folder of the project and / as the separator.
 # A test is "new" when it has no expected file yet: it is run and reported, and saved only with -Update.
@@ -176,6 +178,20 @@ function Read-ErrorProject($run, [string]$folder) {
   return @{ Ok = $true; Text = ($lines -join "`n") }
 }
 
+# a library: its interface (.dfi), the compiler version masked, when the build wrote it and the binary
+function Read-Library($run) {
+  if ($null -eq $run) { return @{ Ok = $false; Text = "TIMEOUT after $TimeoutSeconds seconds" } }
+  $all = $run.Out + "`n" + $run.Err
+  $interface = if ($all -match 'Interface: (.+\.dfi)') { $Matches[1].Trim() } else { $null }
+  $binary = if ($all -match 'Library: (.+)') { $Matches[1].Trim() } else { $null }
+  if ($null -eq $interface -or $null -eq $binary -or -not (Test-Path $interface) -or -not (Test-Path $binary)) {
+    $errors = ($all -split "`r?`n" | Where-Object { $_ -match 'error' } | Select-Object -First 5) -join "`n"
+    return @{ Ok = $false; Text = "BUILD FAILED`n$errors" }
+  }
+  $text = ([System.IO.File]::ReadAllText($interface, [System.Text.Encoding]::UTF8) -replace "`r`n", "`n").Trim("`n")
+  return @{ Ok = $true; Text = ($text -replace '(?m)^ compiler: .*$', ' compiler: <version>') }
+}
+
 $passed = 0; $failed = @(); $new = @(); $saved = 0
 
 function Test-One([string]$name, [hashtable]$result, [string]$expectedFile) {
@@ -226,6 +242,11 @@ $errorPrograms = @()
 if (Test-Path (Join-Path $testsFolder 'errors')) {
   $errorPrograms = Get-ChildItem (Join-Path $testsFolder 'errors') -Filter '*.df' | Sort-Object Name
 }
+$librariesFolder = Join-Path $testsFolder 'libraries'
+$libraries = @()
+if (Test-Path $librariesFolder) {
+  $libraries = Get-ChildItem $librariesFolder -Directory | Where-Object { $_.Name -ne 'expected' } | Sort-Object Name
+}
 $projectsFolder = Join-Path $testsFolder 'projects'
 $projects = @()
 $errorProjects = @()
@@ -239,6 +260,7 @@ if ($Only.Count -gt 0) {
   $programs = $programs | Where-Object { $Only -contains $_.BaseName }
   $errorPrograms = $errorPrograms | Where-Object { $Only -contains $_.BaseName }
   $projects = $projects | Where-Object { $Only -contains $_.Name }
+  $libraries = $libraries | Where-Object { $Only -contains $_.Name }
   $errorProjects = $errorProjects | Where-Object { $Only -contains $_.Name }
 }
 
@@ -258,6 +280,10 @@ foreach ($test in $errorPrograms) {
 foreach ($test in $projects) {
   [void]$all.Add(@{ Name = 'projects/' + $test.Name; Path = $test.FullName; Option = '--run'; Kind = 'program'
     Expected = (Join-Path $projectsFolder ('expected\' + $test.Name + '.txt')) })
+}
+foreach ($test in $libraries) {
+  [void]$all.Add(@{ Name = 'libraries/' + $test.Name; Path = $test.FullName; Option = ''; Kind = 'library'
+    Expected = (Join-Path $librariesFolder ('expected\' + $test.Name + '.dfi')) })
 }
 foreach ($test in $errorProjects) {
   [void]$all.Add(@{ Name = 'projects/errors/' + $test.Name; Path = $test.FullName; Option = '--emit-c'; Kind = 'errorProject'
@@ -314,6 +340,7 @@ foreach ($test in $all) {
     'program' { Read-Program $test.Run }
     'error' { Read-ErrorProgram $test.Run }
     'errorProject' { Read-ErrorProject $test.Run $test.Path }
+    'library' { Read-Library $test.Run }
   }
   Test-One $test.Name $result $test.Expected
 }

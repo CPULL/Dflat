@@ -1,0 +1,3 @@
+; a library without its own .dsprj: its name is the last part of its namespace, with a level 1 warning (spec 16)
+source=main.df
+include=tools

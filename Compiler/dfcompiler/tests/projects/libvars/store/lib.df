@@ -1,0 +1,39 @@
+// lib.df: variables of a library holding a string, an object and arrays (spec 16)
+namespace libs.store
+import Root
+
+class Item(string name, i32 amount) {
+  public string name
+  public i32 amount
+} atEnd {
+  Console.log($"item {name} ends")
+}
+
+string title = "empty"
+Item last = Item("none", 0)
+arr<i32> counts = [1, 2, 3]
+vec<string> names = []
+public string label = "public label"
+
+public fun rename(string text) {
+  title = text
+}
+
+public fun string describe() {
+  return $"{title}: {last.name} x{last.amount}, {counts}, {names}"
+}
+
+public fun keep(string name, i32 amount) {
+  last = Item(name, amount)
+  names.add(name)
+  counts[0] = counts[0] + amount
+}
+
+public fun reset() {
+  counts = [7, 8]
+  names = ["reset"]
+}
+
+atEnd {
+  Console.log("store ends")
+}

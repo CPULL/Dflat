@@ -1,0 +1,3 @@
+// a qualified name of a library namespace needs import lib in the file too (spec 16)
+namespace app
+Root.Console.log(libs.fun.counters.version())

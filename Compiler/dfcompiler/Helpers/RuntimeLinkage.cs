@@ -20,7 +20,8 @@ public static class RuntimeLinkage {
       _ => null
     };
 
-  public static string Apply(string source, RuntimeLinkageMode mode) {
+  // owns: only the definitions of these names change (the stdlib in the generated code); null: all of them (the runtime source)
+  public static string Apply(string source, RuntimeLinkageMode mode, Func<string, bool>? owns = null) {
     if (mode == RuntimeLinkageMode.Static) {
       return source;
     }
@@ -35,7 +36,7 @@ public static class RuntimeLinkage {
         // a top-level definition: collect it up to its end (the closing brace of a body, or the ';' of a declaration)
         var text = new StringBuilder();
         int end = DefinitionEnd(lines, index, text);
-        output.Append(Rewrite(text.ToString(), mode));
+        output.Append(owns == null || owns(DefinedName(text.ToString())) ? Rewrite(text.ToString(), mode) : text.ToString());
         index = end + 1;
         inMacro = false;
         continue;
@@ -129,6 +130,19 @@ public static class RuntimeLinkage {
       head = body.TrimEnd().TrimEnd(';');    // a prototype or a variable without initializer
     }
     return "extern " + StripComments(head).Trim() + ";\n";
+  }
+
+  // the name a definition defines: the identifier before the parameters of a function, or before the initializer / ';' of a variable
+  static string DefinedName(string definition) {
+    string head = StripComments(definition);
+    int end = new[] { head.IndexOf('('), head.IndexOf('='), head.IndexOf('{'), head.IndexOf(';'), head.IndexOf('[') }
+      .Where(at => at >= 0).DefaultIfEmpty(head.Length).Min();
+    string before = head[..end].TrimEnd();
+    int start = before.Length;
+    while (start > 0 && (char.IsLetterOrDigit(before[start - 1]) || before[start - 1] == '_')) {
+      start--;
+    }
+    return before[start..];
   }
 
   static string StripComments(string text) {

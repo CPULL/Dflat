@@ -151,12 +151,20 @@ sealed partial class SourceLoader {
   readonly HashSet<string> visited = new(StringComparer.OrdinalIgnoreCase);
   readonly List<SourceFile> order = new();
   readonly List<SourceRoot> roots = new();
+
+  // the Dflat libraries of the compilation: name, folder and root namespace (spec 16, 15.8)
+  public IEnumerable<(string Name, string Folder, string Namespace)> DflatLibraries =>
+    roots.Where(root => root.LibName != null).Select(root => (root.LibName!, root.Folder, root.Namespace));
   SourceFile? rootFile;
 
   public SourceLoader(IReadOnlyDictionary<string, PpVariable> variables, IReadOnlyDictionary<string, PpValue> projectVariables) {
     this.variables = variables;
     this.projectVariables = projectVariables;
   }
+
+  // a library build (spec 19, 15.8): the root file is lib.df of the library itself; its name (name= of its project, or the fallback of spec 16)
+  public bool LibraryBuild { get; init; }
+  public string? LibraryBuildName { get; set; }
 
   // the warnings with their files, ready to print
   public List<string> Warnings { get; } = new();
@@ -179,7 +187,18 @@ sealed partial class SourceLoader {
     rootFile.Namespace = rootNs;
     string rootFolder = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(rootPath))!;
     projectFolder = projectFile != null ? System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(projectFile))! : rootFolder;   // where the .dflib files are (spec 22)
-    roots.Add(new SourceRoot(rootFolder, rootNs, "the program"));
+    if (LibraryBuild) {
+      if (Namespaces(rootFile).Count == 0) {
+        throw new SourceException($"{rootPath}: error: the root file of a library declares its root namespace");
+      }
+      if (string.IsNullOrEmpty(LibraryBuildName)) {
+        LibraryBuildName = rootNs[(rootNs.LastIndexOf('.') + 1)..];   // the fallback of spec 16
+        Warnings.Add($"{projectFile ?? rootPath}: warning L1: the library {rootFolder} has no name (name= in its own .dsprj): it takes {LibraryBuildName}, the last part of its namespace (spec 16)");
+      }
+      roots.Add(new SourceRoot(rootFolder, rootNs, "the library " + rootFolder) { LibName = LibraryBuildName });
+    } else {
+      roots.Add(new SourceRoot(rootFolder, rootNs, "the program"));
+    }
     roots.Add(new SourceRoot("", "root", "the standard library"));
 
     if (multiFile) {
@@ -202,6 +221,22 @@ sealed partial class SourceLoader {
       }
     }
     Visit(rootFile, multiFile);
+    if (LibraryBuild) {
+      // a built library holds all its namespaces, not only the ones lib.df imports: a program can import any of them (spec 15.8)
+      foreach (string source in Directory.GetFiles(rootFolder, "*.df", SearchOption.AllDirectories).OrderBy(p => p, StringComparer.OrdinalIgnoreCase)) {
+        string relative = System.IO.Path.GetRelativePath(rootFolder, System.IO.Path.GetDirectoryName(source)!);
+        if (relative.Split(System.IO.Path.DirectorySeparatorChar).Any(part => part.StartsWith('.') && part != "." || part.StartsWith("build."))) {
+          continue;   // .compilation and the build folders
+        }
+        var file = Parse(source, source);
+        if (file != rootFile && !visited.Contains(file.Path)) {
+          // the namespace of its folder: the root namespace plus the folders below the library (spec 16)
+          string folderNs = relative == "." ? rootNs : rootNs + "." + relative.Replace(System.IO.Path.DirectorySeparatorChar, '.').ToLowerInvariant();
+          file.Namespace = FileNamespace(file, folderNs);
+          Visit(file, multiFile);
+        }
+      }
+    }
 
     // a fully qualified name brings in its namespace without an import (spec 16); then the names are resolved
     LoadQualified(multiFile);
@@ -303,7 +338,9 @@ sealed partial class SourceLoader {
       }
     }
     if (string.IsNullOrEmpty(libName)) {
-      throw new SourceException($"{projectFile}: error: the library {folder} needs its own project file (.dsprj) with its name: name=<name> (spec 16)");
+      // no name defined: the last part of its namespace, as a fallback (spec 16)
+      libName = ns[(ns.LastIndexOf('.') + 1)..];
+      Warnings.Add($"{projectFile}: warning L1: the library {folder} has no name (name= in its own .dsprj): it takes {libName}, the last part of its namespace (spec 16)");
     }
     roots.Add(new SourceRoot(System.IO.Path.GetFullPath(folder), ns, "the library " + folder) { LibName = libName });
   }
@@ -354,7 +391,7 @@ sealed partial class SourceLoader {
 
   // only the root file has top-level code
   void CheckFile(SourceFile file) {
-    bool isRoot = file == rootFile;
+    bool isRoot = file == rootFile && !LibraryBuild;   // a library has no top-level code (spec 16)
     // the files of a library know their library (its folder name): its globals are visible only inside it (spec 18.1)
     var library = roots.Where(root => root.What.StartsWith("the library ") && file.Path.StartsWith(root.Folder + System.IO.Path.DirectorySeparatorChar,
         StringComparison.OrdinalIgnoreCase)).OrderByDescending(root => root.Folder.Length).FirstOrDefault();

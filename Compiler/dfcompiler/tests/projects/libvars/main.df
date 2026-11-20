@@ -1,0 +1,16 @@
+// a program that uses the string, object and array variables of a library (spec 16)
+namespace app
+import Root
+import lib store
+import libs.store
+
+Console.log(describe())
+rename("shop")
+keep("apple", 3)
+keep("pear", 2)
+Console.log(describe())
+reset()
+Console.log(describe())
+Console.log(label)
+label = "changed by the program"
+Console.log(label)

@@ -1,0 +1,5 @@
+namespace app
+
+public fun i32 twice() {
+  return count * 2
+}

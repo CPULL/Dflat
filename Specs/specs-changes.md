@@ -770,3 +770,14 @@
 - 16 A namespace path segment can be any word of ASCII letters, digits and `_`, keywords included
 - 15.8, 16 The startup code of a library is written `atLibStart { ... }` (no parentheses, as atEnd)
 - 16, 15.8 Every library has its own .dsprj with `name=`; a file uses a library only after `import lib <name>`, then imports its namespaces; a library namespace without `import lib` is an unknown namespace (compile error); `include=` only says where the library folders are
+- 3.5.1 Automatic conversions (new): integers convert automatically to any integer type (out of range saturates + silent OutOfRangeCastException); mixed integer arithmetic computed in a signed type wide enough for both, only the result converts; integer comparisons by value; overloads not chosen by automatic conversions; char to integer automatic; r64 to r32 automatic (silent PrecisionLostException 57, beyond range ±infinity + OutOfRangeCastException); real to integer, integer to char and enums stay explicit
+- 10 The range and items of a for convert to the loop variable type, real to integer included
+- 15.3 New silent exception 57 PrecisionLostException
+- 3.5.1, 19.3 An automatic conversion that can change the value gives a level 3 warning; one that always keeps it gives none
+- 3.5.1, 19.3 char to an integer narrower than 32 bits: saturates, level 2 warning
+- 16, 19.3 A library with no name defined takes the last part of its root namespace (fallback), level 1 warning
+- 16 A fully qualified name of a library namespace in the code also needs import lib in that file
+- 16, 15.8 Library variables of any type (objects, strings, arrays): a new value ends the old one; they end after the library's globals, in reverse order
+- 3.5.1, 19.3 A result of i64 with u64 going to var or a string becomes an i64 (saturated), level 1 warning
+- 14.1 The top-level variables of the root file are seen by the functions, classes and methods of that file only (not globals); each gets its value when its line runs, zero or null before; they end after the top-level code, in reverse order
+- 15.8 Building a library compiles every .df file of its folder and subfolders, not only what lib.df imports

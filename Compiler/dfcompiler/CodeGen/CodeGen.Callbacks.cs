@@ -14,7 +14,24 @@ namespace dfcompiler;
 // non-silent exception out is a compile error, a silent one stops in the wrapper as at any caller (spec 15.4).
 public sealed partial class CodeGen {
   // how the runtime goes into this unit (spec 15.8, RuntimeLinkage.cs)
-  public RuntimeLinkageMode RuntimeMode { get; set; } = RuntimeLinkage.Forced ?? RuntimeLinkageMode.Static;
+  // a library build declares the runtime and the stdlib of the program it is linked with (spec 15.8)
+  public RuntimeLinkageMode RuntimeMode { get; set; } = LibraryBuild != null ? RuntimeLinkageMode.Imported : RuntimeLinkage.Forced ?? RuntimeLinkageMode.Static;
+
+  // the stdlib written in Dflat goes with the runtime (spec 15.8): its functions (the copies of its generics included) and the records of
+  // its classes are defined in the program and only declared in a compiled library. Its lambdas and pure helpers (printers, vtables, array
+  // helpers) stay in each unit: their names are numbered in the unit, or they hold no state
+  readonly HashSet<string> stdlibSymbols = new();
+
+  readonly HashSet<string> stdlibNames = new();
+  readonly HashSet<string> stdlibEnums = new();   // the enums of the stdlib preludes   // the classes, traits and functions of the stdlib preludes written with ordinary lines
+
+  bool IsStdlibClass(ClassInfo cls) => cls.Node.Line >= LibraryLine || stdlibNames.Contains(cls.Name);
+
+  bool IsSharedStdlib(FunSig f) => f.LambdaCtx == null && !f.IsExtern
+    && (f.Node.Line >= LibraryLine || (f.Class != null ? IsStdlibClass(f.Class) : stdlibNames.Contains(f.Name)));
+
+  string StdlibLinkage(string code) =>
+    RuntimeMode == RuntimeLinkageMode.Static ? code : RuntimeLinkage.Apply(code, RuntimeMode, stdlibSymbols.Contains);
 
   readonly Dictionary<string, string> callbackConventions = new();   // a callback type of a .dflib → its calling convention
   readonly Dictionary<string, int> callbackIds = new();               // a pointed type [conv]fun(...) → its number (C names)

@@ -1,0 +1,2 @@
+; a top-level variable of the root file is not seen by another file (spec 14.1)
+source=main.df

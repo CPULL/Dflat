@@ -1,0 +1,13 @@
+// automatic conversions do not choose between overloads (spec 3.5.1)
+import Root
+
+fun show(i32 v) {
+  Console.log(v)
+}
+
+fun show(string s) {
+  Console.log(s)
+}
+
+i64 big = 5
+show(big)

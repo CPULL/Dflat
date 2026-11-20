@@ -632,6 +632,7 @@ sealed partial class SourceLoader {
       }
       throw new CompileException($"the namespace '{ns}' has no '{name}'", line);
     }
+    CheckLibraryImported(scope.File, ns, line);   // a qualified name of a library namespace needs import lib in this file too (spec 16)
     string here = scope.File.Namespace;
     bool visible = decl.Ns == here || decl.Vis == NsVis.Public || decl.Vis == NsVis.Internal && Encloses(decl.Ns, here);
     if (!visible) {

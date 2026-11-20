@@ -65,8 +65,11 @@ public sealed partial class CodeGen {
   }
 
   // enum [ValueType] Name { A, B: 10, C: A, fun ... }
+  readonly Dictionary<string, Node> enumNodes = new();   // the declaration of each enum: its modifiers and its file (the interface, spec 15.8)
+
   void RegisterEnum(Node node) {
     var info = enums[node.Text!];
+    enumNodes[node.Text!] = node;
     var bitfieldNode = node.Children.FirstOrDefault(child => child.Kind == "Bitfield");
     if (bitfieldNode != null) {
       RegisterBitfield(node, info, bitfieldNode.Text!);

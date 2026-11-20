@@ -1,0 +1,6 @@
+// lib.df of a library with no name defined: it is called helpers (spec 16)
+namespace libs.extra.helpers
+
+public fun i32 twice(i32 v) {
+  return v * 2
+}

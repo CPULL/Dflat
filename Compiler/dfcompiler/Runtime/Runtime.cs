@@ -208,6 +208,7 @@ static const df_descriptor df_desc_UnassignedTypeException = { 53, "UnassignedTy
 static const df_descriptor df_desc_CallingGlobalDefinedAfterException = { 54, "CallingGlobalDefinedAfterException", &df_desc_Exception, false };
 static const df_descriptor df_desc_ReadLockBecameWriteLockException = { 55, "ReadLockBecameWriteLockException", &df_desc_Exception, false };
 static const df_descriptor df_desc_StringTruncatedException = { 56, "StringTruncatedException", &df_desc_Exception, true };
+static const df_descriptor df_desc_PrecisionLostException = { 57, "PrecisionLostException", &df_desc_Exception, true };
 
 /* The exception of a function is a local of that function (df_err in the generated code) and travels back to the caller as the second
    value it returns. The runtime functions written in C cannot return it that way: they leave it here, and the code generated around
@@ -2709,6 +2710,45 @@ DF_DIV_UNSIGNED(uint16_t, u16)
 DF_DIV_UNSIGNED(uint32_t, u32)
 DF_DIV_UNSIGNED(uint64_t, u64)
 
+/* a calculation between i64 and u64 is done in 128 bits (spec 3.5.1) */
+#ifdef __SIZEOF_INT128__
+typedef __int128 df_i128;
+typedef unsigned __int128 df_u128;
+#else
+typedef _BitInt(128) df_i128;
+typedef unsigned _BitInt(128) df_u128;
+#endif
+/* 128-bit division written with shifts and subtractions: the C division of 128 bits calls a helper of the compiler (__divti3) that
+   is not linked on every target. Two values that fit 64 bits use the 64-bit division */
+static df_u128 df_udivmod128(df_u128 n, df_u128 d, df_u128* rem) {
+  if ((n >> 64) == 0 && (d >> 64) == 0) {
+    *rem = (df_u128)((uint64_t)n % (uint64_t)d);
+    return (df_u128)((uint64_t)n / (uint64_t)d);
+  }
+  df_u128 q = 0, r = 0;
+  for (int bit = 127; bit >= 0; bit--) {
+    r = (r << 1) | ((n >> bit) & 1);
+    if (r >= d) {
+      r -= d;
+      q |= (df_u128)1 << bit;
+    }
+  }
+  *rem = r;
+  return q;
+}
+static df_i128 df_div_i128(df_i128 a, df_i128 b, const char* function) {
+  if (b == 0) { df_raise(&df_desc_DivisionByZeroException, function); return 0; }
+  df_u128 rem;
+  df_u128 q = df_udivmod128(a < 0 ? (df_u128)0 - (df_u128)a : (df_u128)a, b < 0 ? (df_u128)0 - (df_u128)b : (df_u128)b, &rem);
+  return (a < 0) != (b < 0) ? (df_i128)((df_u128)0 - q) : (df_i128)q;   /* toward zero */
+}
+static df_i128 df_mod_i128(df_i128 a, df_i128 b, const char* function) {
+  if (b == 0) { df_raise(&df_desc_DivisionByZeroException, function); return 0; }
+  df_u128 rem;
+  df_udivmod128(a < 0 ? (df_u128)0 - (df_u128)a : (df_u128)a, b < 0 ? (df_u128)0 - (df_u128)b : (df_u128)b, &rem);
+  return a < 0 ? (df_i128)((df_u128)0 - rem) : (df_i128)rem;   /* the sign of the dividend */
+}
+
 /* ---- saturating casts ---- */
 
 #define DF_SAT_INT(T, NAME, LO, HI) \
@@ -2785,6 +2825,39 @@ static uint64_t df_satc_u64_u(uint64_t v) { return v; }
 static uint64_t df_satc_u64_r(double v) {
   if (isnan(v) || v <= -1.0 || v >= 18446744073709551616.0) df_silent_note(&df_desc_OutOfRangeCastException);
   return df_sat_u64_r(v);
+}
+
+/* the casts of a calculation between i64 and u64 (128 bits, spec 3.5.1): saturating, the checked ones leave the note */
+#define DF_SAT_WIDE(T, NAME, LO, HI) \
+  static T df_sat_##NAME##_w(df_i128 v) { \
+    return v < (df_i128)(LO) ? (T)(LO) : (v > (df_i128)(HI) ? (T)(HI) : (T)v); \
+  } \
+  static T df_satc_##NAME##_w(df_i128 v) { \
+    if (v < (df_i128)(LO) || v > (df_i128)(HI)) df_silent_note(&df_desc_OutOfRangeCastException); \
+    return df_sat_##NAME##_w(v); \
+  }
+
+DF_SAT_WIDE(int8_t, i8, INT8_MIN, INT8_MAX)
+DF_SAT_WIDE(int16_t, i16, INT16_MIN, INT16_MAX)
+DF_SAT_WIDE(int32_t, i32, INT32_MIN, INT32_MAX)
+DF_SAT_WIDE(int64_t, i64, INT64_MIN, INT64_MAX)
+DF_SAT_WIDE(uint8_t, u8, 0, UINT8_MAX)
+DF_SAT_WIDE(uint16_t, u16, 0, UINT16_MAX)
+DF_SAT_WIDE(uint32_t, u32, 0, UINT32_MAX)
+DF_SAT_WIDE(uint64_t, u64, 0, UINT64_MAX)
+
+/* r64 to r32 (spec 3.5.1): beyond the range of r32 gives +-infinity; the checked one leaves the note of the silent
+   OutOfRangeCastException (beyond the range) or PrecisionLostException (a value that changed) */
+static float df_r32_of_r64(double v) {
+  if (v > 3.4028234663852886e38) return INFINITY;
+  if (v < -3.4028234663852886e38) return -INFINITY;
+  return (float)v;
+}
+static float df_r32_of_r64c(double v) {
+  float r = df_r32_of_r64(v);
+  if (isfinite(v) && isinf(r)) df_silent_note(&df_desc_OutOfRangeCastException);
+  else if (!isnan(v) && (double)r != v) df_silent_note(&df_desc_PrecisionLostException);
+  return r;
 }
 
 /* ---- date, clock, lapse (spec 3.2, 3.3) ---- */

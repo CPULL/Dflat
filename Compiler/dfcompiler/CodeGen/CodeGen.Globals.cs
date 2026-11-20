@@ -77,7 +77,7 @@ public sealed partial class CodeGen {
       if (!classes.ContainsKey(type) || IsNullable(type)) {
         throw Error("a global must be an object of a class: global <Class> <name> = <Class>(...) (spec 18.1)", decl);
       }
-      var info = new GlobalInfo(name, $"gl_{name}", type, globalOrder.Count, decl);
+      var info = new GlobalInfo(name, LibraryPrefixed("gl_", name, decl.Line), type, globalOrder.Count, decl);
       CheckInitializerOrder(init, info);
       globals[name] = info;
       globalOrder.Add(info);
@@ -372,8 +372,34 @@ static void df_gl_exit(void) {
       foreach (var global in Enumerable.Reverse(globalOrder).Where(global => global.Library == library)) {
         Drop(global);
       }
+      foreach (var (name, type, _) in Enumerable.Reverse(libraryVarOrder).Where(variable => variable.Library == library)) {
+        sb.Append(OwnedGlobalEnd(type, globalConsts[name].CName));   // then its variables, the other top-level objects (spec 15.8)
+      }
     }
     return sb.ToString();
+  }
+
+  // the end of a library variable or a static that owns what it holds: an object, a string, an array, a tuple or a struct that holds them
+  string OwnedGlobalEnd(string type, string cname) {
+    if (IsClass(type)) {
+      return $"  {{ void* gone = (void*){cname}; {cname} = NULL; df_drop(gone); }}\n";
+    }
+    if (type == "string") {
+      return $"  df_str_free({cname});\n  {cname} = NULL;\n";
+    }
+    if (type == "string?") {
+      return $"  df_opt_str_drop(&{cname});\n";
+    }
+    if (IsArr(type)) {
+      return $"  {ArrDropHelper(type)}({cname});\n  {cname}.p = NULL;\n  {cname}.len = 0;\n";
+    }
+    if (TupleHoldsArrays(type) || IsOwningNullableTuple(type)) {
+      return $"  {OwnedTupleDrop(type, cname)}\n";
+    }
+    if (StructHoldsObjects(type)) {
+      return $"  {StructDropCode(type, cname)}\n";
+    }
+    return "";
   }
 
   readonly List<string> libraryOrder = new();                        // the libraries, in the order they start (spec 15.8)

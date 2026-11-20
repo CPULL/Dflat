@@ -232,6 +232,19 @@ public sealed partial class CodeGen {
     return Assignable(paramType, type) ? 100 : null;
   }
 
+  // an overload that the arguments would reach through automatic conversions of numbers (spec 3.5.1): for the message only
+  bool OnlyAutoFits(List<FunSig> candidates, List<Node> args, Scope scope) {
+    try {
+      return candidates.Any(candidate => MapArgs(candidate, args).Item1 is Node[] slots && args.All(arg => {
+        var argNode = arg.Kind == "Named" ? arg.Children[0] : arg;
+        int paramIndex = Array.IndexOf(slots, argNode);
+        return paramIndex >= 0 && AutoAssignable(candidate.Params[paramIndex].Type, ExprOf(argNode, scope).Type);
+      }));
+    } catch (CompileException) {
+      return false;
+    }
+  }
+
   FunSig ResolveOverload(List<FunSig> candidates, List<Node> args, Scope scope, Node at) {
     if (candidates.Count == 1) {
       return candidates[0];
@@ -269,7 +282,7 @@ public sealed partial class CodeGen {
         string given = DisplayName(ExprOf(args[0], scope).Type);
         throw Error($"the items of this set are {DisplayName(MapKey(owner.Name))}, not {given}", at);
       }
-      throw Error($"no '{candidates[0].Name}' matches these arguments", at);
+      throw Error($"no '{candidates[0].Name}' matches these arguments{(OnlyAutoFits(candidates, args, scope) ? "; automatic conversions do not choose between overloads: write the cast (spec 3.5.1)" : "")}", at);
     }
     if (applicable.Any(entry => !entry.Fun.Params.Any(param => param.IsVariadic))) {
       applicable.RemoveAll(entry => entry.Fun.Params.Any(param => param.IsVariadic));   // the non-variadic overload wins (spec 13.4)

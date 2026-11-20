@@ -1,0 +1,3 @@
+; library variables of strings, objects and arrays (spec 16)
+source=main.df
+include=store

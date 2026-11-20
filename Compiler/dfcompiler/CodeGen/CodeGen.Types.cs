@@ -174,6 +174,7 @@ public sealed partial class CodeGen {
       "u16" => "uint16_t",
       "u32" => "uint32_t",
       "u64" => "uint64_t",
+      "i128" => "df_i128",          // a calculation between i64 and u64 (spec 3.5.1), never written
       "r32" => "float",
       "r64" => "double",
       "bool" => "bool",
@@ -272,11 +273,33 @@ public sealed partial class CodeGen {
   }
 
   // tuples with the same element types share one struct, whatever the field names
+  // a short, stable id of a text (FNV-1a, 32 bits): the generated names that must be the same in separately compiled units
+  public static string StableId(string text) {
+    uint hash = 2166136261;
+    foreach (char c in text) {
+      hash = (hash ^ c) * 16777619;
+    }
+    return hash.ToString("x8");
+  }
+
+  // a C identifier made from a C type text: a readable part, then the stable id of the whole text (so two texts never share it)
+  public static string StableName(string text) {
+    var readable = new StringBuilder();
+    foreach (char c in text) {
+      readable.Append(char.IsAsciiLetterOrDigit(c) ? c : c == '*' ? 'P' : '_');
+    }
+    string part = readable.ToString();
+    if (part.Length > 32) {
+      part = part[..32];
+    }
+    return part + "_" + StableId(text);
+  }
+
   string TupleCType(string tupleType) {
     var cTypes = TupleElems(tupleType).Select(elem => CType(elem.Type)).ToList();
     string key = string.Join(",", cTypes);
     if (!tupleCNames.TryGetValue(key, out var name)) {
-      name = "df_tup" + tupleCNames.Count;
+      name = "df_tup_" + StableName(key);   // named after its item types: the same in every unit (spec 15.8)
       tupleCNames[key] = name;
       var fields = new StringBuilder();
       for (int index = 0; index < cTypes.Count; index++) {
@@ -606,9 +629,118 @@ public sealed partial class CodeGen {
     return Family(to) == Family(from) && IsNumeric(to) && Bits(from) <= Bits(to);
   }
 
+  // ---------------------------------------------------------------- automatic conversions of numbers (spec 3.5.1)
+
+  // the type of a calculation between i64 and u64 (spec 3.5.1): a signed 128-bit value that only goes to a number type; not a type
+  // that can be written
+  const string WideInt = "i128";
+
+  static bool IntLike(string t) => IsInt(t) || t == WideInt;
+
+  // any integer (or char) to any integer, any integer to a real, r64 to r32; real to integer, integer to char and enums stay explicit
+  static bool AutoNumber(string to, string from) =>
+    IsInt(to) && (IntLike(from) || from == "char")
+    || RealTypes.Contains(to) && (IntLike(from) || from == "r64" && to == "r32");
+
+  // Assignable plus the automatic conversions of numbers, also inside nullables and tuples. Assignable alone (widening that keeps the
+  // value) is what chooses between overloads, set members and common types (spec 3.5.1)
+  bool AutoAssignable(string to, string from) {
+    if (Assignable(to, from)) {
+      return true;
+    }
+    if (IsNullable(to) && !IsSetValue(to) && from != "null") {
+      return AutoAssignable(BaseOf(to), IsNullable(from) ? BaseOf(from) : from);
+    }
+    if (IsTuple(to) && IsTuple(from)) {
+      var toElems = TupleElems(to);
+      var fromElems = TupleElems(from);
+      return toElems.Count == fromElems.Count && toElems.Zip(fromElems).All(pair => AutoAssignable(pair.First.Type, pair.Second.Type));
+    }
+    return AutoNumber(to, from);
+  }
+
+  // the value of an integer constant written in the code ((int32_t)300LL, (uint8_t)0xFFULL), null for anything else
+  static readonly Regex IntConstPattern = new(@"^\(\(u?int(8|16|32|64)_t\)(-?\d+)U?LL\)$|^\(\(u?int(8|16|32|64)_t\)0x([0-9A-F]+)ULL\)$", RegexOptions.Compiled);
+
+  static BigInteger? IntConstValue(string code) {
+    if (code == "(-9223372036854775807LL - 1)") {
+      return IntRange("i64").Item1;
+    }
+    var match = IntConstPattern.Match(code);
+    if (!match.Success) {
+      return null;
+    }
+    return match.Groups[2].Success ? BigInteger.Parse(match.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture)
+      : BigInteger.Parse("0" + match.Groups[4].Value, System.Globalization.NumberStyles.HexNumber);
+  }
+
+  // the C code of an automatic conversion of a number (spec 3.5.1): a value that fits is kept, an integer that does not saturates with the
+  // silent OutOfRangeCastException, r64 to r32 can raise the silent PrecisionLostException; level 3 warning when the value can change
+  string AutoNumberCode(Expr e, string to, Node at) {
+    string from = e.Type;
+    if (RealTypes.Contains(to)) {
+      if (from != "r64") {
+        return $"(({CType(to)})({e.Code}))";   // an integer to a real
+      }
+      Warn($"r64 to r32 converted automatically: the value can lose precision (spec 3.5.1)", at, 3);
+      bool caught = SilentCaught(StandardExceptions["PrecisionLostException"]) || SilentCaught(StandardExceptions["OutOfRangeCastException"]);
+      return caught ? SilentCall($"df_r32_of_r64c({e.Code})", "r32", "PrecisionLostException,OutOfRangeCastException", at) : $"df_r32_of_r64({e.Code})";
+    }
+    if (IntConstValue(e.Code) is BigInteger value) {
+      var (min, max) = IntRange(to);
+      if (value < min || value > max) {
+        throw Error($"the constant {value} does not fit in {to} (spec 3.5.1)", at);
+      }
+      return $"(({CType(to)})({e.Code}))";
+    }
+    // char is a code point (at most 21 bits): it fits every integer of 32 bits or more
+    bool keeps = from == "char" ? Bits(to) >= 32 : Assignable(to, from);
+    if (keeps) {
+      return $"(({CType(to)})({e.Code}))";
+    }
+    // a char to an integer narrower than 32 bits: level 2, the code point may not fit (user, 2026-11-19)
+    if (from == WideInt && to == "i64" && wideWarnedLines.Contains(at.Line)) {
+      return CastExpr(e, to, at).Code;   // already said at level 1 (WarnWideToI64)
+    }
+    Warn($"{(from == WideInt ? "a calculation between i64 and u64" : from)} converted automatically to {to}: a value that does not fit saturates (spec 3.5.1)", at, from == "char" ? 2 : 3);
+    return CastExpr(e, to, at).Code;
+  }
+
+  // the range and the items of a for always convert to the type of the loop variable, real to integer included (spec 10, 3.5.1)
+  string ForConvert(Expr e, string to, Node at) {
+    if (IsInt(to) && RealTypes.Contains(e.Type)) {
+      Warn($"{e.Type} converted to {to} in the header of a for: the value is truncated (spec 3.5.1)", at, 3);
+      return CastExpr(e, to, at).Code;
+    }
+    return Convert(e, to, at);
+  }
+
+  bool ForAssignable(string to, string from) => AutoAssignable(to, from) || IsInt(to) && RealTypes.Contains(from);
+
+  // a calculation between i64 and u64 has no type of its own: where no number type receives it (var, a string) it becomes an i64,
+  // saturated, with a level 1 warning (user, 2026-11-19)
+  readonly HashSet<int> wideWarnedLines = new();
+
+  void WarnWideToI64(Node at) {
+    if (wideWarnedLines.Add(at.Line)) {
+      Warn("a calculation between i64 and u64 has no type of its own: it becomes an i64, a value that does not fit saturates (spec 3.5.1)", at, 1);
+    }
+  }
+
+  Expr WideToI64(Expr e, Node at) {
+    if (e.Type != WideInt) {
+      return e;
+    }
+    WarnWideToI64(at);
+    return new Expr(AutoNumberCode(e, "i64", at), "i64");
+  }
+
   string Convert(Expr e, string to, Node at) {
     if (e.Type == to) {
       return e.Code;
+    }
+    if (e.Type == WideInt && !IsNumeric(BaseOf(to))) {
+      e = WideToI64(e, at);   // spec 3.5.1
     }
     if (handles.TryGetValue(e.Type, out var fromHandle) && !IsHandle(to)) {
       return Convert(new Expr(e.Code, fromHandle.Base), to, at);   // lent as the value it is made of (spec 22)
@@ -688,7 +820,7 @@ public sealed partial class CodeGen {
         return $"(({CType(to)}){{ true, {Convert(e, toBase, at)} }})";
       }
       string fromBase = BaseOf(e.Type);
-      if (!Assignable(toBase, fromBase)) {
+      if (!AutoAssignable(toBase, fromBase)) {
         throw Error($"cannot convert {e.Type} to {to} implicitly; use a cast", at);
       }
       if (CType(e.Type) == CType(to)) {
@@ -725,7 +857,7 @@ public sealed partial class CodeGen {
     if (IsTuple(to) && IsTuple(e.Type)) {
       var toElems = TupleElems(to);
       var fromElems = TupleElems(e.Type);
-      if (!Assignable(to, e.Type)) {
+      if (!AutoAssignable(to, e.Type)) {
         throw Error($"cannot convert {e.Type} to {to}", at);
       }
       if (toElems.Zip(fromElems).All(pair => pair.First.Type == pair.Second.Type)) {
@@ -742,6 +874,9 @@ public sealed partial class CodeGen {
       return RealTypes.Contains(e.Type) ? $"df_lapse_from_ms_real((double)({e.Code}))" : $"df_lapse_from_ms((int64_t)({e.Code}))";
     }
     if (!Assignable(to, e.Type)) {
+      if (AutoNumber(to, e.Type)) {
+        return AutoNumberCode(e, to, at);   // spec 3.5.1
+      }
       throw Error($"cannot convert {e.Type} to {to} implicitly; use a cast", at);
     }
     return $"(({CType(to)})({e.Code}))";
@@ -835,6 +970,7 @@ public sealed partial class CodeGen {
     : StrOf(e, at);
 
   string StrOf(Expr e, Node at) {
+    e = WideToI64(e, at);   // spec 3.5.1
     if (e.Type == "string1k") {
       return $"df_s1k_to_str({e.Code})";   // spec 4.5
     }

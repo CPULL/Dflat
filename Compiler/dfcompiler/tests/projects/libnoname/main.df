@@ -1,0 +1,8 @@
+// a library with no name defined takes the last part of its namespace (spec 16)
+namespace app
+import Root
+import lib helpers
+import libs.extra.helpers
+
+Console.log(twice(21))
+Console.log(libs.extra.helpers.twice(5))   // qualified, after import lib

@@ -4,7 +4,7 @@ using dfparser;
 namespace dfcompiler;
 
 public static class Program {
-  public const string Version = "0.0.165alpha";
+  public const string Version = "0.0.175alpha";
 
   // the version of the specification this compiler was built for: the variable `version` of the preprocessor (spec 19.1)
   public const string LanguageVersion = "0.0.40";
@@ -49,6 +49,8 @@ public static class Program {
     public List<string> CSources { get; } = new();   // csource= of the project file: C files compiled with the program (temporary, spec 15.9)
     public string? VulkanSdk { get; set; }           // vulkan-sdk= and glfw= of the project file: the folders the gfx library needs
     public string? Glfw { get; set; }
+    public string? Name { get; set; }                // name= of the project file: the name of a library (spec 16)
+    public bool ForceLib { get; set; }               // --force-lib: build the folder as a library (spec 19)
     public string? LibPath { get; set; }             // libpath= of the project file: the binaries of the C libraries, one subfolder per target (spec 22)
     public Dictionary<string, int> Limits { get; } = new();
     public long? DoubleGrowLimit { get; set; }   // --double-grow-limit 8mb (spec 6.8.2)
@@ -140,8 +142,13 @@ public static class Program {
         return 2;
       }
       if (project.Source == null) {
-        Console.Error.WriteLine($"{projectFile}: the project needs the file to compile: source=<file.df>");
-        return 2;
+        // no source=: the root file is the first of program.df, main.df, lib.df in the folder of the project (spec 19)
+        string projectDir = Path.GetDirectoryName(Path.GetFullPath(projectFile))!;
+        project.Source = new[] { "program.df", "main.df", "lib.df" }.Select(rootName => Path.Combine(projectDir, rootName)).FirstOrDefault(File.Exists);
+        if (project.Source == null) {
+          Console.Error.WriteLine($"{projectFile}: the project needs the file to compile: source=<file.df>, or a program.df, main.df or lib.df next to it");
+          return 2;
+        }
       }
     } else {
       cli.Source = input;
@@ -156,6 +163,9 @@ public static class Program {
     string optMode = cli.OptMode ?? project.OptMode ?? "speed";
     string build = cli.Build ?? project.Build ?? "debug";
     bool run = cli.Run;
+    // a lib.df root builds a library (spec 19): its binary and its interface (spec 15.8); --force-lib for another root
+    bool libraryBuild = string.Equals(Path.GetFileName(path), "lib.df", StringComparison.OrdinalIgnoreCase) || cli.ForceLib || project.ForceLib;
+    string? libraryName = null;
     var programArgs = cli.ProgramArgs;
 
     if (!File.Exists(path)) {
@@ -230,7 +240,7 @@ public static class Program {
         return 1;
       }
       // the root file and the files it imports (spec 16), merged into one program
-      var loader = new SourceLoader(variables, projectVariables) { Target = effective };
+      var loader = new SourceLoader(variables, projectVariables) { Target = effective, LibraryBuild = libraryBuild, LibraryBuildName = project.Name };
       bool multiFile = SourceLoader.IsMultiFile(projectFile, path);
       Node tree;
       try {
@@ -246,6 +256,16 @@ public static class Program {
           Console.Error.WriteLine(warning);
         }
       }
+      // the interface of a library (spec 15.8): asked with DFLAT_EMIT_DFI=<library> until the library build exists (step 2, point 5)
+      CodeGen.TargetName = effective;
+      if (libraryBuild) {
+        libraryName = loader.LibraryBuildName;
+        CodeGen.LibraryBuild = libraryName;
+      }
+      string? dfiLibrary = libraryBuild ? libraryName : Environment.GetEnvironmentVariable("DFLAT_EMIT_DFI");
+      (string Name, string Folder, string Namespace)? dfiRoot = dfiLibrary == null ? null : loader.DflatLibraries.Cast<(string Name, string Folder, string Namespace)?>().FirstOrDefault(lib => string.Equals(lib!.Value.Name, dfiLibrary, StringComparison.OrdinalIgnoreCase));
+      CodeGen.InterfaceLibrary = dfiRoot?.Name;
+      CodeGen.InterfaceNamespace = dfiRoot?.Namespace;
       var (c, genWarnings) = CodeGen.Compile(tree, build == "release", nativeInt, limits, cli.DoubleGrowLimit ?? project.DoubleGrowLimit ?? 4 * 1024 * 1024, cli.GrowExtra ?? project.GrowExtra ?? 500,
         cli.GrowStep ?? project.GrowStep ?? 0);
       foreach (var warning in genWarnings) {
@@ -253,6 +273,11 @@ public static class Program {
       }
       Directory.CreateDirectory(Path.GetDirectoryName(cPath)!);
       File.WriteAllText(cPath, c);
+      if (dfiRoot != null && CodeGen.InterfaceText != null) {
+        string dfiPath = Path.Combine(dfiRoot.Value.Folder, dfiRoot.Value.Name + ".dfi");
+        File.WriteAllText(dfiPath, CodeGen.InterfaceText);
+        Console.WriteLine($"Interface: {dfiPath}");
+      }
     } catch (DfException ex) {
       Console.Error.WriteLine($"{SourceMap.Where(ex.Line, ex.Col)}: error: {SourceMap.ShowNames(ex.Message)}");
       return 1;
@@ -284,7 +309,9 @@ public static class Program {
       return 1;
     }
 
-    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
+    if (!libraryBuild) {
+      Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);   // a library writes its binary in <libpath>/<target>/
+    }
     string optimization = optMode == "size" ? "-Os" : "-O" + optLevel;
     var ccArgs = new List<string> {
       "-std=c11", optimization, "-fwrapv", "-Wno-unused-function",
@@ -317,6 +344,9 @@ public static class Program {
     }
     // the system headers (windows.h above all) come from a header precompiled once for this clang and these flags: parsing them is
     // a large part of the time of a small program. Only for a program alone (no C files, no libraries, no CL: target)
+    if (libraryBuild) {
+      return BuildLibraryBinary(clang, ccArgs, output, cPath, project.LibPath ?? sourceDir, effective, libraryName!, forWindows);
+    }
     string? pch = custom || project.CSources.Count > 0 || native.Args.Count > 0 ? null : SystemHeaderPch(clang, ccArgs, cPath, output);
     int code;
     if (pch != null) {
@@ -380,6 +410,9 @@ public static class Program {
           return null;
         case "--emit-c":
           settings.EmitC = true;
+          break;
+        case "--force-lib":
+          settings.ForceLib = true;
           break;
         case "--run":
           settings.Run = true;
@@ -520,6 +553,36 @@ public static class Program {
   // The project file (.dsprj): one `key = value` per line, the key is the option name without the dashes, `;` starts a comment, paths are
   // relative to the folder of the file. CompilerVar=<name>=<value> defines a variable of the preprocessor. The options that are not built
   // yet are an error.
+  // the binary of a library (spec 15.8): the generated C compiled to an object, then archived as a static library in
+  // <libpath>/<target>/ (the folder of the library when there is no libpath=): <name>.lib on Windows, lib<name>.a elsewhere
+  static int BuildLibraryBinary(string clang, List<string> ccArgs, string output, string cPath, string libRoot, string target, string name, bool forWindows) {
+    string folder = Path.Combine(libRoot, target);
+    Directory.CreateDirectory(folder);
+    string obj = Path.Combine(Path.GetDirectoryName(cPath)!, name + (forWindows ? ".obj" : ".o"));
+    var args = new List<string>(ccArgs);
+    int outIndex = args.IndexOf("-o");
+    args[outIndex + 1] = obj;
+    args.Insert(0, "-c");
+    int code = RunProcess(clang, args);
+    if (code != 0) {
+      return code;
+    }
+    string tool = Path.Combine(Path.GetDirectoryName(clang)!, forWindows ? "llvm-lib.exe" : (OperatingSystem.IsWindows() ? "llvm-ar.exe" : "llvm-ar"));
+    if (!File.Exists(tool)) {
+      Console.Error.WriteLine($"error: {Path.GetFileName(tool)} not found next to {clang}: it makes the static library");
+      return 1;
+    }
+    string binary = Path.Combine(folder, forWindows ? name + ".lib" : "lib" + name + ".a");
+    if (File.Exists(binary)) {
+      File.Delete(binary);
+    }
+    code = RunProcess(tool, forWindows ? new List<string> { "/out:" + binary, obj } : new List<string> { "rcs", binary, obj });
+    if (code == 0) {
+      Console.WriteLine($"Library: {binary}");
+    }
+    return code;
+  }
+
   static void ReadProject(string file, Settings settings, Dictionary<string, PpValue> variables) {
     string folder = Path.GetDirectoryName(Path.GetFullPath(file))!;
     string[] lines = File.ReadAllLines(file);
@@ -537,6 +600,9 @@ public static class Program {
       string value = line[(equal + 1)..].Trim();
       try {
         switch (key) {
+          case "name":
+            settings.Name = value;
+            break;
           case "source":
           case "root":
             settings.Source = Path.Combine(folder, value);

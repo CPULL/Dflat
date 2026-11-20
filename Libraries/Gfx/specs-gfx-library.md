@@ -1064,7 +1064,357 @@ OPEN ITEMS:
 - Default vertex output struct (gfx)
 - Other stages (geometry, tessellation, ray tracing, mesh)
 
-## 6. Text console
+## 6. UI
+The UI system is based on a DOM-like tree of nodes.
+
+A UI consists of nodes, styles, events and optional reusable components.
+
+The DOM can be represented as text, compiled into runtime nodes, and serialized back to text.
+
+This section is preliminary.
+
+### 6.1 General concepts
+- The coordinate origin is the top-left corner of the screen (0,0).
+- The UI is represented as a tree of nodes.
+- Nodes can contain children, receive styles, receive events and be rendered.
+- Appearance is controlled through styles.
+- Interaction is controlled through events and callbacks.
+- Future support for style animations or tweens may be added.
+
+### 6.2 Nodes
+Nodes are divided into three categories:
+- **Layout**: Used as containers that can arrange the items inside
+- **Control**: text, labels, input, sliders, etc.
+- **Comment**: used only to comment the code, they will not participate in defining the UI
+
+```
+enum UINodeType {
+    Layout,
+    Control,
+    Comment
+}
+```
+
+### 6.3 Layout Nodes
+Layout nodes are containers.
+
+Current direction:
+- only one layout node type exists
+- layout behavior is controlled entirely by styles
+
+Current name: `d`
+
+### 6.4 Control nodes
+
+Examples currently discussed:
+- label
+- image
+- input
+- checkbox
+- radio
+- slider
+- dropdown
+- list
+- progress
+
+Comment nodes exist in the DOM description only and are ignored during rendering and interaction.
+
+
+### 6.5 Runtime structure
+
+Sketch of the UINodes (as written):
+
+```
+trait UINode {
+   %UINode parent
+   vec<UINode> children
+   UINodeType type
+	 %UIStyle style
+	 public fun replaceDOM(srting dom) { ... }
+	 public string getDOM() { ... }
+}
+class UILayout : UINode {
+}
+class UIText : UINode {
+  string text
+}
+```
+
+### 6.3 Markup syntax
+- 2 options are being discussed, XAML style and Braces style
+- "In both cases familiarity will be more a problem than ad advantage. It is not c++ or xaml or HTML so people familiar will do errors because previous knowledge. Escaping rules will probably be the same. I can do `label.style { "text with }" }` or `label.style { text with \} }` or `<label style>text with \< and \></label>`
+
+
+**First XAML-style test sketch**:
+```
+<d main>
+  <d sidebar>
+  <d center>
+    <label centerPos>Hello</label>
+    <button bottomright>Click me!</button>
+  </d>
+</d>
+```
+
+**Braces-style test sketch**:
+```
+d.main {
+  d.sidebar { .. }
+  d.center {
+    d.topbar,fixed { label { "TopBar"} button.rightmost { "Exit" } }
+     label.centerPos { "Hello" }
+     button.bottomright { "Click me!" }
+   }
+}
+```
+
+No decision has been made.
+
+### 6.4 DOM
+```
+class UIViewport {
+   ...
+   vec<UINode> nodes
+	 ...
+
+   public fun replaceDOM(string dom) { ... } // You pass a DOM string and the nodes will be generated
+   public fun string getDOM() { ... } // Returns a serialized representation of the DOM
+}
+```
+
+
+### 6.5 Styles
+Styles are cascading and compiled. They are defined with a hmap containing the type of property and its values.
+
+The human readable form will be compact, while the code form will have all parts split.
+
+```
+class UIStyle {
+	%UIStyle parent
+	vec<UIStyle> children
+	public hmap<StyleProperty, UIStyleValue> definition
+	hmap<StyleProperty, UIStyleValue> compiled
+}
+
+```
+d.full {
+  label.center { Hello world! }
+  comment { This is the very first example }
+}
+full: {
+ width:100%vp, nooverflow, scale
+ heigth:100%vp, nooverflow, keepaspect 16:9
+}
+center: {
+  position: hcenter, vcenter
+  font: roboto, 1/25 height
+  color: blue
+}
+```
+- Compiled form example:
+
+```
+center: {
+  position: hcenter, vcenter
+  font: roboto, 1/25 height
+  color: blue
+}
+=>
+UIStyle center = UIStyle([StyleProperty.PositionH:UIPosition.center, StyleProperty.PositionV:UIPosition.center, StyleProperty.FontFace:"roboto", StyleProperty.FontSize: 0.04, StyleProperty.FontSizeUnit:UIUnit.HeightPercent, StyleProperty.Color:Colors.blue])
+```
+
+- the map used will be a hmap
+- "The only need is to update all child nodes when something changes. And that can have an heavy cost when changing a style"
+- "recompiling styles is fast. Finding nodes using the style takes a full scan of all the dom. Unless I will use a vector of weak refs to using nodes. Then updating children is not required because it will be done when the sub nodes need to be re-painted"
+- Property candidates (listed by the assistant, not defined; user: "All, but i am not going to define it here"):
+  1. Size and position: width, height, min/max width and height, positionh, positionv, x, y, keepaspect, scale
+  2. Box: padding, margin, borderwidth, bordercolor, borderradius, background, opacity
+  3. Text: fontface, fontsize, fontsizeu, color, textalign, lineheight, bold, italic, wrap
+  4. Children layout: direction, gap, alignh, alignv, wrap, grow, shrink
+  5. Overflow: overflow, scrollh, scrollv
+  6. Misc: visible, zorder, cursor, enabled
+
+### 6.6 Conflicts
+
+- Layout node: "layout node (probably just one with types)" versus the later "All layout nodes should be the same node with different styles."
+- Cascade: "one hierarchy or another. Not both" versus the later "each style will have a compiled set ... Getting everything from the hierarchy" together with "A node will get the styles from the parents ... closest first" (both style hierarchy and node hierarchy).
+- UIStyle contents: `map<tagname, values>`, no `UIStyleValues`, and the rejected nested-map form. Unresolved.
+
+### 6.7 Open points raised during the discussion (assistant)
+
+- Markup syntax: braces or angular tags.
+- Whether UI depends on 2D, or sits on Core only.
+- Tag order when a node has several tags.
+- Merge rule for the same tag in several styles up the chain.
+- Which height `1/25 height` means; where the 16:9 box sits; what `scale` does.
+- `createDOM`: replace or add; whether `getDOM` outputs styles.
+- Layout properties need layout invalidation, not only repaint.
+- Predefined controls: special types or ready-made trees.
+- Order of priority between node ancestry and style ancestry.
+
+### 6. Appendix A: 60-node page, braces
+```js
+d.main {
+  d.topbar,fixed {
+    label.logo { "MyApp" }
+    d.searchbox {
+      input.wide { placeholder: "Search..." }
+      button { "Search", onclick: doSearch }
+    }
+    d.spacer { }
+    button.iconOnly { icon: "bell", onclick: showNotifications }
+    image.avatar { source: "me.png" }
+    button { "Exit", onclick: doExit }
+  }
+  d.body,row {
+    d.sidebar,column {
+      label.sectionTitle { "Menu" }
+      button.navItem,active { "Dashboard" }
+      button.navItem { "Orders" }
+      button.navItem { "Customers" }
+      button.navItem { "Reports" }
+      d.divider { }
+      label.sectionTitle { "Settings" }
+      button.navItem { "Profile" }
+      button.navItem { "Security" }
+    }
+    d.content,column,scroll {
+      d.header,row {
+        label.pageTitle { "Dashboard" }
+        d.spacer { }
+        dropdown { items: periods, onchange: changePeriod }
+        button.primary { "Export", onclick: doExport }
+      }
+      d.cards,row {
+        d.card {
+          label.cardTitle { "Revenue" }
+          label.bigNumber { "12,400" }
+          progress { value: 0.8 }
+        }
+        d.card {
+          label.cardTitle { "Orders" }
+          label.bigNumber { "312" }
+          progress { value: 0.5 }
+        }
+        d.card {
+          label.cardTitle { "Customers" }
+          label.bigNumber { "89" }
+          progress { value: 0.3 }
+        }
+      }
+      d.panel {
+        label.panelTitle { "Recent orders" }
+        list.zebra {
+          d.listRow,row {
+            label { "Order #1001" }
+            label.muted { "Paid" }
+            button.small { "Open", onclick: openOrder }
+          }
+          d.listRow,row {
+            label { "Order #1002" }
+            label.muted { "Pending" }
+            button.small { "Open", onclick: openOrder }
+          }
+        }
+      }
+      d.form,column {
+        label.sectionTitle { "Quick settings" }
+        input.wide { placeholder: "Display name", bind: displayName }
+        checkbox { "Email notifications", bind: notifyByEmail }
+        radio { "Dark theme", group: theme }
+        slider { min: 0, max: 100, bind: volume }
+        d.actions,row,rightAligned {
+          button { "Cancel", onclick: doCancel }
+          button.primary { "Save", onclick: doSave }
+        }
+      }
+    }
+  }
+}
+```
+
+### 6. Appendix B: 60-node page, XAML style
+```xml
+<d main>
+  <d topbar fixed>
+    <label logo>MyApp</label>
+    <d searchbox>
+      <input wide placeholder="Search..."/>
+      <button onclick="doSearch">Search</button>
+    </d>
+    <d spacer/>
+    <button iconOnly icon="bell" onclick="showNotifications"/>
+    <image avatar source="me.png"/>
+    <button onclick="doExit">Exit</button>
+  </d>
+  <d body row>
+    <d sidebar column>
+      <label sectionTitle>Menu</label>
+      <button navItem active>Dashboard</button>
+      <button navItem>Orders</button>
+      <button navItem>Customers</button>
+      <button navItem>Reports</button>
+      <d divider/>
+      <label sectionTitle>Settings</label>
+      <button navItem>Profile</button>
+      <button navItem>Security</button>
+    </d>
+    <d content column scroll>
+      <d header row>
+        <label pageTitle>Dashboard</label>
+        <d spacer/>
+        <dropdown items="periods" onchange="changePeriod"/>
+        <button primary onclick="doExport">Export</button>
+      </d>
+      <d cards row>
+        <d card>
+          <label cardTitle>Revenue</label>
+          <label bigNumber>12,400</label>
+          <progress value="0.8"/>
+        </d>
+        <d card>
+          <label cardTitle>Orders</label>
+          <label bigNumber>312</label>
+          <progress value="0.5"/>
+        </d>
+        <d card>
+          <label cardTitle>Customers</label>
+          <label bigNumber>89</label>
+          <progress value="0.3"/>
+        </d>
+      </d>
+      <d panel>
+        <label panelTitle>Recent orders</label>
+        <list zebra>
+          <d listRow row>
+            <label>Order #1001</label>
+            <label muted>Paid</label>
+            <button small onclick="openOrder">Open</button>
+          </d>
+          <d listRow row>
+            <label>Order #1002</label>
+            <label muted>Pending</label>
+            <button small onclick="openOrder">Open</button>
+          </d>
+        </list>
+      </d>
+      <d form column>
+        <label sectionTitle>Quick settings</label>
+        <input wide placeholder="Display name" bind="displayName"/>
+        <checkbox bind="notifyByEmail">Email notifications</checkbox>
+        <radio group="theme">Dark theme</radio>
+        <slider min="0" max="100" bind="volume"/>
+        <d actions row rightAligned>
+          <button onclick="doCancel">Cancel</button>
+          <button primary onclick="doSave">Save</button>
+        </d>
+      </d>
+    </d>
+  </d>
+</d>
+```
+
+## 7. Text console
 - Just an idea, not sure it is needed: when you just need a "shell window", maybe for low hardware that has only text modes
 - It would live in Core and use the fonts
 

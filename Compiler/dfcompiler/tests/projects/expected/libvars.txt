@@ -1,0 +1,10 @@
+empty: none x0, [1, 2, 3], []
+item none ends
+item apple ends
+shop: pear x2, [6, 2, 3], [apple, pear]
+shop: pear x2, [7, 8], [reset]
+public label
+changed by the program
+store ends
+item pear ends
+---- exit code 0 ----

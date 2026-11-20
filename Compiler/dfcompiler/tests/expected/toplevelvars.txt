@@ -1,0 +1,10 @@
+count 0, title '', item true
+count 10, title 'hello', item false
+count 12, title 'hello!!', item false
+item first ends
+second
+12
+17
+end of the top-level code
+item second ends
+---- exit code 0 ----

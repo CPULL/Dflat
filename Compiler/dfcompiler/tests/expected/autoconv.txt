@@ -1,0 +1,40 @@
+300
+255
+0
+9223372036854775807
+150
+255
+0
+65
+255
+300
+true
+∞
+-∞
+-13
+12
+true
+false
+true
+9223372036854775807
+6148914691236517204
+-9223372036854775808
+-9223372036854775808
+2
+2
+0
+1
+2
+10
+20
+2147483647
+1
+-2
+0
+1
+2
+caught: Out Of Range Cast Exception
+caught: Precision Lost Exception
+0.25
+caught: Out Of Range Cast Exception
+---- exit code 0 ----

@@ -1,0 +1,5 @@
+// a constant that does not fit the type it goes to is a compile error (spec 3.5.1)
+import Root
+
+u8 b = 300L
+Console.log(b)

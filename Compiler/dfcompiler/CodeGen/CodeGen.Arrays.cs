@@ -154,6 +154,10 @@ public sealed partial class CodeGen {
       if (type is "null" or "void" || IsMulti(type)) {
         throw Error($"cannot infer a variable type from {(type == "null" ? "null" : "this expression")}", decl);
       }
+      if (type == WideInt) {
+        WarnWideToI64(decl);   // it becomes an i64 (spec 3.5.1)
+        return "i64";
+      }
       return type;
     }
     return ResolveType(typeNode);
@@ -1025,7 +1029,7 @@ public sealed partial class CodeGen {
       string declared = itemType;
       if (node.Children.Count > 0 && !(node.Children[0] is { Kind: "Type", Text: "var" })) {
         declared = ResolveType(node.Children[0]);
-        if (declared != itemType && !Assignable(declared, itemType)) {
+        if (declared != itemType && !ForAssignable(declared, itemType)) {   // the items convert to the type of the variable (spec 10)
           throw Error(overMap
             ? $"the 'for' variable '{node.Text}' is {declared}, but the {(index == 0 ? "keys" : "values")} are {itemType}"
             : $"the 'for' variable is {declared}, but the items are {itemType}", s);
@@ -1141,7 +1145,7 @@ public sealed partial class CodeGen {
       if (loopVars[0].Node.Kind == "WritableVar") {
         sb.Append($"{innerPad}  {CType(type)}* l_{loopVars[0].Node.Text} = &({itemCode});\n");   // for &T x in c: the place of the item (spec 6.4)
       } else {
-        sb.Append($"{innerPad}  {CType(type)} {cname} = {Convert(new Expr(itemCode, elem), type, s)};\n");
+        sb.Append($"{innerPad}  {CType(type)} {cname} = {ForConvert(new Expr(itemCode, elem), type, s)};\n");
       }
     }
     if (overMap && mapPart == null) {
@@ -1150,7 +1154,7 @@ public sealed partial class CodeGen {
       if (valueNode.Kind == "WritableVar") {
         sb.Append($"{innerPad}  {CType(valueType)}* l_{valueNode.Text} = &({ReadSlot(collection.Type, CursorValue(whole, collection.Type, position))});\n");   // spec 6.4
       } else {
-        sb.Append($"{innerPad}  {CType(valueType)} v_{valueNode.Text} = {Convert(new Expr(slotValue.Code, valueElem), valueType, s)};\n");
+        sb.Append($"{innerPad}  {CType(valueType)} v_{valueNode.Text} = {ForConvert(new Expr(slotValue.Code, valueElem), valueType, s)};\n");
       }
     }
     var before = assign.Clone();

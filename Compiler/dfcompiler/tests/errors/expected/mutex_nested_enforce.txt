@@ -1,0 +1,1 @@
+mutex_nested_enforce.df(6): error: 'counter' is already locked by an enforce around this one: a mutex is not taken again inside its own enforce (spec 20.13)

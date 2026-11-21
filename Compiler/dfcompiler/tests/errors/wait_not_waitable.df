@@ -1,0 +1,4 @@
+// wait takes a task or a time (spec 20.2)
+import Root.Tasks
+
+wait "soon" timeout 100

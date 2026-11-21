@@ -48,6 +48,9 @@ public sealed partial class CodeGen {
     foreach (string name in ExecFunctions) {
       paths.Add("Root.ExecProcess." + name);
     }
+    foreach (string name in TasksLibraryNames) {
+      paths.Add("Root.Tasks." + name);   // spec 20
+    }
     paths.UnionWith(new[] { "Root.Console.Color", "Root.Console.setColors", "Root.ExecProcess.RunResult" });
     paths.UnionWith(new[] { "Root.Alignment.type", "Root.Alignment.arch", "Root.Alignment.cache", "Root.Alignment.isAligned", "Root.Alignment.isAlignedCache" });   // spec 12.2
     return paths;
@@ -126,6 +129,7 @@ public sealed partial class CodeGen {
     AddNumberStdlib(Add);
     AddIoStdlib(Add);
     AddExecStdlib(Add);
+    AddTasksStdlib(Add);
     return table;
   }
 

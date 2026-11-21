@@ -1,0 +1,1 @@
+lib_without_tasks.dsprj: error: the library plain was built without Root.Tasks, and this program uses it (import Root.Tasks): build the library again with import Root.Tasks (spec 15.8)

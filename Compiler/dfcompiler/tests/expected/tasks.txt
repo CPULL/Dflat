@@ -1,0 +1,17 @@
+Ready
+Worker
+Task
+true
+worker 7 runs
+Completed
+caught: The task was already started
+Failed
+made Picky
+creator caught: negative
+false
+worker 8 runs
+Completed
+Completed
+worker 9 runs
+Completed
+---- exit code 0 ----

@@ -1,0 +1,15 @@
+// Task<*, i32> knows the result, not the class: its methods are not reachable (spec 20.9)
+import Root.Tasks
+
+class Counter {
+  fun i32 taskRun() { return 1 }
+  public fun i32 peek() { return 1 }
+}
+
+class Pair {
+  fun i32, string taskRun() { return 2, "two" }
+}
+
+fun use(Task<*, i32> t) {
+  i32 n = wait t.peek() timeout 100
+}

@@ -138,7 +138,14 @@ public sealed partial class CodeGen {
     ["ModifiedObjectUsedAsKeyException"] = 52,   // spec 11.2.1: the hash of a Keyable key changed (raised when Keyable is built)
     ["UnassignedTypeException"] = 53,   // spec 11.3.6.1: a type switch without default on a set value never assigned
     ["CallingGlobalDefinedAfterException"] = 54,   // spec 18.5: a call to a global that does not rank below every global lock held
-    ["ReadLockBecameWriteLockException"] = 55   // spec 18.5: the read lock of a global held, its write lock asked
+    ["ReadLockBecameWriteLockException"] = 55,   // spec 18.5: the read lock of a global held, its write lock asked
+    ["WaitTimeoutException"] = 58,   // spec 20.2: a wait ran out of time (silent)
+    ["TaskAlreadyTerminatedException"] = 59,   // spec 20.1: a wait on a task that is no more running (silent)
+    ["TaskWasNotStartedException"] = 60,   // spec 20.1: a wait on a task that was not started (silent)
+    ["CalledANotRunningTaskException"] = 61,   // spec 20.1: a call through the handle of a task that is not running
+    ["TaskAlreadyStartedException"] = 62,   // spec 20.1: a second start() of the same task
+    ["ReturnOutsideATaskException"] = 63,   // spec 20.1: return! or return? in a taskRun() that does not run as a task
+    ["WaitingWithoutTimeoutException"] = 64   // spec 20.1: a wait with no timeout from the wait, start or the constructor
   };
 
   readonly Stack<Frame> frames = new();

@@ -1,0 +1,6 @@
+// Task is in Root.Tasks: it needs import Root.Tasks (spec 20.0)
+class Worker {
+  fun taskRun() { }
+}
+
+Task t = Task(Worker)

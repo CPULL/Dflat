@@ -1,0 +1,1 @@
+task_private_call.df(14): error: 'secret' is private in Counter: through the handle the public, unrestricted and internal methods are called (spec 20.1)

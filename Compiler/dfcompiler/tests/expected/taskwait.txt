@@ -1,0 +1,24 @@
+42
+1
+2
+3
+100
+0
+aname
+3 three
+Completed
+ended
+already ended
+waiter caught: broken
+timed out
+123
+7
+7
+true
+Completed
+direct call: Return Outside A Task Exception
+not started
+no timeout: The wait has no timeout: give one to the wait, to start or to the constructor of the task
+10
+end
+---- exit code 0 ----

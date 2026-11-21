@@ -253,6 +253,10 @@ sealed partial class SourceLoader {
     order.Add(rootFile);
     ResolveNames();
 
+    // import Root.Tasks in any file turns on the multitasking runtime (spec 20.0): DF_TASKS in the generated C
+    TasksImported = order.Any(file => file.Tree.Children.Any(statement => statement.Kind == "Import"
+      && string.Equals(statement.Text, "root.tasks", StringComparison.OrdinalIgnoreCase)));
+
     // the program: the imported files first (their declarations are seen before they are used), then the root file
     var program = rootFile.Tree;
     var merged = new List<Node>();

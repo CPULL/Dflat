@@ -75,6 +75,9 @@ public sealed partial class CodeGen {
     if (needs.Contains("exec")) {
       sb.Append(RuntimeExec.Source);
     }
+    if (needs.Contains("tasks")) {
+      sb.Append(RuntimeTasks.Source);   // spec 20.1: the tasks (with DF_TASKS)
+    }
     return sb.ToString();
   }
 
@@ -499,6 +502,11 @@ public sealed partial class CodeGen {
     if (!userTypes.Contains("ExecProcess") && !userTypes.Contains("RunResult")
         && Mentions(program, node => node.Text is "ExecProcess" or "RunResult" || node.Text?.Contains("ExecProcess.") == true || node.Text?.EndsWith(".RunResult") == true)) {
       source.AppendLine(ExecPrelude);
+    }
+    // Root.Tasks (spec 20): the class Task and its enums, written in Dflat (TasksPrelude); only with import Root.Tasks
+    if (TasksMode && !userTypes.Contains("Task") && !userTypes.Contains("Thread") && Mentions(program, node => node.Text is "Task" or "Thread" or "RunStatus" or "RunKind")) {
+      source.AppendLine(TasksPrelude);
+      source.AppendLine(ThreadPrelude);   // spec 20.1 (CodeGen.Threads.cs)
     }
     // vec<T> (spec 6.8) is a generic class written in Dflat, with the collection traits (CodeGen.Vec.cs)
     if (!userTypes.Contains("vec") && !userTypes.Contains("list") && !userTypes.Contains("map") && Mentions(program, node => node.Text is "vec" or "list" or "map" or "bmap" or "hmap" or "hset" or "View" or "getIterator" or "IndexIterator" or "SetIterator" or "IndexCollection" or "MapCollection" or "SetCollection" or "Iterator"

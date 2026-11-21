@@ -1,0 +1,1 @@
+thread_not_function.df(6): error: Thread() takes a function first, then its arguments: Thread(runThis, 567) (spec 20.1)

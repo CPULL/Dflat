@@ -1,0 +1,47 @@
+// import Root.Tasks turns on the thread-safe runtime (spec 20.0, DF_TASKS): the same program gives the same results
+import Root
+import Root.Tasks
+
+class Box {
+  public i32 v
+  public Box(i32 v) { this.v = v }
+}
+
+fun i32 half(i32 n) {
+  if n % 2 != 0 {
+    throw Exception("odd")
+  }
+  return n / 2
+}
+
+fun tryHalf(i32 n) {
+  Console.log(half(n))
+  catch Exception e { Console.log($"caught: {e.message}") }
+}
+
+// strings and temporaries
+string a = "multi"
+string b = a + "tasking"
+Console.log(b.toUpper())
+Console.log($"{b} has {b.len} chars")
+
+// exceptions
+tryHalf(10)
+tryHalf(7)
+
+// a sort with a lambda
+vec<i32> numbers = vec<i32>()
+numbers.add(5)
+numbers.add(1)
+numbers.add(4)
+numbers.sort((i32 x, i32 y) { y - x })
+Console.log(numbers)
+
+// counted objects and their lock
+&@Box shared = @Box(1)
+&@Box other = shared
+enforce shared {
+  shared.v = 41
+}
+Console.log(other.v + 1)
+Console.log(shared.usersCount)

@@ -1,0 +1,88 @@
+// calls through the handle (spec 20.1): they run inside the task, at a checkpoint of its taskRun() (spec 20.8)
+import Root
+import Root.Tasks
+
+class Ticker(i32 delay) {
+  bool alive = true
+  u64 count = 0
+  fun u64 taskRun() {
+    while alive {
+      wait delay
+      count++
+      return? count
+    }
+    return count
+  }
+  public fun stop() {
+    alive = false
+  }
+  public fun u64 getCount() {
+    return count
+  }
+  public fun string describe(string prefix) {
+    return $"{prefix}: {count > 0}"
+  }
+  public fun fail() {
+    throw Exception("told to fail")
+  }
+  public fun u64 check(u64 limit) {
+    if count > limit {
+      throw Exception("over the limit")
+    }
+    return count
+  }
+}
+
+// a busy task with a bare wait in its loop: the calls are served there
+class Worker {
+  bool done = false
+  i32 steps = 0
+  fun i32 taskRun() {
+    while !done {
+      steps++
+      wait
+    }
+    return steps
+  }
+  public fun finish() {
+    done = true
+  }
+}
+
+// a method that gives a value is waited for; one that returns nothing is posted
+Task ticker = Task(Ticker, 20, timeout: 5000).start()
+Root.Time.sleep(150)
+u64 seen = wait ticker.getCount() timeout 1000
+Console.log(seen > 0)
+string text = wait ticker.describe("ticker") timeout 1000
+Console.log(text)
+
+// the exception of a waited method goes to the caller
+u64 checked = wait ticker.check(0) timeout 1000
+Console.log(checked)
+catch Exception e { Console.log($"caller caught: {e.message}") }
+
+// stop: the loop ends, the last value waits to be collected
+ticker.stop()
+u64 last = wait ticker timeout 2000
+Console.log(last > 0)
+Root.Time.sleep(100)
+Console.log(ticker.status)
+
+// a call on a task that is not running
+Task ready = Task(Ticker, 20)
+ready.stop()
+catch CalledANotRunningTaskException e { Console.log($"not running: {e.message}") }
+
+// the exception of a posted call: the task fails at its checkpoint
+Task t2 = Task(Ticker, 20, timeout: 5000).start()
+Root.Time.sleep(60)
+t2.fail()
+Root.Time.sleep(300)
+Console.log(t2.status)
+
+// a bare wait is a checkpoint
+Task w = Task(Worker, timeout: 5000).start()
+Root.Time.sleep(50)
+w.finish()
+Console.log(wait w timeout 2000 > 0)

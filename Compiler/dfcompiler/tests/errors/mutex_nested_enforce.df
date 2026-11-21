@@ -1,0 +1,9 @@
+// an enforce of a mutex inside its own enforce (spec 20.13)
+import Root.Tasks
+
+mutex i32 counter = 0 timeout 100
+enforce counter {
+  enforce counter {
+    counter++
+  }
+}

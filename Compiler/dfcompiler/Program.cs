@@ -4,7 +4,7 @@ using dfparser;
 namespace dfcompiler;
 
 public static class Program {
-  public const string Version = "0.0.189alpha";
+  public const string Version = "0.0.190alpha";
 
   // the version of the specification this compiler was built for: the variable `version` of the preprocessor (spec 19.1)
   public const string LanguageVersion = "0.0.40";
@@ -244,6 +244,7 @@ public static class Program {
         return 1;
       }
       // the root file and the files it imports (spec 16), merged into one program
+      CodeGen.TasksMode = false;   // --check-each compiles many projects in one process
       var loader = new SourceLoader(variables, projectVariables) { Target = effective, LibraryBuild = libraryBuild, LibraryBuildName = project.Name };
       bool multiFile = SourceLoader.IsMultiFile(projectFile, path);
       Node tree;
@@ -251,6 +252,12 @@ public static class Program {
         tree = loader.Load(path, multiFile, project.Includes, projectFile);
         importedLibraries = loader.ImportedLibraries;
         CodeGen.LinkedLibraries = loader.CompiledLibraries;
+        // DFLAT_FORCE_TASKS=1 (environment variable, for the tests): every program gets the multitasking runtime, to check that it changes nothing
+        CodeGen.TasksMode = loader.TasksMode || Environment.GetEnvironmentVariable("DFLAT_FORCE_TASKS") == "1";
+        if (loader.LibrariesWithoutTasks.FirstOrDefault() is CompiledLibrary withoutTasks) {
+          // spec 15.8, 20.0: a library binary built without the multitasking runtime cannot run in a program that has it
+          throw new SourceException($"{projectFile}: error: the library {withoutTasks.Name} was built without Root.Tasks, and this program uses it ({(loader.TasksImported ? "import Root.Tasks" : "a library built with Root.Tasks")}): build the library again with import Root.Tasks (spec 15.8)");
+        }
         libraryArgs.AddRange(loader.CompiledLibraries.Select(library => library.Binary));   // the binaries of the compiled Dflat libraries (spec 15.8)
         CodeGen.OtherTargetNames = loader.OtherTargetNames;
         if (loader.CLibraries.Count > 0) {
@@ -349,6 +356,9 @@ public static class Program {
         ccArgs.Insert(0, "-D_CRT_SECURE_NO_WARNINGS");
       } else {
         ccArgs.Add("-lm");
+        if (CodeGen.TasksMode) {
+          ccArgs.Add("-pthread");   // the threads of Root.Tasks (spec 20)
+        }
       }
     }
     // the system headers (windows.h above all) come from a header precompiled once for this clang and these flags: parsing them is

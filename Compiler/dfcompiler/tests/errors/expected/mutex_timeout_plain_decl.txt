@@ -1,0 +1,1 @@
+mutex_timeout_plain_decl.df(4): error: a timeout in a declaration is for a mutex: mutex i32 counter = 0 timeout 1000 (spec 20.13)

@@ -1,0 +1,15 @@
+// a plain Task does not say what its task is: Task<Counter> needs if t is Task<Counter> c (spec 20.9)
+import Root.Tasks
+
+class Counter {
+  fun i32 taskRun() { return 1 }
+  public fun i32 peek() { return 1 }
+}
+
+class Pair {
+  fun i32, string taskRun() { return 2, "two" }
+}
+
+fun use(Task t) {
+  Task<Counter> c = t
+}

@@ -1,0 +1,6 @@
+// Thread<T> says what the function gives (spec 20.1)
+import Root.Tasks
+
+fun i32 work(i32 n) { return n }
+
+Thread<string> t = Thread(work, 1)

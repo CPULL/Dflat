@@ -1,0 +1,8 @@
+// return! hands out a value: this function returns nothing (spec 20.1)
+import Root.Tasks
+
+fun i32 work(i32 n) { return n }
+
+fun tick() {
+  return! 1
+}

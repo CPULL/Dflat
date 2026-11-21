@@ -1,0 +1,12 @@
+// lib.df: a library built with the multitasking runtime (import Root.Tasks): its interface lists the runtime chunk tasks (spec 15.8)
+namespace tests.tlib
+import Root
+import Root.Tasks
+
+public fun i32 twice(i32 n) {
+  return n * 2
+}
+
+public fun string greet(string who) {
+  return "hello " + who
+}

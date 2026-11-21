@@ -1,0 +1,87 @@
+// threads (spec 20.1): a function that runs on its own; the same start, wait, returns and timeouts as a task
+import Root
+import Root.Tasks
+
+mutex i64 total = 0 timeout 5000
+
+fun lapse runThis(u32 time = 1234) {
+  return time
+}
+
+// many values: return? to whoever waits now, return! waits until it is collected
+fun u64 countDown(u32 d) {
+  u32 left = d
+  while left > 0 {
+    return! left
+    left--
+  }
+  return 0
+}
+
+fun string greet(string who) {
+  return "hello " + who
+}
+
+fun add(i32 times) {
+  i32 i = 0
+  while i < times {
+    enforce total {
+      total++
+    }
+    i++
+  }
+}
+
+fun i32 broken() {
+  throw Exception("thread broke")
+}
+
+fun u64 collect(Thread<u64> t) {
+  u64 sum = 0
+  u64 v = wait t timeout 2000
+  while v > 0 {
+    sum += v
+    v = wait t timeout 2000
+  }
+  return sum
+}
+
+// deferred start, default arguments
+Thread tr1 = Thread(runThis)
+Thread tr2 = Thread(runThis, 567)
+Console.log(tr1.status)
+Console.log(tr1.name)
+Console.log(tr1.kind)
+tr1.start()
+tr2.start()
+var res1 = wait tr1 timeout 5000
+var res2 = wait tr2 timeout 5000
+Console.log(res1)
+Console.log(res2)
+
+// a thread hands out many values
+Thread<u64> c = Thread(countDown, 4, timeout: 5000).start()
+Console.log(collect(c))
+
+// a string argument and result
+string name = "thread"
+Thread g = Thread(greet, name).start()
+string text = wait g timeout 2000
+Console.log(text)
+
+// three threads on one mutex
+Thread a1 = Thread(add, 10000).start()
+Thread a2 = Thread(add, 10000).start()
+Thread a3 = Thread(add, 10000).start()
+wait a1 timeout 10000
+wait a2 timeout 10000
+wait a3 timeout 10000
+enforce total {
+  Console.log(total)
+}
+
+// the exception that ends the thread goes to the waiter
+Thread b = Thread(broken).start()
+i32 r = wait b timeout 2000
+Console.log(r)
+catch Exception e { Console.log($"waiter caught: {e.message}") }

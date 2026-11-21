@@ -314,6 +314,9 @@ public sealed class Parser {
            // global Cache cache = Cache(1) (spec 18.1): global is a modifier only before a type and a name, so it is not a reserved word
            || Peek.Kind == TokenKind.Ident && Peek.Text == "global" && PeekAt(1).Kind is TokenKind.Ident or TokenKind.Keyword && PeekAt(1).Line == Peek.Line
               && (PeekAt(2).Kind == TokenKind.Ident || PeekAt(2).Is("<"))
+           // mutex i32 counter = 0 timeout 1000 (spec 20.13): a modifier only before a type and a name
+           || Peek.Kind == TokenKind.Ident && Peek.Text == "mutex" && PeekAt(1).Kind is TokenKind.Ident or TokenKind.Keyword && PeekAt(1).Line == Peek.Line
+              && (PeekAt(2).Kind == TokenKind.Ident || PeekAt(2).Is("<"))
            || Peek.Kind == TokenKind.Ident && Peek.Text == "notclonable" && PeekAt(1).Kind == TokenKind.Keyword && PeekAt(1).Text == "class"   // spec 11.1, 12.6
            // unsafe fun f(), unsafe class Device (spec 12.1): a modifier only before a keyword, so it is not a reserved word
            || Peek.Kind == TokenKind.Ident && Peek.Text == "unsafe" && PeekAt(1).Kind == TokenKind.Keyword) {
@@ -380,6 +383,14 @@ public sealed class Parser {
 
   Node ParseStatementCore(string? ownerName, bool caseBody) {
     classMember = ownerName != null;   // a field of a class can have accessor blocks (spec 11.1.4)
+    if (Peek.Kind == TokenKind.Ident && Peek.Text == "wait" && PeekAt(1).Line == Peek.Line
+        && PeekAt(1).Kind is TokenKind.Ident or TokenKind.Int or TokenKind.Real or TokenKind.String && !PeekAt(2).Is("=")) {
+      // wait delay, wait t timeout 500 (spec 20.2): a wait, not the declaration of a variable delay of a type wait
+      var start = Peek;
+      var waitStatement = new Node("ExprStmt", start).Add(ParseExpr());
+      EndStatement(caseBody);
+      return waitStatement;
+    }
     if (ownerName == null && Peek.Kind == TokenKind.Ident && Peek.Text == "atLibStart" && PeekAt(1).Is("{")) {
       var start = Next();
       return new Node("AtLibStart", start).Add(ParseBlock());   // the startup code of a library, in lib.df (spec 15.8)
@@ -498,6 +509,13 @@ public sealed class Parser {
           }
           break;   // enforce <expression> as a statement (spec 7.2.6): ParseSimple reads it
       }
+    }
+    if (Peek.Kind == TokenKind.Ident && Peek.Text == "wait" && (PeekAt(1).Line != Peek.Line || PeekAt(1).Kind is TokenKind.Newline or TokenKind.Eof
+        || PeekAt(1).Kind == TokenKind.Op && PeekAt(1).Text is "}" or ";")) {
+      // a bare wait (spec 20.8): a checkpoint, it does not stop
+      var bare = new Node("Wait", Next());
+      EndStatement(caseBody);
+      return bare;
     }
     var simple = ParseSimple(!caseBody);
     EndStatement(caseBody);
@@ -981,9 +999,27 @@ public sealed class Parser {
     return new Node("Continue", t);
   }
 
+  // the value after timeout (enforce p timeout n, @T() timeout n, wait t timeout n): a time, never a wait, so a variable named wait
+  // stays a name there (enforce timeout wait player.bump(2))
+  bool inTimeout;
+
+  Node ParseTimeoutOperand() {
+    bool saved = inTimeout;
+    inTimeout = true;
+    try {
+      return ParseUnary();
+    } finally {
+      inTimeout = saved;
+    }
+  }
+
   Node ParseReturn(bool caseBody) {
     var t = Next();
     var node = new Node("Return", t);
+    // return! val and return? val (spec 20.1): the mark is written against return; return !flag is a negation
+    if (Peek.Kind == TokenKind.Op && Peek.Text is "!" or "?" && Peek.Line == t.Line && Peek.Col == t.Col + t.Text.Length) {
+      node = new Node(Next().Text == "!" ? "ReturnHold" : "ReturnPost", t);
+    }
     bool empty = IsNewline || IsOp(";") || IsOp("}") || AtEnd || (caseBody && IsOp(","));
     if (!empty) {
       node.Add(ParseExpr());
@@ -1065,7 +1101,7 @@ public sealed class Parser {
         var word = Next();
         bool savedBrace = noBrace;
         noBrace = true;
-        name.Add(new Node("Timeout", word).Add(ParseUnary()));
+        name.Add(new Node("Timeout", word).Add(ParseTimeoutOperand()));
         noBrace = savedBrace;
       }
       node.Add(name);
@@ -1166,6 +1202,10 @@ public sealed class Parser {
         var op = Next();
         SkipNewlines();
         first.Add(new Node("Init", op).Add(ParseExpr()));
+      }
+      if (Peek.Kind == TokenKind.Ident && Peek.Text == "timeout" && pos > 0 && Peek.Line == toks[pos - 1].Line) {
+        // mutex i32 counter = 0 timeout 1000 (spec 20.13)
+        first.Add(new Node("Timeout", Next()).Add(ParseTimeoutOperand()));
       }
       return first;
     }
@@ -1344,6 +1384,10 @@ public sealed class Parser {
 
   // vec<4, i16> | Grid<Width * Height, Cell>: a type argument may be a count or a value expression
   Node ParseTypeArg() {
+    if (IsOp("*") && (PeekAt(1).Is(",") || PeekAt(1).Is(">"))) {
+      // Task<*, i32>: any class (spec 20.9); a pointer is *T, with its type after the star
+      return new Node("AnyClass", Next(), "*");
+    }
     if (Peek.Kind == TokenKind.Int && (PeekAt(1).Is(",") || PeekAt(1).Is(">"))) {
       var n = Next();
       return new Node("Count", n, n.Text);
@@ -2331,7 +2375,7 @@ public sealed class Parser {
           Next();
           var countedOf = new Node("CountedOf", t).Add(ParseUnary());   // @Dog(), @plain (spec 12.7)
           if (Peek.Kind == TokenKind.Ident && Peek.Text == "timeout" && Peek.Line == t.Line) {
-            countedOf.Add(new Node("Timeout", Next()).Add(ParseUnary()));   // @Player() timeout 100: the default wait for its lock (spec 12.7)
+            countedOf.Add(new Node("Timeout", Next()).Add(ParseTimeoutOperand()));   // @Player() timeout 100: the default wait for its lock (spec 12.7)
           }
           return countedOf;
         case "_":
@@ -2530,6 +2574,17 @@ public sealed class Parser {
         Next();
         return new Node("Char", t, t.Text);
       case TokenKind.Ident:
+        if (t.Text == "wait" && !inTimeout && PeekAt(1).Line == t.Line && (PeekAt(1).Kind is TokenKind.Ident or TokenKind.Int or TokenKind.Real or TokenKind.String
+            || PeekAt(1).Kind == TokenKind.Keyword && PeekAt(1).Text is "this")) {
+          // wait <target> [timeout <expr>] (spec 20.2): wait is a word here, not a keyword; wait(...) stays a call
+          Next();
+          var waited = new Node("Wait", t).Add(ParseUnary());
+          if (Peek.Kind == TokenKind.Ident && Peek.Text == "timeout" && Peek.Line == t.Line) {
+            var word = Next();
+            waited.Add(new Node("Timeout", word).Add(ParseTimeoutOperand()));
+          }
+          return waited;
+        }
         Next();
         return new Node("Name", t, t.Text);
       case TokenKind.Keyword:
@@ -2540,7 +2595,7 @@ public sealed class Parser {
           if (Peek.Kind == TokenKind.Ident && Peek.Text == "timeout" && PeekAt(1).Kind is TokenKind.Int or TokenKind.Ident) {
             // enforce timeout 500 player.health(): one wait for every lock of the expression (spec 7.2.6)
             var word = Next();
-            sharedTimeout = new Node("Timeout", word, "shared").Add(ParseUnary());
+            sharedTimeout = new Node("Timeout", word, "shared").Add(ParseTimeoutOperand());
           }
           var enforced = new Node("EnforceExpr", t).Add(ParseExpr());
           ParseEnforceClauses(enforced);

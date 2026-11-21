@@ -1,0 +1,180 @@
+// wait (spec 20.2) and the three forms of return in taskRun() (spec 20.1)
+import Root
+import Root.Tasks
+
+class Doubler(i32 n) {
+  fun i32 taskRun() {
+    return n * 2
+  }
+}
+
+// return! hands out a value and waits until it is collected
+class Ticker(i32 count) {
+  fun i32 taskRun() {
+    i32 i = 0
+    while i < count {
+      i++
+      return! i
+    }
+    return 100
+  }
+}
+
+class Namer {
+  fun ->string taskRun() {
+    return "a" + "name"
+  }
+}
+
+class Pair {
+  fun i32, string taskRun() {
+    return 3, "three"
+  }
+}
+
+class Quiet {
+  fun taskRun() {
+    Root.Time.sleep(100)
+  }
+}
+
+class Breaker {
+  fun i32 taskRun() {
+    throw Exception("broken")
+  }
+}
+
+class Slow {
+  fun i32 taskRun() {
+    Root.Time.sleep(500)
+    return 7
+  }
+}
+
+// return? gives a value to whoever waits now, and goes on
+class Poster(i32 count) {
+  fun i32 taskRun() {
+    i32 i = 0
+    while i < count {
+      i++
+      return? i
+      Root.Time.sleep(30)
+    }
+    return -1
+  }
+}
+
+class Holder {
+  public fun ->string taskRun() {
+    return! "first"
+    return "last"
+  }
+}
+
+fun timedOut() {
+  Task a = Task(Slow).start()
+  i32 v = wait a timeout 50
+  Console.log(v)
+  catch WaitTimeoutException { Console.log("timed out") }
+}
+
+fun voidTwice() {
+  Task q = Task(Quiet).start()
+  wait q timeout 2000
+  Console.log("ended")
+  wait q timeout 2000
+  catch TaskAlreadyTerminatedException { Console.log("already ended") }
+}
+
+fun direct() {
+  Holder h = Holder()
+  string got = h.taskRun()
+  Console.log(got)
+  catch ReturnOutsideATaskException e { Console.log($"direct call: {e.message}") }
+}
+
+fun neverStarted() {
+  Task n = Task(Quiet)
+  wait n timeout 50
+  catch TaskWasNotStartedException { Console.log("not started") }
+}
+
+// no timeout from the wait, start or the constructor: a real exception
+fun noTimeout() {
+  Task z = Task(Slow).start()
+  i32 v = wait z
+  Console.log(v)
+  catch WaitingWithoutTimeoutException e { Console.log($"no timeout: {e.message}") }
+}
+
+fun failed() {
+  Task b = Task(Breaker).start()
+  i32 r = wait b timeout 2000
+  Console.log(r)
+  catch Exception e { Console.log($"waiter caught: {e.message}") }
+}
+
+// the result of taskRun()
+Task d = Task(Doubler, 21).start()
+var x = wait d timeout 2000
+Console.log(x)
+
+// many values, one at a time; then the task has ended: zero
+Task t = Task(Ticker, 3, timeout: 5000).start()
+Console.log(wait t timeout 2000)
+Console.log(wait t timeout 2000)
+Console.log(wait t timeout 2000)
+Console.log(wait t timeout 2000)
+Console.log(wait t timeout 300)
+
+// a string and several results
+Task nm = Task(Namer).start()
+string s = wait nm timeout 2000
+Console.log(s)
+Task pr = Task(Pair).start()
+i32 count, string name = wait pr timeout 2000
+Console.log($"{count} {name}")
+
+// a void task: wait is for its end
+Task q = Task(Quiet).start()
+wait q timeout 2000
+Console.log(q.status)
+voidTwice()
+
+// the exception that ended the task goes to the waiter
+failed()
+
+timedOut()
+
+// enforce: the value for a timeout
+Task a2 = Task(Slow).start()
+var w = enforce wait a2 timeout 50 default { 123 }
+Console.log(w)
+
+// the timeout of the task when the wait has none (constructor < start < wait)
+Task a3 = Task(Slow, timeout: 5000).start()
+Console.log(wait a3)
+Task a4 = Task(Slow).start(timeout: 5000)
+Console.log(wait a4)
+
+// return?: the values nobody waits for are dropped
+Task p = Task(Poster, 5).start()
+Root.Time.sleep(80)
+Console.log(wait p timeout 2000 > 0)
+
+// return! and return that nobody collects in time (the timeout of the task): dropped
+Task h = Task(Holder, timeout: 50).start()
+Root.Time.sleep(1000)
+Console.log(h.status)
+
+direct()
+neverStarted()
+noTimeout()
+
+// created, started and waited for on one line
+i32 y = wait Task(Doubler, 5).start() timeout 2000
+Console.log(y)
+
+// a timed wait
+wait 20
+Console.log("end")

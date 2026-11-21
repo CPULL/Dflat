@@ -1,0 +1,13 @@
+DFI {
+ compiler: 0.0.190alpha
+ library: tlib
+ namespace: tests.tlib
+ runtime: tasks
+ stdlib: 
+}
+namespace tests.tlib
+public fun i32 twice(i32 n) -> f_tlib_twice
+public fun ->string greet(string who) -> f_tlib_greet
+ids -> df_libids_tlib
+atLibStart -> df_libstart_tlib
+atEnd -> df_libend_tlib

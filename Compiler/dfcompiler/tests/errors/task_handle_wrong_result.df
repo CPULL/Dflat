@@ -1,0 +1,13 @@
+// the results written after the class must be the ones of its taskRun() (spec 20.9)
+import Root.Tasks
+
+class Counter {
+  fun i32 taskRun() { return 1 }
+  public fun i32 peek() { return 1 }
+}
+
+class Pair {
+  fun i32, string taskRun() { return 2, "two" }
+}
+
+Task<Counter, string> t = Task(Counter)

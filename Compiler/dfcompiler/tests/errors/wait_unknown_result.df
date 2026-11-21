@@ -1,0 +1,6 @@
+// a plain Task parameter: its result type is not known, wait gives no value (spec 20.9)
+import Root.Tasks
+
+fun check(Task t) {
+  var x = wait t timeout 100
+}

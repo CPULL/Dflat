@@ -1,0 +1,1 @@
+return_hold_outside.df(6): error: return! hands out a value of a task or a thread: it is written in taskRun() or in a function run by Thread() (spec 20.1)

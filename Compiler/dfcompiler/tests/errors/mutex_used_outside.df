@@ -1,0 +1,5 @@
+// a mutex is used only inside its enforce (spec 20.13)
+import Root.Tasks
+
+mutex i32 counter = 0 timeout 100
+counter++

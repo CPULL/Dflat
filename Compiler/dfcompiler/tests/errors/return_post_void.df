@@ -1,0 +1,8 @@
+// return? in a taskRun() that returns nothing (spec 20.1)
+import Root.Tasks
+
+class Worker {
+  fun taskRun() {
+    return? 1
+  }
+}

@@ -1,0 +1,7 @@
+namespace app
+import Root
+import Root.Tasks
+import lib plain
+import tests.plain
+
+Console.log(one())

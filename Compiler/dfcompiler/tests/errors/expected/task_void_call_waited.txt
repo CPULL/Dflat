@@ -1,0 +1,1 @@
+task_void_call_waited.df(14): error: reset() returns nothing: it is posted, without wait (spec 20.1)

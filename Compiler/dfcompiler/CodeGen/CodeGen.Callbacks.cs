@@ -22,6 +22,10 @@ public sealed partial class CodeGen {
   // the compiled Dflat libraries the program links (spec 15.8, Dfi.cs): the runtime chunks and the stdlib parts they need are in the program
   internal static IReadOnlyList<CompiledLibrary> LinkedLibraries { get; set; } = new List<CompiledLibrary>();
 
+  // the multitasking runtime (spec 20.0): the program imports Root.Tasks or links a library built with it. The runtime chunk "tasks"
+  // defines DF_TASKS in the generated C, and a library build lists it in its interface
+  public static bool TasksMode { get; set; }
+
   // the stdlib written in Dflat goes with the runtime (spec 15.8): its functions (the copies of its generics included) and the records of
   // its classes are defined in the program and only declared in a compiled library. Its lambdas and pure helpers (printers, vtables, array
   // helpers) stay in each unit: their names are numbered in the unit, or they hold no state

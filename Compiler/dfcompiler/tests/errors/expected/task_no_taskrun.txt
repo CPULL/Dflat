@@ -1,0 +1,1 @@
+task_no_taskrun.df(6): error: Plain has no taskRun(): a class becomes a task with its function taskRun() (spec 20.1)

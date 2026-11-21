@@ -1,0 +1,6 @@
+// a thread has no class: Thread<*, ...> is for tasks (spec 20.1)
+import Root.Tasks
+
+fun i32 work(i32 n) { return n }
+
+Thread<*, i32> t = Thread(work, 1)

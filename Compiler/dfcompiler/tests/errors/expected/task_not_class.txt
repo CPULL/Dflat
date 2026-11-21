@@ -1,0 +1,1 @@
+task_not_class.df(4): error: Task() takes the class of the task first, then the arguments of its constructor: Task(MyTask, 123) (spec 20.1)

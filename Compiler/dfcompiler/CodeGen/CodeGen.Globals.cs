@@ -223,13 +223,15 @@ public sealed partial class CodeGen {
     return false;
   }
 
-  // the C of the locks: a lock per global with its rank, the list of the locks this thread holds (one list: no threads yet)
+  // the C of the locks: a lock per global with its rank, the list of the locks each thread holds (with tasks, DF_TASKS, a busy lock is
+  // waited for; without them a lock the thread does not hold is always free)
   string GlobalsRuntimeCode() {
     var sb = new StringBuilder();
-    sb.Append("/* globals (spec 18): a read/write lock per global, the locks held by the thread (one list: no threads yet) */\n");
+    sb.Append("/* globals (spec 18): a read/write lock per global, the locks held by the thread */\n");
     sb.Append("typedef struct { int32_t rank; int32_t readers; bool writer; } df_glock;\n");
     sb.Append("typedef struct { df_glock* lock; bool write; bool taken; } df_gl_hold;\n");
-    sb.Append("static df_gl_hold* df_gl_held = NULL;\nstatic size_t df_gl_depth = 0;\nstatic size_t df_gl_cap = 0;\n");
+    sb.Append("static DF_TLS df_gl_hold* df_gl_held = NULL;\nstatic DF_TLS size_t df_gl_depth = 0;\nstatic DF_TLS size_t df_gl_cap = 0;\n");
+    sb.Append("#ifdef DF_TASKS\nstatic df_mutex df_gl_state = DF_MUTEX_INIT;   /* guards the readers and writer of every lock of this unit */\n#endif\n");
     sb.Append("typedef struct { void** object; df_glock lock; } df_gl_entry;\n");
     sb.Append($"static df_gl_entry df_gl_table[{globalOrder.Count}] = {{");
     sb.Append(string.Join(",", globalOrder.Select(global => $" {{ (void**)&{global.CName}, {{ {global.Rank}, 0, false }} }}")));
@@ -281,23 +283,45 @@ static bool df_gl_enter(df_glock* lock, bool write, const char* function) {
       return false;
     }
   }
-  /* no threads yet: a lock this thread does not hold is free */
+#ifdef DF_TASKS
+  /* another thread can hold it: wait until it is free (a writer alone, readers together) */
+  for (;;) {
+    DF_LOCK(df_gl_state);
+    bool free_now = write ? !lock->writer && lock->readers == 0 : !lock->writer;
+    if (free_now) {
+      if (write) {
+        lock->writer = true;
+      } else {
+        lock->readers++;
+      }
+    }
+    DF_UNLOCK(df_gl_state);
+    if (free_now) {
+      break;
+    }
+    df_thread_yield();
+  }
+#else
+  /* one thread: a lock this thread does not hold is free */
   if (write) {
     lock->writer = true;
   } else {
     lock->readers++;
   }
+#endif
   df_gl_push(lock, write, true);
   return true;
 }
 static void df_gl_exit(void) {
   df_gl_hold hold = df_gl_held[--df_gl_depth];
   if (hold.taken) {
+    DF_LOCK(df_gl_state);
     if (hold.write) {
       hold.lock->writer = false;
     } else {
       hold.lock->readers--;
     }
+    DF_UNLOCK(df_gl_state);
   }
 }
 ");

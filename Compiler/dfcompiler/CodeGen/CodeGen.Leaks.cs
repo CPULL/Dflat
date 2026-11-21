@@ -147,6 +147,21 @@ public sealed partial class CodeGen {
       case "Throw":
         FlowThrow(node, ctx);
         break;
+      case "Return" or "Enforce" when !ctx.InCatchBody && TasksMode && currentFlowFun is { Class: not null, IsStatic: false } flowRun
+          && flowRun.Name.Split('.')[^1] == "taskRun" && flowRun.Params.Count == 0:
+        ctx.Flow.Raises.Add((AnyException, ctx.Cover));   // a checkpoint of taskRun(): the exception of a posted call (spec 20.1)
+        break;
+      case "ReturnHold":
+      case "ReturnPost":
+        if (!ctx.InCatchBody) {
+          ctx.Flow.Raises.Add((StandardExceptions["ReturnOutsideATaskException"], ctx.Cover));   // a direct call of taskRun() (spec 20.1)
+        }
+        break;
+      case "Wait":
+        if (!ctx.InCatchBody) {
+          ctx.Flow.Raises.Add((AnyException, ctx.Cover));   // the exception that ended the task, given to its waiter (spec 20.2)
+        }
+        break;
       case "Binary":
         if (!ctx.InCatchBody && node.Text is "/" or "%") {
           ctx.Flow.Raises.Add((StandardExceptions["DivisionByZeroException"], ctx.Cover));
@@ -196,6 +211,11 @@ public sealed partial class CodeGen {
           }
           if (node.Children[0] is { Kind: "Member" } method && FlowWritesThroughLock(method, currentFlowFun) && FlowMethodNeedsLock(method.Text!)) {
             ctx.Flow.Raises.Add((StandardExceptions["WritingOnRefCountWithoutLockingException"], ctx.Cover));   // a method through a &@T (spec 12.7)
+          }
+          if (node.Children[0] is { Kind: "Member" } handleCall && IsTaskMethodName(handleCall.Text!)) {
+            // a call through the handle of a task (spec 20.1): the task may not run; a waited call gives the exception of the method
+            ctx.Flow.Raises.Add((StandardExceptions["CalledANotRunningTaskException"], ctx.Cover));
+            ctx.Flow.Raises.Add((AnyException, ctx.Cover));
           }
           if (node.Children[0] is { Kind: "Member", Text: "tryClone" }) {
             ctx.Flow.Raises.Add((StandardExceptions["ObjectNotClonableException"], ctx.Cover));   // spec 12.6

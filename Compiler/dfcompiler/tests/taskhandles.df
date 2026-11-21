@@ -1,0 +1,65 @@
+// typed Task handles (spec 20.9): Task<MyTask>, Task<MyTask, results>, Task<*, results>, and if t is Task<...> name { }
+import Root
+import Root.Tasks
+
+class Counter {
+  i32 n = 5
+  fun i32 taskRun() {
+    wait 30
+    return n
+  }
+  public fun i32 peek() { return n }
+}
+
+// a child class is a task of its parent's kind
+class Bigger : Counter {
+}
+
+class Pair {
+  fun i32, string taskRun() {
+    return 2, "two"
+  }
+}
+
+// Task<Counter>: the methods and the result of Counter
+fun i32 collect(Task<Counter> t) {
+  i32 peeked = wait t.peek() timeout 1000
+  return peeked + wait t timeout 1000
+}
+
+// Task<*, i32>: any task that gives an i32
+fun i32 anyInt(Task<*, i32> t) {
+  return wait t timeout 1000
+}
+
+// a plain Task knows nothing: it is checked
+fun check(Task t) {
+  if t is Task<Counter> c {
+    Console.log($"a counter: {wait c timeout 1000}")
+  } else {
+    Console.log("not a counter")
+  }
+}
+
+fun checkResult(Task t) {
+  if t is Task<*, i32, string> p {
+    i32 a, string b = wait p timeout 1000
+    Console.log($"pair {a} {b}")
+  } else {
+    Console.log("not a pair")
+  }
+}
+
+Task<Counter> a = Task(Counter).start()
+Console.log(collect(a))
+Task<Counter> b = Task(Bigger).start()
+Console.log(anyInt(b))
+Task<Counter, i32> c = Task(Counter).start()
+Console.log(wait c timeout 1000)
+Task<*, i32, string> d = Task(Pair).start()
+i32 x, string y = wait d timeout 1000
+Console.log($"{x} {y}")
+check(Task(Counter).start())
+check(Task(Pair).start())
+checkResult(Task(Pair).start())
+checkResult(Task(Counter).start())

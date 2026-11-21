@@ -1,0 +1,1 @@
+mutex_no_timeout.df(4): error: a mutex needs its timeout, in milliseconds above 0: mutex i32 counter = 0 timeout 1000 (spec 20.13)

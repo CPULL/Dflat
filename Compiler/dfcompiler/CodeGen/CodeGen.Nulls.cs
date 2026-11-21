@@ -282,7 +282,7 @@ public sealed partial class CodeGen {
     var elseNode = s.Children.FirstOrDefault(child => child.Kind == "Else");
     var names = s.Children.Where(child => child.Kind == "Name").ToList();
     var checks = new List<(string Name, string Condition, bool Lock)>();
-    var locks = new List<(string Flag, string Held)>();
+    var locks = new List<(string Flag, string Unlock)>();
     var locked = new HashSet<string>();
     void AddLock(Node name, string blockCode) {
       // the lock of a read/write object (spec 7.2.2): the timeout written for this variable, or the default of the object (-1)
@@ -298,12 +298,34 @@ public sealed partial class CodeGen {
         ms = wait.Code;
       }
       checks.Add((name.Text!, $"({flag} = df_rc_lock({held} = {blockCode}, (int64_t)({ms})))", true));
-      locks.Add((flag, held));
+      locks.Add((flag, $"df_rc_unlock({held})"));
       locked.Add(name.Text!);
     }
     var unwrapped = new Scope(scope);
     var heldNow = new List<string>();   // the locks this enforce holds while its block runs (a &@string is read there, spec 12.7)
+    var mutexesHere = new List<string>();
     foreach (var name in names) {
+      if (MutexLockOf(name, scope) is string mutexLock) {
+        // a mutex (spec 20.13): its lock, the timeout of the enforce or else the one of the mutex (-1)
+        if (activeMutexes.Contains(mutexLock) || mutexesHere.Contains(mutexLock)) {
+          throw Error($"'{name.Text}' is already locked by an enforce around this one: a mutex is not taken again inside its own enforce (spec 20.13)", name);
+        }
+        string mutexFlag = "df_lk" + NewTemp();
+        fn!.Decls.Append($"  bool {mutexFlag} = false;\n  (void){mutexFlag};\n");
+        string mutexMs = "-1";
+        if (name.Children.FirstOrDefault(child => child.Kind == "Timeout") is Node mutexTimeout) {
+          var wait = ExprOf(mutexTimeout.Children[0], scope, "i64");
+          if (!IsInt(wait.Type)) {
+            throw Error($"timeout takes a whole number of milliseconds, not {wait.Type}", mutexTimeout);
+          }
+          mutexMs = wait.Code;
+        }
+        checks.Add((name.Text!, $"({mutexFlag} = df_mtx_lock(&{mutexLock}, (int64_t)({mutexMs})))", true));
+        locks.Add((mutexFlag, $"df_mtx_unlock(&{mutexLock})"));
+        locked.Add(name.Text!);
+        mutexesHere.Add(mutexLock);
+        continue;
+      }
       var variable = scope.Find(name.Text!);
       if (WeakRef(name, scope) is CountedRefInfo weak) {
         // a weak reference (spec 12.7): the object must still be alive; inside the block the name is a temporary usage, read/write for a &%T,
@@ -349,7 +371,7 @@ public sealed partial class CodeGen {
     if (locks.Count > 0) {
       // the locks end at the very end, after the atEnd clauses and default, on every way out (7.2.5)
       var unlock = Synthetic("Block", block).Add(Synthetic("RawC", block,
-        string.Join(" ", locks.Select(l => $"if ({l.Flag}) {{ {l.Flag} = false; df_rc_unlock({l.Held}); }}"))));
+        string.Join(" ", locks.Select(l => $"if ({l.Flag}) {{ {l.Flag} = false; {l.Unlock}; }}"))));
       var guarded = Synthetic("Block", block).Add(Synthetic("AtEnd", block, "drop").Add(unlock));
       guarded.Children.AddRange(block.Children);
       block = guarded;
@@ -398,15 +420,17 @@ public sealed partial class CodeGen {
     foreach (var (flag, _) in locks) {
       sb.Append($"{pad}{flag} = false;\n");
     }
-    string releaseLocks = string.Join(" ", locks.Select(l => $"if ({l.Flag}) {{ df_rc_unlock({l.Held}); }}"));   // a failed check: the locks taken end
+    string releaseLocks = string.Join(" ", locks.Select(l => $"if ({l.Flag}) {{ {l.Unlock}; }}"));   // a failed check: the locks taken end
     sb.Append($"{pad}if ({(checks.Count == 0 ? "1" : string.Join(" && ", checks.Select(check => check.Condition)))}) {{\n");
     var before = assign.Clone();
     var addedLocks = heldNow.Where(heldLocks.Add).ToList();
+    activeMutexes.UnionWith(mutexesHere);   // the mutexes are used inside the block (spec 20.13)
     try {
       EmitBlock(block, sb, unwrapped, indent + 1);
     } finally {
       enforceSource = savedSource;
       heldLocks.ExceptWith(addedLocks);
+      activeMutexes.ExceptWith(mutexesHere);
     }
     var states = new List<AssignState> { assign };
     sb.Append(pad).Append('}');

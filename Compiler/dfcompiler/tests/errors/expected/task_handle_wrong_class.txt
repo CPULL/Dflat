@@ -1,0 +1,1 @@
+task_handle_wrong_class.df(13): error: this is not a task of Counter (spec 20.9)

@@ -1,0 +1,1 @@
+mutex_used_outside.df(5): error: 'counter' is a mutex: it is used only inside enforce counter { } (spec 20.13)

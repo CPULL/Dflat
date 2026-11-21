@@ -1,0 +1,8 @@
+// no import Root.Tasks here: the library pulls the runtime in, and the program links with it
+namespace app
+import Root
+import lib tlib
+import tests.tlib
+
+Console.log(twice(21))
+Console.log(greet("tasks"))

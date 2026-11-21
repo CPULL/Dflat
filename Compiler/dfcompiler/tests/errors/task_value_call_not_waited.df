@@ -1,0 +1,14 @@
+// a method that gives a value is waited for (spec 20.1)
+import Root.Tasks
+
+class Counter {
+  u64 count = 0
+  public u64 shown = 0
+  fun taskRun() { wait 10 }
+  public fun u64 getCount() { return count }
+  public fun reset() { count = 0 }
+  fun secret() { }
+}
+
+Task t = Task(Counter, timeout: 1000).start()
+u64 n = t.getCount()

@@ -1,0 +1,1 @@
+task_handle_star_alone.df(13): error: Task<*> says nothing: write Task, or the results after the star, Task<*, i32> (spec 20.9)

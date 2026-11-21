@@ -442,7 +442,7 @@ static uint64_t df_nf_cps(const char* p, uint64_t n) {
 }
 
 static void df_nf_groups(df_sb* body, const df_nf* f, const char* ip, int il) {
-  static uint32_t cuts[DF_NF_MAXDIG + 8];
+  static DF_TLS uint32_t cuts[DF_NF_MAXDIG + 8];
   memset(cuts, 0, sizeof(uint32_t) * (size_t)(il + 1));
   if (f->ng > 0) {
     int pos = f->gl2r ? 0 : il;
@@ -464,9 +464,9 @@ static void df_nf_groups(df_sb* body, const df_nf* f, const char* ip, int il) {
 }
 
 static df_string df_nf_render(const df_nf* f, df_nv* v) {
-  static char digs[DF_NF_MAXDIG];
-  static char ip[DF_NF_MAXDIG + 8];
-  static char fp[DF_NF_MAXDIG + 8];
+  static DF_TLS char digs[DF_NF_MAXDIG];
+  static DF_TLS char ip[DF_NF_MAXDIG + 8];
+  static DF_TLS char fp[DF_NF_MAXDIG + 8];
   df_sb body = { 0 };
   df_sb out = { 0 };
   int fl = 0;

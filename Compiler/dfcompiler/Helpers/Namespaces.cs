@@ -464,7 +464,11 @@ sealed partial class SourceLoader {
   }
 
   // the namespaces of the stdlib; Console, Math, Random, ExecProcess ... are classes of Root, so importing them gives one name (spec 16.2)
-  static readonly HashSet<string> StdNamespaces = new() { "root", "root.io" };
+  // Root.Tasks (spec 20): importing it turns on the multitasking runtime (SourceLoader.TasksImported)
+  static readonly HashSet<string> StdNamespaces = new() { "root", "root.io", "root.tasks" };
+
+  // the names directly inside a stdlib namespace; none yet for a namespace whose declarations are not written (Root.Tasks)
+  static Dictionary<string, string> StdNames(string ns) => StdChildren.TryGetValue(ns, out var names) ? names : new Dictionary<string, string>();
 
   // the stdlib namespaces a file imports: import Root, import Root.IO ...
   static List<string> StdImports(SourceFile file) =>
@@ -483,7 +487,7 @@ sealed partial class SourceLoader {
       string parent = path[..dot].ToLowerInvariant();
       string name = path[(dot + 1)..];
       if (!StdNamespaces.Contains(parent) || !StdChildren.TryGetValue(parent, out var names) || !names.TryGetValue(name, out var written)) {
-        throw new CompileException($"'{path}' is not a namespace or a name of the standard library: import Root, Root.IO, or one name of them (Root.Console, Root.IO.File)", statement.Line);
+        throw new CompileException($"'{path}' is not a namespace or a name of the standard library: import Root, Root.IO, Root.Tasks, or one name of them (Root.Console, Root.IO.File)", statement.Line);
       }
       found.Add((name, written));
     }
@@ -495,7 +499,7 @@ sealed partial class SourceLoader {
     if (nsAliases.ContainsKey(name) || name == "Root") {
       return null;
     }
-    var found = StdImports(scope.File).Where(ns => StdChildren[ns].ContainsKey(name)).Select(ns => StdChildren[ns][name])
+    var found = StdImports(scope.File).Where(ns => StdNames(ns).ContainsKey(name)).Select(ns => StdNames(ns)[name])
       .Concat(StdSingleImports(scope.File).Where(single => single.Name == name).Select(single => single.Ns)).Distinct().ToList();
     if (found.Count > 1) {
       throw new CompileException($"'{name}' is in the imported namespaces {string.Join(" and ", found)}: write which one ({string.Join(" or ", found.Select(ns => ns + "." + name))})", line);
@@ -517,7 +521,7 @@ sealed partial class SourceLoader {
     if (StdlibNamespace(name.Text!, scope, name.Line) is not string ns) {
       return;
     }
-    if (ns is "Root.IO" or "Root.ExecProcess" && char.IsUpper(name.Text![0])) {
+    if (ns is "Root.IO" or "Root.ExecProcess" or "Root.Tasks" && char.IsUpper(name.Text![0])) {
       return;
     }
     var token = new Token(TokenKind.Ident, name.Text!, name.Line, 0);
@@ -535,7 +539,7 @@ sealed partial class SourceLoader {
     if (scope.IsBound(first) || nsDecls.ContainsKey(first) || StdlibNamespace(first, scope, type.Line) is not string ns) {
       return;
     }
-    if (ns is "Root.IO" or "Root.ExecProcess" && char.IsUpper(first[0])) {
+    if (ns is "Root.IO" or "Root.ExecProcess" or "Root.Tasks" && char.IsUpper(first[0])) {
       return;
     }
     type.Text = ns + "." + type.Text;

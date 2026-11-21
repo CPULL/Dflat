@@ -1,0 +1,1 @@
+thread_wrong_result.df(6): error: this gives i32, not string (spec 20.9)

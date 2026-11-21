@@ -1,0 +1,1 @@
+task_field_through_handle.df(14): error: 'shown' is a field of Counter: fields are never reached through the handle, only methods (spec 20.1)

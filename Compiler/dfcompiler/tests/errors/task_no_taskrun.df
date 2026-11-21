@@ -1,0 +1,6 @@
+// a class becomes a task with its taskRun() (spec 20.1)
+import Root.Tasks
+
+class Plain { }
+
+Task t = Task(Plain)

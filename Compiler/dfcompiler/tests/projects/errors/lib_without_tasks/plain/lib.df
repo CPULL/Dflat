@@ -1,0 +1,7 @@
+// lib.df: a library built without Root.Tasks
+namespace tests.plain
+import Root
+
+public fun i32 one() {
+  return 1
+}

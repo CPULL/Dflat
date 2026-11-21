@@ -23,6 +23,17 @@ sealed partial class SourceLoader {
   // the compiled Dflat libraries the program links (spec 15.8)
   public List<CompiledLibrary> CompiledLibraries { get; } = new();
 
+  // a file of the program imports Root.Tasks (spec 20.0)
+  public bool TasksImported { get; private set; }
+
+  // the multitasking runtime is on (spec 20.0, 15.8): the program imports Root.Tasks, or a library built with it pulls it in (its
+  // interface lists the runtime chunk "tasks"). Every library of such a program must be built with it: the runtime code compiled into a
+  // library binary without it is not thread safe (and its state is not per thread)
+  public bool TasksMode => TasksImported || CompiledLibraries.Any(library => library.Runtime.Contains("tasks"));
+
+  // the libraries built without the multitasking runtime, in a program that has it: each one is a compile error
+  public IEnumerable<CompiledLibrary> LibrariesWithoutTasks => TasksMode ? CompiledLibraries.Where(library => !library.Runtime.Contains("tasks")) : Enumerable.Empty<CompiledLibrary>();
+
   // the files made from the namespaces of a .dfi, by namespace (lower case)
   readonly Dictionary<string, SourceFile> compiledFiles = new();
 

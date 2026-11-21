@@ -1,0 +1,87 @@
+// mutex (spec 20.13): a variable with its own lock, used only inside enforce; recursive for the thread that holds it
+import Root
+import Root.Tasks
+
+// a local mutex: its timeout can be computed
+fun local(i32 ms) {
+  mutex string text = "a" timeout ms
+  enforce text {
+    text = text + "b"
+    Console.log(text)
+  }
+}
+
+class Bag {
+  i32 items = 0
+  public fun add() { items++ }
+  public fun i32 get_count() { return items }
+}
+
+mutex i64 counter = 0 timeout 5000
+mutex Bag bag = Bag() timeout 5000
+
+class Adder(i32 times) {
+  fun taskRun() {
+    i32 i = 0
+    while i < times {
+      enforce counter {
+        counter++
+      }
+      i++
+    }
+  }
+}
+
+class Holder {
+  fun taskRun() {
+    enforce counter {
+      Root.Time.sleep(400)
+    }
+  }
+}
+
+fun bump() {
+  enforce counter {
+    counter += 1000
+  }
+}
+
+Task a = Task(Adder, 20000, timeout: 10000).start()
+Task b = Task(Adder, 20000, timeout: 10000).start()
+Task c = Task(Adder, 20000, timeout: 10000).start()
+wait a timeout 10000
+wait b timeout 10000
+wait c timeout 10000
+enforce counter {
+  Console.log(counter)
+}
+
+// recursive: a function called inside enforce counter takes it again
+enforce counter {
+  bump()
+  Console.log(counter)
+}
+
+// busy: timeout 0 tries once
+Task h = Task(Holder, timeout: 5000).start()
+Root.Time.sleep(100)
+enforce counter timeout 0 {
+  Console.log("got it")
+} lockfail {
+  Console.log("busy")
+}
+wait h timeout 5000
+enforce counter timeout 0 {
+  Console.log("free again")
+} lockfail {
+  Console.log("still busy")
+}
+
+// an object as a mutex
+enforce bag {
+  bag.add()
+  bag.add()
+  Console.log(bag.count)
+}
+
+local(100)

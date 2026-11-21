@@ -1,0 +1,4 @@
+// Task() takes the class of the task first (spec 20.1)
+import Root.Tasks
+
+Task t = Task(5)

@@ -1,0 +1,1 @@
+mutex_zero_timeout.df(4): error: the timeout of a mutex is above 0; enforce m timeout 0 { } tries once (spec 20.13)

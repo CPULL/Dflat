@@ -1,0 +1,6 @@
+// Thread() takes a function first (spec 20.1)
+import Root.Tasks
+
+fun i32 work(i32 n) { return n }
+
+Thread t = Thread(5)

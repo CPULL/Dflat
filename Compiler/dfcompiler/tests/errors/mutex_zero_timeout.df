@@ -1,0 +1,4 @@
+// the timeout of a mutex is above 0 (spec 20.13)
+import Root.Tasks
+
+mutex i32 counter = 0 timeout 0

@@ -1,8 +1,8 @@
 DFI {
- compiler: 0.0.188alpha
+ compiler: 0.0.190alpha
  library: stats
  namespace: stats
- runtime: 
+ runtime: tasks
  stdlib: 
 }
 namespace stats

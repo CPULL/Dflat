@@ -1,0 +1,1 @@
+thread_any_class.df(6): error: a thread has no class: Thread<...> takes only what the function gives, Thread<u64> (spec 20.1)

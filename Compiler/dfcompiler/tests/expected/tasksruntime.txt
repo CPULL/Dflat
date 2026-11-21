@@ -1,0 +1,8 @@
+MULTITASKING
+multitasking has 12 chars
+5
+caught: odd
+[5, 4, 1]
+42
+2
+---- exit code 0 ----

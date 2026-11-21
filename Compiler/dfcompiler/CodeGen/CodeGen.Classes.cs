@@ -1890,6 +1890,9 @@ public sealed partial class CodeGen {
 
   // one argument: an object given to a parameter written ->T moves (the call writes ->x); the others only borrow
   string ArgCode(ParamSig param, Node arg, Scope scope, FunSig? callee = null, int position = -1) {
+    if (callee != null && arg != param.Default) {
+      CheckTaskArgument(callee, param, arg, scope);   // a Task<...> parameter (spec 20.9, CodeGen.Tasks.cs)
+    }
     if (arg.Kind == "OutArg") {
       MarkAssigned(scope.Find(arg.Text!));   // the native fills it
       arg = OutArgument(param, arg);   // =res: the native writes the named result (spec 22)
@@ -2241,6 +2244,9 @@ public sealed partial class CodeGen {
   // enforce) c keeps its marker: Usage is the declaration of c as a counted variable with a usage of its own, put first in the block, so
   // it is released on every way out of it (spec 12.7)
   (string Condition, Scope BlockScope, Node? Usage) IsBinding(Node n, Scope scope) {
+    if (TaskIsBinding(n, scope) is { } taskBinding) {
+      return (taskBinding.Condition, taskBinding.BlockScope, null);   // if t is Task<MyTask> mt { } (spec 20.9)
+    }
     if (!LibraryCode && CountedRef(n.Children[0], scope) is CountedRefInfo counted) {
       return CountedIsBinding(n, counted, scope);
     }

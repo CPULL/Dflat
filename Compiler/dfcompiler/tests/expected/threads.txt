@@ -1,0 +1,10 @@
+Ready
+runThis
+Thread
+1234
+567
+10
+hello thread
+30000
+waiter caught: thread broke
+---- exit code 0 ----

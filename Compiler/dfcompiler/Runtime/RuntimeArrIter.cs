@@ -4,8 +4,8 @@ namespace dfcompiler;
 // An arr has no header ({p, len} only), so the counters live in a side table keyed by the address of the first item (p):
 // a loop, a view or an iterator opens its array once (not once per item) and closes it when it ends; a changing operation asks
 // whether its array is open. While nothing is open the table is empty and the question costs one comparison.
-// Open addressing with linear probing; a removed key leaves a tombstone. No threads yet: one table for the program
-// (with tasks it needs a lock or one table per task).
+// Open addressing with linear probing; a removed key leaves a tombstone. One table for the program: with tasks (DF_TASKS) each call
+// takes its lock.
 public static class RuntimeArrIter {
   public const string Source = """
 /* ---- open iterators and views of arr (spec 6.4) ---- */
@@ -20,6 +20,9 @@ static df_ait_slot* df_ait_slots = NULL;
 static df_uns df_ait_cap = 0;    /* a power of 2, or 0 */
 static df_uns df_ait_live = 0;   /* keys with a count above 0 */
 static df_uns df_ait_used = 0;   /* live keys and tombstones */
+#ifdef DF_TASKS
+static df_mutex df_ait_lock = DF_MUTEX_INIT;
+#endif
 
 static df_uns df_ait_hash(const void* key) {
   uint64_t x = (uint64_t)(uintptr_t)key;
@@ -82,32 +85,32 @@ static void df_ait_report(void) {
 
 /* a loop, a view or an iterator starts using the array whose first item is at p */
 static void df_ait_open(const void* p) {
+  if (p == NULL) {
+    return;   /* an empty array has nothing to change */
+  }
+  DF_LOCK(df_ait_lock);
   static bool reported = false;
   if (!reported) {
     reported = true;
     atexit(df_ait_report);
   }
-  if (p == NULL) {
-    return;   /* an empty array has nothing to change */
-  }
   df_ait_slot* s = df_ait_find(p);
   if (s != NULL) {
     s->count++;
-    return;
+  } else {
+    df_ait_room();
+    df_ait_put(df_ait_slots, df_ait_cap, p, 1, false);
+    df_ait_live++;
+    df_ait_used++;
   }
-  df_ait_room();
-  df_ait_put(df_ait_slots, df_ait_cap, p, 1, false);
-  df_ait_live++;
-  df_ait_used++;
+  DF_UNLOCK(df_ait_lock);
 }
 
 /* ... and stops using it; the last close of a dead array frees its block */
 static void df_ait_close(const void* p) {
+  DF_LOCK(df_ait_lock);
   df_ait_slot* s = df_ait_find(p);
-  if (s == NULL) {
-    return;
-  }
-  if (--s->count == 0) {
+  if (s != NULL && --s->count == 0) {
     if (s->dead) {
       free((void*)s->key);
     }
@@ -115,28 +118,38 @@ static void df_ait_close(const void* p) {
     s->dead = false;
     df_ait_live--;
   }
+  DF_UNLOCK(df_ait_lock);
 }
 
 /* the open iterators and views of the array (0: it can change) */
 static df_uns df_ait_count(const void* p) {
+  DF_LOCK(df_ait_lock);
   df_ait_slot* s = df_ait_find(p);
-  return s == NULL ? 0 : s->count;
+  df_uns count = s == NULL ? 0 : s->count;
+  DF_UNLOCK(df_ait_lock);
+  return count;
 }
 
 /* the array ended while a view or an iterator still holds it */
 static bool df_ait_dead(const void* p) {
+  DF_LOCK(df_ait_lock);
   df_ait_slot* s = df_ait_find(p);
-  return s != NULL && s->dead;
+  bool dead = s != NULL && s->dead;
+  DF_UNLOCK(df_ait_lock);
+  return dead;
 }
 
 /* the block of an array that ends (its items already ended): freed now, or by the last close when it is still open */
 static void df_ait_free(void* p) {
+  DF_LOCK(df_ait_lock);
   df_ait_slot* s = df_ait_find(p);
   if (s != NULL) {
     s->dead = true;
-    return;
   }
-  free(p);
+  DF_UNLOCK(df_ait_lock);
+  if (s == NULL) {
+    free(p);
+  }
 }
 """;
 }

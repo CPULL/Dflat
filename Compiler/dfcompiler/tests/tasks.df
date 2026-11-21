@@ -1,0 +1,68 @@
+// Task (spec 20.1): Task(MyTask, ...) builds the object on the side of the creator, start() runs taskRun() on a thread of its own
+import Root
+import Root.Tasks
+
+class Worker(i32 n) {
+  fun taskRun() {
+    Console.log($"worker {n} runs")
+  }
+}
+
+class Breaker {
+  fun taskRun() {
+    throw Exception("broken")
+  }
+}
+
+class Picky {
+  i32 n
+  public Picky(i32 n) {
+    if n < 0 {
+      throw Exception("negative")
+    }
+    this.n = n
+  }
+  fun taskRun() { }
+}
+
+// Ready, then Running, then Completed
+Task t = Task(Worker, 7)
+Console.log(t.status)
+Console.log(t.name)
+Console.log(t.kind)
+Console.log(t.linked)
+t.start()
+Root.Time.sleep(300)
+Console.log(t.status)
+
+// a second start of the same task: a real exception
+t.start()
+catch TaskAlreadyStartedException e { Console.log($"caught: {e.message}") }
+
+// an exception that leaves taskRun(): Failed
+Task b = Task(Breaker)
+b.start()
+Root.Time.sleep(300)
+Console.log(b.status)
+
+// the exception of the constructor goes to the creator, at Task(...)
+fun makePicky(i32 n) {
+  Task p = Task(Picky, n)
+  Console.log($"made {p.name}")
+  catch Exception e { Console.log($"creator caught: {e.message}") }
+}
+makePicky(1)
+makePicky(-1)
+
+// the named arguments of Task() and of start(); start() gives the task back
+Task u = Task(Worker, 8, timeout: 3600000, linked: false)
+Console.log(u.linked)
+Task s = u.start(timeout: 5000)
+Root.Time.sleep(300)
+Console.log(s.status)
+Console.log(u.status)
+
+// created and started on one line
+Task c = Task(Worker, 9).start()
+Root.Time.sleep(300)
+Console.log(c.status)

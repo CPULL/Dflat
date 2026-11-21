@@ -1,0 +1,1 @@
+task_handle_any_class_call.df(14): error: this Task does not say the class of its task: 'peek' cannot be called through it (spec 20.9)

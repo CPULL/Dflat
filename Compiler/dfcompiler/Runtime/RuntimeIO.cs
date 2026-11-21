@@ -31,7 +31,7 @@ typedef char df_ochar;
 #define DF_IO_NO_RESOURCES 38
 #define DF_IO_GENERIC 43
 
-static uint64_t df_io_err = 0;
+static DF_TLS uint64_t df_io_err = 0;
 
 static bool df_io_silent_id(uint64_t id) {
   return id == DF_IO_FILE_ACCESS || id == DF_IO_DIR_NOT_EMPTY || id == DF_IO_NAME_EXISTS || id == 32;
@@ -969,7 +969,7 @@ static df_string df_io_relative_path(df_string from, df_string to) {
 static uint64_t df_io_temp_counter = 0;
 
 static df_string df_io_temp_name(void) {
-  uint64_t seed = df_time_clock() ^ ((uint64_t)df_time_now() << 20) ^ (++df_io_temp_counter * 0x9E3779B97F4A7C15ULL);
+  uint64_t seed = df_time_clock() ^ ((uint64_t)df_time_now() << 20) ^ (DF_ATOMIC_ADD(df_io_temp_counter, 1) * 0x9E3779B97F4A7C15ULL);
   char name[40];
   int n = snprintf(name, sizeof name, "df%016llx.tmp", (unsigned long long)seed);
   return df_io_join(df_io_temp_dir(), df_io_str(name, (uint64_t)n));

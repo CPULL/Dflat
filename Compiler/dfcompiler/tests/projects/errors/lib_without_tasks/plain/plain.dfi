@@ -1,0 +1,12 @@
+DFI {
+ compiler: 0.0.190alpha
+ library: plain
+ namespace: tests.plain
+ runtime: tasks
+ stdlib: 
+}
+namespace tests.plain
+public fun i32 one() -> f_plain_one
+ids -> df_libids_plain
+atLibStart -> df_libstart_plain
+atEnd -> df_libend_plain

@@ -17,10 +17,10 @@ public static class RuntimeExec {
 #include <unistd.h>
 #endif
 
-static uint64_t df_exec_err = 0;
-static df_string df_exec_out = NULL;
-static df_string df_exec_errout = NULL;
-static bool df_exec_timed_out = false;
+static DF_TLS uint64_t df_exec_err = 0;
+static DF_TLS df_string df_exec_out = NULL;
+static DF_TLS df_string df_exec_errout = NULL;
+static DF_TLS bool df_exec_timed_out = false;
 
 static uint64_t df_exec_error(void) {
   uint64_t id = df_exec_err;

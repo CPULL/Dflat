@@ -1,0 +1,1 @@
+thread_linked.df(6): error: a thread always belongs to the task that starts it: linked is for Task() (spec 20.1)

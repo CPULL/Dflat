@@ -1,0 +1,1 @@
+task_switch_no_default.df(13): error: the type switch of a Task needs a 'default': a Task can be of any class (spec 20.9)

@@ -1,0 +1,1 @@
+task_static_field.df(8): error: the static field Worker.runs cannot be used by the code of a task (Worker.taskRun): a task sees only constants, refcounted objects, weak references, mutex variables and globals (spec 20.12)

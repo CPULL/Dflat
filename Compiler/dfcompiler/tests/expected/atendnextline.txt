@@ -1,0 +1,14 @@
+hello one
+class atEnd: one
+constructor 3
+constructor atEnd
+work
+function atEnd
+start of body
+end of body
+standalone 2
+standalone 1
+caught boom
+end of caught
+after a catch: a standalone block
+---- exit code 0 ----

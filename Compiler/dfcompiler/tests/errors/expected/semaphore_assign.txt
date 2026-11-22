@@ -1,0 +1,1 @@
+semaphore_assign.df(5): error: 'pool' is const

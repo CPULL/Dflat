@@ -1,0 +1,5 @@
+// a semaphore is never assigned (spec 20.14)
+import Root.Tasks
+
+semaphore pool = 2
+pool = 5

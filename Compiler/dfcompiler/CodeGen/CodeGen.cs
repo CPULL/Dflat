@@ -262,6 +262,7 @@ public sealed partial class CodeGen {
     if (TasksMode) {
       LowerWaitDefaults(program);   // enforce wait ... default { v } (spec 20.2, CodeGen.Tasks.cs)
       LowerTaskHandleTypes(program);   // Task<MyTask>, Task<*, i32> (spec 20.9)
+      LowerEventTypes(program);   // Event<Size>, Sender<T> (spec 20.4, CodeGen.Events.cs)
     }
     LowerEnforceExprs(program, null);   // enforce expressions become enforce statements (spec 7.2.6)
     CheckTopLevelFeatures(program);
@@ -321,6 +322,7 @@ public sealed partial class CodeGen {
     DeclareGlobalConsts(program);
     DeclareGlobals(program);   // spec 18
     DeclareFileVars(program);   // the top-level variables its functions use (spec 14.1)
+    DeclareTopSemaphores(program);   // the top-level semaphores, seen by the functions (spec 20.14)
     CheckGlobalUses(program);
     foreach (var statement in program.Children) {
       if (statement.Kind == "Fun") {
@@ -392,7 +394,7 @@ public sealed partial class CodeGen {
     assign = new AssignState();
     currentRet = null;
     var statements = program.Children.Where(statement => statement.Kind is not ("Fun" or "Alias" or "Enum" or "Class" or "Trait" or "GenericSet" or "Struct" or "Handle")).ToList();
-    var root = PrepareFrame(statements, new Scope(null), FrameKind.Function);
+    var root = PrepareFrame(statements, new Scope(fileScope.Vars.Count > 0 ? fileScope : null), FrameKind.Function);
     root.OuterHandler = fn.PanicLabel;
     var mainBody = new StringBuilder();
     EmitHoists(root, mainBody, "  ");
@@ -413,8 +415,10 @@ public sealed partial class CodeGen {
       main.Append($"  int32_t {fn.RetVar} = 0;\n");
     }
     main.Append(mainBody);
+    main.Append(TasksEndCode());   // the soft kill of the runnables still running (spec 20.10)
     main.Append(StaticEndCode());
     main.Append(LinkedEndCode());   // the compiled libraries last, in reverse order (spec 15.8)
+    main.Append(EventsEndCode());   // the registry of the events, at the very end (spec 20.4)
     main.Append("  return 0;\n");
     main.Append($"  {fn.PanicLabel}: df_panic_unhandled(df_err);\n");
     main.Append("  return 0;\n}\n");
@@ -431,6 +435,7 @@ public sealed partial class CodeGen {
       protos.Append(Signature(instance)).Append(";\n");
       bodies.Append(EmitFun(instance)).Append('\n');
     }
+    CheckTaskAccess();   // what the code of a task uses, threads started by threads (spec 20.12, 20.1)
     protos.Append(variadicWrappers);   // the wrappers of the shapes of the C variadic calls, after every prototype (spec 22)
     protos.Append(callbackWrappers);   // the C functions that C calls back, which call the Dflat functions (CodeGen.Callbacks.cs)
     KeyableFieldWarnings();   // spec 11.2.1
@@ -504,8 +509,10 @@ public sealed partial class CodeGen {
     } else {
       main.Append($"  int32_t code = {call};\n");
     }
+    main.Append(TasksEndCode());   // the soft kill of the runnables still running (spec 20.10)
     main.Append(StaticEndCode());
     main.Append(LinkedEndCode());   // the compiled libraries last, in reverse order (spec 15.8)
+    main.Append(EventsEndCode());   // the registry of the events, at the very end (spec 20.4)
     main.Append(entry.Ret == "void" ? "  return 0;\n}\n" : "  return (int)code;\n}\n");
     return main;
   }
@@ -619,6 +626,9 @@ public sealed partial class CodeGen {
       }
       if (p.Children[0] is { Kind: "Type", Text: "Task" or "Thread" } taskType && taskTypeSpecs.ContainsKey(taskType)) {
         taskParamTypes[(funNode, p.Text!)] = taskType;   // Task<MyTask> t (spec 20.9)
+      }
+      if (p.Children[0] is { Kind: "Type", Text: "Event" } eventType && eventTypeSpecs.ContainsKey(eventType)) {
+        eventParamTypes[(funNode, p.Text!)] = eventType;   // Event<Size> e (spec 20.4)
       }
       ps.Add(new ParamSig(p.Text!, variadic ? "arr<" + paramType + ">" : paramType, def?.Children[0]) {
         IsWritable = p.Children.Any(child => child.Kind == "ReadWrite"),
@@ -741,7 +751,7 @@ public sealed partial class CodeGen {
     currentFun = f;
     currentGenericT = f.GenericT;
     initializing = f.IsInit || f.IsStaticInit;
-    var scope = new Scope(null);
+    var scope = new Scope(FileScopeFor(f));
     if (f.Class != null && !f.IsStatic) {
       scope.Vars["this"] = new VarInfo(f.Class.Name, "self", true);
     }
@@ -782,6 +792,7 @@ public sealed partial class CodeGen {
       }
     }
     NoteTaskParams(f, scope);   // Task<MyTask> t knows its task (spec 20.9)
+    NoteEventParams(f, scope);   // Event<Size> e knows its data (spec 20.4)
     var block = f.Node.Children.First(c => c.Kind == "Block");
     // the atEnd after the function body is its final cleanup; a parameter taken with -> ends with the function
     var statements = new List<Node>(block.Children);
@@ -887,6 +898,14 @@ public sealed partial class CodeGen {
       sb.Append(Pad(indent)).Append(TaskWait(s, scope).Code).Append(";\n");   // a bare wait, wait t, wait 250 (spec 20.8)
       return;
     }
+    if (s.Kind == "WaitOn") {
+      EmitWaitOn(s, sb, scope, indent);   // wait on ev as data { } (spec 20.4.7, CodeGen.Events.cs)
+      return;
+    }
+    if (s.Kind == "Semaphore") {
+      EmitSemaphore(s, sb, scope, Pad(indent));   // spec 20.14 (CodeGen.Semaphore.cs)
+      return;
+    }
     if (globalWrites.TryGetValue(s, out var writtenGlobal) && wrappingGlobal.Add(s)) {
       try {
         EmitGlobalWrite(s, writtenGlobal, sb, scope, indent);   // g.f = v under the write lock (spec 18.3)
@@ -898,6 +917,7 @@ public sealed partial class CodeGen {
     if (s.Kind == "Assign" && s.Text == "=" && s.Children[0].Kind == "Name" && scope.Find(s.Children[0].Text!) is VarInfo reassigned) {
       movedVars.Remove(reassigned);   // rex = Dog("new"): usable again
     }
+    NoteTaskAssign(s, scope);   // t = ... for a Task (spec 20.9, CodeGen.TaskHandles.cs)
     string pad = Pad(indent);
     if (!ReleaseBuild && s.Line > 0 && s.Line < LibraryLine && s.Kind is not ("AtEnd" or "Catch" or "Label")) {
       sb.Append($"{pad}DF_LINE({SourceMap.RealLine(s.Line)});\n");   // the line of the statement, for the stack trace (spec 15.2)
@@ -918,6 +938,8 @@ public sealed partial class CodeGen {
         }
         EmitDecl(s, sb, scope, pad);
         NoteTaskVar(s, scope);   // a Task variable made on its line knows its class (spec 20.9)
+        NoteNoTimeout(s, scope);   // made with no timeout: a wait on it needs one (spec 20.2)
+        NoteEventVar(s, scope);   // Event<Size> (spec 20.4)
         return;
 
       case "ReturnHold":
@@ -1040,7 +1062,7 @@ public sealed partial class CodeGen {
         } else if (k is "Call" or "Wait" && e.Type == "string") {
           // a string nobody keeps ends here
           sb.Append(pad).Append(e.Fresh ? $"df_str_free({e.Code});\n" : $"(void)({e.Code});\n");
-        } else if (k is "Call" or "Wait" or "CtorChain" or "PostInc" or "PostDec" or "PreInc" or "PreDec") {
+        } else if (k is "Call" or "Wait" or "CtorChain" or "PostInc" or "PostDec" or "PreInc" or "PreDec" or "CValue") {
           // a result nobody keeps: say so to the C compiler (a call that checks an exception is a statement expression)
           sb.Append(pad).Append(e.Type == "void" || IsMulti(e.Type) ? e.Code : $"(void)({e.Code})").Append(";\n");
         } else {
@@ -1691,9 +1713,13 @@ public sealed partial class CodeGen {
           // the reference to the parent: set once, by the constructor
           return initializing ? new LValueInfo(bare.Code, bare.Type, false) : throw Error($"'{target.Text}' is the reference to the parent: only the constructor sets it", target);
         }
+        if (ownField.IsStatic) {
+          NoteStaticUse(ownField, target);   // spec 20.12
+        }
         return new LValueInfo(bare.Code, bare.Type, ownField.IsConst && !initializing, null, true, ownField.IsWeak, ownField.IsStatic);   // a static too: written as a field, its old value ends
       }
       if (variable == null && globalConsts.TryGetValue(target.Text!, out var global) && IsFileVarHere(target.Text!, target)) {
+        NoteTopVarUse(target.Text!, target);   // spec 20.12
         return libraryVars.Contains(target.Text!) || fileVars.ContainsKey(target.Text!) ? new LValueInfo(global.CName, global.Type, false, null, true)   // a library variable: written as a field, its old value ends (spec 16)
           : new LValueInfo(global.CName, global.Type, !initializing);
       }
@@ -1997,6 +2023,7 @@ public sealed partial class CodeGen {
         }
         if (globalConsts.TryGetValue(n.Text!, out var global) && IsFileVarHere(n.Text!, n)) {   // a top-level variable: only in its own file (spec 14.1)
           CheckMutexUse(global.CName, n.Text!, n, true);   // spec 20.13
+          NoteTopVarUse(n.Text!, n);   // spec 20.12
           return new Expr(global.CName, global.Type);
         }
         if (globals.TryGetValue(n.Text!, out var globalObject)) {
@@ -2082,7 +2109,7 @@ public sealed partial class CodeGen {
       case "CtorChain":
         return CtorChainCall(n, scope);
       case "Member":
-        return CountsMember(n, scope) ?? MemberValue(n, scope);
+        return EventDataMember(n, scope) ?? CountsMember(n, scope) ?? MemberValue(n, scope);
       case "SafeMember":
         return SafeAccess(n, n, scope);
       case "AnyAlive":
@@ -2889,6 +2916,21 @@ public sealed partial class CodeGen {
   Expr Call(Node n, Scope scope) {
     var callee = n.Children[0];
     var args = n.Children[1].Children;
+    if (EventDataMember(n, scope) is Expr propagation) {
+      return propagation;   // data.setProcessed(), data.stopPropagation() (spec 20.4.5)
+    }
+    if (EventSend(n, scope) is Expr sent) {
+      return sent;   // ev.send(data) (spec 20.4)
+    }
+    if (EventMaker(n, scope) is Expr eventMade) {
+      return eventMade;   // Event.register(...), Event(name) (spec 20.4.3)
+    }
+    if (RunnableSignalCall(n, scope) is Expr signalled) {
+      return signalled;   // t.signal(s) (spec 20.3.1, CodeGen.Signals.cs)
+    }
+    if (SignalGroupCreate(n, scope) is Expr group) {
+      return group;   // Signal.group(...) (spec 20.3, CodeGen.Signals.cs)
+    }
     if (TaskCreate(n, scope) is Expr task) {
       return task;   // Task(MyTask, ...) (spec 20.1, CodeGen.Tasks.cs)
     }
@@ -3058,6 +3100,17 @@ public sealed partial class CodeGen {
       }
       if (path.EndsWith(".tryParse") && TryParseCall(path, args, scope, n) is Expr tried) {
         return tried;
+      }
+      if (path == "Root.Time.wait") {
+        // Root.Time.wait(250): the same call as wait 250, a checkpoint (spec 20.8)
+        if (args.Count != 1 || args[0].Kind == "Named") {
+          throw Error("Root.Time.wait takes the time to wait: Root.Time.wait(250) (spec 20.8)", n);
+        }
+        var timed = ExprOf(args[0], scope);
+        if (!IsNumeric(timed.Type) && timed.Type != "lapse") {
+          throw Error($"Root.Time.wait takes a number of milliseconds or a lapse, not {DisplayName(timed.Type)} (spec 20.8)", args[0]);
+        }
+        return TaskWait(Synthetic("Wait", n).Add(args[0]), scope);
       }
       if (Stdlib.TryGetValue(path, out var stdOverloads)) {
         return StdCall(path, stdOverloads, args, scope, n);

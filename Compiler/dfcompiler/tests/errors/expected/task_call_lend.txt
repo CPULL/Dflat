@@ -1,0 +1,1 @@
+task_call_lend.df(17): error: 'item' of look is lent (plain): a posted call does not lend: send a clone (pear!) or a new value (spec 20.12)

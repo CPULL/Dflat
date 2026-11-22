@@ -1,0 +1,16 @@
+// a function that gives a Task<Counter> gives a task of Counter (spec 20.9)
+import Root.Tasks
+
+class Counter {
+  fun i32 taskRun() { return 1 }
+}
+
+class Logger {
+  fun string taskRun() { return "x" }
+}
+
+fun Task<Counter> make() {
+  return Task(Counter, timeout: 100)
+}
+
+Task<Logger> l = make()

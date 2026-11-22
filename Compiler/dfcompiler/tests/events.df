@@ -1,0 +1,136 @@
+// events (spec 20.4): the sender registers, the receivers find it by name; the data is a struct; volatile and static; the sequence of
+// the waiters with processed and stopPropagation; the sender as an id (Sender<T>, myid, from)
+namespace evtest
+import Root
+import Root.Tasks
+
+struct Size { Sender<Window> window, u32 w, u32 h, string label }
+struct Note { i32 n }
+
+class Window(i32 id) {
+  public i32 id
+  unrestricted fun resized(Event<Size> ev, u32 w, u32 h) {
+    ev.send(Size(myid, w, h, $"window {id}"))
+  }
+}
+
+fun ->string receiveOnce(string tag) {
+  Event<Size> ev = Event("gfx.ui.resize", timeout: 2000)
+  string seen = "nothing"
+  wait on ev as size {
+    seen = $"{tag}: {size.label} {size.w}x{size.h} processed={size.processed}"
+    size.setProcessed()
+  }
+  return seen
+}
+
+fun ->string receiveStop(string tag) {
+  Event<Size> ev = Event("gfx.ui.resize", timeout: 2000)
+  string seen = "nothing"
+  wait on ev as size {
+    seen = $"{tag}: {size.label}"
+    size.stopPropagation()
+  }
+  return seen
+}
+
+// the sender registers; a name with a dot is used as it is
+Event<Size> resize = Event.register("gfx.ui.resize", timeout: 1000)
+Console.log(resize.name)
+var notes = Event.register("notes", Note, EventMode.Static, timeout: 500, keep: 2, fullMode: EventQueueFullMode.DiscardOldest)
+Console.log(notes.name)              // a name without a dot: the namespace in front
+
+Window win1 = Window(1)
+Window win2 = Window(2)
+
+// two waiters, in sequence: the second sees processed
+Thread r1 = Thread(receiveOnce, "first").start()
+wait 100
+Thread r2 = Thread(receiveOnce, "second").start()
+wait 100
+win1.resized(resize, 800, 600)
+Console.log(wait r1 timeout 2000)
+Console.log(wait r2 timeout 2000)
+
+// stopPropagation: the next waiter does not get it
+Thread s1 = Thread(receiveStop, "stopper").start()
+wait 100
+Thread s2 = Thread(receiveOnce, "after").start()
+wait 100
+win2.resized(resize, 10, 20)
+Console.log(wait s1 timeout 2000)
+Console.log(wait s2 timeout 3000)
+
+// volatile: nobody waits, it is lost
+win1.resized(resize, 1, 1)
+Event<Size> mine = Event("gfx.ui.resize", timeout: 100)
+wait on mine as lost {
+  Console.log("never: nobody waited")
+}
+
+// static: kept, at most 2, the oldest is discarded
+Event<Note> found = Event("notes", timeout: 100)
+notes.send(Note(1))
+notes.send(Note(2))
+notes.send(Note(3))
+wait on found as note {
+  Console.log($"note {note.n}")
+}
+wait on found as note {
+  Console.log($"note {note.n}")
+}
+wait on found as note {
+  Console.log("never: the queue is empty")
+}
+
+// from: only the events of that sender
+fun ->string onlyFrom(Window w) {
+  Event<Size> ev = Event("gfx.ui.resize", timeout: 2000)
+  string seen = "nothing"
+  wait on ev from w as size {
+    seen = size.label
+  }
+  return seen
+}
+
+Thread f = Thread(onlyFrom, win2).start()
+wait 100
+win1.resized(resize, 5, 5)
+win2.resized(resize, 6, 6)
+Console.log(wait f timeout 3000)
+
+// a name not registered: skipped, no error
+Event<Note> nobody = Event("not.there", timeout: 100)
+nobody.send(Note(9))
+wait on nobody as note {
+  Console.log("never")
+}
+Console.log("skipped")
+
+// the same name with another struct
+fun mismatch() {
+  Event<Note> wrong = Event("gfx.ui.resize", timeout: 100)
+  wrong.send(Note(1))
+  catch DuplicateEventNameWithDataMismatchException e { Console.log($"mismatch: {e.message}") }
+}
+mismatch()
+
+// DiscardOldest while the oldest is in a block: it leaves the queue at once, the block ends normally, nobody else gets it
+notes.send(Note(10))
+notes.send(Note(11))
+wait on found as note {
+  notes.send(Note(12))
+  Console.log($"held {note.n}")
+}
+wait on found as note {
+  Console.log($"note {note.n}")
+}
+wait on found as note {
+  Console.log($"note {note.n}")
+}
+wait on found as note {
+  Console.log("never: the queue is empty")
+}
+
+// left in the queue at the end of the program: freed with the registry
+notes.send(Note(20))

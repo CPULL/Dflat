@@ -277,8 +277,13 @@ public sealed partial class CodeGen {
         }
         continue;
       }
-      var expr = ExprOf(value, scope, field.Type);
       string temp = NewTemp();
+      if (senderFields.TryGetValue((info.Name, field.Name), out var senderClass)) {
+        code.Append($"uint64_t {temp} = {SenderIdCode(value, senderClass, scope)}; ");   // Sender<T>: myid or an object of T (spec 20.4.6)
+        made[field] = temp;
+        continue;
+      }
+      var expr = ExprOf(value, scope, field.Type);
       code.Append($"{CType(field.Type)} {temp} = {StructFieldValue(field, expr, value, scope)}; ");
       made[field] = temp;
     }

@@ -1,0 +1,63 @@
+// what a thread runs (spec 20.1): a function, a method (of this object, of another object, static), a function value or a lambda;
+// & parameters (the place of the creator), counted and weak parameters (held until the function takes them)
+import Root
+import Root.Tasks
+
+class Box(i32 start) {
+  public i32 n = start
+}
+
+class Worker {
+  i32 base = 10
+  fun i32 taskRun() {
+    Thread own = Thread(addBase, 5).start()   // a method of this object: the thread works on it
+    return wait own timeout 2000
+  }
+  fun i32 addBase(i32 k) {
+    return base + k
+  }
+  public fun i32 twice(i32 k) {
+    return! k
+    return k * 2
+  }
+  public static fun i32 square(i32 k) {
+    return k * k
+  }
+}
+
+fun bump(&i32 counter) {
+  counter += 5
+}
+
+fun i32 looksAt(@Box b) {
+  return b.n
+}
+
+fun i32 maybe(%Box w) {
+  enforce w {
+    return w.n
+  } else {
+    return -1
+  }
+}
+
+Task t = Task(Worker, timeout: 2000).start()
+Console.log(wait t)
+Worker w = Worker()
+Thread m = Thread(w.twice, 4).start()
+Console.log(wait m timeout 2000)        // return! from a method run as a thread
+Console.log(wait m timeout 2000)
+Console.log(wait Thread(Worker.square, 6).start() timeout 2000)
+i32(i32) triple = (i32 x) { x * 3 }
+Console.log(wait Thread(triple, 7).start() timeout 2000)
+i32 offset = 100
+i32(i32) plusOffset = (i32 x; offset!) { x + offset }   // a lambda with a capture
+Console.log(wait Thread(plusOffset, 1).start() timeout 2000)
+i32 counter = 1
+Thread b = Thread(bump, &counter).start()
+wait b timeout 2000
+Console.log(counter)
+@Box shared = @Box(8)
+Console.log(wait Thread(looksAt, @shared).start() timeout 2000)
+Console.log(wait Thread(maybe, %shared).start() timeout 2000)
+Console.log(shared.usersCount)

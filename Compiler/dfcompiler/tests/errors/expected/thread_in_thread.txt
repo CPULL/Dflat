@@ -1,0 +1,1 @@
+thread_in_thread.df(7): error: a thread cannot start another thread: outer runs as a thread (spec 20.1)

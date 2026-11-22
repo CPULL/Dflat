@@ -24,7 +24,7 @@ atLibStart {
 }
 
 
-atEnd {
+atLibEnd {
   File("/root/log.txt").writeAllText($"counters ended {Time.now()} with {totalTaken} public taken and {(u64)(Numbers.getCurrent() - 1000) - totalTaken} globally taken. \n", String.StringEncoding.UTF8, FileWriteMode.CreateAppend)
   catch Exception { }                         // an exception leaving an atEnd is a panic (11.4); the (u64) cast: i32 and u64 do not mix (spec 3.5)
 }

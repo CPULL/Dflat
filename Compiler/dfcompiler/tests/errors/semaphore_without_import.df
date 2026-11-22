@@ -1,0 +1,4 @@
+// a semaphore is part of Root.Tasks (spec 20.14)
+import Root
+
+semaphore pool = 2

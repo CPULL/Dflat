@@ -67,6 +67,7 @@ Mostly used to get current date and time and to measure elapsed at nanosecond sc
 | `date now()` | `date d = Root.Time.now()` | Gets the current time in UTC. A `date` prints as ISO 8601, UTC, to the millisecond: `2026-10-11T14:03:22.123Z` |
 | `clock clock()` | `Root.Time.clock()` | Returns a u64 monotonic counter with a resolution of 0.1 ns; `clock()` never returns 0 |
 | `sleep(lapse duration)` | `Root.Time.sleep(250)` | Stops the program for at least `duration`. The OS decides the precision: the pause can be a little longer, never shorter. A zero, negative or null lapse returns at once. A number is a lapse in milliseconds [3.4](dflat-spec.md#34-lapse): `sleep(250)` is 250 ms, `sleep(0.5)` is half a millisecond |
+| `wait(lapse duration)` | `Root.Time.wait(250)` | The same call as `wait 250` (spec 20.8). Without `import Root.Tasks` it is `sleep`. In a task or a thread it is a checkpoint: the calls through the handle are served while it waits (in `taskRun()`), and the cancel signal ends the runnable there (spec 20.10). `sleep` is never a checkpoint |
 
 - `date`, `time`, `clock` and `lapse` are already nullable (`type?` is a compile error on them) and a variable of these types without a value starts as null. A `clock` prints as its number, a `lapse` as its number in its own unit, and null as `null`.
 - `time` [3.3](dflat-spec.md#33-date-and-time) is the time of day, millisecond resolution; parsing in section 9.

@@ -1,0 +1,13 @@
+// a call that lends is waited for (spec 20.12)
+import Root.Tasks
+
+class Store {
+  fun taskRun() {
+    wait 10
+  }
+  public fun fill(&arr<i32> data) { data[0] = 1 }
+}
+
+Task t = Task(Store, timeout: 1000).start()
+arr<i32> d = [0, 0]
+t.fill(&d)

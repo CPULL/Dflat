@@ -396,16 +396,20 @@ sealed partial class SourceLoader {
     if (library != null) {
       SourceMap.SetLibrary(file.Index, library.LibName ?? System.IO.Path.GetFileName(library.Folder), isLibraryRoot);
     }
-    // atLibStart { } and the top-level atEnd { } of lib.df: hidden functions of the library, run at program start and end (spec 15.8, 14.2)
+    // atLibStart { } and atLibEnd { } of lib.df: hidden functions of the library, run at program start and end (spec 15.8, 14.2)
     for (int index = 0; index < file.Tree.Children.Count; index++) {
       var statement = file.Tree.Children[index];
-      if (statement.Kind == "AtLibStart" && !isLibraryRoot) {
-        throw new CompileException("atLibStart is the startup code of a library: it is written only in lib.df (spec 15.8)", statement.Line);
+      if (statement.Kind is "AtLibStart" or "AtLibEnd" && !isLibraryRoot) {
+        string which = statement.Kind == "AtLibStart" ? "atLibStart is the startup code" : "atLibEnd is the end code";
+        throw new CompileException($"{which} of a library: it is written only in lib.df (spec 15.8)", statement.Line);
       }
-      if (isLibraryRoot && statement.Kind is "AtLibStart" or "AtEnd") {
+      if (isLibraryRoot && statement.Kind == "AtEnd") {
+        throw new CompileException("the end code of a library is written atLibEnd { } (spec 14.2, 15.8)", statement.Line);
+      }
+      if (isLibraryRoot && statement.Kind is "AtLibStart" or "AtLibEnd") {
         bool start = statement.Kind == "AtLibStart";
         if (file.Tree.Children.Take(index).Any(other => start ? other.Kind == "Fun" && other.Text == "__libstart" : other.Kind == "Fun" && other.Text == "__libend")) {
-          throw new CompileException($"a library has one {(start ? "atLibStart" : "atEnd")} block (spec 15.8)", statement.Line);
+          throw new CompileException($"a library has one {(start ? "atLibStart" : "atLibEnd")} block (spec 15.8)", statement.Line);
         }
         var fun = new Node("Fun", new Token(TokenKind.Ident, "", statement.Line, 0), start ? "__libstart" : "__libend");
         fun.Add(new Node("Params", new Token(TokenKind.Op, "(", statement.Line, 0)));

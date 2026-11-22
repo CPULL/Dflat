@@ -1,0 +1,1 @@
+semaphore_zero.df(4): error: a semaphore with 0 permits can never be taken (a deadlock): give it 1 or more (spec 20.14)

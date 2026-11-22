@@ -1,0 +1,1 @@
+atlibend_outside.df(4): error: atLibEnd is the end code of a library: it is written only in lib.df (spec 15.8)

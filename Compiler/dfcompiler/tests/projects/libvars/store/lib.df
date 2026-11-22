@@ -34,6 +34,6 @@ public fun reset() {
   names = ["reset"]
 }
 
-atEnd {
+atLibEnd {
   Console.log("store ends")
 }

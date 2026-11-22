@@ -7,4 +7,9 @@ Thread
 hello thread
 30000
 waiter caught: thread broke
+Completed
+1
+starter caught: A thread cannot start another thread
+Ready
+2
 ---- exit code 0 ----

@@ -82,6 +82,7 @@ public sealed partial class CodeGen {
     Add("Root.Time.now", Fixed("date", "df_time_now"));
     Add("Root.Time.clock", Fixed("clock", "df_time_clock"));
     Add("Root.Time.sleep", Fixed("void", "df_time_sleep", "lapse"));
+    Add("Root.Time.wait", Fixed("void", "df_time_sleep", "lapse"));   // compiled as wait <time> (spec 20.8, Call)
 
     Add("Root.ExecProcess.getEnv", new StdFun(new[] { "string" }, "string", "df_exec_get_env", Needs: new[] { "exec" }, Names: new[] { "name" }));
 
@@ -130,6 +131,8 @@ public sealed partial class CodeGen {
     AddIoStdlib(Add);
     AddExecStdlib(Add);
     AddTasksStdlib(Add);
+    AddSignalsStdlib(Add);   // spec 20.3 (CodeGen.Signals.cs)
+    AddEventsStdlib(Add);   // spec 20.4 (CodeGen.Events.cs)
     return table;
   }
 

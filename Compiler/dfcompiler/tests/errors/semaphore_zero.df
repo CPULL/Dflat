@@ -1,0 +1,4 @@
+// a semaphore with 0 permits can never be taken (spec 20.14)
+import Root.Tasks
+
+semaphore broken = 0

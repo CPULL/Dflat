@@ -1,0 +1,1 @@
+event_two_senders.df(7): error: a struct has at most one Sender<...> field: a and b (spec 20.4.6)

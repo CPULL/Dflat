@@ -162,6 +162,12 @@ public sealed partial class CodeGen {
           ctx.Flow.Raises.Add((AnyException, ctx.Cover));   // the exception that ended the task, given to its waiter (spec 20.2)
         }
         break;
+      case "WaitOn" when !ctx.InCatchBody:
+        ctx.Flow.Raises.Add((AnyException, ctx.Cover));   // wait on an event: the cancel signal, the data of another struct (spec 20.4)
+        break;
+      case "Call" when TasksMode && !ctx.InCatchBody && IsTimeWaitCall(node):
+        ctx.Flow.Raises.Add((AnyException, ctx.Cover));   // Root.Time.wait: a checkpoint, the cancel signal (spec 20.8, 20.10)
+        break;
       case "Binary":
         if (!ctx.InCatchBody && node.Text is "/" or "%") {
           ctx.Flow.Raises.Add((StandardExceptions["DivisionByZeroException"], ctx.Cover));

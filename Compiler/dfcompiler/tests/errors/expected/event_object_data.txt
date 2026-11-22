@@ -1,0 +1,1 @@
+event_object_data.df(7): error: 't': the data of an event holds numbers, strings, enums, structs of them and Sender<T>, not Thing (spec 20.4.2)

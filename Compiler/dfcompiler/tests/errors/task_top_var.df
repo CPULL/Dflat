@@ -1,0 +1,16 @@
+// a task sees only constants, refcounted objects, weak references, mutex variables and globals (spec 20.12)
+import Root.Tasks
+
+i32 plain = 7
+
+fun i32 helper() {
+  return plain
+}
+
+class Worker {
+  fun i32 taskRun() {
+    return helper()
+  }
+}
+
+Task t = Task(Worker, timeout: 1000).start()

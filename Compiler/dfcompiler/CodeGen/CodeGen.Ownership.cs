@@ -401,7 +401,9 @@ public sealed partial class CodeGen {
         continue;
       }
       var init = statement.Children.FirstOrDefault(child => child.Kind is "Init" or "WeakInit");
-      if (!GuessOwnerInit(init)) {
+      // an object a task, a thread or a call through the handle gives: the caller owns it (spec 20.1, 20.12)
+      bool waited = init is { Kind: "Init" } && init.Children[0].Kind == "Wait" && ObjectTypeOf(statement) is string waitedType && IsClass(waitedType);
+      if (!waited && !GuessOwnerInit(init)) {
         continue;
       }
       declOwner[statement] = true;

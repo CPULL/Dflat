@@ -1,0 +1,17 @@
+// the type switch of a Task needs a default (spec 20.9)
+import Root.Tasks
+
+class Counter {
+  fun i32 taskRun() { return 1 }
+}
+
+class Logger {
+  fun string taskRun() { return "x" }
+}
+
+fun i32 pick(Task t) {
+  return t is ? {
+    Task<Counter> c: 1,
+    Task<Logger> l: 2
+  }
+}

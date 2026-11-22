@@ -1,0 +1,9 @@
+// the data of an event holds values, strings and Sender<T> (spec 20.4.2)
+import Root.Tasks
+
+class Thing(i32 n) {
+}
+
+struct Data { Thing t }
+
+Event<Data> ev = Event.register("x.data", timeout: 100)

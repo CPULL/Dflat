@@ -1,0 +1,15 @@
+gfx.ui.resize
+evtest.notes
+first: window 1 800x600 processed=false
+second: window 1 800x600 processed=true
+stopper: window 2
+nothing
+note 2
+note 3
+window 2
+skipped
+mismatch: Duplicate Event Name With Data Mismatch Exception
+held 10
+note 11
+note 12
+---- exit code 0 ----

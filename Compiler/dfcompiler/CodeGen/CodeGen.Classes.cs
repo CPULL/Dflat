@@ -1312,6 +1312,25 @@ public sealed partial class CodeGen {
   // given their value when their line runs; seen only by the code of that file; they end after the top-level code, in reverse order
   readonly Dictionary<string, int> fileVars = new();   // name -> line of its declaration
   readonly List<(string Name, string Type)> fileVarOrder = new();
+  readonly List<(string Name, bool Weak)> sharedFileVarOrder = new();   // the @T and %T ones: counting blocks
+  readonly Scope fileScope = new(null);   // the @T and %T top-level variables, seen by the functions of the root file as an outer scope
+
+  // the @T and %T top-level variables a function sees: only the code of the root file; a field of its class with the same name wins
+  Scope? FileScopeFor(FunSig f) {
+    if (fileScope.Vars.Count == 0 || f.IsStaticInit || f.Node.Line >= LibraryLine) {
+      return null;
+    }
+    var names = fileScope.Vars.Keys.Where(name => IsFileVarHere(name, f.Node)
+      && ((f.Class ?? f.LambdaClass) is not ClassInfo cls || FindField(cls, name) == null)).ToList();
+    if (names.Count == fileScope.Vars.Count) {
+      return fileScope;
+    }
+    var some = new Scope(null);
+    foreach (var name in names) {
+      some.Vars[name] = fileScope.Vars[name];
+    }
+    return some;
+  }
 
   bool IsFileVarHere(string name, Node at) =>
     !fileVars.TryGetValue(name, out int line) || line / SourceMap.Stride == at.Line / SourceMap.Stride;
@@ -1360,6 +1379,27 @@ public sealed partial class CodeGen {
         throw NotSupported($"a top-level variable used by a function, declared with var from a value known only when the program runs: write the type of '{name}'", decl);
       }
       fileVars[name] = decl.Line;
+      bool counted = IsCountedDecl(decl);
+      bool weak = decl.Children.Any(child => child.Kind is "Weak" or "WeakInit");
+      if (counted || weak) {
+        // @T and %T: the C variable holds the counting block, as for a local (spec 12.7); the functions of the file see it as a variable of
+        // an outer scope (fileScope), so reads, enforce, assignments and is done. are the ones of the locals; a task sees it (spec 20.12)
+        sharedFileVars.Add(name);
+        string baseType = IsCountedType(type) ? CountedBase(type) : IsWeakType(type) ? type[1..] : type;
+        fileScope.Vars[name] = new VarInfo(baseType, $"g_{name}", false) {
+          IsCounted = counted, IsWeak = weak, IsWritable = decl.Children.Any(child => child.Kind == "ReadWrite")
+        };
+        sharedFileVarOrder.Add((name, weak));
+        classGlobals.Append($"static df_rc* g_{name};\n");
+        var sharedInit = decl.Children.FirstOrDefault(child => child.Kind is "Init" or "WeakInit");
+        int at = program.Children.IndexOf(decl);
+        if (sharedInit == null || sharedInit.Text == "default") {
+          program.Children.RemoveAt(at);
+        } else {
+          program.Children[at] = Synthetic("Assign", decl, "=").Add(Synthetic("Name", decl, name)).Add(sharedInit.Children[0]);
+        }
+        continue;
+      }
       fileVarOrder.Add((name, type));
       globalConsts[name] = ($"g_{name}", type);
       globalConstOrder.Add(name);   // zero or null at program start
@@ -1378,6 +1418,9 @@ public sealed partial class CodeGen {
   // the end of the top-level variables of the root file, after the top-level code (reverse order)
   string FileVarsEndCode() {
     var sb = new StringBuilder();
+    foreach (var (name, weak) in Enumerable.Reverse(sharedFileVarOrder)) {
+      sb.Append(weak ? $"  {{ df_rc* r = g_{name}; g_{name} = NULL; df_rc_unweak(r); }}\n" : $"  {{ df_rc* r = g_{name}; g_{name} = NULL; df_rc_release(r); }}\n");
+    }
     foreach (var (name, type) in Enumerable.Reverse(fileVarOrder)) {
       sb.Append(OwnedGlobalEnd(type, globalConsts[name].CName));
     }
@@ -1616,6 +1659,9 @@ public sealed partial class CodeGen {
     if (currentClass == null || FindField(currentClass, name, at) is not FieldInfo field) {
       return null;
     }
+    if (field.IsStatic) {
+      NoteStaticUse(field, at);   // spec 20.12
+    }
     if (field.IsCounted && !raw) {
       return CountedFieldRead(BareField(name, scope, at, true)!.Value, field, at);   // the object of the counting block (spec 12.7)
     }
@@ -1665,6 +1711,7 @@ public sealed partial class CodeGen {
     if (!field.IsStatic) {
       throw Error($"'{name}' is an instance field: it needs an object", at);
     }
+    NoteStaticUse(field, at);   // spec 20.12
     if (field.HasAccessors) {
       return PropertyGet(new Expr("", cls.Name), field, scope ?? new Scope(null), at);   // C.count through its R: (spec 11.1.4)
     }
@@ -1686,6 +1733,7 @@ public sealed partial class CodeGen {
       }
       CheckAccess(field.Visibility, field.Owner, parts[1], target);
       CheckReadOnlyWrite(field, target);
+      NoteStaticUse(field, target);   // spec 20.12
       return new LValueInfo(field.CName, field.Type, field.IsConst && !initializing, null, true, field.IsWeak, true);   // a static: written as a field, its old value ends
     }
     var owner = ExprOf(target.Children[0], scope);

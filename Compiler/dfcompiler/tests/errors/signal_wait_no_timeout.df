@@ -1,0 +1,5 @@
+// a wait with no timeout anywhere is a compile error where the compiler sees it (spec 20.2)
+import Root.Tasks
+
+Signal go = Signal("go")
+wait go

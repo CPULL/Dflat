@@ -1,0 +1,22 @@
+true
+Killed
+1
+true
+Killed
+true
+Killed
+2
+false
+Running
+Killed
+true
+Killed
+5
+3
+mutex wait given up
+semaphore wait given up
+true true
+Killed Killed
+end of main
+ended with the program
+---- exit code 0 ----

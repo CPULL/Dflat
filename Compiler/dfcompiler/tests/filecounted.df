@@ -1,0 +1,26 @@
+// top-level @T and %T variables used by functions (spec 14.1, 12.7): the counting block is shared, enforce on the weak one, a new value releases the old one
+import Root
+class Box(i32 start) {
+  public i32 n = start
+}
+@Box shared = @Box(4)
+%Box weak = %shared
+fun i32 f() { return shared.n }
+fun i32 g() {
+  enforce weak {
+    return weak.n
+  } else {
+    return -1
+  }
+}
+fun reset() {
+  shared = @Box(9)
+}
+Console.log(f())
+Console.log(g())
+reset()
+Console.log(f())
+Console.log(g())
+weak = %shared
+Console.log(g())
+Console.log(shared.usersCount)

@@ -53,6 +53,7 @@ public sealed partial class CodeGen {
 
   // the code of a call to the user function f: checked the way its signature says
   string UserCallCode(FunSig f, string call) {
+    NoteCall(f);   // what the code of a task reaches (spec 20.12, CodeGen.TaskAccess.cs)
     if (PairReturn(f)) {
       return PairCheck(call, f.Ret);
     }

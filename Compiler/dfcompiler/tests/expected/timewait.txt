@@ -1,0 +1,6 @@
+waited
+true
+true
+true
+Killed
+---- exit code 0 ----

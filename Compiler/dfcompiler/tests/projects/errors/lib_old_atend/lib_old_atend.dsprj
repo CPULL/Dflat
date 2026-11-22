@@ -1,0 +1,2 @@
+; the end code of a library is written atLibEnd { } (spec 14.2, 15.8)
+name=oldend

@@ -1,0 +1,43 @@
+// a wait written in taskRun() serves the calls through the handle while it waits (spec 20.8): a wait on a signal, on another task,
+// on a busy lock; a wait in a call that is being served does not serve (calls never nest)
+import Root
+import Root.Tasks
+
+mutex i32 shared = 0 timeout 3000
+
+class Slow {
+  fun i32 taskRun() {
+    wait 600
+    return 9
+  }
+}
+
+class Waiter {
+  i32 calls = 0
+  fun i32 taskRun() {
+    Signal go = Signal("serving.go")
+    wait go timeout 3000           // blocked here: the calls are served
+    Task other = Task(Slow, timeout: 3000).start()
+    i32 got = wait other           // blocked here too
+    enforce shared {               // and here, while the main program holds the lock
+      shared++
+    }
+    return got
+  }
+  public fun i32 count() {
+    calls++
+    return calls
+  }
+}
+
+Task t = Task(Waiter, timeout: 5000).start()
+wait 100
+Console.log(wait t.count() timeout 500)   // served while it waits on the signal
+Signal.send("serving.go")
+wait 100
+Console.log(wait t.count() timeout 500)   // served while it waits on the other task
+enforce shared {
+  wait 700
+  Console.log(wait t.count() timeout 500)   // served while it waits for the mutex
+}
+Console.log(wait t)

@@ -1,0 +1,168 @@
+// signals (spec 20.3): a name or a number, a mode set when it is made, send and wait; the registry is one for the process
+import Root
+import Root.Tasks
+
+fun i32 single(string name) {
+  Signal s = Signal(name)
+  wait s timeout 3000
+  return 1
+}
+
+fun i32 broadcast() {
+  Signal b = Signal(SignalMode.Broadcast, "bc")
+  wait b timeout 3000
+  return 1
+}
+
+fun i32 exclusive() {
+  Signal e = Signal(SignalMode.Exclusive, "ex")
+  wait e timeout 3000
+  return 1
+}
+
+fun timedOut(Signal s) {
+  wait s
+  Console.log("woken")
+  catch WaitTimeoutException e { Console.log("timeout") }
+}
+
+fun secondListener() {
+  Signal e = Signal(SignalMode.Exclusive, "ex")
+  wait e timeout 100
+  catch ExclusiveSignalBusyException busy { Console.log($"second listener: {busy.message}") }
+}
+
+fun otherMode() {
+  Signal bad = Signal(SignalMode.Stable, "myapp.go")
+  Console.log(bad.mode)
+  catch SignalModeMismatchException e { Console.log($"mode: {e.message}") }
+}
+
+fun reserved() {
+  Signal r = Signal(100)
+  Console.log(r.mode)
+  catch ReservedSignalException e { Console.log($"reserved: {e.message}") }
+}
+
+// the properties
+Signal go = Signal("myapp.go", timeout: 2000)
+Console.log(go.mode)
+Console.log(go.name)
+Console.log(go.number)
+Signal job = Signal(SignalMode.Single, 20000)
+Console.log(job.number)
+Signal cancel = Signal(KnownSignals.Cancel)
+Console.log(cancel.mode)
+Console.log(cancel.number)
+
+// Single: one waiter woken per send
+Thread s1 = Thread(single, "single.a").start()
+wait 200
+Signal.send("single.a")
+Console.log(wait s1 timeout 2000)
+
+// lost when nobody waits (Single)
+Signal lost = Signal("single.lost", timeout: 100)
+lost.send()
+timedOut(lost)
+
+// Stable: the sends are counted
+Signal st = Signal(SignalMode.Stable, "stable.c", timeout: 100)
+st.send()
+Signal.send(SignalMode.Stable, "stable.c")
+timedOut(st)
+timedOut(st)
+timedOut(st)
+
+// Broadcast: every waiter
+Thread b1 = Thread(broadcast).start()
+Thread b2 = Thread(broadcast).start()
+Thread b3 = Thread(broadcast).start()
+wait 200
+Signal.send(SignalMode.Broadcast, "bc")
+Console.log((wait b1 timeout 2000) + (wait b2 timeout 2000) + (wait b3 timeout 2000))
+
+// Exclusive: a second listener is an error
+Thread x1 = Thread(exclusive).start()
+wait 200
+secondListener()
+Signal.send(SignalMode.Exclusive, "ex")
+Console.log(wait x1 timeout 2000)
+
+// the same name with another mode, a reserved number
+otherMode()
+reserved()
+
+// tryGet: null when not registered with that mode
+Signal found = Signal.tryGet(SignalMode.Single, "myapp.go")
+Console.log(found != null)
+Console.log(Signal.tryGet(SignalMode.Broadcast, "myapp.go") == null)
+Console.log(Signal.tryGet(SignalMode.Single, "nope") == null)
+Console.log(Signal.tryGet(SignalMode.Single, 20000) != null)
+
+// a group: the first signal to fire wins, the result says which one
+fun fireLater(i32 which) {
+  wait 200
+  if which == 1 then Signal.send(30001)
+  if which == 2 then Signal.send("grp.b")
+}
+
+SignalGroup anyOf = Signal.group(30001, "grp.b", 30003, timeout: 3000)
+Thread f1 = Thread(fireLater, 1).start()
+SignalType first = wait anyOf
+Console.log($"{first.number} '{first.name}'")
+Thread f2 = Thread(fireLater, 2).start()
+SignalType second = wait anyOf timeout 3000
+Console.log($"{second.number} '{second.name}'")
+SignalType none = wait anyOf timeout 100
+Console.log($"{none.number} '{none.name}'")
+SignalGroup stable = Signal.group(SignalMode.Stable, "grp.s1", "grp.s2")
+Signal.send(SignalMode.Stable, "grp.s2")
+SignalType kept = wait stable timeout 100
+Console.log(kept.name)
+wait f1 timeout 1000
+wait f2 timeout 1000
+
+// t.signal(s): only for that runnable (spec 20.3.1)
+fun i32 listen(string name) {
+  Signal s = Signal(name)
+  wait s timeout 1500
+  return 1
+  catch WaitTimeoutException e { return 0 }
+}
+
+fun i32 listenLate(string name) {
+  wait 300
+  return listen(name)
+}
+
+fun i32 countStable() {
+  Signal s = Signal(SignalMode.Stable, "to.stable", timeout: 100)
+  wait 300
+  i32 got = 0
+  wait s
+  got++
+  wait s
+  got++
+  wait s
+  got++
+  return got
+  catch WaitTimeoutException e { return got }
+}
+
+Thread l1 = Thread(listen, "to.single").start()
+Thread l2 = Thread(listen, "to.single").start()
+wait 200
+l2.signal(Signal("to.single"))
+Console.log($"{wait l1 timeout 3000} {wait l2 timeout 3000}")
+// not waiting now: lost
+Thread l3 = Thread(listenLate, "to.lost").start()
+Signal lostTo = Signal("to.lost")
+l3.signal(lostTo)
+Console.log(wait l3 timeout 3000)
+// Stable: kept for that runnable
+Thread c1 = Thread(countStable).start()
+Signal kept2 = Signal(SignalMode.Stable, "to.stable")
+c1.signal(kept2)
+c1.signal(kept2)
+Console.log(wait c1 timeout 3000)

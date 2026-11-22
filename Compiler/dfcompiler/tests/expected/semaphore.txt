@@ -1,0 +1,11 @@
+10
+at most 2 inside
+2 free
+took 2, 0 free
+3 permits: busy
+gate busy
+took both, 0 free
+skipped: no permit, no timeout
+2 free again
+7
+---- exit code 0 ----

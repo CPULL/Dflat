@@ -1,0 +1,55 @@
+// calls through the handle with the passing modes (spec 20.12): -> gives, x! sends a clone, a new value goes as it is; the results the
+// method makes are the caller's; several results
+import Root
+import Root.Tasks
+
+class Item(string label, i32 weight) {
+  public string label
+  public i32 weight
+} atEnd {
+  Console.log($"  end of {label}")
+}
+
+class Store {
+  vec<Item> items = []
+  fun i32 taskRun() {
+    while true {
+      wait 5
+    }
+    return 0
+  }
+  public fun add(->Item item) {
+    items.add(->item)
+  }
+  public fun i32 weigh(Item item) {
+    return item.weight
+  }
+  public fun Item make(string label) {
+    return Item(label, 1)
+  }
+  public fun ->arr<i32> weights() {
+    arr<i32> all = arr<i32>[items.len]
+    for uns i = 0..items.len {
+      all[i] = items[i].weight
+    }
+    return all
+  }
+  public fun i32, string first() {
+    return items[0].weight, items[0].label
+  }
+}
+
+Task t = Task(Store, timeout: 2000).start()
+Item apple = Item("apple", 3)
+t.add(->apple)                                    // given: the task owns it now
+Item pear = Item("pear", 5)
+Console.log(wait t.weigh(pear!) timeout 500)      // a clone, ended after the call
+Console.log(wait t.weigh(Item("plum", 7)) timeout 500)
+Item made = wait t.make("kiwi") timeout 500     // made by the method: the caller owns it
+Console.log(made.label)
+arr<i32> w = wait t.weights() timeout 500
+Console.log(w)
+i32 weight, string label = wait t.first() timeout 500
+Console.log($"{label} {weight}")
+Console.log(pear.label)
+Console.log(t.kill(1000))

@@ -1,0 +1,57 @@
+// an atEnd on the line after a closing brace belongs to what the brace closes, as } atEnd { on one line (spec 14.2)
+import Root
+
+class Probe(string name) {
+  public fun hello() { Console.log($"hello {name}") }
+}
+atEnd {
+  Console.log($"class atEnd: {name}")
+}
+
+class Built {
+  public Built(i32 n) {
+    Console.log($"constructor {n}")
+  }
+  atEnd {
+    Console.log("constructor atEnd")
+  }
+}
+
+fun work() {
+  Console.log("work")
+}
+atEnd {
+  Console.log("function atEnd")
+}
+
+fun blocks() {
+  Console.log("start of body")
+  // an atEnd after an atEnd block is a standalone block of the function: they run when it ends, the last one first
+  atEnd {
+    Console.log("standalone 1")
+  }
+  atEnd {
+    Console.log("standalone 2")
+  }
+  Console.log("end of body")
+}
+
+fun caught() {
+  throw Exception("boom")
+  catch Exception e {
+    Console.log($"caught {e.message}")
+  }
+  atEnd {
+    Console.log("after a catch: a standalone block")
+  }
+  Console.log("end of caught")
+}
+
+Probe p = Probe("one")
+p.hello()
+p is atEnd.
+Built b = Built(3)
+b is atEnd.
+work()
+blocks()
+caught()

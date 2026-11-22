@@ -348,9 +348,9 @@ public sealed class Parser {
   }
 
   // ownerName: class or trait whose constructors may appear in this block
-  // A "} atEnd { }" on the same line as the closing brace belongs to what it follows: a function, a constructor,
-  // a class, or any other statement with a block (spec 14.2, forms 2 to 5). It becomes the last child, an
-  // AtEnd node with the text "trailing". An atEnd on a line of its own is the standalone block of the compiler.
+  // A "} atEnd { }" on the same line as the closing brace, or with the atEnd on the next line, belongs to what it follows: a function,
+  // a constructor, a class, or any other statement with a block (spec 14.2, forms 2 to 5). It becomes the last child, an AtEnd node with
+  // the text "trailing". After an atEnd block or a catch, and anywhere else, an atEnd that starts a line is a standalone block.
   Node ParseStatement(string? ownerName = null, bool caseBody = false) {
     var statement = ParseStatementCore(ownerName, caseBody);
     // Some a = Some() atEnd { } is atEnd of a (spec 14.2), also after a declaration that ends with } and after a multiple declaration
@@ -366,13 +366,21 @@ public sealed class Parser {
     if (IsKw("atEnd") && PeekAt(1).Is("{") && pos > 0 && Peek.Line == toks[pos - 1].Line && !toks[pos - 1].Is("}")) {
       throw Error("expected end of statement: an atEnd { } on the same line follows a declaration (atEnd of x) or a closing brace");
     }
-    while (IsKw("atEnd") && PeekAt(1).Is("{") && pos > 0 && toks[pos - 1].Is("}")
-           && statement.Kind is not ("AtEnd" or "AtEndOf")) {
+    while (pos > 0 && toks[pos - 1].Is("}") && statement.Kind is not ("AtEnd" or "AtEndOf" or "Catch")
+           && (IsKw("atEnd") && PeekAt(1).Is("{") || AtEndOnNextLine())) {
+      if (IsNewline) {
+        Next();   // the atEnd on the line after the closing brace (spec 14.2)
+      }
       var t = Next();
       statement.Add(new Node("AtEnd", t, "trailing").Add(ParseBlock()));
     }
     return statement;
   }
+
+  // } then, on the next line, atEnd {
+  bool AtEndOnNextLine() =>
+    IsNewline && PeekAt(1).Kind == TokenKind.Keyword && PeekAt(1).Text == "atEnd" && PeekAt(2).Is("{")
+    && PeekAt(1).Line == toks[pos - 1].Line + 1;
 
   // the variables a statement declares: a declaration, or the declarations of a multiple assignment
   static List<string> DeclaredNames(Node statement) => statement.Kind switch {
@@ -383,6 +391,48 @@ public sealed class Parser {
 
   Node ParseStatementCore(string? ownerName, bool caseBody) {
     classMember = ownerName != null;   // a field of a class can have accessor blocks (spec 11.1.4)
+    if (ownerName == null && Peek.Kind == TokenKind.Ident && Peek.Text == "semaphore" && PeekAt(1).Kind == TokenKind.Ident && PeekAt(1).Line == Peek.Line
+        && (PeekAt(2).Is("=") || PeekAt(2).Kind is TokenKind.Newline or TokenKind.Eof || PeekAt(2).Is("}") || PeekAt(2).Is(";")
+            || PeekAt(2).Kind == TokenKind.Ident && PeekAt(2).Text == "timeout")) {
+      // semaphore pool = 12 timeout 1500 (spec 20.14): a word here, not a keyword
+      Next();
+      var name = Next();
+      var sem = new Node("Semaphore", name, name.Text);
+      if (AcceptOp("=")) {
+        sem.Add(new Node("Init", name).Add(ParseExpr()));
+      }
+      if (Peek.Kind == TokenKind.Ident && Peek.Text == "timeout") {
+        var word = Next();
+        sem.Add(new Node("Timeout", word).Add(ParseTimeoutOperand()));
+      }
+      EndStatement(caseBody);
+      return sem;
+    }
+    if (Peek.Kind == TokenKind.Ident && Peek.Text == "wait" && PeekAt(1).Line == Peek.Line && PeekAt(1).Kind == TokenKind.Ident && PeekAt(1).Text == "on"
+        && PeekAt(2).Kind == TokenKind.Ident) {
+      // wait on ev [from x] as data [timeout t] { ... } (spec 20.4.7): the single-target form
+      var start = Next();
+      Next();   // on
+      var waitOn = new Node("WaitOn", start).Add(ParseUnary());
+      if (Peek.Kind is TokenKind.Ident or TokenKind.Keyword && Peek.Text == "from") {
+        var word = Next();
+        waitOn.Add(new Node("From", word).Add(ParseUnary()));
+      }
+      if (Peek.Kind is not (TokenKind.Ident or TokenKind.Keyword) || Peek.Text != "as") {
+        throw Error("wait on takes the name of the data: wait on resize as newsize timeout 200 { ... } (spec 20.4.7)");
+      }
+      Next();
+      waitOn.Text = ExpectIdent().Text;
+      if (Peek.Kind == TokenKind.Ident && Peek.Text == "timeout") {
+        var word = Next();
+        bool savedBrace = noBrace;
+        noBrace = true;
+        waitOn.Add(new Node("Timeout", word).Add(ParseTimeoutOperand()));
+        noBrace = savedBrace;
+      }
+      waitOn.Add(ParseBlock());
+      return waitOn;
+    }
     if (Peek.Kind == TokenKind.Ident && Peek.Text == "wait" && PeekAt(1).Line == Peek.Line
         && PeekAt(1).Kind is TokenKind.Ident or TokenKind.Int or TokenKind.Real or TokenKind.String && !PeekAt(2).Is("=")) {
       // wait delay, wait t timeout 500 (spec 20.2): a wait, not the declaration of a variable delay of a type wait
@@ -394,6 +444,10 @@ public sealed class Parser {
     if (ownerName == null && Peek.Kind == TokenKind.Ident && Peek.Text == "atLibStart" && PeekAt(1).Is("{")) {
       var start = Next();
       return new Node("AtLibStart", start).Add(ParseBlock());   // the startup code of a library, in lib.df (spec 15.8)
+    }
+    if (ownerName == null && Peek.Kind == TokenKind.Ident && Peek.Text == "atLibEnd" && PeekAt(1).Is("{")) {
+      var end = Next();
+      return new Node("AtLibEnd", end).Add(ParseBlock());   // the end code of a library, in lib.df (spec 14.2, 15.8)
     }
     if (DflibMode && ownerName == null && (Peek.Kind == TokenKind.Ident && Peek.Text == "native"
         || IsOp("[") && PeekAt(1).Kind == TokenKind.Ident && PeekAt(2).Is("]") && PeekAt(3).Kind == TokenKind.Ident && PeekAt(3).Text == "native")) {
@@ -504,7 +558,8 @@ public sealed class Parser {
         case "atEnd":
           return PeekAt(1).Kind == TokenKind.Ident && PeekAt(1).Text == "of" ? ParseAtEndOf() : ParseAtEnd();
         case "enforce":
-          if (PeekAt(1).Kind == TokenKind.Ident && (PeekAt(2).Is(",") || PeekAt(2).Is("{") || PeekAt(2).Kind == TokenKind.Ident && PeekAt(2).Text == "timeout")) {
+          if (PeekAt(1).Kind == TokenKind.Ident && (PeekAt(2).Is(",") || PeekAt(2).Is("{") || PeekAt(2).Kind == TokenKind.Ident && PeekAt(2).Text == "timeout"
+              || PeekAt(2).Is(".") && PeekAt(3).Kind == TokenKind.Ident && PeekAt(3).Text == "take" && PeekAt(4).Is("(") && EnforceTakeBlock())) {
             return ParseEnforce();
           }
           break;   // enforce <expression> as a statement (spec 7.2.6): ParseSimple reads it
@@ -1090,12 +1145,39 @@ public sealed class Parser {
   // enforce a, b { } else { }   |   enforce a, b { } null [on a] { } lockfail [on b] { } atEnd { } catch E [ex] [on a, b] { } ... (spec 7.2)
   // The clauses become children after the block: EnforceNull and EnforceLockFail (with an On child when they list variables), Catch,
   // and AtEnd with the text "enforce". else is valid only alone.
+  // enforce pool.take(10) { (a semaphore, spec 20.14), not the enforce expression enforce list.take(3): a block follows the call
+  bool EnforceTakeBlock() {
+    int depth = 0;
+    for (int at = pos + 5; at < toks.Count; at++) {   // past enforce name . take (
+      if (toks[at].Is("(")) {
+        depth++;
+      } else if (toks[at].Is(")")) {
+        if (depth == 0) {
+          var next = at + 1 < toks.Count ? toks[at + 1] : null;
+          return next != null && (next.Is("{") || next.Kind == TokenKind.Ident && next.Text == "timeout" || next.Is(","));
+        }
+        depth--;
+      } else if (toks[at].Kind is TokenKind.Newline or TokenKind.Eof) {
+        return false;
+      }
+    }
+    return false;
+  }
+
   Node ParseEnforce() {
     var t = Next();
     var node = new Node("Enforce", t);
     do {
       var n = ExpectIdent();
       var name = new Node("Name", n, n.Text);
+      if (IsOp(".") && PeekAt(1).Kind == TokenKind.Ident && PeekAt(1).Text == "take" && PeekAt(2).Is("(")) {
+        // enforce pool.take(10) { }: several permits of a semaphore (spec 20.14)
+        Next();
+        var take = Next();
+        Next();
+        name.Add(new Node("Take", take).Add(ParseExpr()));
+        ExpectOp(")");
+      }
       if (Peek.Kind == TokenKind.Ident && Peek.Text == "timeout") {
         // enforce p timeout 500: the longest wait for the lock of p (spec 7.2.1)
         var word = Next();

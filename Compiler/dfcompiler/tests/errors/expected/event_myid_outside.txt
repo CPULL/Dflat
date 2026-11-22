@@ -1,0 +1,1 @@
+event_myid_outside.df(10): error: myid is the id of the object a method of Win runs on: here there is none (spec 20.4.6)

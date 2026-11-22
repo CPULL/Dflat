@@ -1,0 +1,6 @@
+// the registration of an event gives its timeout (spec 20.4.3)
+import Root.Tasks
+
+struct Data { i32 n }
+
+Event<Data> ev = Event.register("x.data")

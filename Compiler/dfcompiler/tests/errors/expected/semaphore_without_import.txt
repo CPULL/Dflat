@@ -1,0 +1,1 @@
+semaphore_without_import.df(4): error: a semaphore is part of Root.Tasks: it needs import Root.Tasks (spec 20.0, 20.14)

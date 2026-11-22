@@ -99,9 +99,12 @@ fun neverStarted() {
   catch TaskWasNotStartedException { Console.log("not started") }
 }
 
-// no timeout from the wait, start or the constructor: a real exception
+// no timeout from the wait, start or the constructor: a real exception where the compiler cannot see it (a parameter)
 fun noTimeout() {
-  Task z = Task(Slow).start()
+  waitWithout(Task(Slow).start())
+}
+
+fun waitWithout(Task<Slow> z) {
   i32 v = wait z
   Console.log(v)
   catch WaitingWithoutTimeoutException e { Console.log($"no timeout: {e.message}") }

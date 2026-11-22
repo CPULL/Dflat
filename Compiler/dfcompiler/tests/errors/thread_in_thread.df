@@ -1,0 +1,11 @@
+// a thread cannot start another thread (spec 20.1)
+import Root.Tasks
+
+fun i32 inner() { return 1 }
+
+fun i32 outer() {
+  Thread t = Thread(inner)
+  return 2
+}
+
+Thread o = Thread(outer)

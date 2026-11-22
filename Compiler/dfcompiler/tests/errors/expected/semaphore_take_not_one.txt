@@ -1,0 +1,1 @@
+semaphore_take_not_one.df(5): error: take(n) takes the permits of a semaphore: 'm' is not one (spec 20.14)

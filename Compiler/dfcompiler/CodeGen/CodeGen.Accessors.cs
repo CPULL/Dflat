@@ -282,10 +282,12 @@ public sealed partial class CodeGen {
   (Expr Obj, FieldInfo Property)? PropertyTarget(Node target, Scope scope) {
     // a static property: count inside its class, C.count outside (the class is the receiver, its code is empty)
     if (target.Kind == "Name" && scope.Find(target.Text!) == null && currentClass != null && FindField(currentClass, target.Text!) is { HasAccessors: true, IsStatic: true } ownStatic) {
+      NoteStaticUse(ownStatic, target);   // spec 20.12
       return (new Expr("", ownStatic.Owner.Name), ownStatic);
     }
     if (target.Kind == "Member" && target.Children.Count == 1 && target.Children[0] is { Kind: "Name" } owner && scope.Find(owner.Text!) == null
         && classes.TryGetValue(owner.Text!, out var ownerClass) && FindField(ownerClass, target.Text!) is { HasAccessors: true, IsStatic: true } staticProperty) {
+      NoteStaticUse(staticProperty, target);   // spec 20.12
       return (new Expr("", ownerClass.Name), staticProperty);
     }
     if (target.Kind == "Name" && scope.Find(target.Text!) == null && currentClass != null && scope.Find("this") != null

@@ -1,0 +1,11 @@
+// myid is written in a method of the sender class (spec 20.4.6)
+import Root.Tasks
+
+class Win(i32 id) {
+}
+
+struct Data { Sender<Win> from, i32 n }
+
+fun send(Event<Data> ev) {
+  ev.send(Data(myid, 1))
+}

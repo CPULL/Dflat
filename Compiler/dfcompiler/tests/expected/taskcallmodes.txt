@@ -1,0 +1,13 @@
+  end of pear
+5
+  end of plum
+7
+kiwi
+[3]
+apple 3
+pear
+true
+  end of kiwi
+  end of pear
+  end of apple
+---- exit code 0 ----

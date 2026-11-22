@@ -1,0 +1,8 @@
+namespace oldend
+import Root
+
+public fun i32 one() { return 1 }
+
+atEnd {
+  Console.log("library end")
+}

@@ -370,11 +370,31 @@ static const df_descriptor df_desc_CalledANotRunningTaskException = { 61, "Calle
 static const df_descriptor df_desc_TaskAlreadyStartedException = { 62, "TaskAlreadyStartedException", &df_desc_Exception, false };
 static const df_descriptor df_desc_ReturnOutsideATaskException = { 63, "ReturnOutsideATaskException", &df_desc_Exception, false };
 static const df_descriptor df_desc_WaitingWithoutTimeoutException = { 64, "WaitingWithoutTimeoutException", &df_desc_Exception, false };
+static const df_descriptor df_desc_ThreadStartedByAThreadException = { 65, "ThreadStartedByAThreadException", &df_desc_Exception, false };
+static const df_descriptor df_desc_SignalModeMismatchException = { 66, "SignalModeMismatchException", &df_desc_Exception, false };
+static const df_descriptor df_desc_ExclusiveSignalBusyException = { 67, "ExclusiveSignalBusyException", &df_desc_Exception, false };
+static const df_descriptor df_desc_ReservedSignalException = { 68, "ReservedSignalException", &df_desc_Exception, false };
+static const df_descriptor df_desc_DuplicateEventNameWithDataMismatchException = { 69, "DuplicateEventNameWithDataMismatchException", &df_desc_Exception, false };
+/* the soft kill (spec 20.10): the runnable ends at a checkpoint; no catch takes it (not an Exception), atEnd blocks and enforce scopes
+   unwind as for any exception */
+static const df_descriptor df_desc_Cancelled = { 0, "Cancelled", NULL, false };
 
 /* The exception of a function is a local of that function (df_err in the generated code) and travels back to the caller as the second
    value it returns. The runtime functions written in C cannot return it that way: they leave it here, and the code generated around
    the call moves it into the local df_err at once. This slot is empty between statements. */
 static DF_TLS df_exception* df_pending = NULL;
+
+/* the cancel signal of the runnable this thread runs (spec 20.10; set by RuntimeTasks): a wait for a busy lock gives up when it arrives,
+   the lock counts as busy, and the runnable ends at its next checkpoint. NULL in the main program and without Root.Tasks */
+static DF_TLS int32_t* df_cancel_flag = NULL;
+#define DF_CANCEL_ASKED() (df_cancel_flag != NULL && DF_ATOMIC_LOAD(*df_cancel_flag) == 1)
+
+/* a wait written in taskRun() (spec 20.8): the task whose calls through the handle it serves while it waits; set by the generated code
+   around such a wait (DF_SERVING), NULL elsewhere and while a call is served (calls never nest). The lock waits call df_serve_hook */
+static DF_TLS void* df_serving = NULL;
+static void (*df_serve_hook)(void* task) = NULL;
+#define DF_SERVING(self, call) ({ void* df_sv_prev = df_serving; df_serving = (void*)df_task_of((void*)(self)); __auto_type df_sv_r = (call); df_serving = df_sv_prev; df_sv_r; })
+#define DF_SERVE_WHILE_WAITING() do { if (df_serving != NULL && df_serve_hook != NULL) { df_serve_hook(df_serving); } } while (0)
 
 /* copies at most maxBytes - 1 bytes plus the terminator, never cutting a UTF-8 character */
 static char* df_cstr_truncated(const char* text, uint64_t length, uint64_t maxBytes) {
@@ -1843,9 +1863,10 @@ static bool df_mtx_lock(df_mtx* m, int64_t ms) {
   }
   int64_t until = df_mono_ms() + ms;
   while (!DF_ATOMIC_CAS(m->owner, (uintptr_t)0, me)) {
-    if (df_mono_ms() >= until) {
+    if (df_mono_ms() >= until || DF_CANCEL_ASKED()) {
       return false;
     }
+    DF_SERVE_WHILE_WAITING();   /* in taskRun(): the calls through the handle (spec 20.8) */
     df_thread_yield();
   }
 #else
@@ -1860,6 +1881,48 @@ static void df_mtx_unlock(df_mtx* m) {
   if (--m->depth == 0) {
     DF_ATOMIC_STORE(m->owner, (uintptr_t)0);
   }
+}
+
+/* ---- semaphore (spec 20.14): a counter of permits, taken with enforce (one, or take(n)) and given back at the end of its block. Without
+   threads (no DF_TASKS) a busy one fails at once ---- */
+typedef struct {
+  int64_t timeout;    /* milliseconds, from the declaration; 0: one try */
+  int64_t permits;    /* the permits free now */
+} df_sem;
+
+/* takes n permits, waiting at most ms (-1: the timeout of the semaphore; 0: one try); false when they stay busy */
+static bool df_sem_take(df_sem* s, int64_t n, int64_t ms) {
+#ifdef DF_TASKS
+  if (ms < 0) {
+    ms = s->timeout;
+  }
+  int64_t until = df_mono_ms() + ms;
+  for (;;) {
+    int64_t have = DF_ATOMIC_LOAD(s->permits);
+    if (have >= n) {
+      if (DF_ATOMIC_CAS(s->permits, have, have - n)) {
+        return true;
+      }
+      continue;
+    }
+    if (df_mono_ms() >= until || DF_CANCEL_ASKED()) {
+      return false;
+    }
+    DF_SERVE_WHILE_WAITING();   /* in taskRun(): the calls through the handle (spec 20.8) */
+    df_thread_yield();
+  }
+#else
+  (void)ms;
+  if (s->permits < n) {
+    return false;
+  }
+  s->permits -= n;
+  return true;
+#endif
+}
+
+static void df_sem_give(df_sem* s, int64_t n) {
+  DF_ATOMIC_ADD(s->permits, n);
 }
 
 /* reference counting (spec 12.7, the Rust Rc model): a counted variable holds the counting block of its object; the counting system owns the
@@ -1970,9 +2033,10 @@ static bool df_rc_lock(df_rc* rc, int64_t ms) {
   }
   int64_t until = df_mono_ms() + ms;
   while (!DF_ATOMIC_CAS(rc->locked, false, true)) {
-    if (df_mono_ms() >= until) {
+    if (df_mono_ms() >= until || DF_CANCEL_ASKED()) {
       return false;
     }
+    DF_SERVE_WHILE_WAITING();   /* in taskRun(): the calls through the handle (spec 20.8) */
     df_thread_yield();
   }
 #else

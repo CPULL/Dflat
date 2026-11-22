@@ -1,0 +1,161 @@
+// the soft kill (spec 20.10): kill(timeout) sends the cancel signal; at its next checkpoint the runnable ends: no catch takes it,
+// its atEnd blocks run; status Killed; true when it ended in time
+import Root
+import Root.Tasks
+
+mutex i32 ends = 0 timeout 5000
+
+class Looper {
+  fun i32 taskRun() {
+    while true {
+      wait 10
+    }
+    return 1
+    catch Exception e {
+      Console.log("never: no catch takes the cancel")
+      return 0
+    }
+  } atEnd {
+    enforce ends {
+      ends++
+    }
+  }
+}
+
+class Parent {
+  fun i32 taskRun() {
+    Task child = Task(Looper, timeout: 1000).start()
+    while true {
+      wait 10
+    }
+    return 0
+  }
+}
+
+class Busy {
+  fun i32 taskRun() {
+    Root.Time.sleep(400)   // not a checkpoint
+    return 2
+  }
+}
+
+fun i32 spin() {
+  while true {
+    wait 10
+  }
+  return 0
+}
+
+Task t = Task(Looper, timeout: 1000).start()
+wait 100
+Console.log(t.kill(2000))
+Console.log(t.status)
+enforce ends {
+  Console.log(ends)
+}
+
+// a thread
+Thread th = Thread(spin).start()
+wait 100
+Console.log(th.kill(2000))
+Console.log(th.status)
+
+// the cascade: the child first, then the parent
+Task p = Task(Parent, timeout: 1000).start()
+wait 100
+Console.log(p.kill(2000))
+Console.log(p.status)
+enforce ends {
+  Console.log(ends)
+}
+
+// no checkpoint: it does not end in time, the kill gives false and does not escalate
+Task b = Task(Busy, timeout: 1000).start()
+wait 50
+Console.log(b.kill(100))
+Console.log(b.status)
+wait 600
+Console.log(b.status)   // it ended at its return, a checkpoint
+
+// a task that never started ends at once
+Task idle = Task(Looper, timeout: 1000)
+Console.log(idle.kill(100))
+Console.log(idle.status)
+
+// a task that ends: its threads get the soft kill (spec 20.1)
+class Marker {
+} atEnd {
+  enforce ends {
+    ends++
+  }
+}
+
+fun i32 marked() {
+  Marker m = Marker()
+  while true {
+    wait 10
+  }
+  return 0
+}
+
+class Starter {
+  fun i32 taskRun() {
+    Thread th = Thread(marked).start()
+    wait 50
+    return 5
+  }
+}
+
+Task st = Task(Starter, timeout: 1000).start()
+Console.log(wait st)
+wait 300
+enforce ends {
+  Console.log(ends)
+}
+
+// waiting for a busy lock: the cancel signal ends the wait, the lock counts as busy, the runnable ends at its next checkpoint
+mutex i32 held = 0 timeout 5000
+semaphore one = 1 timeout 5000
+
+fun i32 blockedOnMutex() {
+  enforce held {
+    Console.log("never: the main program holds it")
+  } lockfail {
+    Console.log("mutex wait given up")
+  }
+  wait 10
+  return 1
+}
+
+fun i32 blockedOnSemaphore() {
+  enforce one {
+    Console.log("never: the main program holds it")
+  } lockfail {
+    Console.log("semaphore wait given up")
+  }
+  wait 10
+  return 1
+}
+
+enforce held, one {
+  Thread bm = Thread(blockedOnMutex).start()
+  Thread bs = Thread(blockedOnSemaphore).start()
+  wait 100
+  Console.log($"{bm.kill(1000)} {bs.kill(1000)}")
+  Console.log($"{bm.status} {bs.status}")
+}
+
+// still running at the end of the main program: the soft kill, its atEnd runs
+class Forever {
+  fun taskRun() {
+    while true {
+      wait 10
+    }
+  } atEnd {
+    Console.log("ended with the program")
+  }
+}
+
+Task left = Task(Forever, timeout: 1000).start()
+wait 50
+Console.log("end of main")

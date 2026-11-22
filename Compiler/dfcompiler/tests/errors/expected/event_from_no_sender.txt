@@ -1,0 +1,1 @@
+event_from_no_sender.df(12): error: Data has no Sender<...> field: from has nothing to compare (spec 20.4.6)

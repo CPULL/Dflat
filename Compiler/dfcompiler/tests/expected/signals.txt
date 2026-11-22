@@ -1,0 +1,28 @@
+Single
+myapp.go
+null
+20000
+ExclusiveSafe
+666
+1
+timeout
+woken
+woken
+timeout
+3
+second listener: This signal is Exclusive: it already has its listener
+1
+mode: This signal exists with another mode
+reserved: The signal numbers below 4096 are reserved: KnownSignals names them
+true
+true
+true
+true
+30001 ''
+null 'grp.b'
+null ''
+grp.s2
+0 1
+0
+2
+---- exit code 0 ----

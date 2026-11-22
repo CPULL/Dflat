@@ -1,0 +1,5 @@
+// Root.Time.wait without Root.Tasks: a plain sleep (spec 20.8)
+import Root
+
+Root.Time.wait(20)
+Console.log("done")

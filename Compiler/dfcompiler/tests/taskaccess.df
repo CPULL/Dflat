@@ -1,0 +1,63 @@
+// what the code of a task sees (spec 20.12): constants, refcounted objects, weak references, mutex variables and globals;
+// the main program and its threads see every top-level variable
+import Root
+import Root.Tasks
+
+class Box {
+  public i32 n = 0
+}
+
+class Store {
+  i32 items = 0
+  public fun add(i32 k) { items += k }
+  public fun i32 count() { return items }
+}
+
+const i32 STEP = 5
+mutex i32 hits = 0 timeout 5000
+global Store store = Store()
+@Box shared = @Box()
+%Box weak = %shared
+i32 plain = 7   // only the main program and its threads use it
+
+class Counter {
+  public static const i32 LIMIT = 3
+
+  fun i32 taskRun() {
+    i32 i = 0
+    while i < LIMIT {
+      enforce hits {
+        hits += STEP
+      }
+      store.add(1)
+      i++
+    }
+    i32 w = 0
+    enforce weak {
+      w = weak.n
+    }
+    return bump() + shared.n + w
+  }
+
+  fun i32 bump() {
+    return helper()
+  }
+}
+
+fun i32 helper() {
+  return STEP * 2
+}
+
+fun i32 mainThread(i32 k) {
+  return plain + k   // a thread of the main program sees its top-level variables
+}
+
+Task t = Task(Counter, timeout: 5000).start()
+Console.log(wait t)
+enforce hits {
+  Console.log(hits)
+}
+Console.log(store.count())
+Console.log(shared.n)
+Thread m = Thread(mainThread, 1).start()
+Console.log(wait m timeout 2000)

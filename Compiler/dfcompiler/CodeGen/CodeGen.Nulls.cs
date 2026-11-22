@@ -297,7 +297,7 @@ public sealed partial class CodeGen {
         }
         ms = wait.Code;
       }
-      checks.Add((name.Text!, $"({flag} = df_rc_lock({held} = {blockCode}, (int64_t)({ms})))", true));
+      checks.Add((name.Text!, Serving($"({flag} = df_rc_lock({held} = {blockCode}, (int64_t)({ms})))"), true));
       locks.Add((flag, $"df_rc_unlock({held})"));
       locked.Add(name.Text!);
     }
@@ -305,6 +305,17 @@ public sealed partial class CodeGen {
     var heldNow = new List<string>();   // the locks this enforce holds while its block runs (a &@string is read there, spec 12.7)
     var mutexesHere = new List<string>();
     foreach (var name in names) {
+      if (SemaphoreLockOf(name, scope) is string semLock) {
+        // a semaphore (spec 20.14): one permit, or take(n); the timeout of the enforce, else the one of the semaphore
+        var (semFlag, semCheck, semRelease) = SemaphoreLock(name, semLock, scope);
+        checks.Add((name.Text!, Serving(semCheck), true));
+        locks.Add((semFlag, semRelease));
+        locked.Add(name.Text!);
+        continue;
+      }
+      if (name.Children.Any(child => child.Kind == "Take")) {
+        throw Error($"take(n) takes the permits of a semaphore: '{name.Text}' is not one (spec 20.14)", name);
+      }
       if (MutexLockOf(name, scope) is string mutexLock) {
         // a mutex (spec 20.13): its lock, the timeout of the enforce or else the one of the mutex (-1)
         if (activeMutexes.Contains(mutexLock) || mutexesHere.Contains(mutexLock)) {
@@ -320,7 +331,7 @@ public sealed partial class CodeGen {
           }
           mutexMs = wait.Code;
         }
-        checks.Add((name.Text!, $"({mutexFlag} = df_mtx_lock(&{mutexLock}, (int64_t)({mutexMs})))", true));
+        checks.Add((name.Text!, Serving($"({mutexFlag} = df_mtx_lock(&{mutexLock}, (int64_t)({mutexMs})))"), true));
         locks.Add((mutexFlag, $"df_mtx_unlock(&{mutexLock})"));
         locked.Add(name.Text!);
         mutexesHere.Add(mutexLock);

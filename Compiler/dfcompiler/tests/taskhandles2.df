@@ -1,0 +1,68 @@
+// Task<...> fields and function results, t = ... checked or learned again, the type switch on a Task (spec 20.9)
+import Root
+import Root.Tasks
+
+class Counter {
+  i32 count = 0
+  fun i32 taskRun() {
+    while true {
+      wait 5
+      count++
+    }
+    return count
+  }
+  public fun i32 hello() { return 1 }
+}
+
+class Logger {
+  fun string taskRun() {
+    while true {
+      wait 5
+    }
+    return "log"
+  }
+}
+
+class Holder {
+  public Task<Counter> worker
+  public fun i32 run() {
+    worker = Task(Counter, timeout: 1000).start()
+    return wait worker.hello() timeout 500   // the field says its class: its methods are reached
+  }
+  public fun stop() {
+    worker.kill(500)
+  }
+}
+
+fun Task<Counter> startCounter() {
+  return Task(Counter, timeout: 1000).start()
+}
+
+fun string kind(Task t) {
+  return t is ? {
+    Task<Counter> c: $"a counter ({wait c.hello() timeout 500})",
+    Task<*, string> s: "gives a string",
+    default: "something else"
+  }
+}
+
+Holder h = Holder()
+Console.log(h.run())
+Console.log(wait h.worker.hello() timeout 500)
+h.stop()
+
+var made = startCounter()
+Console.log(wait made.hello() timeout 500)
+Console.log(kind(made))
+Task log = Task(Logger, timeout: 1000).start()
+Console.log(kind(log))
+
+// a Task that knew its task from its line learns the new one
+Task any = Task(Counter, timeout: 1000).start()
+Console.log(wait any.hello() timeout 500)
+any.kill(500)
+any = startCounter()
+Console.log(wait any.hello() timeout 500)
+any.kill(500)
+made.kill(500)
+log.kill(500)

@@ -1,0 +1,7 @@
+// take(n) is for semaphores (spec 20.14)
+import Root.Tasks
+
+mutex i32 m = 0 timeout 100
+enforce m.take(2) {
+  m++
+}

@@ -787,3 +787,5 @@
 - 15.8 The .dfc format: DFC 1, interface <n> + the .dfi text, targets <count>, one binary <target> <file> <n> line per target, then the binaries in the same order
 - 15.8, 19.3 A library build keeps the other targets of its .dfi / .dfc (layouts, binaries) when the compiler and the interface are the same, otherwise drops them with a level 2 warning; a folder with both a .dfi and a .dfc: level 2 warning at the build, compile error for a program
 - 15.8 Each binary line of a .dfc ends with the SHA-256 of the binary; a binary that does not match is a compile error
+- 14.2 Forms 2 to 5: the `atEnd` can be on the line after the closing brace, and it belongs to what the brace closes; after an `atEnd` block or a `catch` it stays a standalone block
+- 14.2, 15.8 The end code of a library is `atLibEnd { }` (form 6); a standalone `atEnd { }` at the top level of lib.df is a compile error

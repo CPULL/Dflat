@@ -504,9 +504,16 @@ public sealed partial class CodeGen {
       source.AppendLine(ExecPrelude);
     }
     // Root.Tasks (spec 20): the class Task and its enums, written in Dflat (TasksPrelude); only with import Root.Tasks
-    if (TasksMode && !userTypes.Contains("Task") && !userTypes.Contains("Thread") && Mentions(program, node => node.Text is "Task" or "Thread" or "RunStatus" or "RunKind")) {
+    if (TasksMode && !userTypes.Contains("Task") && !userTypes.Contains("Thread") && Mentions(program, node => node.Text is "Task" or "Thread" or "RunStatus" or "RunKind"
+        or "Signal" or "SignalMode" or "KnownSignals" or "Event" or "EventMode" or "EventQueueFullMode")) {
       source.AppendLine(TasksPrelude);
       source.AppendLine(ThreadPrelude);   // spec 20.1 (CodeGen.Threads.cs)
+      if (!userTypes.Contains("Signal")) {
+        source.AppendLine(SignalsPrelude);   // spec 20.3 (CodeGen.Signals.cs)
+      }
+      if (!userTypes.Contains("Event")) {
+        source.AppendLine(EventsPrelude);   // spec 20.4 (CodeGen.Events.cs)
+      }
     }
     // vec<T> (spec 6.8) is a generic class written in Dflat, with the collection traits (CodeGen.Vec.cs)
     if (!userTypes.Contains("vec") && !userTypes.Contains("list") && !userTypes.Contains("map") && Mentions(program, node => node.Text is "vec" or "list" or "map" or "bmap" or "hmap" or "hset" or "View" or "getIterator" or "IndexIterator" or "SetIterator" or "IndexCollection" or "MapCollection" or "SetCollection" or "Iterator"

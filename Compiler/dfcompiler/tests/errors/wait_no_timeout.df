@@ -1,0 +1,14 @@
+// a wait with no timeout anywhere is a compile error where the compiler sees it (spec 20.1, 20.2)
+import Root.Tasks
+
+class Counter {
+  fun i32 taskRun() { return 1 }
+}
+
+class Logger {
+  fun string taskRun() { return "x" }
+}
+
+Task c = Task(Counter)
+c.start()
+i32 v = wait c

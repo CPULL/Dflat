@@ -1,9 +1,10 @@
-// return! hands out a value of a task or a thread: not in a method other than taskRun() (spec 20.1)
+// return! hands out a value of a task or a thread: not in a lambda (spec 20.1)
 import Root.Tasks
 
-class Counter {
-  fun i32 count() {
+fun i32 outer() {
+  i32() inner = () {
     return! 1
     return 2
   }
+  return inner()
 }

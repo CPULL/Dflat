@@ -1,0 +1,1 @@
+task_top_var.df(7): error: the top-level variable 'plain' cannot be used by the code of a task (helper, reached from Worker.taskRun): a task sees only constants, refcounted objects, weak references, mutex variables and globals (spec 20.12)

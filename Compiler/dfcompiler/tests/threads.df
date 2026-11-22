@@ -85,3 +85,36 @@ Thread b = Thread(broken).start()
 i32 r = wait b timeout 2000
 Console.log(r)
 catch Exception e { Console.log($"waiter caught: {e.message}") }
+
+// the timeout of a thread also bounds its own blocking returns (spec 20.1): nobody collects, the value is dropped, the thread goes on
+mutex i32 after = 0 timeout 5000
+
+fun u64 giver() {
+  return! 1
+  enforce after {
+    after = 1
+  }
+  return 0   // nobody collects it either: dropped, the thread ends
+}
+
+Thread gv = Thread(giver, timeout: 50).start()
+wait 1000
+Console.log(gv.status)
+enforce after {
+  Console.log(after)
+}
+
+// a thread cannot start another thread: a handle given to a thread (spec 20.1)
+fun i32 starter(->Thread other) {
+  other.start()
+  return 1
+  catch ThreadStartedByAThreadException e {
+    Console.log($"starter caught: {e.message}")
+    Console.log(other.status)
+    return 2
+  }
+}
+
+Thread inner = Thread(runThis, 1)
+Thread st = Thread(starter, ->inner).start()
+Console.log(wait st timeout 2000)

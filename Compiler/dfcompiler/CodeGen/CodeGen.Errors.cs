@@ -145,7 +145,12 @@ public sealed partial class CodeGen {
     ["CalledANotRunningTaskException"] = 61,   // spec 20.1: a call through the handle of a task that is not running
     ["TaskAlreadyStartedException"] = 62,   // spec 20.1: a second start() of the same task
     ["ReturnOutsideATaskException"] = 63,   // spec 20.1: return! or return? in a taskRun() that does not run as a task
-    ["WaitingWithoutTimeoutException"] = 64   // spec 20.1: a wait with no timeout from the wait, start or the constructor
+    ["WaitingWithoutTimeoutException"] = 64,   // spec 20.1: a wait with no timeout from the wait, start or the constructor
+    ["ThreadStartedByAThreadException"] = 65,   // spec 20.1: start() of a thread inside a thread
+    ["SignalModeMismatchException"] = 66,   // spec 20.3: a signal made again with another mode
+    ["ExclusiveSignalBusyException"] = 67,   // spec 20.3: a second listener of an Exclusive signal
+    ["ReservedSignalException"] = 68,   // spec 20.3: a number below 4096 that KnownSignals does not name
+    ["DuplicateEventNameWithDataMismatchException"] = 69   // spec 20.4.3: an event name used with another struct
   };
 
   readonly Stack<Frame> frames = new();
@@ -610,6 +615,9 @@ public sealed partial class CodeGen {
   void EmitDispatch(Frame frame, StringBuilder sb, string pad) {
     for (int ordinal = 0; ordinal < frame.Catches.Count; ordinal++) {
       sb.Append($"{pad}{frame.DispatchLabel(ordinal)}:\n");
+      if (TasksMode) {
+        sb.Append($"{pad}  if (df_err->descriptor == &df_desc_Cancelled) goto {frame.ExceptionExit};\n");   // the soft kill: no catch takes it (spec 20.10)
+      }
       bool caughtAll = false;
       for (int next = ordinal; next < frame.Catches.Count; next++) {
         var (id, _) = CatchTarget(frame.Catches[next].Node);

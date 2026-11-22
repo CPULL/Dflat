@@ -1,0 +1,6 @@
+// atLibEnd is the end code of a library: only in lib.df (spec 15.8)
+import Root
+
+atLibEnd {
+  Console.log("end")
+}

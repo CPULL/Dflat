@@ -1,0 +1,1 @@
+task_handle_result_wrong.df(16): error: this is not a task of Logger (spec 20.9)

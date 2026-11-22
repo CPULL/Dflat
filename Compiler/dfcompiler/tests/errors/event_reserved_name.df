@@ -1,0 +1,9 @@
+// a struct used as event data cannot have the members of the propagation (spec 20.4.2)
+import Root.Tasks
+
+struct Data {
+  i32 n,
+  bool processed
+}
+
+Event<Data> ev = Event.register("x.data", timeout: 100)

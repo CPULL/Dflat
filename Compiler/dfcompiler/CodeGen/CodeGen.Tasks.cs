@@ -26,13 +26,14 @@ public class Task(u64 handle) {
   public fun RunKind get_kind() { RunKind.Task }
   public fun string get_name() { Root.Tasks.Native.Name(handle) }
   public fun bool get_linked() { Root.Tasks.Native.Linked(handle) }
+  unrestricted fun bool kill(lapse timeout) { Root.Tasks.Native.Kill(handle, timeout) }
 } atEnd {
   Root.Tasks.Native.Release(handle)
 }
 """;
 
   // the names of Root.Tasks (spec 16.1): bare with import Root.Tasks
-  static readonly string[] TasksLibraryNames = { "Task", "Thread", "RunStatus", "RunKind" };
+  static readonly string[] TasksLibraryNames = { "Task", "Thread", "RunStatus", "RunKind", "Signal", "SignalMode", "KnownSignals", "SignalGroup", "SignalType", "Event", "EventMode", "EventQueueFullMode" };
 
   // Root.Tasks.Native: the C side of the class Task (RuntimeTasks)
   static void AddTasksStdlib(Action<string, StdFun> add) {
@@ -46,6 +47,7 @@ public class Task(u64 handle) {
     Native("Status", "i32", "df_task_status", "u64");
     Native("Name", "string", "df_task_name", "u64");
     Native("Linked", "bool", "df_task_linked", "u64");
+    Native("Kill", "bool", "df_task_kill", "u64", "lapse");
   }
 
   // the classes used as tasks: each one gets its df_taskrun_<class> (TaskRunFunctions)
@@ -257,7 +259,7 @@ public class Task(u64 handle) {
     if (node.Kind == "Name" && scope.Find(node.Text!) is VarInfo variable && taskHandles.TryGetValue(variable, out var known)) {
       return known;
     }
-    return null;
+    return TaskHandleOfMember(node, scope);   // a Task<...> field, a function or a method that gives a Task<...> (CodeGen.TaskHandles.cs)
   }
 
   bool IsClassOrChild(ClassInfo cls, ClassInfo of) {
@@ -291,10 +293,11 @@ public class Task(u64 handle) {
     var given = init == null ? null : TaskHandleOf(init, scope);
     if (decl.Children.FirstOrDefault(c => c.Kind == "Type") is Node typeNode && taskTypeSpecs.TryGetValue(typeNode, out var spec)) {
       var wanted = ResolveTaskSpec(spec);
-      if (init != null) {
+      if (init != null && init.Kind != "Null") {
         CheckTaskHandleValue(wanted, given, init);
       }
       taskHandles[variable] = wanted;
+      typedTaskVars.Add(variable);   // t = ... is checked (CodeGen.TaskHandles.cs)
       return;
     }
     if (given is TaskHandle known) {
@@ -311,6 +314,7 @@ public class Task(u64 handle) {
       if (taskParamTypes.TryGetValue((f.Node, p.Name), out var typeNode) && taskTypeSpecs.TryGetValue(typeNode, out var spec)
           && scope.Vars.TryGetValue(p.Name, out var variable)) {
         taskHandles[variable] = ResolveTaskSpec(spec);
+        typedTaskVars.Add(variable);
       }
     }
   }
@@ -358,8 +362,17 @@ public class Task(u64 handle) {
     }
   }
 
+  // a wait written in taskRun(): the calls through the handle are served while it waits (spec 20.8)
+  string Serving(string call) => InTaskRunBody ? $"DF_SERVING(self, {call})" : call;
+
   static bool HasCheckpoint(Node node) =>
-    node.Kind is "Wait" or "Return" or "ReturnHold" or "ReturnPost" or "Enforce" || node.Kind is not ("Lambda" or "Fun") && node.Children.Any(HasCheckpoint);
+    node.Kind is "Wait" or "WaitOn" or "Return" or "ReturnHold" or "ReturnPost" or "Enforce" || IsTimeWaitCall(node)
+    || node.Kind is not ("Lambda" or "Fun") && node.Children.Any(HasCheckpoint);
+
+  // Root.Time.wait(t), Time.wait(t): a timed wait (spec 20.8); seen by its shape, before the names are resolved
+  static bool IsTimeWaitCall(Node node) =>
+    node.Kind == "Call" && node.Children[0] is { Kind: "Member", Text: "wait" } member
+    && member.Children[0] is { Kind: "Name", Text: "Time" } or { Kind: "Member", Text: "Time" };
   // ---------------------------------------------------------------- wait (spec 20.2)
 
   // enforce wait t timeout 1000 default { 123 } (spec 20.2, 7.2.6): the default is the value when the wait gives nothing (a timeout, a
@@ -412,6 +425,10 @@ public class Task(u64 handle) {
     }
     var target = n.Children[0];
     var timeoutNode = n.Children.FirstOrDefault(c => c.Kind == "Timeout")?.Children[0];
+    if (timeoutNode == null) {
+      CheckWaitHasTimeout(target is { Kind: "Call", Children: [{ Kind: "Member" } calledMember, ..] } && TaskMethodTarget(target, scope) != null
+        ? calledMember.Children[0] : target, scope, n);   // spec 20.1, 20.2 (CodeGen.TaskHandles.cs)
+    }
     if (TaskMethodTarget(target, scope) is { } waitedCall) {
       // wait t.getCount() timeout 500: a call through the handle that gives a value (spec 20.1)
       string callTimeout = timeoutNode == null ? "0" : Convert(ExprOf(timeoutNode, scope, "lapse"), "lapse", timeoutNode);
@@ -426,10 +443,16 @@ public class Task(u64 handle) {
       if (InTaskRunBody) {
         return new Expr(CheckRaise($"df_task_pause({lapse}, (void*)self)", "void"), "void");   // the calls through the handle are served meanwhile (spec 20.8)
       }
-      return new Expr(TasksMode ? $"df_task_pause({lapse}, NULL)" : $"df_time_sleep({lapse})", "void");   // wait 250, wait lapse(10) (spec 20.8)
+      return new Expr(TasksMode ? CheckRaise($"df_task_pause({lapse}, NULL)", "void") : $"df_time_sleep({lapse})", "void");   // wait 250, wait lapse(10) (spec 20.8); the cancel signal of a runnable (20.10)
+    }
+    if (waited.Type == "Signal") {
+      return SignalWait(n, waited, timeoutNode, scope);   // spec 20.3 (CodeGen.Signals.cs)
+    }
+    if (waited.Type == "SignalGroup") {
+      return SignalGroupWait(n, target, waited, timeoutNode, scope);   // spec 20.3 (CodeGen.Signals.cs)
     }
     if (waited.Type is not ("Task" or "Thread")) {
-      throw Error($"wait takes a task, a thread or a time, not {DisplayName(waited.Type)} (spec 20.2)", target);
+      throw Error($"wait takes a task, a thread, a signal or a time, not {DisplayName(waited.Type)} (spec 20.2)", target);
     }
     string ret = TaskHandleOf(target, scope)?.Ret ?? "void";
     string timeoutCode = timeoutNode == null ? "0" : Convert(ExprOf(timeoutNode, scope, "lapse"), "lapse", timeoutNode);
@@ -437,7 +460,7 @@ public class Task(u64 handle) {
     string handle = $"({TempObject(waited).Code})->m_handle";
     string slot = NewTemp();
     string error = NewTemp();
-    string call = $"df_task_wait({handle}, {(ret == "void" ? "NULL, 0" : $"&{slot}, sizeof({slot})")}, {timeoutCode})";
+    string call = Serving($"df_task_wait({handle}, {(ret == "void" ? "NULL, 0" : $"&{slot}, sizeof({slot})")}, {timeoutCode})");
     string jump = $"if ({error}) {{ df_err = {error}; df_err_thrown = false; goto {Handler}; }}";
     bool fresh = ret == "string" || IsClass(ret) || IsArr(ret);
     if (n.Children.FirstOrDefault(c => c.Kind == "WaitDefault") is Node defaultNode) {
@@ -464,7 +487,7 @@ public class Task(u64 handle) {
     && run.Name.Split('.')[^1] == "taskRun" && run.Params.Count == 0;
 
   static bool ContainsWait(Node node) =>
-    node.Kind == "Wait" || node.Kind is not ("Lambda" or "Fun") && node.Children.Any(ContainsWait);
+    node.Kind is "Wait" or "WaitOn" || node.Kind is not ("Lambda" or "Fun") && node.Children.Any(ContainsWait);
 
   // before a statement of taskRun() that is a checkpoint (a return, an enforce, a wait in it): the calls waiting are served
   void EmitCheckpoint(Node s, StringBuilder sb, string pad) {
@@ -486,7 +509,7 @@ public class Task(u64 handle) {
   }
 
   // the members of the class Task itself (TasksPrelude): not calls through the handle
-  static readonly HashSet<string> TaskOwnMembers = new() { "start", "status", "kind", "name", "linked", "get_status", "get_kind", "get_name", "get_linked" };
+  static readonly HashSet<string> TaskOwnMembers = new() { "start", "signal", "kill", "status", "kind", "name", "linked", "get_status", "get_kind", "get_name", "get_linked" };
 
   // a method name of a class that runs as a task (for the exceptions a call can let out, CodeGen.Leaks.cs)
   bool IsTaskMethodName(string name) => TasksMode && !TaskOwnMembers.Contains(name)
@@ -509,6 +532,9 @@ public class Task(u64 handle) {
         throw Error($"this Task does not say the class of its task: '{member.Text}' cannot be called through it (spec 20.9)", call);
       }
     }
+    if (cls == null && receiver.Kind is "Name" or "Member" or "Call") {
+      cls = TaskHandleOfMember(receiver, scope)?.Cls;   // a Task<MyTask> field, or a function that gives one (spec 20.9)
+    }
     return cls == null ? null : (receiver, cls);
   }
 
@@ -519,24 +545,50 @@ public class Task(u64 handle) {
     type == "string" || IsNumeric(type) || type is "bool" or "char" or "lapse" or "date" or "time" or "clock" || IsEnum(type)
     || IsStruct(type) && !StructHoldsObjects(type);
 
+  // what a call through the handle gives back (spec 20.12): values, and what the method makes or gives (its owner is the caller); several
+  // results of those
+  bool TaskCallResultType(FunSig f) {
+    if (IsMulti(f.Ret)) {
+      return TupleElems(f.Ret).All(elem => TaskCallValueType(elem.Type));
+    }
+    if (TaskCallValueType(f.Ret)) {
+      return true;
+    }
+    if (IsCountedType(f.Ret) || IsWeakType(f.Ret) || IsFunType(f.Ret) || f.Writes.Count > 0 || f.RetWritable) {
+      return false;
+    }
+    return IsClass(f.Ret) ? f.ReturnsOwned : IsArr(f.Ret) || IsTuple(f.Ret) || IsStruct(f.Ret);
+  }
+
+  // a parameter of a call through the handle whose value the record owns (an object, an array, a collection, a struct or tuple of them)
+  bool TaskCallOwnedParam(ParamSig p) => !TaskCallValueType(p.Type);
+
   // the record of a method called through the handle: its arguments and its result, and the functions that run and end it
   string TaskCallRecord(FunSig f, Node at) {
     if (taskCallRecords.TryGetValue(f, out var known)) {
       return known;
     }
     foreach (var p in f.Params) {
-      if (!TaskCallValueType(p.Type) || p.Ref == 2 || p.IsGift || p.IsVariadic) {
-        throw Error($"'{p.Name}' of {f.Name.Split('.')[^1]}: a call through the handle passes numbers, strings, enums and structs of them for now (spec 20.1)", at);
+      if (p.IsVariadic || IsCountedType(p.Type) || IsWeakType(p.Type) || p.IsWeak || IsFunType(p.Type)) {
+        throw Error($"'{p.Name}' of {f.Name.Split('.')[^1]}: a call through the handle does not pass variadic, counted, weak or function parameters yet (spec 20.1)", at);
+      }
+      if (p.Ref == 2 && (p.Type == "string" || IsCountedType(p.Type))) {
+        throw Error($"'{p.Name}' of {f.Name.Split('.')[^1]}: a call through the handle does not lend a string read/write yet (spec 20.12)", at);
       }
     }
-    if (f.Ret != "void" && (!TaskCallValueType(f.Ret) || IsMulti(f.Ret))) {
-      throw Error($"{f.Name.Split('.')[^1]} gives {DisplayName(f.Ret)}: a call through the handle gives back numbers, strings, enums and structs of them for now (spec 20.1)", at);
+    if (f.Ret != "void" && !TaskCallResultType(f)) {
+      throw Error($"{f.Name.Split('.')[^1]} gives {DisplayName(f.Ret)}: a call through the handle gives back values and the objects, arrays and collections the method makes or gives (->), not lends (spec 20.12)", at);
     }
     string name = "df_tcr" + taskCallRecords.Count;
     taskCallRecords[f] = name;
     var fields = new StringBuilder("typedef struct {\n  df_task_call head;\n");
     for (int index = 0; index < f.Params.Count; index++) {
-      fields.Append($"  {CType(f.Params[index].Type)} a{index};\n");
+      var p = f.Params[index];
+      // & : the place of the caller (spec 20.12); a plain object or array: the value, owned by the record (o) when it is new, lent otherwise
+      fields.Append(p.Ref == 2 ? $"  {CType(p.Type)}* a{index};\n" : $"  {CType(p.Type)} a{index};\n");
+      if (TaskCallOwnedParam(p) && !p.IsGift && p.Ref != 2) {
+        fields.Append($"  bool o{index};\n");
+      }
     }
     if (f.Ret != "void") {
       fields.Append($"  {CType(f.Ret)} result;\n  bool taken;\n");
@@ -544,9 +596,16 @@ public class Task(u64 handle) {
     fields.Append($"}} {name};\n\n");
     typeDefs.Append(fields);
     // invoke: the method on the object of the task, with the arguments of the record
-    string args = string.Concat(Enumerable.Range(0, f.Params.Count).Select(index => IsByPointer(f.Params[index]) ? $", &r->a{index}" : $", r->a{index}"));
+    string args = string.Concat(Enumerable.Range(0, f.Params.Count).Select(index => f.Params[index].IsGift && TaskCallOwnedParam(f.Params[index]) ? $", g{index}"
+      : f.Params[index].Ref == 2 ? $", r->a{index}" : IsByPointer(f.Params[index]) ? $", &r->a{index}" : $", r->a{index}"));
     string call = $"{f.CName}(({CType(f.Class!.Name)})obj{args})";
     var invoke = new StringBuilder($"static void {name}_invoke(void* obj, df_task_call* c) {{\n  {name}* r = ({name}*)c;\n");
+    for (int index = 0; index < f.Params.Count; index++) {
+      if (f.Params[index].IsGift && TaskCallOwnedParam(f.Params[index])) {
+        // ->T: the method owns it now; the record keeps nothing to end (spec 20.12)
+        invoke.Append($"  {CType(f.Params[index].Type)} g{index} = r->a{index};\n  r->a{index} = {ZeroValue(f.Params[index].Type)};\n");
+      }
+    }
     if (PairReturn(f)) {
       invoke.Append(f.Ret == "void" ? $"  r->head.error = {call};\n" : $"  {RetCType(f)} res = {call};\n  r->head.error = res.err;\n  r->result = res.value;\n");
     } else {
@@ -558,10 +617,16 @@ public class Task(u64 handle) {
     for (int index = 0; index < f.Params.Count; index++) {
       if (f.Params[index].Type == "string") {
         end.Append($"  df_str_free(r->a{index});\n");
+      } else if (TaskCallOwnedParam(f.Params[index]) && f.Params[index].IsGift) {
+        end.Append($"  {DropValueCode(f.Params[index].Type, $"r->a{index}")}\n");   // a gift never served
+      } else if (TaskCallOwnedParam(f.Params[index]) && f.Params[index].Ref != 2) {
+        end.Append($"  if (r->o{index}) {{\n    {DropValueCode(f.Params[index].Type, $"r->a{index}")}\n  }}\n");   // a new value, not a lend
       }
     }
     if (f.Ret == "string") {
       end.Append("  if (!r->taken) {\n    df_str_free(r->result);\n  }\n");
+    } else if (f.Ret != "void" && (!TaskCallValueType(f.Ret) || IsMulti(f.Ret))) {
+      end.Append($"  if (!r->taken) {{\n    {DropValueCode(f.Ret, "r->result")}\n  }}\n");   // a result nobody collected (spec 20.1)
     }
     end.Append("}\n");
     taskCallCode.Append(invoke).Append(end);
@@ -596,6 +661,7 @@ public class Task(u64 handle) {
     var code = new StringBuilder($"({{ {record}* {rec} = ({record}*)df_task_call_new(sizeof({record}), {record}_invoke, {record}_end, {(waited ? "true" : "false")}); ");
     var named = args.Where(a => a.Kind == "Named").ToDictionary(a => a.Text!, a => a.Children[0]);
     var positional = args.Where(a => a.Kind != "Named").ToList();
+    bool lends = false;
     for (int index = 0; index < f.Params.Count; index++) {
       var p = f.Params[index];
       Node? argNode = index < positional.Count ? positional[index] : named.GetValueOrDefault(p.Name);
@@ -606,17 +672,44 @@ public class Task(u64 handle) {
         }
         var fallback = ExprOf(p.Default, scope, p.Type);
         value = Convert(fallback, p.Type, call);
+        if (TaskCallOwnedParam(p) && !p.IsGift && p.Ref != 2) {
+          code.Append($"{rec}->o{index} = true; ");   // a default value: the record ends it
+        }
         if (p.Type == "string") {
           value = $"df_str_dup({value})";
         }
+      } else if (TaskCallOwnedParam(p) && p.IsGift) {
+        value = ArgCode(p, argNode, scope, f, index);   // ->x: given to the record, then to the method (spec 20.12)
+      } else if (p.Ref == 2) {
+        // &x: the method works on the place of the caller, who waits for the end of the call (spec 20.12)
+        if (!waited) {
+          throw Error(f.Ret == "void"
+            ? $"'{p.Name}' of {name} is lent read/write (&): a posted call does not lend; the method needs a result to be waited for (spec 20.12)"
+            : $"'{p.Name}' of {name} is lent read/write (&): a call that lends is waited for: wait t.{name}(...) timeout n (spec 20.12)", argNode);
+        }
+        value = ArgCode(p, argNode, scope, f, index);
+        lends = true;
       } else {
         var given = ExprOf(argNode, scope, p.Type);
         value = Convert(given, p.Type, argNode);
+        if (TaskCallOwnedParam(p)) {
+          if (!given.Fresh && !waited) {
+            string clone = $"send a clone ({(argNode.Kind == "Name" ? argNode.Text : "x")}!) or a new value";
+            throw Error(f.Ret == "void"
+              ? $"'{p.Name}' of {name} is lent (plain): a posted call does not lend: {clone} (spec 20.12)"
+              : $"'{p.Name}' of {name} is lent (plain): a call that lends is waited for (wait t.{name}(...) timeout n), or {clone} (spec 20.12)", argNode);
+          }
+          code.Append($"{rec}->o{index} = {(given.Fresh ? "true" : "false")}; ");   // a new value: the record ends it; otherwise a lend
+          lends |= !given.Fresh;
+        }
         if (p.Type == "string" && !given.Fresh) {
           value = $"df_str_dup({value})";   // the record owns its strings: the caller goes on (spec 20.12)
         }
       }
       code.Append($"{rec}->a{index} = {value}; ");
+    }
+    if (lends) {
+      code.Append($"{rec}->head.lends = true; ");   // the caller waits for the end once it has started (spec 20.12, temporary)
     }
     string refuse = $"if (!df_task_post_call({handle}, &{rec}->head)) {{ df_task_call_release(&{rec}->head); {(waited ? $"df_task_call_release(&{rec}->head); " : "")}"
       + $"df_raise(&df_desc_CalledANotRunningTaskException, {fn!.NameConst}); {RaiseJump} }} ";
@@ -628,12 +721,12 @@ public class Task(u64 handle) {
     string got = NewTemp();
     string error = NewTemp();
     string result = NewTemp();
-    string waitCall = SilentCall($"df_task_wait_call({handle}, &{rec}->head, {timeoutCode}, &{got})", "Exception",
+    string waitCall = SilentCall(Serving($"df_task_wait_call({handle}, &{rec}->head, {timeoutCode}, &{got})"), "Exception",
       "WaitTimeoutException,TaskAlreadyTerminatedException", call);
     code.Append($"bool {got}; df_exception* {error} = {waitCall}; {CType(f.Ret)} {result} = {ZeroValue(f.Ret)}; ");
     code.Append($"if ({got}) {{ {result} = {rec}->result; {rec}->taken = true; }} df_task_call_release(&{rec}->head); ");
     code.Append($"if ({error}) {{ df_err = {error}; df_err_thrown = false; goto {Handler}; }} {result}; }})");
-    return new Expr(code.ToString(), f.Ret, f.Ret == "string");
+    return new Expr(code.ToString(), f.Ret, f.Ret == "string" || !TaskCallValueType(f.Ret) && !IsMulti(f.Ret));
   }
 
   // ---------------------------------------------------------------- return! and return? (spec 20.1)
@@ -643,7 +736,7 @@ public class Task(u64 handle) {
     string written = hold ? "return!" : "return?";
     // in taskRun() of a task, or in a plain function that runs as a thread (spec 20.1)
     bool inTask = currentFun is { Class: not null, IsStatic: false } && currentFun.Name.Split('.')[^1] == "taskRun";
-    bool inThread = currentFun is { Class: null, Struct: null, LambdaCtx: null };
+    bool inThread = currentFun is { Struct: null, LambdaCtx: null } && !inTask;   // a function or a method run by Thread() (spec 20.1)
     if (!inTask && !inThread) {
       throw Error($"{written} hands out a value of a task or a thread: it is written in taskRun() or in a function run by Thread() (spec 20.1)", s);
     }
@@ -673,6 +766,7 @@ public class Task(u64 handle) {
     sb.Append($"{pad}  if (!{string.Format(give, held)}) {{\n");
     sb.Append($"{pad}    {drop}(&{held});\n");
     sb.Append($"{pad}    df_raise(&df_desc_ReturnOutsideATaskException, {fn!.NameConst});\n{pad}    {RaiseJump}\n{pad}  }}\n{pad}}}\n");
+    sb.Append($"{pad}if (df_pending) {RaiseJump}\n");   // a return is a checkpoint: the cancel signal (spec 20.10)
   }
 
 }

@@ -1,0 +1,14 @@
+// from compares the senders: the struct needs a Sender<T> field (spec 20.4.6)
+import Root
+import Root.Tasks
+
+class Win(i32 id) {
+}
+
+struct Data { i32 n }
+
+Win w = Win(1)
+Event<Data> ev = Event("x.data", timeout: 100)
+wait on ev from w as d {
+  Console.log(d.n)
+}

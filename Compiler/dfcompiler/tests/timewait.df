@@ -1,0 +1,34 @@
+// Root.Time.wait (spec 20.8): the same call as a timed wait, a checkpoint
+import Root
+import Root.Tasks
+
+class Ticker {
+  i32 count = 0
+  fun i32 taskRun() {
+    while true {
+      Root.Time.wait(10)   // a checkpoint: no warning for the loop, the calls through the handle are served
+      count++
+    }
+    return 0
+  }
+  public fun bool seen() { return count > 0 }
+}
+
+fun i32 sleeper() {
+  lapse pause = 10
+  while true {
+    Time.wait(pause)   // a lapse; a checkpoint: the cancel signal ends the thread here
+  }
+  return 0
+}
+
+Time.wait(50)
+Console.log("waited")
+Task t = Task(Ticker, timeout: 2000).start()
+wait 100
+Console.log(wait t.seen() timeout 1000)
+Console.log(t.kill(1000))
+Thread s = Thread(sleeper).start()
+wait 50
+Console.log(s.kill(1000))
+Console.log(s.status)

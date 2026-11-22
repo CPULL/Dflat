@@ -1,0 +1,7 @@
+// a struct has at most one Sender<T> field (spec 20.4.6)
+import Root.Tasks
+
+class Win(i32 id) {
+}
+
+struct Data { Sender<Win> a, Sender<Win> b }

@@ -1,0 +1,17 @@
+// a Task<Counter> field takes only tasks of Counter (spec 20.9)
+import Root.Tasks
+
+class Counter {
+  fun i32 taskRun() { return 1 }
+}
+
+class Logger {
+  fun string taskRun() { return "x" }
+}
+
+class Holder {
+  Task<Counter> worker
+  public fun set() {
+    worker = Task(Logger, timeout: 100)
+  }
+}

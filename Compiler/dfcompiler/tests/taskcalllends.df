@@ -1,0 +1,64 @@
+// lends through the handle (spec 20.12, temporary rule): a plain or & argument is lent without a copy, only in a call that is waited for;
+// a call that has not started when the timeout runs out is withdrawn; once it has started, the caller waits for its end
+import Root
+import Root.Tasks
+
+class Item(string label, i32 weight) {
+  public string label
+  public i32 weight
+}
+
+class Scale {
+  fun i32 taskRun() {
+    while true {
+      wait 5
+    }
+    return 0
+  }
+  public fun i32 weigh(Item item) {
+    return item.weight
+  }
+  public fun i32 total(arr<i32> data) {
+    i32 sum = 0
+    for var v in data {
+      sum += v
+    }
+    return sum
+  }
+  public fun i32 fill(&arr<i32> data, &i32 count) {
+    data[0] = 10
+    count = 3
+    return 1
+  }
+  public fun i32 slow(&Item item) {
+    Root.Time.sleep(300)   // runs longer than the timeout of the caller
+    item.weight = 0
+    return item.weight
+  }
+  public fun block() {
+    Root.Time.sleep(400)   // the task is busy: the next call waits in the queue
+  }
+  public fun i32 mark(&i32 flag) {
+    flag = 1
+    return 1
+  }
+}
+
+Task t = Task(Scale, timeout: 2000).start()
+Item pear = Item("pear", 5)
+Console.log(wait t.weigh(pear) timeout 500)            // lent: no copy
+arr<i32> numbers = [1, 2, 3]
+Console.log(wait t.total(numbers) timeout 500)
+i32 count = 0
+Console.log(wait t.fill(&numbers, &count) timeout 500)
+Console.log($"{numbers} {count}")
+// started: the timeout runs out while it runs on pear, the caller waits for its end
+Console.log(wait t.slow(&pear) timeout 50)
+Console.log(pear.weight)
+// not started when the timeout runs out: withdrawn, the task never sees flag
+t.block()
+i32 flag = 0
+Console.log(wait t.mark(&flag) timeout 50)
+wait 600
+Console.log(flag)
+Console.log(t.kill(1000))

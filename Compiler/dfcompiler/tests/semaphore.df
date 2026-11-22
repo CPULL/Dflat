@@ -1,0 +1,80 @@
+// semaphores (spec 20.14): permits taken by enforce, one or take(n), given back at the end of the block; a busy one follows the enforce rules
+import Root
+import Root.Tasks
+
+semaphore pool = 2 timeout 5000
+semaphore gate                     // 1 permit, no timeout: one try
+mutex i32 inside = 0 timeout 5000
+mutex i32 most = 0 timeout 5000
+
+fun i32 worker(i32 n) {
+  enforce pool {
+    enforce inside {
+      inside++
+      enforce most {
+        if inside > most then most = inside
+      }
+    }
+    wait 50
+    enforce inside {
+      inside--
+    }
+  }
+  return n
+}
+
+fun busy() {
+  enforce gate {
+    enforce gate timeout 0 {
+      Console.log("never: the only permit is taken")
+    } lockfail {
+      Console.log("gate busy")
+    }
+  }
+}
+
+fun local() {
+  semaphore two = 2
+  enforce two.take(2) {
+    Console.log($"took both, {two} free")
+    enforce two {
+      Console.log("never")
+    }
+    Console.log("skipped: no permit, no timeout")
+  }
+  Console.log($"{two} free again")
+}
+
+// four threads, two permits: never more than two inside
+Thread w1 = Thread(worker, 1).start()
+Thread w2 = Thread(worker, 2).start()
+Thread w3 = Thread(worker, 3).start()
+Thread w4 = Thread(worker, 4).start()
+Console.log((wait w1 timeout 3000) + (wait w2 timeout 3000) + (wait w3 timeout 3000) + (wait w4 timeout 3000))
+enforce most {
+  Console.log($"at most {most} inside")
+}
+Console.log($"{pool} free")
+enforce pool.take(2) {
+  Console.log($"took 2, {pool} free")
+}
+enforce pool.take(3) timeout 50 {
+  Console.log("never: only 2 permits")
+} lockfail {
+  Console.log("3 permits: busy")
+}
+busy()
+local()
+
+// a task sees a top-level semaphore (spec 20.12: it has a lock)
+class User {
+  fun i32 taskRun() {
+    enforce pool {
+      return 7
+    }
+    return 0
+  }
+}
+
+Task u = Task(User, timeout: 2000).start()
+Console.log(wait u)

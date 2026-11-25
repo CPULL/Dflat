@@ -63,6 +63,8 @@ typedef struct df_task {
   uint64_t id;                        /* of this runnable: never 0 (the main program), never used again */
   uint64_t owner;                     /* who owns the handle, and who waits now: the owner or a borrower (spec 20.2.6) */
   uint64_t holder;
+  struct df_task** lent;                     /* a thread: the tasks whose handle is lent to it with & */
+  int32_t lentN;
   uint64_t waiter;                    /* the runnable that waits for it now (waiting > 0) */
   int64_t waiting;
   int64_t interested;                 /* the registrations that keep a value of return? (spec 20.2.5) */
@@ -285,6 +287,10 @@ static void df_task_release(uint64_t handle) {
   df_task_all_remove(task);
   df_task* parent = task->parent;
   free(task->slot);
+  for (int32_t i = 0; i < task->lentN; i++) {
+    df_task_release((uint64_t)(uintptr_t)task->lent[i]);
+  }
+  free(task->lent);
   free(task);
   if (parent) {
     df_task_release((uint64_t)(uintptr_t)parent);
@@ -812,6 +818,21 @@ static void df_task_main(void* p) {
   df_task_release((uint64_t)(uintptr_t)task);
 }
 
+/* Thread(f, &t): the handle of t is lent to the thread, from its start to its end (spec 20.2.6) */
+static void df_thread_lends(uint64_t thread, uint64_t handle) {
+  df_task* task = (df_task*)(uintptr_t)thread;
+  df_task* lent = (df_task*)(uintptr_t)handle;
+  if (task == NULL || lent == NULL) {
+    return;
+  }
+  task->lent = (df_task**)realloc(task->lent, (size_t)(task->lentN + 1) * sizeof(df_task*));
+  if (!task->lent) {
+    df_out_of_memory();
+  }
+  DF_ATOMIC_ADD(lent->refs, 1);
+  task->lent[task->lentN++] = lent;
+}
+
 /* start(): 0 started, 1 already started (spec 20.1: a second start is an exception), 2 the system gave no thread, 3 a thread started
    inside a thread (spec 20.1: a thread cannot start another thread) */
 static int32_t df_task_start(uint64_t handle, int64_t timeout) {
@@ -831,6 +852,15 @@ static int32_t df_task_start(uint64_t handle, int64_t timeout) {
   DF_ATOMIC_STORE(task->status, DF_RUN_RUNNING);
   df_cond_broadcast(&task->changed);
   df_mutex_unlock(&task->lock);
+  /* the lends start here, before the thread runs: the owner cannot wait until it ends (spec 20.2.6) */
+  for (int32_t i = 0; i < task->lentN; i++) {
+    df_task* lent = task->lent[i];
+    df_mutex_lock(&lent->lock);
+    if (lent->holder == df_task_me()) {
+      lent->holder = task->id;
+    }
+    df_mutex_unlock(&lent->lock);
+  }
   DF_ATOMIC_ADD(task->refs, 1);   /* the thread's */
   df_thread thread;
   if (!df_thread_start(&thread, df_task_main, task)) {

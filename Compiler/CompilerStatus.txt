@@ -1,6 +1,7 @@
-Compiler version 0.0.208 alpha for version 0.0.40 of the specs 2026/11/24
+Compiler version 0.0.209 alpha for version 0.0.41 of the specs 2026/11/25
 
 Changes from the previous version -----------------------
+- Who can wait on a task (spec 20.2.6): a handle lent with & to a thread is lent from the start of the thread (it was from its first wait: the owner could wait before it). Tests taskowners and semaphore do not depend on time; *.dfc files are binary in git
 - Numbers (spec 2.1, 3.5.1, 4.2, 13.2): type.MIN and type.MAX of the integer types, constants of that type; when no version of a function (of the program or built-in) matches, the only one that the automatic conversions reach is called with the level 3 warning, several are a compile error; substr, insert, remove, replaceAt, padLeft, padRight take uns (text.substr(position, word.len) needs no cast and gives no warning). Tests intlimits, autooverload, errors/autoconv_overload, intlimits_real
 - indexOf and lastIndexOf of string (spec 4.2) take startPoint before caseSensitive, and give an int: text.indexOf("*/", position), text.indexOf("x", caseSensitive: false); indexOf("x", false) is a compile error. The position converts from any integer. Tests stringindexof, strings, errors/indexof_old_case
 - Type switch (spec 11.3.7): a jump leaves it (jump #label#), a jump to another case of it is a compile error; in an enforce, break, continue and jump in a type switch are refused as anywhere else in its block. Tests switchtype, errors/switchtype_jump, switchtype_jump_default, switchtype_enforce_break

@@ -1,2 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+# compiled libraries: the text of a .dfc is read byte by byte, also when it holds no binary
+*.dfc binary
+*.lib binary
+*.a binary

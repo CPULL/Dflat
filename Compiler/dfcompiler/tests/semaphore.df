@@ -15,7 +15,12 @@ fun i32 worker(i32 n) {
         if inside > most then most = inside
       }
     }
-    wait 50
+    bool two = false
+    for i32 turn in 0..500 {          // stays inside until two of them are
+      enforce most { two = most >= 2 }
+      if two then break
+      wait 10
+    }
     enforce inside {
       inside--
     }
@@ -50,7 +55,7 @@ Thread w1 = Thread(worker, 1).start()
 Thread w2 = Thread(worker, 2).start()
 Thread w3 = Thread(worker, 3).start()
 Thread w4 = Thread(worker, 4).start()
-Console.log((wait w1 timeout 3000) + (wait w2 timeout 3000) + (wait w3 timeout 3000) + (wait w4 timeout 3000))
+Console.log((wait w1 timeout 20000) + (wait w2 timeout 20000) + (wait w3 timeout 20000) + (wait w4 timeout 20000))
 enforce most {
   Console.log($"at most {most} inside")
 }

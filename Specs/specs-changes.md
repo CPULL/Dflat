@@ -789,6 +789,15 @@
 - 15.8 Each binary line of a .dfc ends with the SHA-256 of the binary; a binary that does not match is a compile error
 - 14.2 Forms 2 to 5: the `atEnd` can be on the line after the closing brace, and it belongs to what the brace closes; after an `atEnd` block or a `catch` it stays a standalone block
 - 14.2, 15.8 The end code of a library is `atLibEnd { }` (form 6); a standalone `atEnd { }` at the top level of lib.df is a compile error
+
+## Changes in 0.0.41
+
+- 4, 4.1, 12 Strings behave as values: a change to one is never seen through another; `b = a` borrows and the copy is made at the first change; a field and an item have their own text; a return copies only when the owner outlives the function
+- 15.3 58 and 64 removed; new 70 `WaitingOnANotOwnedTaskException`, 71 `TokenAlreadyRegisteredException`
+- 20.1, 20.2.6 Only the owner of a task, or the one that borrows its handle with `&`, waits on it
+- 20.2 `wait` on one or several waitables (`on` branches), the registrations, what arrives while a block runs, the mandatory `timeout` with its block and its value, the clauses `catch E [on x]`, `atEnd`, `default`; the waitables have no timeout of their own for the receiver
+- 20.3 Signals: `==`, `SignalGroup(s1, s2)`, a group gives the `Signal`; `SignalMode.Stable` removed; 20.3.2 `Token` (new)
+- 20.4 Events: the owner, the turn of the waiters, the full queue
 - 2.5, 13 The arguments of a call run from left to right in the order of the parameters defined in the signature of the function, also when they are given by name; the object of a method runs before them
 - 11.1.5.1 The values of a new struct run in the order of its fields, also when they are given by name
 - 11.3.6, 11.3.6.1 A set value can be given to a parameter of the same set: its tag chooses the copy of the function when the program runs

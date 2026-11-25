@@ -247,6 +247,7 @@ public class Thread(u64 handle) {
       throw Error($"this function takes {ps.Count} argument{(ps.Count == 1 ? "" : "s")}, not {positional.Count} ({FunDisplay(target.Value!.Value.Type)})", n);
     }
     string rec = NewTemp();
+    var lends = new List<int>();
     var code = new StringBuilder($"({{ {record}* {rec} = ({record}*)df_alloc(sizeof({record})); memset({rec}, 0, sizeof({record})); ");
     if (target.Self != null) {
       code.Append($"{rec}->self = {target.Self}; ");
@@ -263,6 +264,7 @@ public class Thread(u64 handle) {
       string converted;
       if (p.Ref == 2 && p.Type == "Task" && argNode != null) {
         NoteTaskLent(argNode, scope);   // one borrower at a time (spec 20.2.6)
+        lends.Add(index);
       }
       if (p.Ref == 2 || ThreadArgMoves(p)) {
         // &x: the place of the caller (a thread shares the memory of its task, spec 20.1, 20.12); @x, %x, ->x: held by the record
@@ -280,7 +282,12 @@ public class Thread(u64 handle) {
     string size = target.Ret == "void" ? "0" : $"sizeof({CType(target.Ret)})";
     string fnPointer = target.Fun != null ? $"(void*){target.Fun.CName}" : $"{rec}->fn.code";
     string shown = target.Fun?.Name ?? "lambda";
-    code.Append($"df_thread_new({rec}, {record}_end, {record}_run, {fnPointer}, \"{shown}\", \"{TaskResultText(target.Ret)}\", {timeoutCode}, {size}, {record}_drop); }})");
+    string handle = NewTemp();
+    code.Append($"uint64_t {handle} = df_thread_new({rec}, {record}_end, {record}_run, {fnPointer}, \"{shown}\", \"{TaskResultText(target.Ret)}\", {timeoutCode}, {size}, {record}_drop); ");
+    foreach (int index in lends) {
+      code.Append($"if (*{rec}->a{index} != NULL && !DF_IS_DEAD(*{rec}->a{index})) {{ df_thread_lends({handle}, (*{rec}->a{index})->m_handle); }} ");
+    }
+    code.Append($"{handle}; }})");
     var made = Synthetic("Call", n).Add(Synthetic("Name", n, "Thread"))
       .Add(Synthetic("Args", n).Add(Synthetic("CValue", n, code.ToString()).Add(Synthetic("Type", n, "u64"))));
     return Started(ExprOf(made, scope), started, scope);

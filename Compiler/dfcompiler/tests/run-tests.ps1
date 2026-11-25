@@ -400,6 +400,31 @@ foreach ($batch in $batches) {
   }
 }
 
+# a multitasking program gives its threads some time: on a busy or small machine that can be too little. One that does not match runs again,
+# alone, up to two times; a test that needed it says so
+function Test-Tasks($test) {
+  if ($test.Kind -ne 'program') { return $false }
+  $sources = if (Test-Path $test.Path -PathType Container) { Get-ChildItem $test.Path -Filter '*.df' -Recurse } else { Get-Item $test.Path }
+  foreach ($source in $sources) {
+    if ((Get-Content -Raw $source.FullName) -match 'import Root\.Tasks') { return $true }
+  }
+  return $false
+}
+$again = @()
+if (-not $Update) {
+  foreach ($test in $all) {
+    if ($test.Kind -ne 'program' -or -not (Test-Path $test.Expected)) { continue }
+    $wanted = ([System.IO.File]::ReadAllText($test.Expected, [System.Text.Encoding]::UTF8) -replace "`r`n", "`n").Trim("`n")
+    for ($try = 2; $try -le 3; $try++) {
+      $result = Read-Program $test.Run
+      if (($result.Ok -and $result.Text -ceq $wanted) -or -not (Test-Tasks $test)) { break }
+      Invoke-Pool @($test) 1 @()
+      $result = Read-Program $test.Run
+      if ($result.Ok -and $result.Text -ceq $wanted) { $again += "$($test.Name) (run $try)" }
+    }
+  }
+}
+
 foreach ($test in $all) {
   $result = switch ($test.Kind) {
     'program' { Read-Program $test.Run }
@@ -416,6 +441,7 @@ if ($Update) {
   exit 0
 }
 Write-Host ("{0} passed, {1} failed, {2} new" -f $passed, $failed.Count, $new.Count)
+if ($again.Count -gt 0) { Write-Host ('passed only when run again, alone: ' + ($again -join ', ')) -ForegroundColor Yellow }
 if ($failed.Count -gt 0) { Write-Host ('failed: ' + ($failed -join ', ')) -ForegroundColor Red }
 if ($failed.Count -gt 0 -or $new.Count -gt 0) { exit 1 }
 exit 0

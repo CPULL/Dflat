@@ -1,0 +1,110 @@
+// a return gives the text that ends with the function, without a copy (spec 4); the one that goes on is copied
+import Root
+import Root.Tasks
+
+fun ->string mk(i32 n) {
+  return $"text {n} made at run time"
+}
+
+class D(string n) {
+  public string label = n
+  public fun ->string copy() { return label }
+}
+
+class Loud(string n) {
+  public string label = n
+} atEnd {
+  Console.log($"end of {label}")
+}
+
+struct S { string label, i32 n }
+
+fun ->string borrowed() {
+  string a = mk(1)
+  string b = a
+  string c = b
+  return c
+}
+
+fun ->string chosen(bool first) {
+  string a = mk(2)
+  string b = mk(3)
+  string r = a
+  if !first { r = b }
+  return r
+}
+
+fun ->string field() {
+  D d = D(mk(4))
+  return d.label
+}
+
+fun ->string structField() {
+  S s = S(mk(5), 1)
+  return s.label
+}
+
+fun ->string seenAtEnd() {
+  Loud l = Loud(mk(6))
+  return l.label
+}
+
+fun ->string withAtEnd() {
+  D d = D(mk(7))
+  atEnd { Console.log($"atEnd sees {d.label}") }
+  return d.label
+}
+
+fun ->string, ->string two() {
+  D d = D(mk(8))
+  return d.label, d.label
+}
+
+fun ->string loop() {
+  for var i in 0..5 {
+    D d = D(mk(i))
+    if i == 3 { return d.label }
+  }
+  return "none"
+}
+
+fun ->string param(string p) {
+  string q = p
+  return q
+}
+
+class Giver {
+  fun ->string taskRun() {
+    string s = mk(20)
+    return! s
+    wait 50
+    s += " more"
+    return! s
+    return s
+  }
+}
+
+Console.log(borrowed())
+Console.log(chosen(true))
+Console.log(chosen(false))
+Console.log(field())
+Console.log(structField())
+Console.log(seenAtEnd())
+Console.log(withAtEnd())
+string x, string y = two()
+Console.log($"{x} / {y}")
+Console.log(loop())
+string given = mk(9)
+Console.log(param(given) + " / " + given)
+D k = D(mk(10))
+Console.log(k.copy() + " / " + k.label)
+Task t = Task(Giver, timeout: 2000).start()
+{
+  string one = wait t timeout 1000
+  Console.log(one)
+}
+Console.log(wait t timeout 1000)
+wait t as v { Console.log(v) } timeout 1000
+string fallback = "kept " + 1.toStr()
+string late = wait t timeout 5 { fallback }
+Console.log(late + " " + fallback)

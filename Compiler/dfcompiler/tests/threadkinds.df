@@ -42,7 +42,7 @@ fun i32 maybe(%Box w) {
 }
 
 Task t = Task(Worker, timeout: 2000).start()
-Console.log(wait t)
+Console.log(wait t timeout 5000)
 Worker w = Worker()
 Thread m = Thread(w.twice, 4).start()
 Console.log(wait m timeout 2000)        // return! from a method run as a thread

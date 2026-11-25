@@ -1,1 +1,1 @@
-wait_no_timeout.df(14): error: this wait has no timeout: give one to the wait, to start or to the constructor (spec 20.1, 20.2)
+wait_no_timeout.df(14): error: a wait writes its timeout: wait x timeout 500 (spec 20.2.8)

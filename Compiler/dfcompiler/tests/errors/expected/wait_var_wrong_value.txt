@@ -1,0 +1,1 @@
+wait_var_wrong_value.df(15): error: cannot convert string to i32 implicitly; use a cast

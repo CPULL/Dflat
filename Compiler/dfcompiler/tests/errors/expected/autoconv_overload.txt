@@ -1,1 +1,1 @@
-autoconv_overload.df(13): error: no 'show' matches these arguments; automatic conversions do not choose between overloads: write the cast (spec 3.5.1)
+autoconv_overload.df(13): error: ambiguous call: through automatic conversions it matches show(i32), show(u16); write the cast (spec 3.5.1)

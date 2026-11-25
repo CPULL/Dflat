@@ -289,12 +289,15 @@ public sealed partial class CodeGen {
       format = Convert(ExprOf(slots[2]!, scope, "string"), "string", slots[2]!);
     }
     MarkAssigned(target.Variable);
+    var ordered = ArgsInOrder(new List<Node?> { slots[0], slots[2] }, format == null ? new List<string> { text } : new List<string> { text, format }, out string prefix);
+    text = ordered[0];
+    format = format == null ? null : ordered[1];
     if (number) {
       NeedChunk("numfmt");
       string call = format == null
         ? $"df_tryparse_{type}({text}, &{target.Code})"
         : $"df_tryparse_{type}_f({text}, &{target.Code}, {format})";
-      return new Expr(call, "bool");
+      return ArgsFirst(new Expr(call, "bool"), prefix);
     }
     NeedChunk("date");
     string nullCode = type == "date" ? "INT64_MIN" : "(-1)";
@@ -302,6 +305,6 @@ public sealed partial class CodeGen {
       ? $"df_{type}_parse({text}, {nullCode})"
       : $"df_{type}_parse_f({text}, {nullCode}, {format})";
     string temp = NewTemp();
-    return new Expr($"({{ {CType(type)} {temp} = {parse}; bool {temp}_ok = {temp} != {nullCode}; if ({temp}_ok) {{ {target.Code} = {temp}; }} {temp}_ok; }})", "bool");
+    return ArgsFirst(new Expr($"({{ {CType(type)} {temp} = {parse}; bool {temp}_ok = {temp} != {nullCode}; if ({temp}_ok) {{ {target.Code} = {temp}; }} {temp}_ok; }})", "bool"), prefix);
   }
 }

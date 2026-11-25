@@ -1,0 +1,1 @@
+token_as.df(5): error: a token gives no value: on a token takes no as (spec 20.3.2)

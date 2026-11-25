@@ -1,0 +1,19 @@
+u16 65535
+u16 0
+string text
+u16 65535
+u8 0 s
+string s 255
+i64
+u16
+put u16 65535
+put text
+0
+first 65535 0
+first 65535 4
+3
+..abcabc
+true
+abc
+h+ello
+---- exit code 0 ----

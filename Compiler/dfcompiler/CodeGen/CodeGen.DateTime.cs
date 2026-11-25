@@ -45,6 +45,16 @@ public sealed partial class CodeGen {
       throw Error("toStr takes the format as its only argument", at);
     }
     string formatCode = Convert(ExprOf(format, scope, "string"), "string", format);
+    if (ReceiverOf(at) is Node formatted && (HasEffects(formatted) && !IsLiteralNode(format) || HasEffects(format) && !IsLiteralNode(formatted))) {
+      // make().toStr(f()): the value first (spec 2.5)
+      string held = NewTemp();
+      var result = FormatWith(value with { Code = held }, format, formatCode, at);
+      return result with { Code = $"({{ __auto_type {held} = {value.Code}; {result.Code}; }})" };
+    }
+    return FormatWith(value, format, formatCode, at);
+  }
+
+  Expr FormatWith(Expr value, Node format, string formatCode, Node at) {
     string? literal = format.Kind == "String" ? FromCodePoints(Unescape(format.Text![1..^1], format)) : null;
     if (NumberFormat(value, literal, formatCode, at) is Expr number) {
       return number;

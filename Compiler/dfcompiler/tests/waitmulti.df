@@ -1,0 +1,339 @@
+// the wait on several waitables (spec 20.2.1 .. 20.2.6): branches, turns, what is kept between the runs, null targets, the end of the scope
+import Root
+import Root.Tasks
+
+struct Size { u32 w, u32 h }
+
+class Quick {
+  fun i32 taskRun() {
+    return 42
+  }
+}
+
+class Texts {
+  fun string taskRun() {
+    return! "one"
+    return! "two"
+    return "three"
+  }
+}
+
+class Empty {
+  fun taskRun() { wait 20 }
+}
+
+class Sender {
+  fun taskRun() {
+    wait 50
+    Signal.send("multi.late")
+  }
+}
+
+// nothing arrives
+fun none() {
+  Signal a = Signal("multi.a")
+  Signal b = Signal("multi.b")
+  wait
+    on a { Console.log("never a") }
+    on b { Console.log("never b") }
+    timeout 30 { Console.log("timeout") }
+}
+
+// the branches take turns; a token stays in its count
+fun turns() {
+  Token s1 = Token.register("multi.s1")
+  Token s2 = Token.register("multi.s2")
+  s1.produce(3)
+  s2.produce(2)
+  string order = ""
+  bool more = true
+  while more {
+    wait
+      on s1 { order += "1" }
+      on s2 { order += "2" }
+      timeout 20 { more = false }
+  }
+  Console.log($"turns {order}")
+}
+
+// what arrives in a block: kept for another branch (one), abandoned for the same branch
+fun kept() {
+  Signal s1 = Signal("multi.k1")
+  Signal s2 = Signal("multi.k2")
+  i32 n1 = 0
+  i32 n2 = 0
+  bool first = true
+  bool more = true
+  while more {
+    wait
+      on s1 {
+        n1++
+        if n1 == 1 {
+          s1.send()   // the same branch: abandoned
+          s2.send()   // another one: kept
+          s2.send()   // only one for each branch
+        }
+      }
+      on s2 { n2++ }
+      timeout 20 {
+        more = first
+        if first { s1.send() }   // the code of the loop: kept for the next run
+        first = false
+      }
+  }
+  Console.log($"kept {n1} {n2}")
+}
+
+// several signals in one branch
+fun several() {
+  Signal s1 = Signal("multi.v1")
+  Signal s2 = Signal("multi.v2")
+  i32 runs = 0
+  #again#
+  wait
+    on s1, s2 as s {
+      if s == s1 {
+        Console.log("s1 fired")
+      } else {
+        Console.log($"{s.name} fired")
+      }
+    }
+    timeout 10 { }
+  runs++
+  if runs == 1 { s2.send() }
+  if runs == 2 { s1.send() }
+  if runs < 4 { jump #again# }
+}
+
+// tasks: values, a void task, a value that is not named, a task made null and one that replaces another
+fun tasks() {
+  Task texts = Task(Texts, timeout: 2000).start()
+  Task quick = Task(Quick, timeout: 2000).start()
+  Task empty = Task(Empty).start()
+  string got = ""
+  i32 sum = 0
+  i32 ends = 0
+  bool more = true
+  while more {
+    wait
+      on texts as t { got += t + " " }
+      on quick as q { sum += q }
+      on empty { ends++ }
+      timeout 200 { more = false }
+  }
+  Console.log($"tasks {got}{sum} {ends}")
+  Task again = Task(Quick, timeout: 2000).start()
+  Task other = Task(Texts, timeout: 2000).start()
+  i32 runs = 0
+  i32 values = 0
+  i32 unnamed = 0
+  while runs < 5 {
+    wait
+      on again as v {
+        values += v
+        if values == 42 {
+          again = Task(Quick, timeout: 2000).start()
+        } else {
+          again = null
+        }
+      }
+      on other { unnamed++ }
+      timeout 1000 { }
+    runs++
+  }
+  Console.log($"replaced {values} {unnamed}")
+}
+
+// events: volatile ones while the wait is busy: the last one; static ones by their queue
+fun events() {
+  Event<Size> moves = Event.register("multi.move")
+  Event<Size> sizes = Event.register("multi.size", EventMode.Static, keep: 2, fullMode: EventQueueFullMode.DiscardNewest)
+  Signal go = Signal("multi.go")
+  bool more = true
+  bool first = true
+  while more {
+    wait
+      on go {
+        moves.send(Size(1, 1))
+        moves.send(Size(2, 2))
+        moves.send(Size(3, 3))
+        sizes.send(Size(10, 1))
+        sizes.send(Size(20, 1))
+        sizes.send(Size(30, 1))
+      }
+      on moves as m { Console.log($"move {m.w}") }
+      on sizes as z { Console.log($"size {z.w}") }
+      timeout 20 {
+        more = first
+        if first { go.send() }
+        first = false
+      }
+  }
+}
+
+// a signal of another runnable, a group, the registration that ends with the scope
+fun i32 others() {
+  Signal late = Signal("multi.late")
+  Signal excl = Signal(SignalMode.Exclusive, "multi.excl")
+  SignalGroup group = Signal.group(7001, "multi.g2")
+  Task sender = Task(Sender).start()
+  wait
+    on excl { Console.log("never") }
+    on late { Console.log("late arrived") }
+    timeout 2000 { Console.log("never") }
+  i32 runs = 0
+  while true {
+    wait
+      on group as g {
+        Console.log($"group {g.name}")
+        return 5
+      }
+      on late { }
+      timeout 10 { Signal.send("multi.g2") }
+    runs++
+  }
+  return 0
+}
+
+// a wait in taskRun(): the calls through the handle are served, the kill is seen
+class Server {
+  i32 count = 0
+  bool alive = true
+  fun i32 taskRun() {
+    Token bump = Token("multi.bump")
+    Signal stop = Signal("multi.stop")
+    while alive {
+      wait
+        on bump { count++ }
+        on stop { alive = false }
+        timeout 5000 { }
+    }
+    return count
+  }
+  public fun i32 getCount() { return count }
+}
+
+none()
+turns()
+kept()
+several()
+tasks()
+events()
+Console.log(others())
+// the Exclusive signal is free again: its scope ended
+wait Signal(SignalMode.Exclusive, "multi.excl") timeout 1
+Console.log("exclusive free")
+
+Token bump = Token.register("multi.bump")
+Task server = Task(Server, timeout: 2000).start()
+bump.produce(2)
+wait 100
+Console.log(wait server.getCount() timeout 2000)
+Signal.send("multi.stop")
+Console.log(wait server timeout 2000)
+Task killed = Task(Server).start()
+wait 20
+Console.log(killed.kill(1000))
+
+// at top level, in a block that throws
+Token top = Token.register("multi.top")
+top.produce()
+{
+  wait
+    on top { throw Exception("from the block") }
+    timeout 100 { Console.log("never") }
+  Console.log("never")
+  catch Exception ex { Console.log(ex.message) }
+}
+wait
+  on top { Console.log("never") }
+  timeout 10
+Console.log("end")
+
+// a task that fails, an Exclusive signal that has its listener: the exception leaves the wait
+class Fails {
+  fun i32 taskRun() {
+    throw Exception("task failed")
+  }
+}
+
+fun failing() {
+  Task bad = Task(Fails).start()
+  Signal quiet = Signal("multi.quiet")
+  wait
+    on quiet { Console.log("never") }
+    on bad as v { Console.log("never") }
+    timeout 2000 { Console.log("never") }
+  Console.log("never")
+  catch Exception ex { Console.log(ex.message) }
+}
+
+fun i32 listener() {
+  Signal excl = Signal(SignalMode.Exclusive, "multi.excl2")
+  wait excl timeout 300
+  return 1
+}
+
+fun busy() {
+  Thread held = Thread(listener).start()
+  wait 100
+  Signal excl = Signal(SignalMode.Exclusive, "multi.excl2")
+  Signal other = Signal("multi.other")
+  wait
+    on excl { Console.log("never") }
+    on other { Console.log("never") }
+    timeout 1
+  wait
+    on other { Console.log("never") }
+    on excl { Console.log("never") }
+    timeout 1
+  Console.log("never")
+  catch ExclusiveSignalBusyException { Console.log("exclusive busy") }
+}
+
+// from: each branch takes the events of its sender; a thread that hands out many values; the values of return? nobody waits for
+struct Move { Sender<Window> window, i32 x }
+
+class Window {
+  Event<Move> moved = Event.register("multi.moved")
+  public fun go(i32 x) { moved.send(Move(myid, x)) }
+}
+
+fun ->string counter(i32 n) {
+  i32 i = 0
+  while i < n {
+    i++
+    return! $"v{i}"
+  }
+  return "last"
+}
+
+fun from() {
+  Window w1 = Window()
+  Window w2 = Window()
+  Window w3 = Window()
+  Event<Move> moved = Event("multi.moved")
+  Thread t = Thread(counter, 2, timeout: 2000).start()
+  string log = ""
+  i32 idle = 0
+  while idle < 2 {
+    wait
+      on moved from w1 as m { log += $"a{m.x} " }
+      on moved from w2 as m { log += $"b{m.x} " }
+      on t as v {
+        if v == "v1" {
+          w2.go(5)
+          w1.go(6)
+          w3.go(7)
+          w1.go(8)   // a newer one of the same sender
+        }
+        if v == "last" { log += v }
+      }
+      timeout 100 { idle++ }
+  }
+  Console.log(log)
+}
+
+failing()
+busy()
+from()

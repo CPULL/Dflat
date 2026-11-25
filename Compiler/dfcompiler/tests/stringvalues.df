@@ -1,0 +1,194 @@
+// strings behave as values (spec 4): a change to one is never seen through another; the copy is made only where it is needed
+import Root
+
+class D(string n) {
+  public string label = n
+}
+
+struct S { string label }
+
+fun ->string mk(i32 n) {
+  return $"text {n} made at run time"
+}
+
+fun example() {
+  string a = "one"
+  string b = a
+  b += " two"
+  Console.log(a)
+  Console.log(b)
+}
+
+fun sourceChanges(bool x) {
+  string a = mk(1)
+  string b = a
+  if x { a += " changed" }
+  Console.log($"{a} / {b}")
+  a = mk(2)
+  Console.log($"{a} / {b}")
+  string c = b
+  c.trim()
+  c[0] = 'T'
+  Console.log($"{b} / {c}")
+  string d = c
+  c.clear()
+  Console.log($"[{c}] {d}")
+}
+
+fun swap() {
+  string a = mk(1)
+  string b = mk(2)
+  string t = a
+  a = b
+  b = t
+  Console.log($"{a} / {b}")
+  a, b = b, a
+  Console.log($"{a} / {b}")
+}
+
+fun fields() {
+  S s = S(mk(1))
+  string r = s.label
+  s.label = mk(2)
+  Console.log($"{r} / {s.label}")
+  D d = D(mk(3))
+  string seen = "x"
+  seen = d.label
+  d.label += "!"
+  Console.log($"{seen} / {d.label}")
+  seen = d.label
+  d = null
+  Console.log(seen)
+  D k = D("k")
+  string a = mk(4)
+  k.label = a
+  a += "!"
+  Console.log($"{a} / {k.label}")
+  k.label = ->a
+  Console.log($"[{a}] {k.label}")
+}
+
+fun items() {
+  vec<string> v = [mk(1), mk(2)]
+  string r = v[0]
+  v[0] = mk(3)
+  string q = v[1]
+  v.clear()
+  Console.log($"{r} / {q}")
+  arr<string> w = [mk(4), mk(5)]
+  string e = w[0]
+  for &string item in w {
+    item += "!"
+  }
+  Console.log($"{e} / {w[0]}")
+}
+
+// the borrow of one turn and the change of the next
+fun loops() {
+  string a = mk(0)
+  string last = "none"
+  i32 i = 0
+  while i < 3 {
+    a += $" {i}"
+    Console.log(last)
+    last = a
+    i++
+  }
+  Console.log(last)
+  string text = "x"
+  string first = text
+  for var k in 0..3 {
+    text = text + "y"
+  }
+  Console.log($"{first} {text}")
+  string j = mk(9)
+  string kept = j
+  i32 n = 0
+  #again#
+  Console.log(kept)
+  j = mk(n)
+  n++
+  if n < 2 { jump #again# }
+  Console.log($"{kept} / {j}")
+}
+
+fun addTo(&string s) {
+  string before = s
+  s += " added"
+  Console.log($"{before} -> {s}")
+}
+
+fun replace(&string s) {
+  s = mk(77)
+}
+
+fun references() {
+  string a = mk(1)
+  string b = a
+  addTo(&a)
+  Console.log(b)
+  string c = a
+  replace(&c)            // c borrows: it has its own text before it is changed
+  Console.log($"{a} / {c}")
+  string d = a
+  &string r = a
+  r += " through r"
+  Console.log($"{d} / {a}")
+}
+
+fun lambdas() {
+  string a = mk(1)
+  string b = a
+  fun() show = () { Console.log(b) }
+  a = mk(2)
+  show()
+  string c = mk(3)
+  string e = c
+  {
+    fun() change = (; &c) { c += " changed" }
+    change()
+  }
+  Console.log($"{e} / {c}")
+}
+
+fun ->string returned() {
+  string a = mk(5)
+  string b = a
+  return b
+}
+
+fun chains() {
+  string a = mk(1)
+  string b = a
+  string c = b
+  a = mk(2)
+  b += "!"
+  Console.log($"{a} / {b} / {c}")
+  string s = mk(3)
+  s = s.toUpper()
+  string same = s
+  s = same.substr(0, 4)
+  Console.log($"{s} / {same}")
+  s += s
+  Console.log(s)
+  string m = s.len > 100 ? { true: a, default: b }
+  b = mk(4)
+  a = mk(5)
+  Console.log(m)
+}
+
+string top = mk(100)
+string other = top
+top += "!"
+Console.log($"{top} / {other}")
+example()
+sourceChanges(true)
+sourceChanges(false)
+swap()
+fields()
+items()
+loops()
+references()
+lambdas()
+Console.log(returned())
+chains()

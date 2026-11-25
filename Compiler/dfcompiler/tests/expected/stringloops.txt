@@ -1,0 +1,29 @@
+text 1 made at run time, long enough for a block
+text 11 made at run time, long enough for a block
+--- the name of the collection
+text 1 made at run time, long enough for a block
+text 51 made at run time, long enough for a block
+text 1 made at run time, long enough for a block text 1 made at run time, long enough for a block
+text 53 made at run time, long enough for a block text 53 made at run time, long enough for a block
+--- another name
+text 50 made at run time, long enough for a block
+text 55 made at run time, long enough for a block
+--- in a method, lent
+text 10 made at run time, long enough for a block
+text 61 made at run time, long enough for a block
+text 60 made at run time, long enough for a block
+text 71 made at run time, long enough for a block
+--- map
+a text 1 made at run time, long enough for a block
+b text 92 made at run time, long enough for a block
+text 91 made at run time, long enough for a block
+text 92 made at run time, long enough for a block
+--- parts
+1 text 1 made at run time, long enough for a block
+4 text 57 made at run time, long enough for a block
+--- characters
+text 7 49
+--- no change: no copy
+text 80 made at run time, long enough for a block
+text 81 made at run time, long enough for a block
+---- exit code 0 ----

@@ -1,0 +1,56 @@
+// Proposal: a set value (a variable, a field, an item) given to a parameter of the same set.
+// The call reads the tag of the value and calls the copy of the function for that member.
+import Root
+
+Generic JsonType { r64?, string, bool, JsonArray }
+
+class JsonArray {
+  public vec<JsonType> items = []
+}
+
+// one copy of writeValue for each member of JsonType: in each copy value has the type of its case
+fun string writeValue(JsonType value) {
+  return value is ? {
+    JsonArray: writeArray(value),
+    string: "\"" + value + "\"",
+    bool: writeBool(value),
+    r64?: "" + value
+  }
+}
+
+fun string writeArray(JsonArray source) {
+  string body = ""
+  for JsonType item in source.items {
+    if body.len > 0 {
+      body += ","
+    }
+    body += writeValue(item)     // proposal: item is a JsonType, its tag chooses the copy
+  }
+  return "[" + body + "]"
+}
+
+fun string writeBool(bool flag) {
+  if flag {
+    return "true"
+  }
+  return "false"
+}
+
+// today: the type of the argument is known when compiling
+Console.log(writeValue("text"))     // "text"
+Console.log(writeValue(true))       // true
+
+// proposal: the type is known only when the program runs
+JsonType value = 1.5
+Console.log(writeValue(value))      // 1.5
+value = "other"
+Console.log(writeValue(value))      // "other"
+
+JsonArray list = JsonArray()
+list.items.add(1.5)
+list.items.add("two")
+list.items.add(false)
+Console.log(writeValue(list))       // [1.5,"two",false]
+
+// JsonType never
+// writeValue(never)                // never assigned: UnassignedTypeException

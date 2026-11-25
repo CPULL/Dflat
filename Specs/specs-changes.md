@@ -789,3 +789,12 @@
 - 15.8 Each binary line of a .dfc ends with the SHA-256 of the binary; a binary that does not match is a compile error
 - 14.2 Forms 2 to 5: the `atEnd` can be on the line after the closing brace, and it belongs to what the brace closes; after an `atEnd` block or a `catch` it stays a standalone block
 - 14.2, 15.8 The end code of a library is `atLibEnd { }` (form 6); a standalone `atEnd { }` at the top level of lib.df is a compile error
+- 2.5, 13 The arguments of a call run from left to right in the order of the parameters defined in the signature of the function, also when they are given by name; the object of a method runs before them
+- 11.1.5.1 The values of a new struct run in the order of its fields, also when they are given by name
+- 11.3.6, 11.3.6.1 A set value can be given to a parameter of the same set: its tag chooses the copy of the function when the program runs
+- 10.5, 11.3.7 `switch value is ? { }`: the statement form of the type switch; a null object goes to `default`
+- 11.3.7 `jump` can leave a type switch, never go to another case of it
+- 4.2 `indexOf` and `lastIndexOf` of a string take `startPoint` before `caseSensitive` and give an `int`
+- 2.1 `type.MIN` and `type.MAX` for the integer types
+- 3.5.1, 13.2 When no version of a function matches, the only one that the automatic conversions reach is called
+- 4.2 `substr`, `insert`, `remove`, `replaceAt`, `padLeft`, `padRight` take `uns`

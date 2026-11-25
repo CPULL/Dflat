@@ -2119,6 +2119,12 @@ public sealed partial class CodeGen {
     CheckParentAccess(chosen, receiver, name, at);
     var codes = ArgCodes(chosen, args, scope, at, out string prefix);
     string call;
+    if (receiver != null && !LibraryCode && ReceiverOf(at) is Node receiverNode && HasEffects(receiverNode) && args.Any(arg => !IsLiteralNode(arg))) {
+      // make(1).f(g()): the object first (spec 2.5)
+      string heldReceiver = NewTemp();
+      prefix = $"__auto_type {heldReceiver} = {receiver}; {prefix}";
+      receiver = heldReceiver;
+    }
     if (receiver == null) {
       call = $"{chosen.CName}({string.Join(", ", codes)})";
     } else {
@@ -2282,7 +2288,7 @@ public sealed partial class CodeGen {
     if (!classes.TryGetValue(targetName, out var target) && !traits.TryGetValue(targetName, out target)) {
       throw Error($"'is' needs a class or trait name, not '{targetName}'", n);
     }
-    if (currentGenericT == null && subject.Type != "Exception" && IsSubtype(subject.Type, target.Name)) {
+    if (!quietIs && currentGenericT == null && subject.Type != "Exception" && IsSubtype(subject.Type, target.Name)) {
       Warn($"{subject.Type} is always a {target.Name}: the check is upward", n, 2);
     }
     return target;

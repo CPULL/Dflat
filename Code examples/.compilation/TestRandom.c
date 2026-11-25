@@ -17,6 +17,56 @@
 #include <windows.h>
 #endif
 
+/* ---- multitasking (spec 20): DF_TASKS is defined by the compiler only when the program imports Root.Tasks (or links a library built
+   with it). Without it these macros are the plain single-thread code, with no cost:
+   - DF_TLS: the state of one execution (the call frames, the pending exception, the temporaries ...) is per thread;
+   - DF_ATOMIC_*: the counters several threads change (the users of a counted object, the leak counters);
+   - df_mutex: a short lock around the state the whole program shares (the iterator table, the random generator) ---- */
+#ifdef DF_TASKS
+#ifndef _WIN32
+#include <pthread.h>
+#include <sched.h>
+#endif
+#define DF_TLS _Thread_local
+#define DF_ATOMIC_ADD(x, n) __atomic_add_fetch(&(x), (n), __ATOMIC_SEQ_CST)
+#define DF_ATOMIC_SUB(x, n) __atomic_sub_fetch(&(x), (n), __ATOMIC_SEQ_CST)
+#define DF_ATOMIC_LOAD(x) __atomic_load_n(&(x), __ATOMIC_SEQ_CST)
+#define DF_ATOMIC_STORE(x, v) __atomic_store_n(&(x), (v), __ATOMIC_SEQ_CST)
+/* true when x was expected and is now desired */
+#define DF_ATOMIC_CAS(x, expected, desired) \
+  ({ __typeof__(x) df_cas_e = (expected); __atomic_compare_exchange_n(&(x), &df_cas_e, (desired), false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); })
+#ifdef _WIN32
+typedef SRWLOCK df_mutex;
+#define DF_MUTEX_INIT SRWLOCK_INIT
+static inline void df_mutex_lock(df_mutex* m) { AcquireSRWLockExclusive(m); }
+static inline void df_mutex_unlock(df_mutex* m) { ReleaseSRWLockExclusive(m); }
+static inline void df_thread_yield(void) { SwitchToThread(); }
+static inline int64_t df_mono_ms(void) { return (int64_t)GetTickCount64(); }
+#else
+typedef pthread_mutex_t df_mutex;
+#define DF_MUTEX_INIT PTHREAD_MUTEX_INITIALIZER
+static inline void df_mutex_lock(df_mutex* m) { pthread_mutex_lock(m); }
+static inline void df_mutex_unlock(df_mutex* m) { pthread_mutex_unlock(m); }
+static inline void df_thread_yield(void) { sched_yield(); }
+static inline int64_t df_mono_ms(void) {
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  return (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+}
+#endif
+#define DF_LOCK(m) df_mutex_lock(&(m))
+#define DF_UNLOCK(m) df_mutex_unlock(&(m))
+#else
+#define DF_TLS
+#define DF_ATOMIC_ADD(x, n) ((x) += (n))
+#define DF_ATOMIC_SUB(x, n) ((x) -= (n))
+#define DF_ATOMIC_LOAD(x) (x)
+#define DF_ATOMIC_STORE(x, v) ((x) = (v))
+#define DF_ATOMIC_CAS(x, expected, desired) ((x) == (expected) ? ((x) = (desired), true) : false)
+#define DF_LOCK(m) ((void)0)
+#define DF_UNLOCK(m) ((void)0)
+#endif
+
 /* uns: the native unsigned size of the target (spec 3.1, 6.1); lengths and indexes of the collections. DF_UNS_BITS is defined by the compiler */
 #if DF_UNS_BITS == 32
 typedef uint32_t df_uns;
@@ -42,20 +92,60 @@ typedef struct {
   uint64_t len;    /* byte length */
 } df_sv;
 
+/* ---- the call stack of a debug build (spec 15.2) ----
+   Every function of the program pushes a frame when it starts and pops it on every way out (the cleanup attribute); each statement
+   writes its line in the frame on top. A release build has no frames. */
+typedef struct df_frame {
+  const char* file;
+  const char* function;
+  uint64_t line;
+  struct df_frame* prev;
+} df_frame;
+
+static DF_TLS df_frame* df_frame_top = NULL;
+
+static void df_frame_pop(df_frame* frame) {
+  df_frame_top = frame->prev;
+}
+
+#define DF_LINE(n) (df_frame_top ? (void)(df_frame_top->line = (n)) : (void)0)
+
+/* one call of a stack trace: file, line and function, innermost first */
+typedef struct {
+  const char* file;
+  const char* function;
+  uint64_t line;
+} df_trace_item;
+
+static void df_trace_print(const df_trace_item* items, uint64_t count) {
+  for (uint64_t i = 0; i < count; i++) {
+    printf("%s (%llu) %s\n", items[i].file, (unsigned long long)items[i].line, items[i].function);
+  }
+}
+
 /* ---- panic ---- */
 
 /* set by the console when it changes the terminal mode (Console.read): gives the terminal back before a panic */
 static void (*df_panic_hook)(void) = NULL;
 
-/* critical exit: prints "Panic <code>" on stdout, no cleanup */
-static void df_panic(int64_t code) {
+/* critical exit: prints the calls of a debug build, then "Panic <code>" on stdout, no cleanup */
+static void df_panic_exit(int64_t code, bool frames) {
   if (df_panic_hook) {
     df_panic_hook();
   }
   fflush(stdout);
+  if (frames) {
+    for (df_frame* frame = df_frame_top; frame; frame = frame->prev) {
+      printf("%s (%llu) %s\n", frame->file, (unsigned long long)frame->line, frame->function);
+    }
+  }
   printf("Panic %lld\n", (long long)code);
   fflush(stdout);
   _Exit((int)code);
+}
+
+static void df_panic(int64_t code) {
+  df_panic_exit(code, true);
 }
 
 #define DF_PANIC_UNHANDLED (-1000)
@@ -75,6 +165,109 @@ static void* df_alloc(uint64_t n) {
   return p;
 }
 
+/* ---- the OS threads (spec 20, only with DF_TASKS): a thread runs fn(arg); the heap is the C heap, shared and thread safe ---- */
+#ifdef DF_TASKS
+typedef struct {
+  void (*fn)(void*);
+  void* arg;
+} df_thread_call;
+
+#ifdef _WIN32
+typedef HANDLE df_thread;
+
+static DWORD WINAPI df_thread_entry(LPVOID p) {
+  df_thread_call call = *(df_thread_call*)p;
+  free(p);
+  call.fn(call.arg);
+  return 0;
+}
+#else
+typedef pthread_t df_thread;
+
+static void* df_thread_entry(void* p) {
+  df_thread_call call = *(df_thread_call*)p;
+  free(p);
+  call.fn(call.arg);
+  return NULL;
+}
+#endif
+
+/* false: the OS could not start the thread */
+static bool df_thread_start(df_thread* thread, void (*fn)(void*), void* arg) {
+  df_thread_call* call = (df_thread_call*)df_alloc(sizeof(df_thread_call));
+  call->fn = fn;
+  call->arg = arg;
+#ifdef _WIN32
+  *thread = CreateThread(NULL, 0, df_thread_entry, call, 0, NULL);
+  if (*thread == NULL) {
+    free(call);
+    return false;
+  }
+#else
+  if (pthread_create(thread, NULL, df_thread_entry, call) != 0) {
+    free(call);
+    return false;
+  }
+#endif
+  return true;
+}
+
+/* waits for the end of the thread and gives its OS resources back */
+static void df_thread_join(df_thread thread) {
+#ifdef _WIN32
+  WaitForSingleObject(thread, INFINITE);
+  CloseHandle(thread);
+#else
+  pthread_join(thread, NULL);
+#endif
+}
+
+/* a lock made at run time (the locks of the tasks), and a condition to wait on under it */
+#ifdef _WIN32
+typedef CONDITION_VARIABLE df_cond;
+static void df_mutex_init(df_mutex* m) { InitializeSRWLock(m); }
+static void df_mutex_destroy(df_mutex* m) { (void)m; }
+static void df_cond_init(df_cond* c) { InitializeConditionVariable(c); }
+static void df_cond_destroy(df_cond* c) { (void)c; }
+static void df_cond_broadcast(df_cond* c) { WakeAllConditionVariable(c); }
+/* waits at most ms (-1: no limit) for a broadcast; the lock is held again when it returns */
+static void df_cond_wait_ms(df_cond* c, df_mutex* m, int64_t ms) {
+  SleepConditionVariableSRW(c, m, ms < 0 ? INFINITE : (DWORD)(ms > 0x7FFFFFFF ? 0x7FFFFFFF : ms), 0);
+}
+#else
+typedef pthread_cond_t df_cond;
+static void df_mutex_init(df_mutex* m) { pthread_mutex_init(m, NULL); }
+static void df_mutex_destroy(df_mutex* m) { pthread_mutex_destroy(m); }
+static void df_cond_init(df_cond* c) { pthread_cond_init(c, NULL); }
+static void df_cond_destroy(df_cond* c) { pthread_cond_destroy(c); }
+static void df_cond_broadcast(df_cond* c) { pthread_cond_broadcast(c); }
+static void df_cond_wait_ms(df_cond* c, df_mutex* m, int64_t ms) {
+  if (ms < 0) {
+    pthread_cond_wait(c, m);
+    return;
+  }
+  struct timespec until;
+  clock_gettime(CLOCK_REALTIME, &until);
+  until.tv_sec += ms / 1000;
+  until.tv_nsec += (ms % 1000) * 1000000;
+  if (until.tv_nsec >= 1000000000) {
+    until.tv_sec++;
+    until.tv_nsec -= 1000000000;
+  }
+  pthread_cond_timedwait(c, m, &until);
+}
+#endif
+
+/* nobody waits for the end of the thread: its OS resources go back when it ends */
+static void df_thread_detach(df_thread thread) {
+#ifdef _WIN32
+  CloseHandle(thread);
+#else
+  pthread_detach(thread);
+#endif
+}
+#endif
+
 /* ---- exceptions (error register, spec 10.7) ---- */
 
 typedef struct df_descriptor {
@@ -93,7 +286,34 @@ typedef struct {
   char* message;     /* C-style, max 2 KB */
   char* function;    /* C-style, max 1 KB: minified header of the failing function */
   uint64_t line;     /* 0 in release */
+  df_trace_item* trace;   /* the calls when it was raised, innermost first (spec 15.2); NULL in release */
+  uint64_t traceLen;
 } df_exception;
+
+/* a debug build copies the frames into the exception when it is raised: its line and its stack trace */
+static void df_exc_trace(df_exception* exception) {
+  exception->trace = NULL;
+  exception->traceLen = 0;
+#ifndef DF_RELEASE
+  uint64_t count = 0;
+  for (df_frame* frame = df_frame_top; frame; frame = frame->prev) {
+    count++;
+  }
+  if (count > 0) {
+    exception->trace = (df_trace_item*)malloc(count * sizeof(df_trace_item));
+    if (exception->trace) {
+      uint64_t i = 0;
+      for (df_frame* frame = df_frame_top; frame; frame = frame->prev, i++) {
+        exception->trace[i].file = frame->file;
+        exception->trace[i].function = frame->function;
+        exception->trace[i].line = frame->line;
+      }
+      exception->traceLen = count;
+    }
+    exception->line = df_frame_top->line;
+  }
+#endif
+}
 
 static const df_descriptor df_desc_Exception = { 10, "Exception", NULL, false };
 static const df_descriptor df_desc_NullPointerException = { 11, "NullPointerException", &df_desc_Exception, false };
@@ -137,11 +357,43 @@ static const df_descriptor df_desc_ModifiedObjectUsedAsKeyException = { 52, "Mod
 static const df_descriptor df_desc_UnassignedTypeException = { 53, "UnassignedTypeException", &df_desc_Exception, false };
 static const df_descriptor df_desc_CallingGlobalDefinedAfterException = { 54, "CallingGlobalDefinedAfterException", &df_desc_Exception, false };
 static const df_descriptor df_desc_ReadLockBecameWriteLockException = { 55, "ReadLockBecameWriteLockException", &df_desc_Exception, false };
+static const df_descriptor df_desc_StringTruncatedException = { 56, "StringTruncatedException", &df_desc_Exception, true };
+static const df_descriptor df_desc_PrecisionLostException = { 57, "PrecisionLostException", &df_desc_Exception, true };
+/* Root.Tasks (spec 20.1, 20.2) */
+static const df_descriptor df_desc_WaitTimeoutException = { 58, "WaitTimeoutException", &df_desc_Exception, true };
+static const df_descriptor df_desc_TaskAlreadyTerminatedException = { 59, "TaskAlreadyTerminatedException", &df_desc_Exception, true };
+static const df_descriptor df_desc_TaskWasNotStartedException = { 60, "TaskWasNotStartedException", &df_desc_Exception, true };
+static const df_descriptor df_desc_CalledANotRunningTaskException = { 61, "CalledANotRunningTaskException", &df_desc_Exception, false };
+static const df_descriptor df_desc_TaskAlreadyStartedException = { 62, "TaskAlreadyStartedException", &df_desc_Exception, false };
+static const df_descriptor df_desc_ReturnOutsideATaskException = { 63, "ReturnOutsideATaskException", &df_desc_Exception, false };
+static const df_descriptor df_desc_WaitingWithoutTimeoutException = { 64, "WaitingWithoutTimeoutException", &df_desc_Exception, false };
+static const df_descriptor df_desc_ThreadStartedByAThreadException = { 65, "ThreadStartedByAThreadException", &df_desc_Exception, false };
+static const df_descriptor df_desc_SignalModeMismatchException = { 66, "SignalModeMismatchException", &df_desc_Exception, false };
+static const df_descriptor df_desc_ExclusiveSignalBusyException = { 67, "ExclusiveSignalBusyException", &df_desc_Exception, false };
+static const df_descriptor df_desc_ReservedSignalException = { 68, "ReservedSignalException", &df_desc_Exception, false };
+static const df_descriptor df_desc_WaitingOnANotOwnedTaskException = { 70, "WaitingOnANotOwnedTaskException", &df_desc_Exception, false };
+static const df_descriptor df_desc_TokenAlreadyRegisteredException = { 71, "TokenAlreadyRegisteredException", &df_desc_Exception, false };
+static const df_descriptor df_desc_DuplicateEventNameWithDataMismatchException = { 69, "DuplicateEventNameWithDataMismatchException", &df_desc_Exception, false };
+/* the soft kill (spec 20.10): the runnable ends at a checkpoint; no catch takes it (not an Exception), atEnd blocks and enforce scopes
+   unwind as for any exception */
+static const df_descriptor df_desc_Cancelled = { 0, "Cancelled", NULL, false };
 
 /* The exception of a function is a local of that function (df_err in the generated code) and travels back to the caller as the second
    value it returns. The runtime functions written in C cannot return it that way: they leave it here, and the code generated around
    the call moves it into the local df_err at once. This slot is empty between statements. */
-static df_exception* df_pending = NULL;
+static DF_TLS df_exception* df_pending = NULL;
+
+/* the cancel signal of the runnable this thread runs (spec 20.10; set by RuntimeTasks): a wait for a busy lock gives up when it arrives,
+   the lock counts as busy, and the runnable ends at its next checkpoint. NULL in the main program and without Root.Tasks */
+static DF_TLS int32_t* df_cancel_flag = NULL;
+#define DF_CANCEL_ASKED() (df_cancel_flag != NULL && DF_ATOMIC_LOAD(*df_cancel_flag) == 1)
+
+/* a wait written in taskRun() (spec 20.8): the task whose calls through the handle it serves while it waits; set by the generated code
+   around such a wait (DF_SERVING), NULL elsewhere and while a call is served (calls never nest). The lock waits call df_serve_hook */
+static DF_TLS void* df_serving = NULL;
+static void (*df_serve_hook)(void* task) = NULL;
+#define DF_SERVING(self, call) ({ void* df_sv_prev = df_serving; df_serving = (void*)df_task_of((void*)(self)); __auto_type df_sv_r = (call); df_serving = df_sv_prev; df_sv_r; })
+#define DF_SERVE_WHILE_WAITING() do { if (df_serving != NULL && df_serve_hook != NULL) { df_serve_hook(df_serving); } } while (0)
 
 /* copies at most maxBytes - 1 bytes plus the terminator, never cutting a UTF-8 character */
 static char* df_cstr_truncated(const char* text, uint64_t length, uint64_t maxBytes) {
@@ -163,9 +415,25 @@ static int64_t df_exc_live = 0;
 
 static void df_exc_report(void) {
   if (getenv("DF_EXC_COUNT")) {
-    printf("exceptions alive at exit: %lld\n", (long long)df_exc_live);
+    printf("exceptions alive at exit: %lld\n", (long long)DF_ATOMIC_LOAD(df_exc_live));
   }
 }
+
+/* a silent exception in a release build keeps only its id and its type (spec 15.2): the message is the name of the type, the function is
+   empty (a null string); the extra values are zeroed where a class of the program throws it */
+#ifdef DF_RELEASE
+static void df_exc_silent_strip(df_exception* exception) {
+  if (!exception->descriptor->silent) {
+    return;
+  }
+  free(exception->message);
+  exception->message = df_cstr_truncated(exception->descriptor->name, strlen(exception->descriptor->name), 2048);
+  free(exception->function);
+  exception->function = df_cstr_truncated("", 0, 1024);
+}
+#else
+#define df_exc_silent_strip(exception) ((void)0)
+#endif
 
 static df_exception* df_new_exception(const df_descriptor* descriptor, const char* message, uint64_t messageLength, const char* function) {
   df_exception* exception = (df_exception*)df_alloc(sizeof(df_exception));
@@ -175,7 +443,9 @@ static df_exception* df_new_exception(const df_descriptor* descriptor, const cha
   exception->message = df_cstr_truncated(message, messageLength, 2048);
   exception->function = df_cstr_truncated(function, strlen(function), 1024);
   exception->line = 0;
-  df_exc_live++;
+  df_exc_trace(exception);
+  df_exc_silent_strip(exception);
+  DF_ATOMIC_ADD(df_exc_live, 1);
   return exception;
 }
 
@@ -212,17 +482,20 @@ static bool df_exc_is(const df_exception* exception, uint64_t id) {
 }
 
 /* a library function that would raise a silent exception leaves a note; the caller raises it only when a catch exists */
-static const df_descriptor* df_silent_desc = NULL;
+static DF_TLS const df_descriptor* df_silent_desc = NULL;
 
 static void df_silent_note(const df_descriptor* descriptor) {
   df_silent_desc = descriptor;
 }
 
-/* unhandled exception: its message, then Panic -1000 */
+/* unhandled exception: its message, the calls where it was raised (debug), then Panic -1000 */
 static void df_panic_unhandled(const df_exception* error) {
   fflush(stdout);
   printf("%s\n", error ? error->message : "");
-  df_panic(DF_PANIC_UNHANDLED);
+  if (error) {
+    df_trace_print(error->trace, error->traceLen);
+  }
+  df_panic_exit(DF_PANIC_UNHANDLED, false);
 }
 
 /* ---- strings (spec 4.4) ----
@@ -291,8 +564,8 @@ static void df_bs_copy_to(const df_sroot* r, char* out) {
 
 /* the text of a block string as one piece, for the code that needs it so: a copy that lives until 16 more are made */
 #define DF_FLAT_RING 16
-static char* df_flat_ring[DF_FLAT_RING];
-static unsigned df_flat_next = 0;
+static DF_TLS char* df_flat_ring[DF_FLAT_RING];
+static DF_TLS unsigned df_flat_next = 0;
 
 static const char* df_bs_flat(const df_sroot* r) {
   char* text = (char*)malloc(r->bytes + 1);
@@ -413,11 +686,11 @@ static char df_str_none[1];
 #ifdef DF_STR_TRACE
 static int64_t df_str_live = 0;
 static void df_str_trace_report(void) {
-  fprintf(stderr, "strings alive at exit: %lld\n", (long long)df_str_live);
+  fprintf(stderr, "strings alive at exit: %lld\n", (long long)DF_ATOMIC_LOAD(df_str_live));
 }
 static bool df_str_hooked = false;
-#define DF_STR_TRACE_ALLOC() do { if (!df_str_hooked) { df_str_hooked = true; atexit(df_str_trace_report); } df_str_live++; } while (0)
-#define DF_STR_TRACE_FREE() (df_str_live--)
+#define DF_STR_TRACE_ALLOC() do { if (DF_ATOMIC_CAS(df_str_hooked, false, true)) { atexit(df_str_trace_report); } DF_ATOMIC_ADD(df_str_live, 1); } while (0)
+#define DF_STR_TRACE_FREE() (DF_ATOMIC_SUB(df_str_live, 1))
 #else
 #define DF_STR_TRACE_ALLOC() ((void)0)
 #define DF_STR_TRACE_FREE() ((void)0)
@@ -873,6 +1146,20 @@ static void df_str_set(df_string* slot, bool* owned, df_string value, bool fresh
   *owned = fresh;
 }
 
+/* a variable that only borrows its text takes a copy of its own (strings behave as values, spec 4) */
+static df_string* df_str_mine(df_string* slot, bool* owned) {
+  if (!*owned) {
+    *slot = df_str_dup(*slot);
+    *owned = true;
+  }
+  return slot;
+}
+
+/* the copy that a parameter took of its text ends with the function */
+static void df_str_keep_end(df_string* kept) {
+  df_str_free(*kept);
+}
+
 /* a place that always owns its string (a field, an item): a borrowed value is copied */
 static void df_str_put(df_string* slot, df_string value, bool fresh) {
   df_string old = *slot;
@@ -1250,11 +1537,11 @@ static bool df_str_owner = true;
 
 /* new strings that are only read in a statement (an operand, an argument): freed when the statement ends. A function frees the
    ones above the mark it took when it started, so the temporaries of its callers stay */
-static df_string* df_tmps = NULL;
-static bool* df_tmp_objs = NULL;   /* the entry is an object (dropped), not a string (freed) */
-static void (**df_tmp_fns)(void*) = NULL;   /* the entry is a block ended by its own function (the arrays of a tuple) */
-static size_t df_tmp_top = 0;
-static size_t df_tmp_cap = 0;
+static DF_TLS df_string* df_tmps = NULL;
+static DF_TLS bool* df_tmp_objs = NULL;   /* the entry is an object (dropped), not a string (freed) */
+static DF_TLS void (**df_tmp_fns)(void*) = NULL;   /* the entry is a block ended by its own function (the arrays of a tuple) */
+static DF_TLS size_t df_tmp_top = 0;
+static DF_TLS size_t df_tmp_cap = 0;
 static void df_drop(void* obj);
 
 static void df_tmp_push(void* p, bool object) {
@@ -1339,13 +1626,13 @@ typedef struct {
 
 static df_fn df_fn_retain(df_fn f) {
   if (f.ctx) {
-    f.ctx->rc++;
+    DF_ATOMIC_ADD(f.ctx->rc, 1);
   }
   return f;
 }
 
 static void df_fn_release(df_fn f) {
-  if (f.ctx && --f.ctx->rc == 0) {
+  if (f.ctx && DF_ATOMIC_SUB(f.ctx->rc, 1) == 0) {
     f.ctx->end(f.ctx);
     free(f.ctx);
   }
@@ -1367,9 +1654,9 @@ static void df_fn_set(df_fn* slot, df_fn value) {
 }
 
 /* sort(lambda) (spec 6.6): the lambda the comparer of the sort calls; saved and restored around each sort, so a sort inside a comparer works */
-static df_fn df_sort_fn;
+static DF_TLS df_fn df_sort_fn;
 /* the exception the lambda of a sort let out: the comparer keeps the first one and the sort finishes; it is raised after the sort */
-static df_exception* df_sort_err;
+static DF_TLS df_exception* df_sort_err;
 
 static void df_fn_drop(df_fn* slot) {
   df_fn_release(*slot);
@@ -1420,6 +1707,17 @@ static bool df_str_eq(df_string a, df_string b) {
   return x.len == y.len && memcmp(x.p, y.p, x.len) == 0;
 }
 
+/* < <= > >= on strings (spec 6.2.2): by bytes, the same as code point order in UTF-8; a shorter prefix first */
+static int df_str_order(df_string a, df_string b) {
+  df_sv x = df_view(a), y = df_view(b);
+  uint64_t n = x.len < y.len ? x.len : y.len;
+  int c = n ? memcmp(x.p, y.p, n) : 0;
+  if (c != 0) {
+    return c < 0 ? -1 : 1;
+  }
+  return (x.len > y.len) - (x.len < y.len);
+}
+
 /* ---- objects (classes): every object starts with its class descriptor ---- */
 
 typedef struct df_trait {
@@ -1445,6 +1743,10 @@ typedef struct df_class {
   void (*drop)(void*);   /* ends the object: its atEnd, then the objects it owns */
   df_uns (*hash)(const void*);   /* .hash (spec 6.2.1): the override of get_hash() or the default; NULL when the program uses no hash */
   void* (*clone)(const void*);   /* .clone() (spec 12.6): a new object; NULL when the class cannot be cloned (or nothing clones) */
+  const char* bare;   /* the bare name of the class, for the default order (spec 6.2.2) */
+  /* the compareTo of the class (trait Comparable, spec 11.2.1) that applies to other: its depth (the most specific has the highest, -1 when none
+     applies); with run it calls it and gives the sign of the result. NULL when the class is not Comparable */
+  int (*cmp)(const void* self, const void* other, int* depth, bool run);
 } df_class;
 
 typedef struct { const df_class* cls; } df_object;
@@ -1483,9 +1785,48 @@ static df_string df_dead_str(const void* obj) {
   return df_str_lit("(destroyed)", 11);
 }
 
-static const df_class df_dead_class = { 0, "(destroyed)", NULL, NULL, df_dead_str, NULL, 0, NULL, NULL, NULL };
+static const df_class df_dead_class = { 0, "(destroyed)", NULL, NULL, df_dead_str, NULL, 0, NULL, NULL, NULL, "(destroyed)", NULL };
 
 #define DF_IS_DEAD(p) (((const df_object*)(p))->cls == &df_dead_class)
+
+/* the exception of a compareTo called by a comparison that cannot raise it there (sort, the keys of a map): the caller raises it after */
+static DF_TLS df_exception* df_cmp_err = NULL;
+
+/* the order of two objects (spec 6.2.2): the most specific compareTo that applies (trait Comparable, of either object; the left one on a tie),
+   otherwise null first, then the bare names of the classes, then the addresses */
+static int df_obj_cmp(const void* a, const void* b) {
+  if (a == b) {
+    return 0;
+  }
+  const df_class* ca = a != NULL ? ((const df_object*)a)->cls : NULL;
+  const df_class* cb = b != NULL ? ((const df_object*)b)->cls : NULL;
+  int da = -1, db = -1;
+  if (ca != NULL && ca->cmp != NULL) {
+    (void)ca->cmp(a, b, &da, false);
+  }
+  if (cb != NULL && cb->cmp != NULL) {
+    (void)cb->cmp(b, a, &db, false);
+  }
+  if (da >= 0 && da >= db) {
+    return ca->cmp(a, b, &da, true);
+  }
+  if (db >= 0) {
+    return -cb->cmp(b, a, &db, true);
+  }
+  if (a == NULL || b == NULL) {
+    return a == NULL ? -1 : 1;
+  }
+  int c = strcmp(ca->bare, cb->bare);
+  if (c != 0) {
+    return c < 0 ? -1 : 1;
+  }
+  return (uintptr_t)a < (uintptr_t)b ? -1 : 1;
+}
+
+/* a comparer of the items of a sort that are objects (pointers to them) */
+static int df_cmp_objp(const void* a, const void* b) {
+  return df_obj_cmp(*(const void* const*)a, *(const void* const*)b);
+}
 
 /* a clone of an object by its class at run time (spec 12.6): null for null, a destroyed object or a class that cannot be cloned */
 static void* df_clone_obj(const void* obj) {
@@ -1510,6 +1851,91 @@ static void df_drop(void* obj) {
   if (c != NULL && c->drop != NULL) {
     c->drop(obj);
   }
+}
+
+/* ---- mutex (spec 20.13): a recursive lock, taken with enforce. The owner is the thread that holds it (the address of a thread-local
+   mark); the same thread takes it again at once. Without threads (no DF_TASKS) it is always free ---- */
+typedef struct {
+  int64_t timeout;    /* milliseconds, from the declaration (spec 20.13: required, above 0) */
+  uintptr_t owner;    /* 0: free */
+  int64_t depth;
+} df_mtx;
+
+static DF_TLS char df_thread_mark;
+
+/* waits at most ms (-1: the timeout of the mutex; 0: one try); false when it stays busy */
+static bool df_mtx_lock(df_mtx* m, int64_t ms) {
+  uintptr_t me = (uintptr_t)&df_thread_mark;
+  if (DF_ATOMIC_LOAD(m->owner) == me) {
+    m->depth++;
+    return true;
+  }
+#ifdef DF_TASKS
+  if (ms < 0) {
+    ms = m->timeout;
+  }
+  int64_t until = df_mono_ms() + ms;
+  while (!DF_ATOMIC_CAS(m->owner, (uintptr_t)0, me)) {
+    if (df_mono_ms() >= until || DF_CANCEL_ASKED()) {
+      return false;
+    }
+    DF_SERVE_WHILE_WAITING();   /* in taskRun(): the calls through the handle (spec 20.8) */
+    df_thread_yield();
+  }
+#else
+  (void)ms;
+  m->owner = me;
+#endif
+  m->depth = 1;
+  return true;
+}
+
+static void df_mtx_unlock(df_mtx* m) {
+  if (--m->depth == 0) {
+    DF_ATOMIC_STORE(m->owner, (uintptr_t)0);
+  }
+}
+
+/* ---- semaphore (spec 20.14): a counter of permits, taken with enforce (one, or take(n)) and given back at the end of its block. Without
+   threads (no DF_TASKS) a busy one fails at once ---- */
+typedef struct {
+  int64_t timeout;    /* milliseconds, from the declaration; 0: one try */
+  int64_t permits;    /* the permits free now */
+} df_sem;
+
+/* takes n permits, waiting at most ms (-1: the timeout of the semaphore; 0: one try); false when they stay busy */
+static bool df_sem_take(df_sem* s, int64_t n, int64_t ms) {
+#ifdef DF_TASKS
+  if (ms < 0) {
+    ms = s->timeout;
+  }
+  int64_t until = df_mono_ms() + ms;
+  for (;;) {
+    int64_t have = DF_ATOMIC_LOAD(s->permits);
+    if (have >= n) {
+      if (DF_ATOMIC_CAS(s->permits, have, have - n)) {
+        return true;
+      }
+      continue;
+    }
+    if (df_mono_ms() >= until || DF_CANCEL_ASKED()) {
+      return false;
+    }
+    DF_SERVE_WHILE_WAITING();   /* in taskRun(): the calls through the handle (spec 20.8) */
+    df_thread_yield();
+  }
+#else
+  (void)ms;
+  if (s->permits < n) {
+    return false;
+  }
+  s->permits -= n;
+  return true;
+#endif
+}
+
+static void df_sem_give(df_sem* s, int64_t n) {
+  DF_ATOMIC_ADD(s->permits, n);
 }
 
 /* reference counting (spec 12.7, the Rust Rc model): a counted variable holds the counting block of its object; the counting system owns the
@@ -1549,23 +1975,33 @@ static df_rc* df_rc_new_str(df_string value, bool fresh) {
   return rc;
 }
 
+/* with threads (DF_TASKS): the counts change atomically; the end of the last user and the end of the last weak reference decide under this
+   lock which of them frees the counting block. A release that reaches 0 empties obj under the lock: a weak end that sees users == 0 and
+   obj != NULL leaves the block to that release */
+#ifdef DF_TASKS
+static df_mutex df_rc_end_lock = DF_MUTEX_INIT;
+#endif
+
 /* one more user of the same object */
 static df_rc* df_rc_use(df_rc* rc) {
   if (rc != NULL) {
-    rc->users++;
+    DF_ATOMIC_ADD(rc->users, 1);
   }
   return rc;
 }
 
 /* a user releases its usage: at 0 the object ends (final, the count never rises again) */
 static void df_rc_release(df_rc* rc) {
-  if (rc == NULL || --rc->users != 0) {
+  if (rc == NULL || DF_ATOMIC_SUB(rc->users, 1) != 0) {
     return;
   }
+  DF_LOCK(df_rc_end_lock);
   void* obj = rc->obj;
   uint8_t kind = rc->kind;
   rc->obj = NULL;
-  if (rc->weaks == 0) {
+  bool unused = DF_ATOMIC_LOAD(rc->weaks) == 0;
+  DF_UNLOCK(df_rc_end_lock);
+  if (unused) {
     free(rc);
   }
   if (kind == 0) {
@@ -1598,22 +2034,39 @@ static df_rc* df_rc_timeout(df_rc* rc, int64_t ms) {
 }
 
 /* enforce takes the lock, waiting at most ms (-1: the default of the object), and holds a usage with it so the object stays while it is
-   locked. There are no threads yet: a busy lock is held by this same thread, which cannot release it while it waits, so the wait would
-   always run out; it fails at once. With threads this becomes the queue of the waiters, a timed wait and an atomic hand-over */
+   locked. Without threads a busy lock is held by this same thread, which cannot release it while it waits, so the wait would always run
+   out; it fails at once. With threads (DF_TASKS) the lock is taken atomically and a busy one is tried again until ms runs out */
 static bool df_rc_lock(df_rc* rc, int64_t ms) {
+  if (rc == NULL || DF_ATOMIC_LOAD(rc->users) == 0) {
+    return false;
+  }
+#ifdef DF_TASKS
+  if (ms < 0) {
+    ms = rc->timeout;
+  }
+  int64_t until = df_mono_ms() + ms;
+  while (!DF_ATOMIC_CAS(rc->locked, false, true)) {
+    if (df_mono_ms() >= until || DF_CANCEL_ASKED()) {
+      return false;
+    }
+    DF_SERVE_WHILE_WAITING();   /* in taskRun(): the calls through the handle (spec 20.8) */
+    df_thread_yield();
+  }
+#else
   (void)ms;
-  if (rc == NULL || rc->users == 0 || rc->locked) {
+  if (rc->locked) {
     return false;
   }
   rc->locked = true;
-  rc->users++;
+#endif
+  DF_ATOMIC_ADD(rc->users, 1);
   return true;
 }
 
 static void df_rc_release(df_rc* rc);
 
 static void df_rc_unlock(df_rc* rc) {
-  rc->locked = false;
+  DF_ATOMIC_STORE(rc->locked, false);
   df_rc_release(rc);
 }
 
@@ -1623,13 +2076,19 @@ static void df_rc_unlock(df_rc* rc) {
 /* weak references (spec 12.7): they hold the counting block, not a usage; the object is gone when its user count is 0 */
 static df_rc* df_rc_weak(df_rc* rc) {
   if (rc != NULL) {
-    rc->weaks++;
+    DF_ATOMIC_ADD(rc->weaks, 1);
   }
   return rc;
 }
 
 static void df_rc_unweak(df_rc* rc) {
-  if (rc != NULL && --rc->weaks == 0 && rc->users == 0) {
+  if (rc == NULL) {
+    return;
+  }
+  DF_LOCK(df_rc_end_lock);
+  bool unused = DF_ATOMIC_SUB(rc->weaks, 1) == 0 && DF_ATOMIC_LOAD(rc->users) == 0 && rc->obj == NULL;
+  DF_UNLOCK(df_rc_end_lock);
+  if (unused) {
     free(rc);
   }
 }
@@ -1641,14 +2100,16 @@ static void df_rc_unweak(df_rc* rc) {
    users (or a null variable) it gives NULL and nothing changes */
 static void* df_rc_take(df_rc** slot) {
   df_rc* rc = *slot;
-  if (rc == NULL || rc->users != 1) {
+  if (rc == NULL || !DF_ATOMIC_CAS(rc->users, (df_uns)1, (df_uns)0)) {
     return NULL;
   }
+  DF_LOCK(df_rc_end_lock);
   void* obj = rc->obj;
   rc->obj = NULL;
-  rc->users = 0;
+  bool unused = DF_ATOMIC_LOAD(rc->weaks) == 0;
+  DF_UNLOCK(df_rc_end_lock);
   *slot = NULL;
-  if (rc->weaks == 0) {
+  if (unused) {
     free(rc);
   }
   return obj;
@@ -1721,12 +2182,103 @@ static void df_exc_release(df_exception* exception) {
   }
   free(exception->message);
   free(exception->function);
+  free(exception->trace);
   free(exception);
-  df_exc_live--;
+  DF_ATOMIC_SUB(df_exc_live, 1);
+}
+
+/* a destructor (class atEnd, constructor fragment, trait atEnd) that lets an exception out: the cleanup goes on, releasing as much as possible,
+   and the program panics with the first such exception when the scope that ended the objects is done (spec 11.4) */
+static DF_TLS df_exception* df_dtor_err = NULL;
+
+static void df_dtor_fail(df_exception* error) {
+  if (df_dtor_err == NULL) {
+    df_dtor_err = error;
+  } else {
+    df_exc_release(error);
+  }
+}
+
+static void df_dtor_check(void) {
+  if (df_dtor_err != NULL) {
+    df_exception* error = df_dtor_err;
+    df_dtor_err = NULL;
+    df_panic_unhandled(error);
+  }
 }
 
 static df_string df_str_obj(const void* obj) {
   return obj ? ((const df_object*)obj)->cls->str(obj) : df_str_lit("null", 4);
+}
+
+/* ---- string1k (spec 4.5): 1024 bytes, the UTF-8 text ended by a 0, no stored length; at most 1023 bytes (a C char[1024]) ---- */
+
+typedef struct { uint8_t b[1024]; } df_s1k;
+
+#define DF_S1K_MAX 1023
+
+static uint64_t df_s1k_bytes(const df_s1k* v) {
+  uint64_t n = 0;
+  while (n < DF_S1K_MAX && v->b[n] != 0) {
+    n++;
+  }
+  return n;
+}
+
+/* the text after the bytes there: cut at the last whole character that fits, with the note of the silent StringTruncatedException */
+static void df_s1k_put(df_s1k* v, uint64_t at, const char* text, uint64_t length) {
+  uint64_t keep = length;
+  if (at + keep > DF_S1K_MAX) {
+    keep = DF_S1K_MAX - at;
+    while (keep > 0 && ((unsigned char)text[keep] & 0xC0) == 0x80) {
+      keep--;
+    }
+    df_silent_note(&df_desc_StringTruncatedException);
+  }
+  memcpy(v->b + at, text, keep);
+  v->b[at + keep] = 0;
+  v->b[DF_S1K_MAX] = 0;
+}
+
+static df_s1k df_s1k_from_str(df_string s) {
+  df_s1k v;
+  df_sv text = df_view(s);
+  df_s1k_put(&v, 0, text.p, text.len);
+  return v;
+}
+
+static df_s1k df_s1k_from_cstr(const char* text) {
+  df_s1k v;
+  df_s1k_put(&v, 0, text, strlen(text));
+  return v;
+}
+
+static df_string df_s1k_to_str(df_s1k v) {
+  v.b[DF_S1K_MAX] = 0;
+  return df_str_dup_cstr((const char*)v.b);
+}
+
+/* += in place */
+static bool df_s1k_append(df_s1k* v, df_string s) {
+  df_sv text = df_view(s);
+  df_s1k_put(v, df_s1k_bytes(v), text.p, text.len);
+  return true;
+}
+
+/* .len: the characters, as for string */
+static uint64_t df_s1k_len(df_s1k v) {
+  uint64_t bytes = df_s1k_bytes(&v), count = 0;
+  for (uint64_t i = 0; i < bytes; i++) {
+    if ((v.b[i] & 0xC0) != 0x80) {
+      count++;
+    }
+  }
+  return count;
+}
+
+static bool df_s1k_eq(df_s1k a, df_s1k b) {
+  uint64_t bytes = df_s1k_bytes(&a);
+  return bytes == df_s1k_bytes(&b) && memcmp(a.b, b.b, bytes) == 0;
 }
 
 /* ---- arrays (arr<T>): pointer and length; a null array has no pointer ---- */
@@ -1752,6 +2304,86 @@ static bool df_idx_ok(df_uns len, df_uns index, const char* function) {
   }
   df_raise(&df_desc_IndexOutOfRangeException, function);
   return false;
+}
+
+/* the address of item index of a pointer (spec 12.1): NULL after raising NullPointerException or IndexOutOfRangeException;
+   count < 0 is an unbounded pointer */
+static void* df_ptr_at(void* cur, void* base, int64_t count, int64_t index, size_t size, const char* function) {
+  if (!cur) {
+    df_raise(&df_desc_NullPointerException, function);
+    return NULL;
+  }
+  int64_t at = ((char*)cur - (char*)base) + index * (int64_t)size;
+  if (count >= 0 && (at < 0 || at + (int64_t)size > count * (int64_t)size)) {
+    df_raise(&df_desc_IndexOutOfRangeException, function);
+    return NULL;
+  }
+  return (char*)cur + index * (int64_t)size;
+}
+
+/* p.add(steps) (spec 12.1): the new cursor, or NULL after raising NullPointerException or IndexOutOfRangeException when it would leave the
+   bounds (the item at the new cursor must be inside) */
+static void* df_ptr_move(void* cur, void* base, int64_t count, int64_t delta, size_t size, const char* function) {
+  if (!cur) {
+    df_raise(&df_desc_NullPointerException, function);
+    return NULL;
+  }
+  int64_t to = ((char*)cur - (char*)base) + delta;
+  if (count >= 0 && (to < 0 || to + (int64_t)size > count * (int64_t)size)) {
+    df_raise(&df_desc_IndexOutOfRangeException, function);
+    return NULL;
+  }
+  return (char*)cur + delta;
+}
+
+/* *i32{count} p = q (spec 12.1): a negative bound raises IndexOutOfRangeException; in safe code the count items from the cursor must be
+   inside the bounds of q (an unbounded q cannot be bounded there) */
+static bool df_ptr_bound_ok(void* cur, void* base, int64_t count, int64_t bound, size_t size, bool safe, const char* function) {
+  if (bound < 0) {
+    df_raise(&df_desc_IndexOutOfRangeException, function);
+    return false;
+  }
+  if (!cur || !safe) {
+    return true;
+  }
+  int64_t at = (char*)cur - (char*)base;
+  if (count < 0 || bound * (int64_t)size > count * (int64_t)size - at) {
+    df_raise(&df_desc_IndexOutOfRangeException, function);
+    return false;
+  }
+  return true;
+}
+
+/* p.inRange(steps): the cursor moved by the amount stays inside the bounds; false for the null pointer */
+static bool df_ptr_in_range(void* cur, void* base, int64_t count, int64_t delta, size_t size) {
+  if (!cur) {
+    return false;
+  }
+  int64_t to = ((char*)cur - (char*)base) + delta;
+  return count < 0 || (to >= 0 && to + (int64_t)size <= count * (int64_t)size);
+}
+
+/* p.isAligned(bytes): an alignment of 0 or 1 is always met */
+static bool df_ptr_aligned(void* cur, uint64_t bytes) {
+  return bytes <= 1 || (uint64_t)(uintptr_t)cur % bytes == 0;
+}
+
+/* the text of a pointer (spec 12.1): "*i32 null", "*i32 0x1a2b", "*i32 0x1a2b, 256", "*i32 0x1a2b, 37/256" */
+static df_string df_ptr_str(const char* name, void* cur, void* base, int64_t count, size_t size) {
+  char buf[600];
+  if (!cur) {
+    snprintf(buf, sizeof buf, "%s null", name);
+  } else if (count <= 1) {
+    snprintf(buf, sizeof buf, "%s 0x%llx", name, (unsigned long long)(uintptr_t)cur);
+  } else {
+    long long at = (long long)(((char*)cur - (char*)base) / (int64_t)size);
+    if (at == 0) {
+      snprintf(buf, sizeof buf, "%s 0x%llx, %lld", name, (unsigned long long)(uintptr_t)cur, (long long)count);
+    } else {
+      snprintf(buf, sizeof buf, "%s 0x%llx, %lld/%lld", name, (unsigned long long)(uintptr_t)cur, at, (long long)count);
+    }
+  }
+  return df_str_from_buf(buf);
 }
 
 /* an index given as a signed number: a negative one (or one past the range of uns) becomes a value no array has */
@@ -2392,6 +3024,45 @@ DF_DIV_UNSIGNED(uint16_t, u16)
 DF_DIV_UNSIGNED(uint32_t, u32)
 DF_DIV_UNSIGNED(uint64_t, u64)
 
+/* a calculation between i64 and u64 is done in 128 bits (spec 3.5.1) */
+#ifdef __SIZEOF_INT128__
+typedef __int128 df_i128;
+typedef unsigned __int128 df_u128;
+#else
+typedef _BitInt(128) df_i128;
+typedef unsigned _BitInt(128) df_u128;
+#endif
+/* 128-bit division written with shifts and subtractions: the C division of 128 bits calls a helper of the compiler (__divti3) that
+   is not linked on every target. Two values that fit 64 bits use the 64-bit division */
+static df_u128 df_udivmod128(df_u128 n, df_u128 d, df_u128* rem) {
+  if ((n >> 64) == 0 && (d >> 64) == 0) {
+    *rem = (df_u128)((uint64_t)n % (uint64_t)d);
+    return (df_u128)((uint64_t)n / (uint64_t)d);
+  }
+  df_u128 q = 0, r = 0;
+  for (int bit = 127; bit >= 0; bit--) {
+    r = (r << 1) | ((n >> bit) & 1);
+    if (r >= d) {
+      r -= d;
+      q |= (df_u128)1 << bit;
+    }
+  }
+  *rem = r;
+  return q;
+}
+static df_i128 df_div_i128(df_i128 a, df_i128 b, const char* function) {
+  if (b == 0) { df_raise(&df_desc_DivisionByZeroException, function); return 0; }
+  df_u128 rem;
+  df_u128 q = df_udivmod128(a < 0 ? (df_u128)0 - (df_u128)a : (df_u128)a, b < 0 ? (df_u128)0 - (df_u128)b : (df_u128)b, &rem);
+  return (a < 0) != (b < 0) ? (df_i128)((df_u128)0 - q) : (df_i128)q;   /* toward zero */
+}
+static df_i128 df_mod_i128(df_i128 a, df_i128 b, const char* function) {
+  if (b == 0) { df_raise(&df_desc_DivisionByZeroException, function); return 0; }
+  df_u128 rem;
+  df_udivmod128(a < 0 ? (df_u128)0 - (df_u128)a : (df_u128)a, b < 0 ? (df_u128)0 - (df_u128)b : (df_u128)b, &rem);
+  return a < 0 ? (df_i128)((df_u128)0 - rem) : (df_i128)rem;   /* the sign of the dividend */
+}
+
 /* ---- saturating casts ---- */
 
 #define DF_SAT_INT(T, NAME, LO, HI) \
@@ -2468,6 +3139,39 @@ static uint64_t df_satc_u64_u(uint64_t v) { return v; }
 static uint64_t df_satc_u64_r(double v) {
   if (isnan(v) || v <= -1.0 || v >= 18446744073709551616.0) df_silent_note(&df_desc_OutOfRangeCastException);
   return df_sat_u64_r(v);
+}
+
+/* the casts of a calculation between i64 and u64 (128 bits, spec 3.5.1): saturating, the checked ones leave the note */
+#define DF_SAT_WIDE(T, NAME, LO, HI) \
+  static T df_sat_##NAME##_w(df_i128 v) { \
+    return v < (df_i128)(LO) ? (T)(LO) : (v > (df_i128)(HI) ? (T)(HI) : (T)v); \
+  } \
+  static T df_satc_##NAME##_w(df_i128 v) { \
+    if (v < (df_i128)(LO) || v > (df_i128)(HI)) df_silent_note(&df_desc_OutOfRangeCastException); \
+    return df_sat_##NAME##_w(v); \
+  }
+
+DF_SAT_WIDE(int8_t, i8, INT8_MIN, INT8_MAX)
+DF_SAT_WIDE(int16_t, i16, INT16_MIN, INT16_MAX)
+DF_SAT_WIDE(int32_t, i32, INT32_MIN, INT32_MAX)
+DF_SAT_WIDE(int64_t, i64, INT64_MIN, INT64_MAX)
+DF_SAT_WIDE(uint8_t, u8, 0, UINT8_MAX)
+DF_SAT_WIDE(uint16_t, u16, 0, UINT16_MAX)
+DF_SAT_WIDE(uint32_t, u32, 0, UINT32_MAX)
+DF_SAT_WIDE(uint64_t, u64, 0, UINT64_MAX)
+
+/* r64 to r32 (spec 3.5.1): beyond the range of r32 gives +-infinity; the checked one leaves the note of the silent
+   OutOfRangeCastException (beyond the range) or PrecisionLostException (a value that changed) */
+static float df_r32_of_r64(double v) {
+  if (v > 3.4028234663852886e38) return INFINITY;
+  if (v < -3.4028234663852886e38) return -INFINITY;
+  return (float)v;
+}
+static float df_r32_of_r64c(double v) {
+  float r = df_r32_of_r64(v);
+  if (isfinite(v) && isinf(r)) df_silent_note(&df_desc_OutOfRangeCastException);
+  else if (!isnan(v) && (double)r != v) df_silent_note(&df_desc_PrecisionLostException);
+  return r;
 }
 
 /* ---- date, clock, lapse (spec 3.2, 3.3) ---- */
@@ -2663,6 +3367,9 @@ static void df_time_sleep(int64_t l) {
 
 static uint64_t df_rng[4];
 static bool df_rng_ready = false;
+#ifdef DF_TASKS
+static df_mutex df_rng_lock = DF_MUTEX_INIT;   /* one generator for the whole program: one thread at a time moves it */
+#endif
 
 static uint64_t df_splitmix(uint64_t* state) {
   uint64_t z = (*state += 0x9E3779B97F4A7C15ULL);
@@ -2671,11 +3378,19 @@ static uint64_t df_splitmix(uint64_t* state) {
   return z ^ (z >> 31);
 }
 
-static void df_rand_seed(uint64_t seed) {
+/* the generator lock is held by the caller */
+static void df_rand_seed_held(uint64_t seed) {
   for (int i = 0; i < 4; i++) {
     df_rng[i] = df_splitmix(&seed);
   }
   df_rng_ready = true;
+}
+
+/* Root.Random.seed */
+static void df_rand_seed(uint64_t seed) {
+  DF_LOCK(df_rng_lock);
+  df_rand_seed_held(seed);
+  DF_UNLOCK(df_rng_lock);
 }
 
 static uint64_t df_rotl(uint64_t x, int k) {
@@ -2683,8 +3398,9 @@ static uint64_t df_rotl(uint64_t x, int k) {
 }
 
 static uint64_t df_rand_next(void) {
+  DF_LOCK(df_rng_lock);
   if (!df_rng_ready) {
-    df_rand_seed((uint64_t)df_time_now() ^ df_time_clock());
+    df_rand_seed_held((uint64_t)df_time_now() ^ df_time_clock());
   }
   uint64_t result = df_rotl(df_rng[1] * 5, 7) * 9;
   uint64_t t = df_rng[1] << 17;
@@ -2694,6 +3410,7 @@ static uint64_t df_rand_next(void) {
   df_rng[0] ^= df_rng[3];
   df_rng[2] ^= t;
   df_rng[3] = df_rotl(df_rng[3], 45);
+  DF_UNLOCK(df_rng_lock);
   return result;
 }
 
@@ -2764,6 +3481,7 @@ DF_MATH_SIGNED(int32_t, i32)
 DF_MATH_SIGNED(int64_t, i64)
 
 /* ---- end of runtime ---- */
+#define df_ait_free(p) free(p)
 /* ---- program ---- */
 
 
@@ -2784,6 +3502,9 @@ int main(int argc, char** argv) {
   (void)df_err_thrown;
   size_t df_tm = df_tmp_top;
   (void)df_tm;
+  df_frame df_fr __attribute__((cleanup(df_frame_pop))) = { "TestRandom.df", "Main()", 1, df_frame_top };
+  df_frame_top = &df_fr;
+  DF_LINE(1);
   df_console_log(df_tmp(df_str_from_i64((int64_t)(df_rand_int(((int64_t)0LL), ((int64_t)10LL))))));
   df_tmp_drop(df_tm);
   return 0;

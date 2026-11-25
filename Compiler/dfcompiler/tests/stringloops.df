@@ -1,0 +1,93 @@
+// strings behave as values (spec 4): a loop variable keeps its text when the body changes the collection
+import Root
+
+fun ->string mk(i32 n) {
+  return $"text {n} made at run time, long enough for a block"
+}
+
+class H {
+  public vec<string> items = [mk(1), mk(2)]
+  public map<string, string> names = ["a": mk(1), "b": mk(2)]
+  public string word = mk(1)
+  public fun replace(i32 k) {
+    items[0] = mk(k)
+    items[1] = mk(k + 1)
+    word = mk(k)
+  }
+  public fun rename() {
+    names["a"] = mk(91)
+    names["b"] = mk(92)
+  }
+  public fun own() {
+    for string s in items {
+      replace(60)
+      Console.log(s)
+    }
+  }
+}
+
+fun lent(vec<string> v, &H h) {
+  for string s in v {
+    h.replace(70)
+    Console.log(s)
+  }
+}
+
+H h = H()
+for string s in h.items {
+  h.replace(10)
+  Console.log(s)
+}
+Console.log("--- the name of the collection")
+vec<string> v = [mk(1), mk(2)]
+for string s in v {
+  v[0] = mk(50)
+  v[1] = mk(51)
+  Console.log(s)
+}
+arr<string> a = [mk(1), mk(2)]
+for string s in a {
+  a[0] = mk(52)
+  string b = s
+  a[1] = mk(53)
+  if b.len == 0 then continue
+  Console.log($"{s} {b}")
+}
+Console.log("--- another name")
+&vec<string> r = v
+for string s in v {
+  r[0] = mk(54)
+  r[1] = mk(55)
+  Console.log(s)
+}
+Console.log("--- in a method, lent")
+h.own()
+lent(h.items, &h)
+Console.log("--- map")
+for (n, t) in h.names {
+  h.rename()
+  Console.log($"{n} {t}")
+}
+for string t in h.names.values {
+  h.rename()
+  Console.log(t)
+}
+Console.log("--- parts")
+vec<(i32, string)> pairs = [(1, mk(1)), (2, mk(2))]
+for (i32 n, string t) in pairs {
+  pairs[0] = (3, mk(56))
+  pairs[1] = (4, mk(57))
+  Console.log($"{n} {t}")
+}
+Console.log("--- characters")
+uns count = 0
+for char c in h.word {
+  if count == 0 then h.replace(80)
+  if count < 6 then Console.print(c)
+  count++
+}
+Console.log($" {count}")
+Console.log("--- no change: no copy")
+for string s in h.items {
+  Console.log(s)
+}

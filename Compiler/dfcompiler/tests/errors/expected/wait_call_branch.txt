@@ -1,0 +1,1 @@
+wait_call_branch.df(13,6): error: a wait names a variable or an object, not a call: make the promise first, then wait on it (spec 20.2.1)

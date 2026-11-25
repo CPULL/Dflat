@@ -15,5 +15,5 @@ Holder { p: Vec3 { x: 4, y: 0, z: -1 } }
 Big { a: 1, b: 2, c: 3, ... }
 Stamp { when: null, count: 3, mark: k }
 true false true
-2 1
+1 2
 ---- exit code 0 ----

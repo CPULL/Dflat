@@ -1,0 +1,4 @@
+// the second argument of indexOf is the position (spec 4.2)
+import Root
+
+Console.log("HELLO".indexOf("ell", false))

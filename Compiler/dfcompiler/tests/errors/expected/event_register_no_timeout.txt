@@ -1,1 +1,1 @@
-event_register_no_timeout.df(6): error: the registration of an event gives its timeout: Event.register(name, timeout: 1000) (spec 20.4.3)
+event_register_no_timeout.df(6): error: a BlockSender event gives how long a send waits for room: Event.register(name, ..., timeout: 1000) (spec 20.4.3)

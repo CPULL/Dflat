@@ -6,9 +6,6 @@ ExclusiveSafe
 666
 1
 timeout
-woken
-woken
-timeout
 3
 second listener: This signal is Exclusive: it already has its listener
 1
@@ -20,9 +17,12 @@ true
 true
 30001 ''
 null 'grp.b'
-null ''
+true
 grp.s2
+gb fired, not ga: true
+true
+false
+false
 0 1
 0
-2
 ---- exit code 0 ----

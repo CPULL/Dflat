@@ -1,0 +1,14 @@
+sent
+main: 1 2 
+reader: 3
+lost
+kept 3
+only the last
+got 7
+still 7
+not registered any more
+new owner 1
+first 1 2 
+slow 10 11 12 13 14 15 
+main 14 15 
+---- exit code 0 ----

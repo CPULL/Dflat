@@ -1,0 +1,16 @@
+toktest.jobs
+4
+one consumed
+1
+no more
+30 done, 0 left
+This token is registered already
+not registered: skipped
+0
+registered now
+7
+0
+the owner ended
+1
+totts 0
+---- exit code 0 ----

@@ -1,0 +1,17 @@
+// break cannot leave an enforce, also inside a type switch (spec 7.2.4)
+import Root
+
+Generic Nums { i32, string }
+
+class Box { }
+Box b = Box()
+Nums n = 5
+while true {
+  enforce b {
+    switch n is ? {
+      i32: break
+      default: Console.log("default")
+    }
+  }
+  atEnd { Console.log("end") }
+}

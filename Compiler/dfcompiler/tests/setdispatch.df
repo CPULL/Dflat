@@ -1,0 +1,144 @@
+// A set value given to a parameter of the same set: its tag chooses the copy of the function (spec 11.3.6)
+import Root
+
+Generic JsonType { r64?, string, bool, JsonArray }
+Generic Nums { i32, string }
+
+class JsonArray {
+  public vec<JsonType> items = []
+}
+
+fun ->string writeValue(JsonType value) {
+  return value is ? {
+    JsonArray: writeArray(value),
+    string: "\"" + value + "\"",
+    bool: writeBool(value),
+    r64?: "" + value
+  }
+}
+
+fun ->string writeArray(JsonArray source) {
+  string body = ""
+  for JsonType item in source.items {
+    if body.len > 0 {
+      body += ","
+    }
+    body += writeValue(item)
+  }
+  return "[" + body + "]"
+}
+
+fun ->string writeBool(bool flag) {
+  if flag {
+    return "true"
+  }
+  return "false"
+}
+
+fun bool isArray(JsonType value) {
+  return value is ? { JsonArray: true, default: false }
+}
+
+fun show(JsonType value) {
+  Console.log("show " + writeValue(value))
+}
+
+// a parameter before and after it, and by name
+fun ->string around(string before, JsonType value, i32 after) {
+  return before + writeValue(value) + after
+}
+
+fun ->string note(string s) {
+  Console.print(s + " ")
+  return s
+}
+
+fun JsonType give(bool which) {
+  Console.print("give ")
+  if which {
+    return "given"
+  }
+  return 2.5
+}
+
+// two of them
+fun ->string both(Nums a, Nums b) {
+  return (a is ? { i32: "int", string: "string" }) + " " + (b is ? { i32: "int", string: "string" })
+}
+
+class Node(string n) {
+  public string name = n
+  public JsonType value = 1.5
+  public fun ->string text() {
+    return name + ": " + write(value)
+  }
+  public fun ->string write(JsonType v) {
+    return writeValue(v)
+  }
+  public static fun ->string plain(JsonType v) {
+    return "static " + writeValue(v)
+  }
+}
+
+class Dog(string n) {
+  public string name = n
+} atEnd {
+  Console.log("end of " + name)
+}
+
+fun ->Dog makeDog(JsonType v) {
+  return Dog(writeValue(v))
+}
+
+struct Pen {
+  i32 width,
+  public fun ->string draw(JsonType v) {
+    return width + writeValue(v)
+  }
+}
+
+Console.log(writeValue("text"))
+Console.log(writeValue(true))
+JsonType value = 1.5
+Console.log(writeValue(value))
+value = "other"
+Console.log(writeValue(value))
+r64? nothing = null
+value = nothing
+Console.log(writeValue(value))
+show(value)
+JsonArray list = JsonArray()
+list.items.add(1.5)
+list.items.add("two")
+list.items.add(false)
+Console.log(writeValue(list))
+JsonType nested = list!
+Console.log($"{writeValue(nested)} {isArray(nested)} {isArray(list.items[0])}")
+Console.log(around(note("a"), list.items[1], 3))
+Console.log(around(after: 3, value: list.items[2], before: note("b")))
+Console.log(writeValue(give(true)))
+Console.log(around(note("first"), give(false), 4))
+Nums x = 4
+Nums y = "s"
+Console.log(both(x, y))
+Console.log(both(y, 5))
+Node node = Node("n")
+Console.log(node.text())
+node.value = "changed"
+Console.log(node.text())
+Console.log(node.write(node.value))
+Console.log(Node.plain(node.value))
+if true {
+  Dog dog = makeDog(node.value)
+  Console.log(dog.name)
+}
+Pen pen = Pen(3)
+Console.log(pen.draw(node.value))
+value = "s"
+value is ? {
+  string s: Console.log("a string: " + s),
+  default: Console.log("not a string")
+}
+JsonType never
+string failed = writeValue(never)
+catch UnassignedTypeException { Console.log("never assigned") }

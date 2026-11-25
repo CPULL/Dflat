@@ -90,7 +90,7 @@ Console.log(Stamp(count: 3))
 // == field by field
 Console.log($"{Vec3(1.0, 2.0, 3.0) == t} {Vec3(x: 1.0) == t} {b == b}")
 
-// the values are computed in the order they are written
+// the values are computed in the order of the fields
 i32 calls = 0
 var ordered = Big(d: bump(&calls), a: bump(&calls))
 Console.log($"{ordered.a} {ordered.d}")

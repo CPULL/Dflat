@@ -1,5 +1,4 @@
-// a field shares the string it is given (spec 4): k.label = a is the same string, a change through a is seen through the field, and when
-// a ends the field keeps the text (level 3 warning). A borrowed string (a parameter), or an object of an inner scope, gets a copy.
+// a field has its own text (spec 4): k.label = a copies it, a change of a is not seen through the field
 import Root
 
 class Kennel {
@@ -9,12 +8,12 @@ class Kennel {
 
 fun fill(&Kennel k, i32 n) {
   string t = "box " + n.toStr()
-  k.label = t                      // shared: t ends with the function, k.label keeps the text
+  k.label = t                      // t ends with the function, k.label keeps its text
   t += "!"
 }
 
 fun copyParam(&Kennel k, string s) {
-  k.other = s                      // s is borrowed: the field takes a copy
+  k.other = s                      // the field has its own text
 }
 
 fun rebind(&Kennel k) {
@@ -29,7 +28,7 @@ fun inner(&Kennel k) {
   string a = "outer " + 3.toStr()
   {
     Kennel local = Kennel()
-    local.label = a                // local ends first: it takes a copy
+    local.label = a                // local ends first
     a += "?"
     Console.log(local.label)
   }
@@ -40,9 +39,9 @@ Kennel k = Kennel()
 string a = "top " + 0.toStr()
 k.label = a
 a += " changed"
-Console.log(k.label)             // top 0 changed
+Console.log(k.label)             // top 0
 fill(&k, 5)
-Console.log(k.label)             // box 5!
+Console.log(k.label)             // box 5
 string given = "given " + 9.toStr()
 copyParam(&k, given)
 given += "!"

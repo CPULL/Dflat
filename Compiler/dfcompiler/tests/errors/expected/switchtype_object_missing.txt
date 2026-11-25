@@ -1,0 +1,1 @@
+switchtype_object_missing.df(8): error: no case of the type switch takes every Animal: add a case for it or a 'default'

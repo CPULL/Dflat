@@ -1,0 +1,1 @@
+task_wait_counted.df(8): error: a counted or weak reference cannot be waited on: only the owner of the task waits (spec 20.2.6)

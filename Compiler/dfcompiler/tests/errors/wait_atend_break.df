@@ -1,0 +1,11 @@
+import Root
+import Root.Tasks
+
+Signal a = Signal("a")
+Signal b = Signal("b")
+while true {
+  wait
+    on a { break }
+    timeout 10 { }
+    atEnd { Console.log("x") }
+}

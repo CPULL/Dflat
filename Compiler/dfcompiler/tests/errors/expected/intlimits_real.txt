@@ -1,0 +1,1 @@
+intlimits_real.df(4): error: MAX is a constant of the integer types, not of r64 (spec 2.1)

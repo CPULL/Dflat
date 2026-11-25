@@ -1,0 +1,105 @@
+// strings behave as values (spec 2.5, 4): a text read by one part of an expression, changed by a part after it
+import Root
+
+fun ->string mk(i32 n) {
+  return $"text {n} made at run time, long enough for a block"
+}
+
+class K(string n) {
+  public string label = n
+  public string? maybe = n
+  public vec<string> items = [n]
+  public i32 count
+  public fun ->string change(i32 k) {
+    label = mk(k)
+    maybe = mk(k)
+    items[0] = mk(k)
+    return $"changed {k}"
+  }
+  public fun i32 bump() {
+    label = mk(1000)
+    count++
+    return count
+  }
+  public fun ->string own() {
+    return pair(label, change(30))
+  }
+}
+
+class Two(string a, string b) {
+  public string x = a
+  public string y = b
+}
+
+string top = mk(1)
+
+fun ->string changeTop(i32 k) {
+  top = mk(k)
+  return "top changed"
+}
+
+fun ->string pair(string a, string b) {
+  return $"[{a} | {b}]"
+}
+
+fun ->string opt(string? a, string b) {
+  return $"[{a} | {b}]"
+}
+
+fun ->string twice(&string s) {
+  s += s
+  return "twice"
+}
+
+fun show(string a) {
+  Console.log(a)
+}
+
+fun lent(vec<string> v, &K k) {
+  Console.log(pair(v[0], k.change(40)))
+}
+
+K k = K(mk(1))
+Console.log("--- arguments")
+Console.log(pair(k.label, k.change(2)))
+Console.log(pair(b: k.change(3), a: k.label))
+Console.log(pair(k.items[0], k.change(4)))
+Console.log(opt(k.maybe, k.change(5)))
+Console.log(pair(top, changeTop(2)))
+Console.log(k.own())
+string mine = "ab"
+Console.log(pair(mine, twice(&mine)))
+string seen = k.label
+show(pair(seen, k.change(7)))
+Two two = Two(k.label, k.change(8))
+Console.log($"{two.x} / {two.y}")
+Console.log(pair(k.maybe ?? "none", k.change(9)))
+Console.log("--- operators")
+Console.log(k.label + " " + k.change(10))
+Console.log(k.label + k.change(10))
+string before = mk(10)
+bool same = k.label == k.change(11)
+bool first = k.label < k.change(0)
+Console.log($"{same} {first}")
+i32 num = k.count + k.bump()
+Console.log($"{num} {k.count}")
+Console.log("--- interpolation")
+Console.log($"{k.label} {k.change(12)} {k.label}")
+Console.log("--- literals")
+vec<string> all = [k.label, k.change(13), k.label]
+Console.log(all)
+(string, string) t = (k.label, k.change(14))
+Console.log(t)
+map<string, string> m = ["a": k.label, "b": k.change(15)]
+Console.log(m)
+string p, string q = k.label, k.change(16)
+Console.log($"{p} / {q}")
+k.label, p = mk(20), k.label
+Console.log($"{p} / {k.label}")
+two.x, two.y = two.y, two.x
+Console.log($"{two.x} / {two.y}")
+Console.log("--- receivers")
+Console.log(k.label.startsWith(k.change(17).substr(0, 0) + "text 20 "))
+Console.log(k.label.replace("text", k.change(18)))
+Console.log(k.label.substr(0, k.change(19).len))
+lent(k.items, &k)

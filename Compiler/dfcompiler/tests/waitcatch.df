@@ -1,0 +1,159 @@
+// the clauses of a wait (spec 20.2.1, 20.2.7): catch E [ex] [on x], atEnd, default, with the rules of enforce (7.2.3)
+import Root
+import Root.Tasks
+
+class FirstException : Exception { }
+class OtherException : Exception { }
+
+class Fails(bool first) {
+  fun i32 taskRun() {
+    if first { throw FirstException("first failed") }
+    throw OtherException("other failed")
+  }
+}
+
+class Good {
+  fun i32 taskRun() { return 5 }
+}
+
+// several waitables: each catch on its own
+fun several(bool first) {
+  Signal quiet = Signal("catch.quiet")
+  Task a = Task(Good)
+  Task b = Task(Fails, first).start()
+  wait
+    on a as x { Console.log("never") }
+    on b as y { Console.log("never") }
+    on quiet { Console.log("never") }
+    timeout 2000 { Console.log("never") }
+    catch FirstException on a { Console.log("never: a did not fail") }
+    catch FirstException ex on b { Console.log($"b: {ex.message}") }
+    catch Exception ex { Console.log($"any: {ex.message}") }
+}
+
+// the exception of a block is of no waitable
+fun fromBlock() {
+  Task a = Task(Good, timeout: 2000).start()
+  Signal quiet = Signal("catch.quiet2")
+  wait
+    on a as x { throw OtherException($"block {x}") }
+    on quiet { }
+    catch OtherException on a { Console.log("never: a did not fail") }
+    catch OtherException ex { Console.log($"the block: {ex.message}") }
+    timeout 2000 { Console.log("never") }
+}
+
+// one waitable, the clauses on the same line or on the next ones
+fun single() {
+  Task b = Task(Fails, true).start()
+  wait b as x { Console.log("never") } timeout 2000 { Console.log("never") } catch FirstException ex on b { Console.log($"single: {ex.message}") }
+  Task c = Task(Fails, false).start()
+  wait c as x { Console.log("never") }
+  timeout 2000
+  Console.log("after")
+  catch OtherException { Console.log("the catch of the function") }
+}
+
+fun noBlock() {
+  Task b = Task(Fails, true).start()
+  wait b timeout 2000 catch FirstException { Console.log("no block") }
+  Signal s = Signal("catch.none")
+  wait s timeout 5 { Console.log("timed out") }
+  catch Exception { Console.log("never") }
+  atEnd { Console.log("at end") }
+}
+
+// atEnd: skipped while an exception is pending; the last one always runs; default takes what no catch matches
+fun order(bool fail) {
+  Task t = Task(Good)
+  if fail { t = Task(Fails, false).start() } else { t = Task(Good, timeout: 2000).start() }
+  wait t { Console.log("got a value") }
+  timeout 2000 { Console.log("never") }
+  atEnd { Console.log("1") }
+  catch FirstException { Console.log("never") }
+  atEnd { Console.log("2") }
+  default { Console.log("default") }
+  atEnd { Console.log("last") }
+}
+
+fun ->string left() {
+  Task t = Task(Good, timeout: 2000).start()
+  wait t as v { return $"returned {v}" }
+  timeout 2000 { return "never" }
+  atEnd { Console.log("before the return") }
+  return "never"
+}
+
+// an exception that no catch matches bubbles up, after the last atEnd
+fun bubbles() {
+  Task t = Task(Fails, false).start()
+  wait t { Console.log("never") }
+  timeout 2000
+  catch FirstException { Console.log("never") }
+  atEnd { Console.log("then it goes up") }
+}
+
+// in a loop: a waitable that failed is dropped by the developer (20.2.3)
+fun loop() {
+  Task a = Task(Fails, true).start()
+  Task b = Task(Good, timeout: 2000).start()
+  i32 got = 0
+  i32 failed = 0
+  bool more = true
+  while more {
+    wait
+      on a as x { Console.log("never") }
+      on b as y { got += y }
+      timeout 50 { more = false }
+      catch FirstException on a {
+        failed++
+        a = null
+      }
+  }
+  Console.log($"loop {got} {failed}")
+}
+
+// the other failures: an event of another struct, an Exclusive signal that has its listener
+struct Num { i32 n }
+struct Text { string s }
+
+fun i32 listener() {
+  Signal e = Signal(SignalMode.Exclusive, "catch.excl")
+  wait e timeout 300
+  return 1
+}
+
+fun others() {
+  Event<Num> made = Event.register("catch.event")
+  Event<Text> wrong = Event("catch.event")
+  Thread th = Thread(listener).start()
+  wait 50
+  Signal e = Signal(SignalMode.Exclusive, "catch.excl")
+  wait
+    on e { Console.log("never") }
+    on made as n { Console.log("never") }
+    timeout 10 { Console.log("never") }
+    catch ExclusiveSignalBusyException on e { Console.log("the signal is busy") }
+  wait
+    on made as n { Console.log("never") }
+    on wrong as t { Console.log("never") }
+    timeout 10 { Console.log("never") }
+    catch DuplicateEventNameWithDataMismatchException on made { Console.log("never") }
+    catch DuplicateEventNameWithDataMismatchException on wrong { Console.log("another struct") }
+}
+
+several(true)
+several(false)
+fromBlock()
+single()
+noBlock()
+order(false)
+order(true)
+Console.log(left())
+{
+  bubbles()
+  Console.log("never")
+  catch OtherException ex { Console.log(ex.message) }
+}
+loop()
+others()

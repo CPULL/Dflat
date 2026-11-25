@@ -18,7 +18,7 @@ class Waiter {
     Signal go = Signal("serving.go")
     wait go timeout 3000           // blocked here: the calls are served
     Task other = Task(Slow, timeout: 3000).start()
-    i32 got = wait other           // blocked here too
+    i32 got = wait other timeout 5000           // blocked here too
     enforce shared {               // and here, while the main program holds the lock
       shared++
     }
@@ -40,4 +40,4 @@ enforce shared {
   wait 700
   Console.log(wait t.count() timeout 500)   // served while it waits for the mutex
 }
-Console.log(wait t)
+Console.log(wait t timeout 5000)

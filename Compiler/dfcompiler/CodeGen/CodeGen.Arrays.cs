@@ -1098,11 +1098,22 @@ public sealed partial class CodeGen {
         ? $"({{ {CType(step.Type)} {tuple} = {step.Code}; if (!{tuple}.e2) {{ break; }} ({CType(customElem)}){{ {tuple}.e0, {tuple}.e1 }}; }})"   // (key, value)
         : $"({{ {CType(step.Type)} {tuple} = {step.Code}; if (!{tuple}.e1) {{ break; }} {tuple}.e0; }})";
     }
+    // the body can change the collection: the loop variable keeps a copy of its text (spec 4, CodeGen.StringArgs.cs)
+    void KeepText(Node variable, string variableType, string itemType) {
+      if (variableType is "string" or "string?" && itemType == variableType && LoopTextChanged(source, collection, block.Children, variable.Text!, scope, customElem != null)) {
+        string slot = variableType == "string" ? $"v_{variable.Text}" : $"v_{variable.Text}.val";
+        sb.Append($"{innerPad}  df_string df_keep_{variable.Text} __attribute__((cleanup(df_str_keep_end))) = df_str_dup({slot});\n");
+        sb.Append($"{innerPad}  {slot} = df_keep_{variable.Text};\n");
+      }
+    }
     string itemCode;
     string loop;
     string? keptText = null;
     if (collection.Type == "string") {
       Need("text", "");
+      if (LoopTextChanged(source, collection, block.Children, null, scope, false)) {
+        sb.Append($"{innerPad}df_string df_keep{tempCounter} __attribute__((cleanup(df_str_keep_end))) = df_str_dup({whole});\n{innerPad}{whole} = df_keep{tempCounter};\n");
+      }
       // a block string is read from a copy of its text, freed after the loop
       string text = NewTemp();
       keptText = NewTemp();
@@ -1146,6 +1157,7 @@ public sealed partial class CodeGen {
         sb.Append($"{innerPad}  {CType(type)}* l_{loopVars[0].Node.Text} = &({itemCode});\n");   // for &T x in c: the place of the item (spec 6.4)
       } else {
         sb.Append($"{innerPad}  {CType(type)} {cname} = {ForConvert(new Expr(itemCode, elem), type, s)};\n");
+        KeepText(loopVars[0].Node, type, elem);
       }
     }
     if (overMap && mapPart == null) {
@@ -1155,6 +1167,7 @@ public sealed partial class CodeGen {
         sb.Append($"{innerPad}  {CType(valueType)}* l_{valueNode.Text} = &({ReadSlot(collection.Type, CursorValue(whole, collection.Type, position))});\n");   // spec 6.4
       } else {
         sb.Append($"{innerPad}  {CType(valueType)} v_{valueNode.Text} = {ForConvert(new Expr(slotValue.Code, valueElem), valueType, s)};\n");
+        KeepText(valueNode, valueType, valueElem);
       }
     }
     var before = assign.Clone();

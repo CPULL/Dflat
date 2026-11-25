@@ -107,7 +107,7 @@ class Starter {
 }
 
 Task st = Task(Starter, timeout: 1000).start()
-Console.log(wait st)
+Console.log(wait st timeout 5000)
 wait 300
 enforce ends {
   Console.log(ends)

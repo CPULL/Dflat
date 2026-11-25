@@ -1,0 +1,10 @@
+// a case that is not a member of the set (spec 11.3.6.1)
+import Root
+
+Generic Nums { i32, string }
+
+Nums n = 5
+switch n is ? {
+  r64: Console.log("real")
+  default: Console.log("other")
+}

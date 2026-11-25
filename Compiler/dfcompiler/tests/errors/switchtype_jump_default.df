@@ -1,0 +1,10 @@
+// a jump to the default of a type switch (spec 11.3.7)
+import Root
+
+Generic Nums { i32, string }
+
+Nums n = 5
+switch n is ? {
+  i32: jump default
+  default: Console.log("default")
+}

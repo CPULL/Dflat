@@ -1,0 +1,1 @@
+task_copy.df(8): error: the handle of a task cannot be copied: it has one owner (spec 20.1)

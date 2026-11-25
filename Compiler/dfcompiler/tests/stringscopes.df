@@ -1,0 +1,98 @@
+// a string variable that outlives what it is read from keeps a copy of the text: a variable of an inner scope, a new object of the statement
+import Root
+
+class D(string n) {
+  public string label = n
+}
+
+struct S { string label }
+
+fun ->string mk(i32 n) {
+  return $"window {n} with a text that is not a literal"
+}
+
+fun ->string local() {
+  string seen = "x"
+  {
+    string t = mk(1)
+    seen = t
+  }
+  return seen
+}
+
+fun ->string fields() {
+  string seen = "x"
+  string other = "y"
+  {
+    S s = S(mk(2))
+    seen = s.label
+    D d = D(mk(3))
+    other = d.label
+  }
+  return seen + ", " + other
+}
+
+fun ->string items() {
+  string seen = "x"
+  string other = "y"
+  string third = "z"
+  {
+    vec<string> v = [mk(4), "b"]
+    seen = v[0]
+    map<i32, string> m = [1: mk(5)]
+    other = m[1]
+    third = v[1].len == 1 ? { true: v[0], default: "k" }
+  }
+  return seen + ", " + other + ", " + third
+}
+
+fun ->string loops() {
+  string last = "x"
+  i32 i = 0
+  while i < 3 {
+    i++
+    string t = mk(i)
+    last = t
+  }
+  string found = "none"
+  vec<string> v = [mk(6), "b"]
+  for var k in v {
+    if k.len > 3 { found = k }
+  }
+  v.clear()
+  return last + ", " + found
+}
+
+fun ->string several() {
+  string seen = "x"
+  i32 n = 0
+  {
+    S s = S(mk(7))
+    n, seen = 1, s.label
+  }
+  return $"{n} {seen}"
+}
+
+fun ->string temporary() {
+  string seen = "x"
+  seen = D(mk(8)).label
+  string declared = D(mk(9)).label
+  return seen + ", " + declared
+}
+
+// a change through b is not seen in the field (spec 4)
+fun same() {
+  D d = D(mk(10))
+  string b = "x"
+  b = d.label
+  b += "!"
+  Console.log(d.label)
+}
+
+Console.log(local())
+Console.log(fields())
+Console.log(items())
+Console.log(loops())
+Console.log(several())
+Console.log(temporary())
+same()

@@ -74,6 +74,11 @@ public sealed partial class CodeGen {
         throw Error($"a thread cannot start another thread: {fun.Name} runs as a thread (spec 20.1)", at);
       }
     }
+    foreach (var (fun, what, at) in sharedTaskWaits) {
+      if (threadFuns.Contains(fun)) {
+        throw Error($"'{what}' is a task of the parent: a thread cannot wait on it ({fun.Name} runs as a thread, spec 20.1)", at);
+      }
+    }
     if (taskClasses.Count == 0 || funSharedUses.Count == 0) {
       return;
     }

@@ -116,16 +116,18 @@ public sealed partial class CodeGen {
     Add("string", "trimLeft", Fun("string", "df_str_trim_left_set", new[] { "string" }, needs: TextNeed));
     Add("string", "trimRight", Fun("string", "df_str_trim_right", NoParams, needs: TextNeed));
     Add("string", "trimRight", Fun("string", "df_str_trim_right_set", new[] { "string" }, needs: TextNeed));
-    Add("string", "substr", Fun("string", "df_str_substr", new[] { "u32", "u32" }, needs: TextNeed));
+    Add("string", "substr", Fun("string", "df_str_substr", new[] { "uns", "uns" }, needs: TextNeed));
     Add("string", "replace", Fun("string", "df_str_replace", new[] { "string", "string" }, "true", TextNeed));
     Add("string", "replace", Fun("string", "df_str_replace", new[] { "string", "string", "bool" }, needs: TextNeed));
     foreach (var (name, cname) in new[] {
       ("indexOf", "df_str_indexof"), ("lastIndexOf", "df_str_lastindexof")
     }) {
-      Add("string", name, Fun("i64", cname, new[] { "string" }, "true", TextNeed));
-      Add("string", name, Fun("i64", cname, new[] { "string", "bool" }, needs: TextNeed));
-      Add("string", name, Fun("i64", cname + "_c", new[] { "char" }, "true", TextNeed));
-      Add("string", name, Fun("i64", cname + "_c", new[] { "char", "bool" }, needs: TextNeed));
+      foreach (var (val, suffix) in new[] { ("string", ""), ("char", "_c") }) {
+        Add("string", name, Fun("int", cname + suffix, new[] { val }, "true", TextNeed));
+        Add("string", name, Fun("int", cname + suffix + "_from", new[] { val, "uns" }, "true", TextNeed));
+        Add("string", name, Fun("int", cname + suffix + "_from", new[] { val, "uns", "bool" }, needs: TextNeed));
+        Add("string", name, Fun("int", cname + suffix, new[] { val, "bool" }, needs: TextNeed) with { Names = new[] { "val", "caseSensitive" }, NamedOnly = true });
+      }
     }
     foreach (var (name, cname) in new[] {
       ("contains", "df_str_contains"), ("startsWith", "df_str_startswith"), ("endsWith", "df_str_endswith")
@@ -136,13 +138,13 @@ public sealed partial class CodeGen {
     Add("string", "split", Fun("arr<string>", "df_str_split", new[] { "string" }, needs: TextNeed));
     Add("string", "toLower", Fun("string", "df_str_tolower", NoParams, needs: TextNeed));
     Add("string", "toUpper", Fun("string", "df_str_toupper", NoParams, needs: TextNeed));
-    Add("string", "padLeft", Fun("string", "df_str_pad_left", new[] { "u32" }, "32u", TextNeed));
-    Add("string", "padLeft", Fun("string", "df_str_pad_left", new[] { "u32", "char" }, needs: TextNeed));
-    Add("string", "padRight", Fun("string", "df_str_pad_right", new[] { "u32" }, "32u", TextNeed));
-    Add("string", "padRight", Fun("string", "df_str_pad_right", new[] { "u32", "char" }, needs: TextNeed));
-    Add("string", "insert", Fun("string", "df_str_insert", new[] { "u32", "string" }, needs: TextNeed));
-    Add("string", "remove", Fun("string", "df_str_remove", new[] { "u32", "u32" }, needs: TextNeed));
-    Add("string", "replaceAt", Fun("string", "df_str_replace_at", new[] { "u32", "u32", "string" }, needs: TextNeed));
+    Add("string", "padLeft", Fun("string", "df_str_pad_left", new[] { "uns" }, "32u", TextNeed));
+    Add("string", "padLeft", Fun("string", "df_str_pad_left", new[] { "uns", "char" }, needs: TextNeed));
+    Add("string", "padRight", Fun("string", "df_str_pad_right", new[] { "uns" }, "32u", TextNeed));
+    Add("string", "padRight", Fun("string", "df_str_pad_right", new[] { "uns", "char" }, needs: TextNeed));
+    Add("string", "insert", Fun("string", "df_str_insert", new[] { "uns", "string" }, needs: TextNeed));
+    Add("string", "remove", Fun("string", "df_str_remove", new[] { "uns", "uns" }, needs: TextNeed));
+    Add("string", "replaceAt", Fun("string", "df_str_replace_at", new[] { "uns", "uns", "string" }, needs: TextNeed));
     Add("string", "append", Fun("string", "df_str_append_new", new[] { "string" }, needs: TextNeed));
     Add("string", "prepend", Fun("string", "df_str_prepend", new[] { "string" }, needs: TextNeed));
     Add("string", "toCStr", Fun("arr<u8>", "df_str_tocstr", NoParams, "0", TextNeed));
@@ -179,7 +181,7 @@ public sealed partial class CodeGen {
     var names = new Dictionary<string, string[]> {
       ["trim"] = new[] { "c" }, ["trimLeft"] = new[] { "c" }, ["trimRight"] = new[] { "c" },
       ["substr"] = new[] { "start", "len" }, ["replace"] = new[] { "toFind", "replacement", "caseSensitive" },
-      ["indexOf"] = new[] { "val", "caseSensitive" }, ["lastIndexOf"] = new[] { "val", "caseSensitive" },
+      ["indexOf"] = new[] { "val", "startPoint", "caseSensitive" }, ["lastIndexOf"] = new[] { "val", "startPoint", "caseSensitive" },
       ["contains"] = new[] { "val", "caseSensitive" }, ["startsWith"] = new[] { "val", "caseSensitive" },
       ["endsWith"] = new[] { "val", "caseSensitive" }, ["split"] = new[] { "separator" },
       ["padLeft"] = new[] { "totalWidth", "paddingChar" }, ["padRight"] = new[] { "totalWidth", "paddingChar" },
@@ -189,6 +191,9 @@ public sealed partial class CodeGen {
     foreach (var entry in table["string"].Where(entry => names.ContainsKey(entry.Key))) {
       for (int index = 0; index < entry.Value.Count; index++) {
         var fun = entry.Value[index];
+        if (fun.NamedOnly) {
+          continue;   // it says its names
+        }
         entry.Value[index] = fun with { Names = names[entry.Key].Take(fun.Params.Length).ToArray() };
       }
     }
@@ -505,7 +510,7 @@ public sealed partial class CodeGen {
     }
     // Root.Tasks (spec 20): the class Task and its enums, written in Dflat (TasksPrelude); only with import Root.Tasks
     if (TasksMode && !userTypes.Contains("Task") && !userTypes.Contains("Thread") && Mentions(program, node => node.Text is "Task" or "Thread" or "RunStatus" or "RunKind"
-        or "Signal" or "SignalMode" or "KnownSignals" or "Event" or "EventMode" or "EventQueueFullMode")) {
+        or "Signal" or "SignalMode" or "KnownSignals" or "Token" or "Event" or "EventMode" or "EventQueueFullMode")) {
       source.AppendLine(TasksPrelude);
       source.AppendLine(ThreadPrelude);   // spec 20.1 (CodeGen.Threads.cs)
       if (!userTypes.Contains("Signal")) {

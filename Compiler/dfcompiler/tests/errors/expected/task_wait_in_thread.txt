@@ -1,0 +1,1 @@
+task_wait_in_thread.df(8): error: 't' is a task of the parent: a thread cannot wait on it (w runs as a thread, spec 20.1)

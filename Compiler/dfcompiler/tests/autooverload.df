@@ -1,0 +1,55 @@
+// the automatic conversions choose a version when nothing else matches and only one is reached (spec 3.5.1, 13.2)
+import Root
+
+fun show(u16 v) { Console.log($"u16 {v}") }
+fun show(string s) { Console.log($"string {s}") }
+
+fun two(u8 a, string s) { Console.log($"u8 {a} {s}") }
+fun two(string s, u8 a) { Console.log($"string {s} {a}") }
+
+// without conversions it wins
+fun wide(i64 v) { Console.log("i64") }
+fun wide(u16 v) { Console.log("u16") }
+
+class Box {
+  public fun put(u16 v) { Console.log($"put u16 {v}") }
+  public fun put(string s) { Console.log($"put {s}") }
+}
+class Made {
+  public u16 n
+  public Made(u16 v) { n = v }
+  public Made(string s) { n = 1 }
+}
+
+fun first(u16 v, i32 more = 0) { Console.log($"first {v} {more}") }
+fun first(string s, i32 more = 0) { Console.log($"first {s} {more}") }
+
+u64 big = 70000
+i32 small = -1
+show(big)
+show(small)
+show("text")
+show(v: big)
+two(small, "s")
+two("s", big)
+wide(small)
+wide((u8)3)
+Box box = Box()
+box.put(big)
+box.put("text")
+Console.log(Made(small).n)
+first(big)
+first(big, 4)
+int at = 2
+string s = "abcabc"
+Console.log(s.indexOf("a", at + 1))
+Console.log(s.padLeft(at + 6, '.'))
+uns position = 1
+string word = "bc"
+Console.log(s.substr(position, word.len) == word)
+Console.log(s.remove(0, uns.MAX) + s.substr(3, uns.MAX) + s.substr(uns.MAX, 1))
+string t = "hello"
+t.insert(position, "--")
+t.replaceAt(position, 2, "++")
+t.remove(position, 1)
+Console.log(t)

@@ -1,0 +1,17 @@
+// the value of a timeout block has the type of what the wait gives (spec 20.2.8, 7.2.6)
+import Root
+import Root.Tasks
+
+class Number {
+  fun i32 taskRun() {
+    wait 100
+    return 7
+  }
+}
+
+Task n = Task(Number).start()
+var r = wait n timeout 30 {
+  Console.log("late")
+  return "not a number"
+}
+Console.log(r)

@@ -1,0 +1,18 @@
+text 1 made at run time
+text 2 made at run time
+text 3 made at run time
+text 4 made at run time
+text 5 made at run time
+end of text 6 made at run time
+text 6 made at run time
+atEnd sees text 7 made at run time
+text 7 made at run time
+text 8 made at run time / text 8 made at run time
+text 3 made at run time
+text 9 made at run time / text 9 made at run time
+text 10 made at run time / text 10 made at run time
+text 20 made at run time
+text 20 made at run time more
+text 20 made at run time more
+kept 1 kept 1
+---- exit code 0 ----

@@ -1,0 +1,9 @@
+import Root
+import Root.Tasks
+
+i32 n = 5
+Signal a = Signal("multi.a")
+wait
+  on a { }
+  on n { }
+  timeout 100 { }

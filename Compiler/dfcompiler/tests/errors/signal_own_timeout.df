@@ -1,0 +1,4 @@
+// a signal has no timeout of its own: the timeout is the one of the wait (spec 20.2.8)
+import Root.Tasks
+
+Signal s = Signal("x.sig", timeout: 1000)

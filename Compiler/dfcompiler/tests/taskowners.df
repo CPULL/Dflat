@@ -1,0 +1,82 @@
+// who can wait on a task (spec 20.1, 20.2.6): the owner, or the one that borrows the handle with &
+import Root
+import Root.Tasks
+
+class Count {
+  fun i32 taskRun() {
+    return! 1
+    return! 2
+    return 3
+  }
+}
+
+fun i32 borrow(&Task<Count> t) {
+  return wait t timeout 1000
+}
+
+fun i32 takes(->Task<Count> t) {
+  return wait t timeout 1000
+}
+
+// a thread that borrows: the owner cannot wait until it ends
+fun i32 thread(&Task<Count> t) {
+  i32 n = wait t timeout 1000
+  wait 200
+  return n
+}
+
+fun lentToThread() {
+  Task t = Task(Count, timeout: 3000).start()
+  Thread th = Thread(thread, &t).start()
+  wait 100
+  ownerWaits(&t)
+  Console.log(wait th timeout 1000)
+  wait 20
+  Console.log($"owner again: {wait t timeout 1000}")
+}
+
+fun ownerWaits(&Task<Count> t) {
+  wait t as v { Console.log("never") } timeout 1000
+  Console.log("never")
+  catch WaitingOnANotOwnedTaskException ex { Console.log(ex.message) }
+}
+
+// given to another task, in a field
+class Holder(->Task<Count> t) {
+  fun i32 taskRun() {
+    i32 a = wait t timeout 1000
+    i32 b = wait t timeout 1000
+    return a * 10 + b
+  }
+}
+
+// a field of an object, waited on by its methods
+class Team {
+  Task<Count> member = Task(Count, timeout: 3000).start()
+  public fun i32 next() { return wait member timeout 1000 }
+}
+
+Task a = Task(Count, timeout: 3000)
+&Task same = a.start()                // the same handle: lent
+Console.log(wait same timeout 1000)
+Console.log(wait a timeout 1000)
+Console.log(borrow(&a))
+Task<Count> g = Task(Count, timeout: 3000).start()
+Console.log(takes(->g))
+lentToThread()
+Task<Count> inner = Task(Count, timeout: 3000).start()
+Task h = Task(Holder, ->inner, timeout: 3000).start()
+Console.log(wait h timeout 3000)
+Team team = Team()
+Console.log($"{team.next()} {team.next()}")
+// a group: the timeout block gives a signal
+Signal s1 = Signal("owners.s1")
+Signal s2 = Signal("owners.s2")
+SignalGroup pair = SignalGroup(s1, s2)
+Signal got = wait pair timeout 10 { s1 }
+Console.log(got == s1)
+s2.send()
+got = wait pair timeout 10 { s1 }
+Console.log(got == s2)
+Signal none = wait pair timeout 10 { null }
+Console.log(none == null)

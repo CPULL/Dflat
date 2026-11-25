@@ -1,0 +1,10 @@
+// not every object has a case, and there is no default (spec 11.3.7)
+import Root
+
+class Animal { }
+class Dog : Animal { }
+
+Animal a = Dog()
+switch a is ? {
+  Dog: Console.log("dog")
+}

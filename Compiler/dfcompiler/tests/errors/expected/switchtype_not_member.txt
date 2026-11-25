@@ -1,0 +1,1 @@
+switchtype_not_member.df(8): error: r64 is not a member of the set Nums: it can never match (spec 11.3.6.1)

@@ -1,0 +1,201 @@
+// var r = wait t timeout 500 { several lines, return }: the type is the one of what the waitable gives (spec 20.2.8, 7.2.6)
+import Root
+import Root.Tasks
+
+fun ->string mk(i32 n) {
+  return $"text {n} made at run time, long enough for a block"
+}
+
+class Dog(string n) {
+  public string name = n
+} atEnd {
+  Console.log($"end of {name}")
+}
+
+class Number(i32 pause) {
+  fun i32 taskRun() {
+    wait pause
+    return 7
+  }
+}
+
+class Text(i32 pause) {
+  fun ->string taskRun() {
+    wait pause
+    return mk(1)
+  }
+}
+
+class Kennel(i32 pause) {
+  fun ->Dog taskRun() {
+    wait pause
+    return Dog("made")
+  }
+}
+
+class Items(i32 pause) {
+  fun ->arr<i32> taskRun() {
+    wait pause
+    arr<i32> a = [1, 2, 3]
+    return a
+  }
+}
+
+class Counter {
+  i32 count = 41
+  public fun i32 getCount() {
+    count++
+    return count
+  }
+  public fun i32 slowCount() {
+    Root.Time.sleep(400)
+    return -5
+  }
+  fun i32 taskRun() {
+    wait 3000
+    return 0
+  }
+}
+
+fun r64 half() {
+  wait 1000
+  return 0.5
+}
+
+// a timeout is not an exception: these catches do not see it
+fun i32 caught() {
+  Task t = Task(Number, 500).start()
+  i32 r = wait t timeout 30
+  Console.log("goes on")
+  return r + 1
+  catch TaskAlreadyTerminatedException { return -10 }
+  catch TaskWasNotStartedException { return -11 }
+}
+
+fun i32 caughtCall() {
+  Task t = Task(Counter).start()
+  Root.Time.sleep(100)
+  i32 r = wait t.slowCount() timeout 30
+  Console.log("goes on")
+  return r + 1
+  catch TaskAlreadyTerminatedException { return -12 }
+}
+
+fun i32 inside(i32 pause) {
+  Task t = Task(Number, pause).start()
+  var r = wait t timeout 100 {
+    Console.log("late in a function")
+    if pause > 500 then return 100
+    return 200
+  }
+  return r + 1
+}
+
+Task n1 = Task(Number, 0).start()
+var a = wait n1 timeout 2000 {
+  Console.log("never")
+  return -1
+}
+Console.log(a + 1)
+Task n2 = Task(Number, 1000).start()
+var b = wait n2 timeout 30 {
+  Console.log("late")
+  return -1
+}
+Console.log(b + 1)
+
+Task t1 = Task(Text, 0).start()
+var s1 = wait t1 timeout 2000 {
+  Console.log("never")
+  return ""
+}
+Console.log(s1)
+Task t2 = Task(Text, 1000).start()
+var s2 = wait t2 timeout 30 {
+  string other = mk(2)
+  return other
+}
+Console.log(s2)
+
+if true {
+  Task d1 = Task(Kennel, 0).start()
+  var dog = wait d1 timeout 2000 {
+    Console.log("never")
+    return Dog("other")
+  }
+  Console.log(dog.name)
+  Task d2 = Task(Kennel, 1000).start()
+  var dog2 = wait d2 timeout 30 {
+    Console.log("no dog")
+    return Dog("other")
+  }
+  Console.log(dog2.name)
+}
+
+Task i1 = Task(Items, 1000).start()
+var list = wait i1 timeout 30 {
+  Console.log("no items")
+  return [9]
+}
+Console.log(list)
+
+Thread th = Thread(half).start()
+var h = wait th timeout 30 {
+  Console.log("thread late")
+  return 0.25
+}
+Console.log(h)
+
+Console.log(inside(0))
+Console.log(inside(1000))
+
+var fresh = wait Task(Number, 0).start() timeout 2000 {
+  Console.log("never")
+  return -1
+}
+Console.log(fresh)
+
+Signal go = Signal("waitvar.go")
+Signal stop = Signal("waitvar.stop")
+SignalGroup g = SignalGroup(go, stop)
+var fired = wait g timeout 30 {
+  Console.log("no signal")
+  return stop
+}
+Console.log(fired == stop)
+
+// a call through the handle
+Task counter = Task(Counter).start()
+Root.Time.sleep(100)
+var c1 = wait counter.getCount() timeout 2000 {
+  Console.log("never")
+  return -1
+}
+Console.log(c1)
+var c2 = wait counter.slowCount() timeout 50 {
+  Console.log("call late")
+  return -2
+}
+Console.log(c2)
+var c3 = wait counter.slowCount() timeout 20 { -3 }
+Console.log(c3)
+
+// in a loop: each run starts from nothing
+for i32 k in [0, 1000, 0] {
+  Task turn = Task(Number, k).start()
+  var r = wait turn timeout 200 {
+    Console.log("late turn")
+    return -k
+  }
+  Console.log(r)
+}
+
+// with no timeout block, the object is the variable's
+if true {
+  Task d3 = Task(Kennel, 0).start()
+  var dog3 = wait d3 timeout 2000
+  Console.log(dog3.name)
+}
+Console.log(caught())
+Console.log(caughtCall())
+Console.log("end")

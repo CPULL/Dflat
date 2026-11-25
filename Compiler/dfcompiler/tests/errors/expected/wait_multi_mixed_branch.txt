@@ -1,0 +1,1 @@
+wait_multi_mixed_branch.df(8): error: a branch on several waitables takes signals only, not Event (spec 20.2.1)

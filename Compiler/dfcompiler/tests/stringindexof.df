@@ -1,0 +1,35 @@
+// indexOf and lastIndexOf with the position they start from (spec 4.2)
+import Root
+
+string s = "one two one two"
+Console.log($"{s.indexOf("one")} {s.indexOf("one", 1)} {s.indexOf("one", 8)} {s.indexOf("one", 9)}")
+Console.log($"{s.indexOf('t', 5)} {s.indexOf('t', 4)} {s.indexOf('z', 2)}")
+Console.log($"past the end: {s.indexOf("o", 15)} {s.indexOf("o", 100)} {s.indexOf("", 15)} {s.indexOf("", 16)}")
+Console.log($"{s.lastIndexOf("one")} {s.lastIndexOf("one", 8)} {s.lastIndexOf("one", 7)} {s.lastIndexOf("one", 0)}")
+Console.log($"{s.lastIndexOf('t')} {s.lastIndexOf('t', 11)} {s.lastIndexOf('t', 3)} {s.lastIndexOf('o', 100)}")
+Console.log($"{s.indexOf("TWO", 5, false)} {s.indexOf("TWO", caseSensitive: false)} {s.indexOf("TWO", 5)}")
+Console.log($"{s.lastIndexOf('T', caseSensitive: false)} {s.lastIndexOf('T', 5, false)}")
+Console.log($"{s.indexOf(startPoint: 5, val: "two")} {s.indexOf(caseSensitive: false, val: 'T', startPoint: 5)}")
+string wide = "é one é two é"
+Console.log($"{wide.indexOf('é', 1)} {wide.indexOf("é", 7)} {wide.lastIndexOf('é', 11)} {wide.lastIndexOf("é")}")
+string empty = ""
+Console.log($"{empty.indexOf("a", 0)} {empty.indexOf("a", 3)} {empty.lastIndexOf('a')}")
+// every position, from an int
+int at = s.indexOf("o")
+while at >= 0 {
+  Console.print($"{at} ")
+  at = s.indexOf("o", at + 1)
+}
+Console.log("")
+at = s.lastIndexOf("o")
+while at >= 0 {
+  Console.print($"{at} ")
+  if at == 0 then break
+  at = s.lastIndexOf('o', at - 1)
+}
+Console.log("")
+uns position = 4
+i32 small = 5
+Console.log($"{s.indexOf("two", position)} {s.indexOf('t', small)}")
+string1k fixed = "a-b-c"
+Console.log(fixed.indexOf("-", 2))

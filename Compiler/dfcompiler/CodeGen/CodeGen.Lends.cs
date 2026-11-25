@@ -131,6 +131,9 @@ public sealed partial class CodeGen {
     if (!LibraryCode && CountedRef(lender, scope) is CountedRefInfo counted && IsWritableRef(counted) && !heldLocks.Contains(counted.Code)) {
       return $"a lend from the &@{counted.Type} '{counted.Name}' is valid only inside enforce {counted.Name} {{ }}, which holds its lock";
     }
+    if (TasksMode && init.Kind == "Call" && init.Children[0] is { Kind: "Member", Text: "start" } started && PlaceType(started.Children[0], scope) is "Task" or "Thread") {
+      return ReadOnlySource(started.Children[0], scope);   // a.start(): the handle itself (spec 20.1)
+    }
     if (init.Kind == "Call") {
       return CalleesOf(init) is { Count: > 0 } callees && callees.All(f => f.Writes.Contains(0)) ? null : "this value is lent read-only";
     }

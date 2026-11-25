@@ -8,7 +8,7 @@ class Win(i32 id) {
 struct Data { i32 n }
 
 Win w = Win(1)
-Event<Data> ev = Event("x.data", timeout: 100)
+Event<Data> ev = Event("x.data")
 wait on ev from w as d {
   Console.log(d.n)
-}
+} timeout 5000

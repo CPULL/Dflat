@@ -1,0 +1,1 @@
+task_wait_plain_borrow.df(9): error: 'b' only lends its task: it is lent with & to be waited on (&Task b, spec 20.2.6)

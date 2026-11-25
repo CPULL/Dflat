@@ -294,6 +294,9 @@ public sealed partial class CodeGen {
       if (typeNode.Text == "var" && init?.Children[0] is { Kind: "Index" } ranged && ranged.Children.Count > 1 && ranged.Children[1].Kind == "Range") {
         return "var";   // var part = c[a..b]: a view (spec 6.5)
       }
+      if (typeNode.Text == "var" && init?.Children[0] is { Kind: "Wait" }) {
+        return "var";   // var d = wait t timeout 500: an object that a task, a thread or a signal group gives is the variable's (spec 20.1)
+      }
       if (typeNode.Text == "var" && init?.Children[0] is { Kind: "Copy" }) {
         return "var";   // var h2 = h!, var part = c[a..b]!: a new object, the variable owns it (spec 12.6)
       }
@@ -402,7 +405,7 @@ public sealed partial class CodeGen {
       }
       var init = statement.Children.FirstOrDefault(child => child.Kind is "Init" or "WeakInit");
       // an object a task, a thread or a call through the handle gives: the caller owns it (spec 20.1, 20.12)
-      bool waited = init is { Kind: "Init" } && init.Children[0].Kind == "Wait" && ObjectTypeOf(statement) is string waitedType && IsClass(waitedType);
+      bool waited = init is { Kind: "Init" } && init.Children[0].Kind == "Wait" && ObjectTypeOf(statement) is string waitedType && (IsClass(waitedType) || waitedType == "var");
       if (!waited && !GuessOwnerInit(init)) {
         continue;
       }
@@ -993,6 +996,9 @@ public sealed partial class CodeGen {
     bool owns = variable != null ? variable.Own || variable.RefSlot : target.IsField;   // a & parameter replaces the caller's object (spec 13.1)
     if (variable is { IsWeak: true }) {
       throw Error($"'{targetNode.Text}' is a weak reference: it takes a counted object marked with % ({targetNode.Text} = %x) or another weak reference (spec 12.7)", at);
+    }
+    if (owns && !value.Fresh && value.Type == "Signal" && (lateValues.Contains(at) || lateValues.Contains(targetNode))) {
+      value = SignalCopy(value, at);   // the timeout block of a wait on a signal group gives an existing signal (spec 20.2.8)
     }
     bool movesIn = value.Fresh || value.Type == "null";
     if (owns && !movesIn) {

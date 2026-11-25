@@ -1,0 +1,29 @@
+--- functions, by name
+1 2 3 = 1 2 3
+1 2 3 = 1 2 3
+--- strings
+abcdef 1 2 bc
+1 2 bc
+abc b x axc
+abc a true
+1 zz azzbc
+1 2 abc
+0 1 Q Qbc
+1 -- Q--bc
+a 3 ..a
+--- standard library
+1 2 2
+12 true 12
+7 000 7
+--- collections
+0 9 [9, 1, 2]
+0 2 [2, 1, 9]
+1 8 1
+b 2 [a: 1, b: 2]
+--- objects
+maker 1 2 3
+--- structs
+1 2 1 2
+1 2 3 4 1 2 3 4
+1 2 3 4 1 2 3 4
+---- exit code 0 ----

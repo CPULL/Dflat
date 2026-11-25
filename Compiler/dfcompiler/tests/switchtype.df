@@ -1,0 +1,186 @@
+// switch value is ? { }: the statement form of the type switch, and the type switch on an object (spec 11.3.7, 10.5)
+import Root
+
+Generic JsonType { r64?, string, bool, JsonArray }
+Generic Nums { i32, string }
+
+class JsonArray {
+  public vec<JsonType> items = []
+}
+
+trait Loud {
+  fun noise() { Console.log("noise") }
+}
+
+class Animal {
+  public string name = "animal"
+}
+class Dog : Animal {
+  public fun woof() { Console.log("woof") }
+}
+class Puppy : Dog { }
+class Cat : Animal {
+  public fun meow() { Console.log("meow") }
+}
+
+// a parameter with a set type: only the matching case is compiled in each copy
+fun write(JsonType value) {
+  switch value is ? {
+    JsonArray:
+      Console.print("[")
+      for JsonType item in value.items {
+        write(item)
+      }
+      Console.print("]")
+    string: { Console.print("'" + value + "' ") }
+    bool, r64?: Console.print($"{value} ")
+  }
+}
+
+fun test(Animal obj) {
+  switch obj is ? {
+    Puppy: Console.log("puppy")
+    Dog x: x.woof()
+    Cat x:
+      Console.print("a cat: ")
+      x.meow()
+    default: Console.log("not supported")
+  }
+}
+
+fun ->string kind(Animal obj) {
+  return obj is ? {
+    Dog: "dog",
+    Cat c: "cat " + c.name,
+    Animal: "animal",
+    default: "nothing"
+  }
+}
+
+fun i32 returns(Nums n) {
+  switch n is ? {
+    i32: return n + 1
+    string: return (i32)n.len
+  }
+}
+
+fun i32 fromValue(vec<Nums> v, i32 index) {
+  switch v[index] is ? {
+    i32 x: return x
+    string s:
+      if s.len > 3 then return 100
+      return 50
+  }
+}
+
+fun ->string generic<T>(T v) {
+  switch v is ? {
+    i32: return $"i32 {v + 1}"
+    string s: return "string " + s
+    default:
+      string other = "other"
+      return other
+  }
+}
+
+fun Nums give(bool which) {
+  if which { return "given" }
+  return 7
+}
+
+fun ->Animal make(bool dog) {
+  if dog { return Dog() }
+  return Cat()
+}
+
+fun ->string never() {
+  Nums n
+  switch n is ? {
+    i32: return "i32"
+    string: return "string"
+  }
+  catch UnassignedTypeException { return "never assigned" }
+}
+
+fun callee() {
+  Nums n
+  switch n is ? {
+    i32: Console.log("i32")
+    string: Console.log("string")
+  }
+}
+
+JsonArray list = JsonArray()
+list.items.add(1.5)
+list.items.add("two")
+list.items.add(false)
+write(list)
+Console.log("")
+Console.log("--- objects")
+test(Puppy())
+test(Dog())
+test(Cat())
+test(Animal())
+test(null)
+Console.log(kind(Puppy()) + ", " + kind(Cat()) + ", " + kind(Animal()) + ", " + kind(null))
+Console.log("--- set values")
+Console.log($"{returns(4)} {returns("abc")} {returns(give(true))} {returns(give(false))}")
+vec<Nums> v = [5, "four", "ab"]
+Console.log($"{fromValue(v, 0)} {fromValue(v, 1)} {fromValue(v, 2)}")
+Console.log(generic((i32)3) + ", " + generic("s") + ", " + generic(1.5))
+switch give(true) is ? {
+  string s:
+    Console.log("a new value: " + s)
+    Console.log("still " + s)
+  i32 n: Console.log(n)
+}
+switch make(true) is ? {
+  Dog d:
+    Console.log("made a " + d.name)
+    d.woof()
+  default: Console.log("no dog")
+}
+Console.log("--- one line, loops")
+for Nums n in v {
+  switch n is ? { i32 x: continue, string s: Console.log(s) }
+  switch n is ? {
+    string s: if s == "four" then break
+    default: Console.log("not here")
+  }
+}
+for Nums n in v {
+  switch n is ? {
+    i32 x:
+      switch x {
+        5: Console.log("five")
+        default: Console.log("more")
+      }
+    default: { }
+  }
+}
+Console.log("--- jump")
+i32 turn = 0
+#again#
+turn++
+Nums j = turn
+switch j is ? {
+  i32 x:
+    Console.log($"turn {x}")
+    if x < 3 then jump #again#
+    Console.log("out")
+  default: { }
+}
+switch turn {
+  3:
+    switch j is ? {
+      i32: jump 4
+      default: { }
+    }
+    Console.log("never")
+  4: Console.log("the case of the outer switch")
+  default: { }
+}
+Console.log("--- exceptions")
+Console.log(never())
+callee()
+catch UnassignedTypeException { Console.log("caught") }

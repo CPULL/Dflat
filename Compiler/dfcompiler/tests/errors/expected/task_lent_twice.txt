@@ -1,0 +1,1 @@
+task_lent_twice.df(10): error: 'mine' is lent already: a task has one borrower at a time (spec 20.2.6)

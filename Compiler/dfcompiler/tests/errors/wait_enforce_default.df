@@ -1,0 +1,12 @@
+import Root
+import Root.Tasks
+
+class Slow {
+  fun i32 taskRun() {
+    wait 1000
+    return 1
+  }
+}
+
+Task t = Task(Slow).start()
+var w = enforce wait t timeout 50 default { 123 }

@@ -1,0 +1,11 @@
+// a set value chooses the copy only for a parameter whose type is the set; a type parameter needs one type (spec 11.3.6)
+import Root
+
+Generic Nums { i32, string }
+
+fun Item same<Item : Nums>(Item a) {
+  return a
+}
+
+Nums n = 5
+Console.log(same(n))

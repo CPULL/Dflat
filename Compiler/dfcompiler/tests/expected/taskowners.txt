@@ -1,0 +1,13 @@
+1
+2
+3
+1
+This runnable neither owns nor borrows the handle of the task it waits for
+1
+owner again: 2
+12
+1 2
+true
+true
+true
+---- exit code 0 ----

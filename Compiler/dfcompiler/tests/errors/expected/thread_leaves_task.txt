@@ -1,0 +1,1 @@
+thread_leaves_task.df(12): error: the handle of a thread never leaves its task: only the parent waits on it (spec 20.1)

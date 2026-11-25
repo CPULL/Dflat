@@ -1,0 +1,6 @@
+import Root
+import Root.Tasks
+
+Signal s = Signal("a")
+Token t = Token("a.b")
+SignalGroup g = SignalGroup(s, t)

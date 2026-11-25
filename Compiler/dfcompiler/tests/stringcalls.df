@@ -1,0 +1,120 @@
+// strings behave as values (spec 4): the changes hidden in calls, and the parameters
+import Root
+
+fun ->string mk(i32 n) {
+  return $"text {n} made at run time"
+}
+
+class D(string n) {
+  public string label = n
+  public i32 uses
+  public fun rename(i32 k) { label = mk(k) }
+  public fun indirect(i32 k) { rename(k) }
+  public fun touch() { uses++ }
+  public fun given(string p) {
+    label = "was " + p
+    Console.log($"{p} / {label}")
+  }
+  public fun ->string twice(string p) {
+    rename(50)
+    return p + "!"
+  }
+  public fun own() {
+    string mine = label
+    rename(60)
+    Console.log($"{mine} / {label}")
+  }
+  public string shown {
+    R: { return label }
+    W: { label = "<" + value + ">" }
+  }
+}
+
+class Box {
+  public D d = D("in a box")
+  public vec<string> names = ["a"]
+  public fun change() { d.rename(70) }
+  public fun clearNames() { names.clear() }
+}
+
+string top = mk(1)
+
+fun changeTop() { top = mk(2) }
+
+fun readTop() {
+  string t = top
+  changeTop()
+  Console.log($"{t} / {top}")
+}
+
+fun topParam(string p) {
+  changeTop()
+  string copy = p
+  changeTop()
+  Console.log($"{p} / {copy}")
+}
+
+fun locals() {
+  D d = D(mk(10))
+  string a = d.label
+  d.rename(11)
+  Console.log($"{a} / {d.label}")
+  string b = d.label
+  d.indirect(12)
+  Console.log($"{b} / {d.label}")
+  string c = d.label
+  d.touch()               // changes no text
+  Console.log(c)
+  string e = d.label
+  d.shown = "set"
+  Console.log($"{e} / {d.label}")
+}
+
+fun inside(&Box box) {
+  string a = box.d.label
+  box.change()
+  Console.log($"{a} / {box.d.label}")
+  string n = box.names[0]
+  box.clearNames()
+  Console.log(n)
+}
+
+fun items() {
+  vec<D> v = [D(mk(20)), D(mk(21))]
+  string a = v[0].label
+  v[0].rename(22)
+  Console.log($"{a} / {v[0].label}")
+}
+
+fun same(string p, &string s) {
+  s = mk(30)
+  Console.log($"{p} / {s}")
+}
+
+fun loop(string p, &D d) {
+  for var i in 0..2 {
+    d.rename(i)
+    Console.log(p)
+  }
+}
+
+fun values(string p, &D d) {
+  fun(i32) f = (i32 k; &d) { d.rename(k) }
+  f(90)
+  Console.log(p)
+}
+
+readTop()
+topParam(top)
+locals()
+D k = D(mk(40))
+k.given(k.label)
+Console.log(k.twice(k.label))
+k.own()
+Box box = Box()
+inside(&box)
+items()
+D z = D(mk(31))
+same(z.label, &z.label)
+loop(z.label, &z)
+values(z.label, &z)

@@ -1,0 +1,1 @@
+signal_stable.df(4): error: 'SignalMode' has no entry 'Stable'

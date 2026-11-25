@@ -1,0 +1,1 @@
+signal_own_timeout.df(4): error: no 'Signal' matches these arguments

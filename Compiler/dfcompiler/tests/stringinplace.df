@@ -1,11 +1,11 @@
-// Changes in place (spec 4.1): a borrow sees them; a result used elsewhere is a new string
+// Changes in place (spec 4.1): the other variables never see them (strings behave as values, spec 4); a result used elsewhere is a new string
 import Root
 
 class Note {
   public string text
 }
 
-// += is always in place: b borrows a, so b sees the change; the string moves to bigger classes and b follows
+// += is always in place: b keeps the text it took; the string moves to bigger classes
 string a = "start" + "!"
 string b = a
 for i32 round in 0..100 {
@@ -30,7 +30,7 @@ string original = "keep me"
 string other = original.toUpper()
 Console.log($"{original} / {other}")
 
-// an alias: string same = text, then text = same.trim() works in place
+// text = same.trim(): text gets a new string, same keeps its own
 string text = " ali" + "ased "
 string same = text
 text = same.trim()
@@ -81,7 +81,7 @@ Console.log($"{fresh} {work}")
 string big = "".padLeft(5000, 'z')
 string bigView = big
 big.clear()
-Console.log($"[{big}] [{bigView}] {big.len}")
+Console.log($"[{big}] {bigView.len} {big.len}")
 string grown = "a"
 for i32 round in 0..200 {
   grown += "bc"

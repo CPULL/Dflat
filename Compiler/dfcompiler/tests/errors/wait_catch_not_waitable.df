@@ -1,0 +1,9 @@
+import Root
+import Root.Tasks
+
+Signal a = Signal("a")
+Signal b = Signal("b")
+wait
+  on a { }
+  timeout 10 { }
+  catch Exception on b { }

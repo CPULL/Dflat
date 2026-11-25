@@ -1,0 +1,12 @@
+late: timeout block
+task gave 42
+on, timeout block
+signal: timeout block
+event: timeout block
+-1
+next line: 42
+next line: timeout block
+several lines
+-2
+42
+---- exit code 0 ----

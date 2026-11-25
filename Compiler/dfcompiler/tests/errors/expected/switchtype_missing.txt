@@ -1,0 +1,1 @@
+switchtype_missing.df(7): error: the type switch does not cover bool of the set Nums: add a case or a 'default'

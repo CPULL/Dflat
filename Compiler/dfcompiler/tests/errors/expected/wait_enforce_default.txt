@@ -1,0 +1,1 @@
+wait_enforce_default.df(12): error: enforce wait ... default is replaced by the timeout block: wait t timeout 1000 { 123 } (spec 20.2.8)

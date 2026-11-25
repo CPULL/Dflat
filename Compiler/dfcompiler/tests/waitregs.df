@@ -1,0 +1,160 @@
+// the registrations belong to the runnable (spec 20.2.4, 20.2.6): one for each waitable, shared by all its waits, kept to the end of the scope
+import Root
+import Root.Tasks
+
+struct Num { i32 n }
+
+class Pair {
+  fun ->string taskRun() {
+    return! "header"
+    return! "body"
+    return "end"
+  }
+}
+
+class Posts {
+  fun i32 taskRun() {
+    wait 60
+    return? 1
+    return? 2
+    wait 200
+    return 3
+  }
+}
+
+// a send that comes between two waits is kept, for another wait and in another form
+fun between() {
+  Signal go = Signal("regs.go")
+  Signal other = Signal("regs.other")
+  wait go timeout 10
+  go.send()
+  wait
+    on other { Console.log("never") }
+    on go { Console.log("kept for the wait on several") }
+    timeout 10 { Console.log("never") }
+  go.send()
+  wait go { Console.log("kept for the wait on one") } timeout 10 { Console.log("never") }
+  go.send()
+  go.send()      // one only is kept
+  wait go { Console.log("one") } timeout 10 { Console.log("never") }
+  wait go { Console.log("never") } timeout 10 { Console.log("only one is kept") }
+}
+
+// the scope ends: what was kept disappears, a token stays in its count
+fun ends() {
+  Signal s = Signal("regs.single")
+  Token st = Token.register("regs.stable")
+  {
+    wait
+      on s { }
+      on st { }
+      timeout 10
+    s.send()
+    st.produce()
+  }
+  wait s { Console.log("never") } timeout 10 { Console.log("gone with the scope") }
+  wait st { Console.log("the token is there") } timeout 10 { Console.log("never") }
+}
+
+// two waits of one runnable on an Exclusive signal do not conflict
+fun exclusive() {
+  Signal e = Signal(SignalMode.Exclusive, "regs.excl")
+  wait e timeout 5
+  wait
+    on e { Console.log("never") }
+    timeout 5 { Console.log("no conflict") }
+  e.send()
+  wait e { Console.log("exclusive kept") } timeout 5 { Console.log("never") }
+}
+
+// a loop with one waitable keeps what arrives in its block; the same signal sent in its own block is abandoned
+fun loop() {
+  Event<Num> ev = Event.register("regs.ev")
+  Signal s = Signal("regs.loop")
+  string log = ""
+  i32 idle = 0
+  wait on ev as first { log += "never" } timeout 1
+  ev.send(Num(1))
+  while idle < 2 {
+    wait on ev as d {
+      log += $"{d.n} "
+      if d.n < 3 {
+        ev.send(Num(d.n + 1))
+        ev.send(Num(d.n + 2))
+      }
+    } timeout 10 { idle++ }
+  }
+  Console.log($"events {log}")
+  i32 n = 0
+  wait s timeout 1
+  s.send()
+  idle = 0
+  while idle < 1 {
+    wait s {
+      n++
+      s.send()
+    } timeout 10 { idle++ }
+  }
+  Console.log($"signal {n}")
+}
+
+// a wait on the task inside its own block: the next value (header, then body)
+fun nested() {
+  Task p = Task(Pair, timeout: 2000).start()
+  Signal stop = Signal("regs.stop")
+  wait
+    on p as header {
+      string body = wait p timeout 500
+      Console.log($"{header} {body}")
+      wait p as e { Console.log(e) } timeout 500 { Console.log("never") }
+    }
+    on stop { }
+    timeout 1000 { Console.log("never") }
+}
+
+// return? while the runnable does not wait now: the last one is kept
+fun posted() {
+  Task p = Task(Posts, timeout: 2000).start()
+  i32 none = wait p timeout 10
+  wait 150
+  i32 last = wait p timeout 10
+  i32 end = wait p timeout 2000
+  Console.log($"{none} {last} {end}")
+}
+
+// waits in an atEnd, in a lambda, in a switch, in the condition of a loop
+class Closer {
+  public fun close() {
+    Token s = Token.register("regs.close")
+    s.produce()
+    atEnd {
+      wait s { Console.log("in atEnd") } timeout 10 { Console.log("never") }
+    }
+    Console.log("closing")
+  }
+}
+
+fun places() {
+  Token s = Token.register("regs.places")
+  s.produce(2)
+  fun() f = () { wait s { Console.log("in a lambda") } timeout 10 { Console.log("never") } }
+  f()
+  i32 k = 1
+  switch k {
+    1: {
+      wait s { Console.log("in a switch") } timeout 10 { Console.log("never") }
+    }
+    default: {
+      Console.log("never")
+    }
+  }
+}
+
+between()
+ends()
+exclusive()
+loop()
+nested()
+posted()
+Closer().close()
+places()

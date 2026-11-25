@@ -235,7 +235,7 @@ public sealed partial class CodeGen {
     return StructCreateCode(info, given, scope);
   }
 
-  // the fields a creation gives, in the order they are written
+  // the fields a creation gives, in the order of the definition of the struct (spec 2.5)
   List<(StructField Field, Node Value)> StructGiven(StructInfo info, List<Node> args, Node at) {
     var named = args.Where(arg => arg.Kind == "Named").ToList();
     var positional = args.Where(arg => arg.Kind != "Named").ToList();
@@ -258,11 +258,11 @@ public sealed partial class CodeGen {
       }
       given.Add((field, arg.Children[0]));
     }
-    return given;
+    return given.OrderBy(pair => info.Fields.IndexOf(pair.Field)).ToList();
   }
 
   Expr StructCreateCode(StructInfo info, List<(StructField Field, Node Value)> given, Scope scope) {
-    // the given values first, in the order they are written; then the struct, with the start values of the others
+    // the given values first, in order; then the struct, with the start values of the others
     var code = new StringBuilder("({ ");
     var made = new Dictionary<StructField, string>();
     var copies = new StringBuilder();
@@ -270,7 +270,14 @@ public sealed partial class CodeGen {
     foreach (var (field, value) in given) {
       if (field.Buffer != null) {
         if (value.Kind == "List") {
-          made[field] = BufferInitializer(field, value, scope);
+          string items = BufferInitializer(field, value, scope);
+          if (HasEffects(value)) {
+            string held = NewTemp();
+            code.Append($"{CType(ArrElem(field.Type))} {held}[{field.Buffer}] = {items}; ");
+            copies.Append($"memcpy({result}.f_{field.Name}, {held}, sizeof({held})); ");
+            items = "{0}";
+          }
+          made[field] = items;
         } else {
           copies.Append($"memmove({result}.f_{field.Name}, {BufferSource(field, value, scope)}, sizeof({result}.f_{field.Name})); ");
           made[field] = "{0}";

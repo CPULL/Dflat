@@ -1,0 +1,1 @@
+switchtype_enforce_break.df(12): error: 'break' cannot leave an enforce: return is the only way out of its block (spec 7.2.4)

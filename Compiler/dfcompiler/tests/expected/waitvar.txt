@@ -1,0 +1,36 @@
+8
+late
+0
+text 1 made at run time, long enough for a block
+text 2 made at run time, long enough for a block
+made
+no dog
+other
+end of other
+end of made
+no items
+[9]
+thread late
+0.25
+8
+late in a function
+201
+7
+no signal
+true
+42
+call late
+-2
+-3
+7
+late turn
+-1000
+7
+made
+end of made
+goes on
+1
+goes on
+1
+end
+---- exit code 0 ----

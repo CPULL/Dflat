@@ -1,0 +1,22 @@
+b: first failed
+any: other failed
+the block: block 5
+single: first failed
+the catch of the function
+no block
+timed out
+at end
+got a value
+1
+2
+last
+default
+last
+before the return
+returned 5
+then it goes up
+other failed
+loop 5 1
+the signal is busy
+another struct
+---- exit code 0 ----

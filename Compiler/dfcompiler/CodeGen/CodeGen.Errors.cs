@@ -139,17 +139,17 @@ public sealed partial class CodeGen {
     ["UnassignedTypeException"] = 53,   // spec 11.3.6.1: a type switch without default on a set value never assigned
     ["CallingGlobalDefinedAfterException"] = 54,   // spec 18.5: a call to a global that does not rank below every global lock held
     ["ReadLockBecameWriteLockException"] = 55,   // spec 18.5: the read lock of a global held, its write lock asked
-    ["WaitTimeoutException"] = 58,   // spec 20.2: a wait ran out of time (silent)
     ["TaskAlreadyTerminatedException"] = 59,   // spec 20.1: a wait on a task that is no more running (silent)
     ["TaskWasNotStartedException"] = 60,   // spec 20.1: a wait on a task that was not started (silent)
     ["CalledANotRunningTaskException"] = 61,   // spec 20.1: a call through the handle of a task that is not running
     ["TaskAlreadyStartedException"] = 62,   // spec 20.1: a second start() of the same task
     ["ReturnOutsideATaskException"] = 63,   // spec 20.1: return! or return? in a taskRun() that does not run as a task
-    ["WaitingWithoutTimeoutException"] = 64,   // spec 20.1: a wait with no timeout from the wait, start or the constructor
     ["ThreadStartedByAThreadException"] = 65,   // spec 20.1: start() of a thread inside a thread
     ["SignalModeMismatchException"] = 66,   // spec 20.3: a signal made again with another mode
     ["ExclusiveSignalBusyException"] = 67,   // spec 20.3: a second listener of an Exclusive signal
     ["ReservedSignalException"] = 68,   // spec 20.3: a number below 4096 that KnownSignals does not name
+    ["WaitingOnANotOwnedTaskException"] = 70,   // spec 20.2.6: a wait by a runnable that neither owns nor borrows the handle
+    ["TokenAlreadyRegisteredException"] = 71,   // spec 20.3.2: a token registered again with the same name
     ["DuplicateEventNameWithDataMismatchException"] = 69   // spec 20.4.3: an event name used with another struct
   };
 
@@ -341,6 +341,7 @@ public sealed partial class CodeGen {
     foreach (var statement in frame.Statements) {
       if (statement.Kind == "Decl") {
         Hoist(statement);
+        NoteHoistedTask(statement, typingScope);   // var r = wait t timeout 500: the type of r comes from what t is
       } else if (statement.Kind == "MultiAssign") {
         foreach (var target in statement.Children[0].Children.Where(target => target.Kind == "Decl")) {
           Hoist(target);
@@ -359,9 +360,11 @@ public sealed partial class CodeGen {
   string TypeForHoist(Node decl, Scope scope) {
     string? saved = handlerOverride;
     handlerOverride ??= "df_hoist_typing";
+    hoistTyping++;
     try {
       return ResolveDeclType(decl, scope);
     } finally {
+      hoistTyping--;
       handlerOverride = saved;
     }
   }

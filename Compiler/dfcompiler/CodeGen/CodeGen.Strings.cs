@@ -21,7 +21,7 @@ public sealed partial class CodeGen {
     "Call" => n.Children[0] is { Kind: "Member", Text: "toStr" } || (n.Line >= LibraryLine && n.Children[0] is { Kind: "Member", Text: string member } && member.StartsWith("tree_"))
       ? e.Fresh : true,
     "Binary" => n.Text == "+" || (n.Text == "??" && e.Fresh),
-    "Paren" or "Gift" => e.Fresh,
+    "Paren" or "Gift" or "Wait" => e.Fresh,   // wait t: the value the task gave
     "TypeSwitch" => e.Fresh,   // a string type switch gives a string of its own
     "Member" => e.Fresh && e.Code.StartsWith("df_str_dup_cstr("),   // ex.message, ex.function: a new string made from the C text of the exception
     _ => false
@@ -47,32 +47,6 @@ public sealed partial class CodeGen {
     string code = StrOf(e, at);
     bool fresh = e.Type == "string" ? e.Fresh : true;
     return StrRead(new Expr(code, "string", fresh));
-  }
-
-  // k.label = a, with a local that owns its string (spec 4): the field takes the same string, and a goes on as a borrower of it, so a change
-  // through a is seen through k.label and the text lives on with the field when a ends (level 3 warning). Until the last use of a, k
-  // and the field are locked as for a borrow (12). Null when the field takes a copy: a value that is not such a local, a field reached
-  // through an item or a call, or an object that may end before a (declared in an inner scope)
-  string? SharedFieldString(LValueInfo target, Node targetNode, Node statement, Scope scope) {
-    var source = statement.Children[1];
-    if (LibraryCode || !target.IsField || source.Kind != "Name" || scope.Find(source.Text!) is not VarInfo { OwnFlag: string flag } local
-        || local.ReadOnlyString || local.IsParam || local.RefSlot || LendPath(targetNode) is not string path) {
-      return null;
-    }
-    string root = path.Split('.')[0];
-    if (scope.Find(root) != null && ScopeDepth(root, scope) < ScopeDepth(source.Text!, scope)) {
-      return null;   // the object is declared in an inner scope: it can end before a
-    }
-    if (local.IsLocal) {
-      Warn($"'{path}' shares the string of '{source.Text}': when '{source.Text}' ends, the field keeps the text as its own (spec 4)", statement, 3);
-    }
-    if (followingStatements.TryGetValue(statement, out var after)) {
-      LockLenders(Synthetic("Decl", statement, source.Text), after, new List<string> { path }, false, true, scope);
-    }
-    // a C string is copied into a regular string (spec 4.4.6): a stays its owner
-    string share = NewTemp();
-    return $"({{ bool {share} = {flag} && !df_is_cstr((const uint8_t*)df_str_res({local.CName})); df_str_put(&{target.Code}, {local.CName}, {share}); "
-      + $"if ({share}) {{ {flag} = false; }} }})";
   }
 
   // how many scopes up from here the name is declared (0 here); a name not found is the farthest
@@ -103,6 +77,33 @@ public sealed partial class CodeGen {
   // C for "the value is new": a value of another type converted to a string is new too
   static string FreshCode(Expr value, string converted) =>
     value.Type is not ("string" or "string?") || value.Fresh || IsStaticStr(converted) ? "true" : "false";
+
+  // a string variable that would borrow from something that ends before it keeps a copy of the text: a value read from a variable of an
+  // inner scope (a local, an object, a struct, a collection, a loop variable, the data of an event) or from what a call gives
+  (string Code, string Fresh) StrKept(string? name, Node valueNode, string code, string fresh, Scope scope) {
+    if (fresh != "false" || LibraryCode) {
+      return (code, fresh);
+    }
+    int depth = name == null ? 0 : ScopeDepth(name, scope);
+    var paths = new HashSet<string>();
+    StrLenderPaths(valueNode, paths);
+    bool eager = paths.Any(lender => CurrentStrBorrows().Eager.Any(path => StrTouches(path, lender)));
+    return eager || ReadsShorter(valueNode, depth, scope) ? ($"df_str_dup({code})", "true") : (code, fresh);
+  }
+
+  static bool ReadsShorter(Node node, int depth, Scope scope) {
+    var root = node;
+    while (root.Kind is "Member" or "Index" or "Paren" && root.Children.Count > 0) {
+      root = root.Children[0];
+    }
+    if (root.Kind == "Call") {
+      return true;   // D("x").label: the object ends with the statement
+    }
+    if (root.Kind == "Name") {
+      return scope.Find(root.Text!) != null && ScopeDepth(root.Text!, scope) < depth;
+    }
+    return root.Children.Any(child => ReadsShorter(child, depth, scope));   // n ? { 1: s.label, ... }, a ?? b
+  }
 
   // v = value for a string variable, field, tuple item or reference parameter; fresh is C code ("true", "false" or a flag)
   string StrAssign(LValueInfo target, string fresh, string converted) {
@@ -216,10 +217,54 @@ public sealed partial class CodeGen {
       return value;
     }
     if (expression.Kind == "Name" && scope.Find(expression.Text!) is VarInfo { OwnFlag: string flag } variable) {
+      if (givingValue) {
+        return new Expr($"df_str_dup({variable.CName})", "string", true);   // return! s, return? s: the code goes on with s
+      }
       string taken = NewTemp();
-      return new Expr($"({{ df_string {taken} = {variable.CName}; if (!{flag}) {{ {taken} = df_str_dup({taken}); }} {flag} = false; {taken}; }})", "string", true);
+      // a borrower gives the text of the local it borrows from, which ends here; otherwise a copy
+      var owners = new StringBuilder();
+      if (!LibraryCode && CurrentStrBorrows().Lenders.TryGetValue(expression.Text!, out var lenders)) {
+        foreach (string lender in lenders.Where(path => path != expression.Text)) {
+          if (scope.Find(lender) is VarInfo { Type: "string", IsLocal: true, OwnFlag: string ownerFlag } owner) {
+            owners.Append($"if ({ownerFlag} && {owner.CName} == {taken}) {{ {ownerFlag} = false; }} else ");
+          }
+        }
+      }
+      return new Expr($"({{ df_string {taken} = {variable.CName}; if (!{flag}) {{ {owners}{{ {taken} = df_str_dup({taken}); }} }} {flag} = false; {taken}; }})", "string", true);
+    }
+    if (ReturnedField(expression, scope) is string field) {
+      string taken = NewTemp();
+      return new Expr($"({{ df_string* {taken} = &{field}; df_string {taken}s = *{taken}; *{taken} = NULL; {taken}s; }})", "string", true);
     }
     return new Expr(StrOwned(value, value.Code), "string", true);
+  }
+
+  bool givingValue;   // return! and return?: the function goes on, its locals keep their texts
+
+  // return d.label, return s.label with a local that ends with the function and that nobody sees ending (no atEnd): the text is taken out
+  string? ReturnedField(Node expression, Scope scope) {
+    if (LibraryCode || givingValue || fn!.IsMain || IsMulti(currentRet!) || expression is not { Kind: "Member" } member || member.Children[0] is not { Kind: "Name" } holder
+        || scope.Find(holder.Text!) is not VarInfo { IsLocal: true, IsParam: false, IsCounted: false, IsWeak: false } held) {
+      return null;
+    }
+    for (var frame = frames.Peek(); frame != null; frame = frame.Parent) {
+      if (frame.AtEnds.Any(atEnd => atEnd.Text != "drop") || frame.Kind == FrameKind.AtEndBody) {
+        return null;
+      }
+      if (frame.Kind == FrameKind.Function) {
+        break;
+      }
+    }
+    if (!(IsClass(held.Type) && held.Own && classes.TryGetValue(held.Type, out var cls) && !cls.IsTrait && FindField(cls, member.Text!) is { HasAccessors: false, IsStatic: false, IsCounted: false, IsWeak: false }
+        && classes.Values.All(c => c.Dtor == null || !IsSubtype(c.Name, held.Type) && !IsSubtype(held.Type, c.Name)) || IsStruct(held.Type) && held.OwnsStruct)) {
+      return null;
+    }
+    try {
+      var place = LValue(member, scope);
+      return place is { Type: "string", IsConst: false } ? place.Code : null;
+    } catch (CompileException) {
+      return null;   // a field that cannot be written here: a copy
+    }
   }
 
   // ---------------------------------------------------------------- changes in place (spec 4.1)
@@ -270,18 +315,14 @@ public sealed partial class CodeGen {
       throw Error($"'{target.Text}' is a read-only borrow (a parameter or a loop variable): its string cannot be changed in place (spec 4.1)", at);
     }
     MarkAssigned(place.Variable);
-    return ($"&{place.Code}", place.Variable?.OwnFlag is string flag ? $"&{flag}" : "&df_str_owner");
+    // a borrower takes its own copy before it changes (spec 4)
+    return place.Variable?.OwnFlag is string flag ? (StrMine(place.Variable), $"&{flag}") : ($"&{place.Code}", "&df_str_owner");
   }
 
-  // the same place written twice: x and x, a.b and a.b, or a variable declared as a borrow of the other (string b = x)
+  // the same place written twice: x and x, a.b and a.b
   static bool SamePlace(Node a, Node b, Scope scope) {
     if (a.Kind == "Name" && b.Kind == "Name") {
-      if (a.Text == b.Text) {
-        return true;
-      }
-      var first = scope.Find(a.Text!);
-      var second = scope.Find(b.Text!);
-      return first != null && second != null && (first.AliasOf == second || second.AliasOf == first);
+      return a.Text == b.Text;
     }
     return a.Kind == "Member" && b.Kind == "Member" && a.Text == b.Text && SamePlace(a.Children[0], b.Children[0], scope);
   }
@@ -317,16 +358,27 @@ public sealed partial class CodeGen {
     if (member.Children[0] != root || args.Any(arg => arg.Kind == "Named")) {
       return null;
     }
-    string Pos(int index) => Convert(ExprOf(args[index], scope, "u32"), "u32", args[index]);
+    string Pos(int index) => Convert(ExprOf(args[index], scope, NativeUns), NativeUns, args[index]);
     string Text(int index) => StrReadOf(ExprOf(args[index], scope, "string"), args[index]);
-    return (member.Text, args.Count) switch {
-      ("insert", 2) => $"df_str_splice_in({slot}, {flag}, {Pos(0)}, 0, {Text(1)})",
-      ("remove", 2) => $"df_str_splice_in({slot}, {flag}, {Pos(0)}, {Pos(1)}, NULL)",
-      ("replaceAt", 3) => $"df_str_splice_in({slot}, {flag}, {Pos(0)}, {Pos(1)}, {Text(2)})",
-      ("append", 1) => $"df_str_append({slot}, {flag}, {Text(0)})",
-      ("prepend", 1) => $"df_str_splice_in({slot}, {flag}, 0, 0, {Text(0)})",
+    List<string>? codes = (member.Text, args.Count) switch {
+      ("insert", 2) => new() { Pos(0), Text(1) },
+      ("remove", 2) => new() { Pos(0), Pos(1) },
+      ("replaceAt", 3) => new() { Pos(0), Pos(1), Text(2) },
+      ("append" or "prepend", 1) => new() { Text(0) },
       _ => null
     };
+    if (codes == null) {
+      return null;
+    }
+    codes = ArgsInOrder(args.Cast<Node?>().ToList(), codes, out string prefix);   // from left to right (spec 2.5)
+    string edit = member.Text switch {
+      "insert" => $"df_str_splice_in({slot}, {flag}, {codes[0]}, 0, {codes[1]})",
+      "remove" => $"df_str_splice_in({slot}, {flag}, {codes[0]}, {codes[1]}, NULL)",
+      "replaceAt" => $"df_str_splice_in({slot}, {flag}, {codes[0]}, {codes[1]}, {codes[2]})",
+      "append" => $"df_str_append({slot}, {flag}, {codes[0]})",
+      _ => $"df_str_splice_in({slot}, {flag}, 0, 0, {codes[0]})"
+    };
+    return prefix == "" ? edit : $"({{ {prefix}{edit}; }})";
   }
 
   // x = x.trim(): x takes the result in place. Null when the assignment is not that.

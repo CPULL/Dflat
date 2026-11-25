@@ -1,0 +1,8 @@
+import Root
+import Root.Tasks
+
+Signal a = Signal("multi.a")
+Signal b = Signal("multi.b")
+wait
+  on a { Console.log("a") }
+  on b { Console.log("b") }

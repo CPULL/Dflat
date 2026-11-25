@@ -232,18 +232,28 @@ public sealed partial class CodeGen {
     return Assignable(paramType, type) ? 100 : null;
   }
 
-  // an overload that the arguments would reach through automatic conversions of numbers (spec 3.5.1): for the message only
-  bool OnlyAutoFits(List<FunSig> candidates, List<Node> args, Scope scope) {
+  // the argument goes to a parameter of this type, through the automatic conversions too (spec 3.5.1)
+  bool AutoFits(Node arg, string paramType, Scope scope) {
+    if (ArgCost(arg, paramType, scope) != null) {
+      return true;
+    }
+    if (arg.Kind is "List" or "MapLit" or "EmptyNew" or "Lambda" or "Gift" or "WritableAddressOf" or "Null" || IsUntypedLiteral(arg)) {
+      return false;
+    }
     try {
-      return candidates.Any(candidate => MapArgs(candidate, args).Item1 is Node[] slots && args.All(arg => {
-        var argNode = arg.Kind == "Named" ? arg.Children[0] : arg;
-        int paramIndex = Array.IndexOf(slots, argNode);
-        return paramIndex >= 0 && AutoAssignable(candidate.Params[paramIndex].Type, ExprOf(argNode, scope).Type);
-      }));
+      return AutoAssignable(paramType, ExprOf(arg, scope).Type);
     } catch (CompileException) {
       return false;
     }
   }
+
+  // the versions that the arguments reach only through the automatic conversions of numbers (spec 3.5.1)
+  List<FunSig> AutoReached(List<FunSig> candidates, List<Node> args, Scope scope) =>
+    candidates.Where(candidate => MapArgs(candidate, args).Item1 is Node[] slots && args.All(arg => {
+      var argNode = arg.Kind == "Named" ? arg.Children[0] : arg;
+      int paramIndex = Array.IndexOf(slots, argNode);
+      return AutoFits(argNode, paramIndex >= 0 ? candidate.Params[paramIndex].Type : ArrElem(candidate.Params[^1].Type), scope);
+    })).ToList();
 
   FunSig ResolveOverload(List<FunSig> candidates, List<Node> args, Scope scope, Node at) {
     if (candidates.Count == 1) {
@@ -277,12 +287,22 @@ public sealed partial class CodeGen {
       }
     }
     if (applicable.Count == 0) {
+      var reached = AutoReached(candidates, args, scope);
+      if (reached.Count > 1 && reached.Any(f => !f.Params.Any(param => param.IsVariadic))) {
+        reached.RemoveAll(f => f.Params.Any(param => param.IsVariadic));
+      }
+      if (reached.Count == 1) {
+        return reached[0];
+      }
+      if (reached.Count > 1) {
+        throw Error($"ambiguous call: through automatic conversions it matches {string.Join(", ", reached.Select(FunHeader))}; write the cast (spec 3.5.1)", at);
+      }
       if (candidates[0].Class is ClassInfo owner && IsSet(owner.Name) && args.Count == 1 && args[0].Kind != "Named") {
         // add and its overloads for collections (CodeGen.Sets.cs): say what the set takes
         string given = DisplayName(ExprOf(args[0], scope).Type);
         throw Error($"the items of this set are {DisplayName(MapKey(owner.Name))}, not {given}", at);
       }
-      throw Error($"no '{candidates[0].Name}' matches these arguments{(OnlyAutoFits(candidates, args, scope) ? "; automatic conversions do not choose between overloads: write the cast (spec 3.5.1)" : "")}", at);
+      throw Error($"no '{candidates[0].Name}' matches these arguments", at);
     }
     if (applicable.Any(entry => !entry.Fun.Params.Any(param => param.IsVariadic))) {
       applicable.RemoveAll(entry => entry.Fun.Params.Any(param => param.IsVariadic));   // the non-variadic overload wins (spec 13.4)

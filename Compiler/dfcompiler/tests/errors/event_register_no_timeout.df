@@ -1,6 +1,6 @@
-// the registration of an event gives its timeout (spec 20.4.3)
+// a BlockSender event gives how long a send waits for room (spec 20.4.3)
 import Root.Tasks
 
 struct Data { i32 n }
 
-Event<Data> ev = Event.register("x.data")
+Event<Data> ev = Event.register("x.data", EventMode.Static, keep: 2, fullMode: EventQueueFullMode.BlockSender)

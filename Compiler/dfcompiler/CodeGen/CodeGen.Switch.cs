@@ -388,6 +388,7 @@ public sealed partial class CodeGen {
       EmitJumpToLabel(target.Text!, sb, indent, s);
       return;
     }
+    CheckTypeCaseJump(target, s);
     if (switches.Count == 0) {
       if (target.Kind == "Target") {
         EmitJumpToLabel(target.Text!, sb, indent, s);

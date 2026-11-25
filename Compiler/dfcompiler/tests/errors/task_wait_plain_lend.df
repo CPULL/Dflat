@@ -1,0 +1,9 @@
+import Root
+import Root.Tasks
+
+class C {
+  fun i32 taskRun() { return 1 }
+}
+fun f(Task<C> t) { wait t timeout 10 }
+Task<C> t = Task(C).start()
+f(t)

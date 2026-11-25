@@ -1,0 +1,8 @@
+window 1 with a text that is not a literal
+window 2 with a text that is not a literal, window 3 with a text that is not a literal
+window 4 with a text that is not a literal, window 5 with a text that is not a literal, window 4 with a text that is not a literal
+window 3 with a text that is not a literal, window 6 with a text that is not a literal
+1 window 7 with a text that is not a literal
+window 8 with a text that is not a literal, window 9 with a text that is not a literal
+window 10 with a text that is not a literal
+---- exit code 0 ----

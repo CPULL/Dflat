@@ -15,29 +15,29 @@ class Window(i32 id) {
 }
 
 fun ->string receiveOnce(string tag) {
-  Event<Size> ev = Event("gfx.ui.resize", timeout: 2000)
+  Event<Size> ev = Event("gfx.ui.resize")
   string seen = "nothing"
   wait on ev as size {
     seen = $"{tag}: {size.label} {size.w}x{size.h} processed={size.processed}"
     size.setProcessed()
-  }
+  } timeout 2000
   return seen
 }
 
 fun ->string receiveStop(string tag) {
-  Event<Size> ev = Event("gfx.ui.resize", timeout: 2000)
+  Event<Size> ev = Event("gfx.ui.resize")
   string seen = "nothing"
   wait on ev as size {
     seen = $"{tag}: {size.label}"
     size.stopPropagation()
-  }
+  } timeout 2000
   return seen
 }
 
 // the sender registers; a name with a dot is used as it is
-Event<Size> resize = Event.register("gfx.ui.resize", timeout: 1000)
+Event<Size> resize = Event.register("gfx.ui.resize")
 Console.log(resize.name)
-var notes = Event.register("notes", Note, EventMode.Static, timeout: 500, keep: 2, fullMode: EventQueueFullMode.DiscardOldest)
+var notes = Event.register("notes", Note, EventMode.Static, keep: 2, fullMode: EventQueueFullMode.DiscardOldest)
 Console.log(notes.name)              // a name without a dot: the namespace in front
 
 Window win1 = Window(1)
@@ -63,33 +63,33 @@ Console.log(wait s2 timeout 3000)
 
 // volatile: nobody waits, it is lost
 win1.resized(resize, 1, 1)
-Event<Size> mine = Event("gfx.ui.resize", timeout: 100)
+Event<Size> mine = Event("gfx.ui.resize")
 wait on mine as lost {
   Console.log("never: nobody waited")
-}
+} timeout 100
 
 // static: kept, at most 2, the oldest is discarded
-Event<Note> found = Event("notes", timeout: 100)
+Event<Note> found = Event("notes")
 notes.send(Note(1))
 notes.send(Note(2))
 notes.send(Note(3))
 wait on found as note {
   Console.log($"note {note.n}")
-}
+} timeout 100
 wait on found as note {
   Console.log($"note {note.n}")
-}
+} timeout 100
 wait on found as note {
   Console.log("never: the queue is empty")
-}
+} timeout 100
 
 // from: only the events of that sender
 fun ->string onlyFrom(Window w) {
-  Event<Size> ev = Event("gfx.ui.resize", timeout: 2000)
+  Event<Size> ev = Event("gfx.ui.resize")
   string seen = "nothing"
   wait on ev from w as size {
     seen = size.label
-  }
+  } timeout 2000
   return seen
 }
 
@@ -100,16 +100,16 @@ win2.resized(resize, 6, 6)
 Console.log(wait f timeout 3000)
 
 // a name not registered: skipped, no error
-Event<Note> nobody = Event("not.there", timeout: 100)
+Event<Note> nobody = Event("not.there")
 nobody.send(Note(9))
 wait on nobody as note {
   Console.log("never")
-}
+} timeout 100
 Console.log("skipped")
 
 // the same name with another struct
 fun mismatch() {
-  Event<Note> wrong = Event("gfx.ui.resize", timeout: 100)
+  Event<Note> wrong = Event("gfx.ui.resize")
   wrong.send(Note(1))
   catch DuplicateEventNameWithDataMismatchException e { Console.log($"mismatch: {e.message}") }
 }
@@ -121,16 +121,16 @@ notes.send(Note(11))
 wait on found as note {
   notes.send(Note(12))
   Console.log($"held {note.n}")
-}
+} timeout 100
 wait on found as note {
   Console.log($"note {note.n}")
-}
+} timeout 100
 wait on found as note {
   Console.log($"note {note.n}")
-}
+} timeout 100
 wait on found as note {
   Console.log("never: the queue is empty")
-}
+} timeout 100
 
 // left in the queue at the end of the program: freed with the registry
 notes.send(Note(20))

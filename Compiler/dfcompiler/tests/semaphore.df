@@ -77,4 +77,4 @@ class User {
 }
 
 Task u = Task(User, timeout: 2000).start()
-Console.log(wait u)
+Console.log(wait u timeout 5000)

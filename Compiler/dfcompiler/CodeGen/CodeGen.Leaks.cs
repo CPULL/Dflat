@@ -157,12 +157,17 @@ public sealed partial class CodeGen {
           ctx.Flow.Raises.Add((StandardExceptions["ReturnOutsideATaskException"], ctx.Cover));   // a direct call of taskRun() (spec 20.1)
         }
         break;
+      case "TypeSwitch" or "TypeSwitchStmt":
+        if (!ctx.InCatchBody && !node.Children.Skip(1).Any(arm => arm.Children[0].Children.Any(label => label.Kind == "Default"))) {
+          ctx.Flow.Raises.Add((StandardExceptions["UnassignedTypeException"], ctx.Cover));   // a set value never assigned (spec 11.3.6.1)
+        }
+        break;
       case "Wait":
         if (!ctx.InCatchBody) {
           ctx.Flow.Raises.Add((AnyException, ctx.Cover));   // the exception that ended the task, given to its waiter (spec 20.2)
         }
         break;
-      case "WaitOn" when !ctx.InCatchBody:
+      case "WaitOn" or "WaitMulti" when !ctx.InCatchBody:
         ctx.Flow.Raises.Add((AnyException, ctx.Cover));   // wait on an event: the cancel signal, the data of another struct (spec 20.4)
         break;
       case "Call" when TasksMode && !ctx.InCatchBody && IsTimeWaitCall(node):

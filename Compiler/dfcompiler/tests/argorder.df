@@ -1,0 +1,83 @@
+// The arguments of a call run from left to right, in the order of the parameters (spec 2.5): built-in methods, the standard library, structs
+import Root
+
+fun u32 pos(u32 n) {
+  Console.print($"{n} ")
+  return n
+}
+
+fun ->string text(string s) {
+  Console.print($"{s} ")
+  return s
+}
+
+fun i32 num(i32 n) {
+  Console.print($"{n} ")
+  return n
+}
+
+fun three(i32 a, i32 b, i32 c) {
+  Console.log($"= {a} {b} {c}")
+}
+
+struct Point {
+  i32 x,
+  i32 y,
+  arr<i32>[2] more
+}
+
+class Maker(i32 n) {
+  public i32 base = n
+  public fun i32 plus(i32 k) {
+    return base + k
+  }
+}
+
+fun ->Maker maker(i32 n) {
+  Console.print($"maker {n} ")
+  return Maker(n)
+}
+
+Console.log("--- functions, by name")
+three(c: num(3), b: num(2), a: num(1))
+three(num(1), c: num(3), b: num(2))
+Console.log("--- strings")
+Console.log(text("abcdef").substr(pos(1), pos(2)))
+Console.log("abcdef".substr(len: pos(2), start: pos(1)))
+Console.log(text("abc").replace(text("b"), text("x")))
+Console.log(text("abc").startsWith(text("a")))
+string t = "abc"
+t.insert(pos(1), text("zz"))
+Console.log(t)
+t.remove(pos(1), pos(2))
+Console.log(t)
+t.replaceAt(pos(0), pos(1), text("Q"))
+Console.log(t)
+t = t.insert(pos(1), text("--"))
+Console.log(t)
+Console.log(text("a").padLeft(pos(3), '.'))
+Console.log("--- standard library")
+Console.log(Math.max(num(1), num(2)))
+i32 parsed = 0
+bool ok = i32.tryParse(text("12"), &parsed)
+Console.log($"{ok} {parsed}")
+Console.log(num(7).toStr(text("000")))
+Console.log("--- collections")
+vec<i32> v = [1, 2]
+v.insert(pos(0), num(9))
+Console.log(v)
+v.swap(pos(0), pos(2))
+Console.log(v)
+Console.log(v.replace(pos(1), num(8)))
+map<string, i32> m = ["a": 1]
+m.add(text("b"), num(2))
+Console.log(m)
+Console.log("--- objects")
+Console.log(maker(1).plus(num(2)))
+Console.log("--- structs")
+Point p = Point(y: num(2), x: num(1))
+Console.log($"{p.x} {p.y}")
+Point q = Point(more: [num(3), num(4)], y: num(2), x: num(1))
+Console.log($"{q.x} {q.y} {q.more[0]} {q.more[1]}")
+Point r = Point(num(1), num(2), [num(3), num(4)])
+Console.log($"{r.x} {r.y} {r.more[0]} {r.more[1]}")

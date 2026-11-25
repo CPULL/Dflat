@@ -10,12 +10,12 @@ namespace dfcompiler;
 public sealed partial class CodeGen {
   const string ThreadPrelude = """
 public class Thread(u64 handle) {
-  public fun ->Thread start(lapse timeout = null) {
+  public fun &Thread start(lapse timeout = null) {
     i32 started = Root.Tasks.Native.Start(handle, timeout)
     if started == 1 then throw TaskAlreadyStartedException("The thread was already started")
     if started == 2 then throw NoMoreResourcesException("The system cannot start a new thread")
     if started == 3 then throw ThreadStartedByAThreadException("A thread cannot start another thread")
-    return Thread(Root.Tasks.Native.Retain(handle))
+    return this
   }
   public fun RunStatus get_status() { (RunStatus)Root.Tasks.Native.Status(handle) }
   public fun RunKind get_kind() { RunKind.Thread }
@@ -224,10 +224,13 @@ public class Thread(u64 handle) {
       NoteThreadCreate(target.Fun, n);   // a thread written in a thread, and what a task reaches (CodeGen.TaskAccess.cs)
     }
     Node? timeout = null;
+    Node? started = null;
     var given = new List<Node>();
     foreach (var arg in args.Skip(1)) {
       if (arg is { Kind: "Named", Text: "timeout" }) {
         timeout = arg.Children[0];
+      } else if (arg is { Kind: "Named", Text: StartArgument }) {
+        started = arg;
       } else if (arg is { Kind: "Named", Text: "linked" }) {
         throw Error("a thread always belongs to the task that starts it: linked is for Task() (spec 20.1)", arg);
       } else {
@@ -258,6 +261,9 @@ public class Thread(u64 handle) {
         throw Error($"missing argument '{p.Name}' of {target.Fun?.Name ?? "the function"}", n);
       }
       string converted;
+      if (p.Ref == 2 && p.Type == "Task" && argNode != null) {
+        NoteTaskLent(argNode, scope);   // one borrower at a time (spec 20.2.6)
+      }
       if (p.Ref == 2 || ThreadArgMoves(p)) {
         // &x: the place of the caller (a thread shares the memory of its task, spec 20.1, 20.12); @x, %x, ->x: held by the record
         converted = ArgCode(p, argNode ?? p.Default!, scope, target.Fun, index);
@@ -277,7 +283,7 @@ public class Thread(u64 handle) {
     code.Append($"df_thread_new({rec}, {record}_end, {record}_run, {fnPointer}, \"{shown}\", \"{TaskResultText(target.Ret)}\", {timeoutCode}, {size}, {record}_drop); }})");
     var made = Synthetic("Call", n).Add(Synthetic("Name", n, "Thread"))
       .Add(Synthetic("Args", n).Add(Synthetic("CValue", n, code.ToString()).Add(Synthetic("Type", n, "u64"))));
-    return ExprOf(made, scope);
+    return Started(ExprOf(made, scope), started, scope);
   }
 
   // the old name: the function of Thread(f, ...) when it is a function or a method

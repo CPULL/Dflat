@@ -233,10 +233,22 @@ public sealed partial class CodeGen {
           converted = StructOwnedCode(value, tempType, values[index]);
           ownStructTemps.Add(temp);
         }
+        bool copied = false;
+        if (tempType == "string" && targets[index].Kind is "Name" or "Decl") {
+          // q, seen = 1, s.label with s of an inner scope: a copy
+          var kept = StrKept(targets[index].Kind == "Name" ? targets[index].Text : null, values[index], converted, FreshCode(value, converted), scope);
+          copied = kept.Code != converted;
+          converted = kept.Code;
+        }
+        if (tempType == "string" && !copied && FreshCode(value, converted) == "false" && !LibraryCode && IsTextRead(values[index])
+            && StrChangedBy(values[index], values.Skip(index + 1).Select(LaterPart).Concat(ReplacedTargets(targets, index, scope)), scope, false)) {
+          converted = $"df_str_dup({converted})";   // a, b = k.label, k.change() (CodeGen.StringArgs.cs)
+          copied = true;
+        }
         sb.Append($"{pad}{CType(tempType)} {temp} = {converted};\n");
         if (tempType == "string") {
-          string fresh = FreshCode(value, converted);
-          if (values[index].Kind == "Name" && scope.Find(values[index].Text!) is VarInfo { OwnFlag: string sourceFlag }) {
+          string fresh = copied ? "true" : FreshCode(value, converted);
+          if (!copied && values[index].Kind == "Name" && scope.Find(values[index].Text!) is VarInfo { OwnFlag: string sourceFlag }) {
             fresh = NewTemp();
             sb.Append($"{pad}bool {fresh} = {sourceFlag};\n{pad}{sourceFlag} = false;\n");
           }

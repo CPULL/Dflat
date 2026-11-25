@@ -1,0 +1,8 @@
+import Root
+import Root.Tasks
+
+class W {
+  fun taskRun() { wait 1 }
+}
+Task w = Task(W).start()
+w.signal(Token("a.b"))

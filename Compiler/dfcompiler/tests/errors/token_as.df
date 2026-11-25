@@ -1,0 +1,5 @@
+import Root
+import Root.Tasks
+
+Token t = Token("a.b")
+wait t as x { Console.log("never") } timeout 10

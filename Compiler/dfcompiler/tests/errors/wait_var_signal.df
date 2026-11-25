@@ -1,0 +1,10 @@
+// a signal gives no value: its wait has no timeout block that gives one (spec 20.2.8, 20.3)
+import Root
+import Root.Tasks
+
+Signal go = Signal("wait_var_signal.go")
+var r = wait go timeout 30 {
+  Console.log("late")
+  return 1
+}
+Console.log(r)

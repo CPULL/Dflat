@@ -1,0 +1,103 @@
+// tokens (spec 20.3.2): produced and consumed, one for each wait; the owner, the names, the waits on several waitables
+namespace toktest
+import Root
+import Root.Tasks
+
+Token jobs = Token.register("jobs")
+Console.log(jobs.name)
+
+// produced before anybody waits: kept
+jobs.produce()
+jobs.produce(3)
+jobs.produce(0)
+Console.log(jobs.count)
+wait jobs timeout 10
+wait jobs { Console.log("one consumed") } timeout 10 { Console.log("never") }
+Token same = Token("jobs")
+wait same timeout 0
+Console.log(same.count)
+wait jobs timeout 0
+wait jobs { Console.log("never") } timeout 0 { Console.log("no more") }
+
+// several runnables: each token to one
+fun i32 worker(i32 id) {
+  Token work = Token("toktest.work")
+  i32 done = 0
+  while true {
+    wait work { done++ } timeout 200 { return done }
+    wait 2
+  }
+  return done
+}
+
+Token work = Token.register("work")
+Thread w1 = Thread(worker, 1).start()
+Thread w2 = Thread(worker, 2).start()
+Thread w3 = Thread(worker, 3).start()
+wait 50
+work.produce(20)
+wait 20
+work.produce(10)
+i32 total = (wait w1 timeout 3000) + (wait w2 timeout 3000) + (wait w3 timeout 3000)
+Console.log($"{total} done, {work.count} left")
+
+// registered twice
+fun twice() {
+  Token again = Token.register("jobs")
+  Console.log("never")
+  catch TokenAlreadyRegisteredException ex { Console.log(ex.message) }
+}
+twice()
+
+// not registered: produce and the waits are skipped; they work once it is registered
+Token later = Token("later.name")
+later.produce(5)
+wait later { Console.log("never") } timeout 5000 { Console.log("not registered: skipped") }
+Token made = Token.register("later.name")
+Console.log(made.count)
+later.produce()
+wait later { Console.log("registered now") } timeout 10 { Console.log("never") }
+
+// the owner is the runnable that registers: at its end the count disappears and the name is free
+class Owner {
+  fun i32 taskRun() {
+    Token mine = Token.register("owned")
+    mine.produce(7)
+    Token done = Token("toktest.ready")
+    done.produce()
+    wait 100
+    return 1
+  }
+}
+Token ready = Token.register("ready")
+Task owner = Task(Owner, timeout: 2000).start()
+wait ready timeout 2000
+Token owned = Token("owned")
+Console.log(owned.count)
+wait owner timeout 2000
+wait 20
+Console.log(owned.count)
+wait owned { Console.log("never") } timeout 5000 { Console.log("the owner ended") }
+Token ours = Token.register("owned")
+ours.produce()
+Console.log(owned.count)
+
+// with other waitables: the branches take turns, a token of a branch that did not run stays in the count
+Signal stop = Signal("tok.stop")
+Signal other = Signal("tok.other")
+SignalGroup g = SignalGroup(stop, other)
+wait g timeout 1
+work.produce(3)
+other.send()
+string order = ""
+bool more = true
+while more {
+  wait
+    on work { order += "t" }
+    on g as fired {
+      order += fired == other ? { true: "o", default: "s" }
+      if fired == stop { more = false }
+    }
+    timeout 20 { stop.send() }
+}
+Console.log($"{order} {work.count}")

@@ -53,7 +53,7 @@ fun i32 mainThread(i32 k) {
 }
 
 Task t = Task(Counter, timeout: 5000).start()
-Console.log(wait t)
+Console.log(wait t timeout 5000)
 enforce hits {
   Console.log(hits)
 }

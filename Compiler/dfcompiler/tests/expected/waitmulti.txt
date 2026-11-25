@@ -1,0 +1,23 @@
+timeout
+turns 12121
+kept 1 1
+multi.v2 fired
+s1 fired
+tasks one two three 42 1
+replaced 84 3
+move 3
+size 10
+size 20
+late arrived
+group multi.g2
+5
+exclusive free
+2
+2
+true
+from the block
+end
+task failed
+exclusive busy
+a8 b5 last
+---- exit code 0 ----

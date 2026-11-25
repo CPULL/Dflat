@@ -1,0 +1,1 @@
+wait_multi_no_timeout.df(6): error: a wait writes its timeout: wait x timeout 500 (spec 20.2.8)

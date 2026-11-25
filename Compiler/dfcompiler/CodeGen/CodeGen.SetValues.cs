@@ -251,6 +251,7 @@ public sealed partial class CodeGen {
     string result = NewTemp();
     var cases = new StringBuilder();
     string? type = expected;
+    bool fresh = true;
     foreach (var (tags, arm, isDefault) in arms) {
       var armScope = scope;
       string bind = "";
@@ -263,7 +264,15 @@ public sealed partial class CodeGen {
         bind = $"{CType(member)} {cname} = {UnwrapSetValue(held, member)}; ";
       }
       var value = ExprOf(arm.Children[1], armScope, type);
+      if (n.Text == "dispatch" && type != null && value.Type != type) {
+        throw Error($"a value of the set {DisplayName(subject.Type)} chooses the copy of {arm.Children[1].Children[0].Text} when the program runs: all the copies return the same type, not {DisplayName(type)} and {DisplayName(value.Type)} (spec 11.3.6)", n);
+      }
       type ??= value.Type;
+      fresh &= value.Fresh;
+      if (type == "void") {
+        cases.Append($"{(isDefault ? "default:" : string.Join(" ", tags.Select(tag => $"case {tag}u:")))} {{ {bind}{value.Code}; break; }} ");
+        continue;
+      }
       string labels = isDefault ? "default:" : string.Join(" ", tags.Select(tag => $"case {tag}u:"));
       string armCode = Convert(value, type, arm);
       if (type == "string" && !value.Fresh) {
@@ -275,6 +284,9 @@ public sealed partial class CodeGen {
       // a value never assigned and no default: UnassignedTypeException (spec 11.3.6.1, 15.3)
       cases.Append($"case 0u: {{ df_raise(&df_desc_UnassignedTypeException, {fn!.NameConst}); {RaiseJump} }} ");
     }
-    return new Expr($"({{ {SetValueCType()} {held} = {subject.Code}; {CType(type!)} {result} = {ZeroValue(type!)}; switch ({held}.tag) {{ {cases}}} {result}; }})", type!, type == "string");
+    if (type == "void") {
+      return new Expr($"({{ {SetValueCType()} {held} = {subject.Code}; switch ({held}.tag) {{ {cases}}} }})", "void");
+    }
+    return new Expr($"({{ {SetValueCType()} {held} = {subject.Code}; {CType(type!)} {result} = {ZeroValue(type!)}; switch ({held}.tag) {{ {cases}}} {result}; }})", type!, type == "string" || fresh && n.Text == "dispatch");
   }
 }

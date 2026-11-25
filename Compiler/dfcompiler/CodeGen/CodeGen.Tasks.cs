@@ -16,11 +16,11 @@ enum RunStatus { Ready, Running, Completed, Failed, Killed }
 enum RunKind { Process, Task, Thread }
 
 public class Task(u64 handle) {
-  public fun ->Task start(lapse timeout = null) {
+  public fun &Task start(lapse timeout = null) {
     i32 started = Root.Tasks.Native.Start(handle, timeout)
     if started == 1 then throw TaskAlreadyStartedException("The task was already started")
     if started == 2 then throw NoMoreResourcesException("The system cannot start a new thread")
-    return Task(Root.Tasks.Native.Retain(handle))
+    return this
   }
   public fun RunStatus get_status() { (RunStatus)Root.Tasks.Native.Status(handle) }
   public fun RunKind get_kind() { RunKind.Task }
@@ -33,7 +33,7 @@ public class Task(u64 handle) {
 """;
 
   // the names of Root.Tasks (spec 16.1): bare with import Root.Tasks
-  static readonly string[] TasksLibraryNames = { "Task", "Thread", "RunStatus", "RunKind", "Signal", "SignalMode", "KnownSignals", "SignalGroup", "SignalType", "Event", "EventMode", "EventQueueFullMode" };
+  static readonly string[] TasksLibraryNames = { "Task", "Thread", "RunStatus", "RunKind", "Signal", "SignalMode", "KnownSignals", "SignalGroup", "Token", "Event", "EventMode", "EventQueueFullMode" };
 
   // Root.Tasks.Native: the C side of the class Task (RuntimeTasks)
   static void AddTasksStdlib(Action<string, StdFun> add) {
@@ -74,17 +74,26 @@ public class Task(u64 handle) {
     }
     var run = TaskRunOf(cls)
       ?? throw Error($"{DisplayName(cls.Name)} has no taskRun(): a class becomes a task with its function taskRun() (spec 20.1)", n);
+    if (run.Ret == "Thread") {
+      throw Error("the handle of a thread never leaves its task: taskRun() does not give it (spec 20.1)", n);
+    }
     Node? timeout = null;
     Node? linked = null;
+    Node? started = null;
     var ctorArgs = Synthetic("Args", n);
     foreach (var arg in args.Skip(1)) {
       if (arg is { Kind: "Named", Text: "timeout" }) {
         timeout = arg.Children[0];   // the named arguments of Task() are its own, never of the constructor of the class (spec 20.1)
       } else if (arg is { Kind: "Named", Text: "linked" }) {
         linked = arg.Children[0];
+      } else if (arg is { Kind: "Named", Text: StartArgument }) {
+        started = arg;
       } else {
         ctorArgs.Add(arg);
       }
+    }
+    foreach (var given in ctorArgs.Children) {
+      CheckThreadLeaves(given, scope);   // a thread never leaves its task (spec 20.1)
     }
     // the object is built here, on the side of the creator: the exception of its constructor goes to the creator (spec 20.1)
     var obj = ExprOf(Synthetic("Call", n).Add(Synthetic("Name", n, cls.Name)).Add(ctorArgs), scope);
@@ -97,7 +106,7 @@ public class Task(u64 handle) {
       + (run.Ret == "void" ? "0, NULL)" : $"sizeof({CType(run.Ret)}), {TaskDropName(cls)})");
     var made = Synthetic("Call", n).Add(Synthetic("Name", n, "Task"))
       .Add(Synthetic("Args", n).Add(Synthetic("CValue", n, handle).Add(Synthetic("Type", n, "u64"))));
-    return ExprOf(made, scope);
+    return Started(ExprOf(made, scope), started, scope);
   }
 
   FunSig? TaskRunOf(ClassInfo cls) =>
@@ -250,6 +259,12 @@ public class Task(u64 handle) {
 
   // what an expression of type Task knows of its task: made here, or a variable that knows; null when nothing is known
   TaskHandle? TaskHandleOf(Node node, Scope scope) {
+    while (node.Kind is "WritableAddressOf" or "Gift" or "Paren" && node.Children.Count == 1) {
+      node = node.Children[0];   // &t, ->t
+    }
+    if (node.Kind == "Call" && node.Children[0] is { Kind: "Member", Text: "start" } started && started.Children[0].Kind is "Name" or "Member") {
+      return TaskHandleOf(started.Children[0], scope);   // a.start(): the handle itself (spec 20.1)
+    }
     if (TaskClassOfNode(node, scope) is ClassInfo made) {
       return new TaskHandle(made, TaskRunOf(made)!.Ret);
     }
@@ -305,6 +320,23 @@ public class Task(u64 handle) {
     }
   }
 
+  void NoteHoistedTask(Node decl, Scope scope) {
+    if (!TasksMode || !scope.Vars.TryGetValue(decl.Text!, out var variable) || variable.Type is not ("Task" or "Thread")) {
+      return;
+    }
+    string? saved = handlerOverride;
+    handlerOverride ??= "df_hoist_typing";
+    hoistTyping++;
+    try {
+      NoteTaskVar(decl, scope);
+    } catch (CompileException) {
+      // reported when the declaration is compiled
+    } finally {
+      hoistTyping--;
+      handlerOverride = saved;
+    }
+  }
+
   // the parameters of a function: a Task<...> parameter knows what its task is (spec 20.9)
   void NoteTaskParams(FunSig f, Scope scope) {
     if (!TasksMode) {
@@ -321,7 +353,7 @@ public class Task(u64 handle) {
 
   // f(t) with a parameter Task<...>: the argument must fit (spec 20.9)
   void CheckTaskArgument(FunSig f, ParamSig p, Node arg, Scope scope) {
-    if (TasksMode && p.Type is "Task" or "Thread" && taskParamTypes.TryGetValue((f.Node, p.Name), out var typeNode) && taskTypeSpecs.TryGetValue(typeNode, out var spec)) {
+    if (TasksMode && !HoistTyping && p.Type is "Task" or "Thread" && taskParamTypes.TryGetValue((f.Node, p.Name), out var typeNode) && taskTypeSpecs.TryGetValue(typeNode, out var spec)) {
       CheckTaskHandleValue(ResolveTaskSpec(spec), TaskHandleOf(arg, scope), arg);
     }
   }
@@ -349,6 +381,7 @@ public class Task(u64 handle) {
     var bound = new VarInfo("Task", cname, false);
     inner.Vars[n.Text!] = bound;
     taskHandles[bound] = handle;
+    taskAliases[bound] = n.Children[0];
     return (condition, inner);
   }
 
@@ -366,7 +399,7 @@ public class Task(u64 handle) {
   string Serving(string call) => InTaskRunBody ? $"DF_SERVING(self, {call})" : call;
 
   static bool HasCheckpoint(Node node) =>
-    node.Kind is "Wait" or "WaitOn" or "Return" or "ReturnHold" or "ReturnPost" or "Enforce" || IsTimeWaitCall(node)
+    node.Kind is "Wait" or "WaitOn" or "WaitMulti" or "Return" or "ReturnHold" or "ReturnPost" or "Enforce" || IsTimeWaitCall(node)
     || node.Kind is not ("Lambda" or "Fun") && node.Children.Any(HasCheckpoint);
 
   // Root.Time.wait(t), Time.wait(t): a timed wait (spec 20.8); seen by its shape, before the names are resolved
@@ -375,27 +408,81 @@ public class Task(u64 handle) {
     && member.Children[0] is { Kind: "Name", Text: "Time" } or { Kind: "Member", Text: "Time" };
   // ---------------------------------------------------------------- wait (spec 20.2)
 
-  // enforce wait t timeout 1000 default { 123 } (spec 20.2, 7.2.6): the default is the value when the wait gives nothing (a timeout, a
-  // task that ended or never started). Lowered before the other enforce expressions: the wait keeps its default as WaitDefault
+  // the timeout block of a wait that gives a value (spec 20.2.8): one value stays in the wait (WaitDefault), several lines run after it
+  // (WaitNote). Lowered before the enforce expressions
   void LowerWaitDefaults(Node node) {
     for (int index = 0; index < node.Children.Count; index++) {
       var child = node.Children[index];
       if (child is { Kind: "EnforceExpr" } && child.Children.Count > 0 && child.Children[0].Kind == "Wait") {
-        var clauses = child.Children.Skip(1).ToList();
-        if (clauses.Count != 1 || clauses[0].Kind != "EnforceDefault") {
-          throw Error("enforce wait takes one clause, default { value }: the value when the wait gives nothing (spec 20.2)", child);
+        throw Error("enforce wait ... default is replaced by the timeout block: wait t timeout 1000 { 123 } (spec 20.2.8)", child);
+      }
+      if (child is { Kind: "Decl" } && child.Children.FirstOrDefault(c => c.Kind == "Init") is { Children: [{ Kind: "Wait" } declWait] } declInit
+          && declWait.Children.FirstOrDefault(c => c.Kind == "TimeoutBlock") is Node longBlock && longBlock.Children[0].Children is not [{ Kind: "ExprStmt" }]) {
+        // i32 r = wait t timeout 500 { log("late"); return -1 } (spec 20.2.8, 7.2.6): r takes what the wait gives, then the timeout block runs
+        // when the wait gave nothing (its C flag, WaitNote) and gives r its value with return
+        string note = $"df_wnote{++enforceTemps}";
+        declWait.Children.RemoveAll(c => c == longBlock);
+        declWait.Add(Synthetic("WaitNote", longBlock, note));
+        var lateBlock = ValueBlock(longBlock.Children[0], child.Text!);
+        NoteLateValues(lateBlock, child.Text!);
+        var late = Synthetic("If", longBlock).Add(Synthetic("CValue", longBlock, note).Add(Synthetic("Type", longBlock, "bool")))
+          .Add(lateBlock);
+        node.Children.Insert(index + 1, late);
+      }
+      if (child is { Kind: "ExprStmt", Children: [{ Kind: "Wait" } statementWait] } && statementWait.Children.Any(c => c.Kind == "TimeoutBlock")) {
+        // wait t timeout 50 { ... } as a statement (spec 20.2.1): the statement form, with no block for the waitable
+        var waitOn = Synthetic("WaitOn", statementWait);
+        waitOn.Children.AddRange(statementWait.Children);
+        node.Children[index] = waitOn;
+        child = waitOn;
+      }
+      if (child is { Kind: "Wait" } && child.Children.FirstOrDefault(c => c.Kind == "TimeoutBlock") is Node timeoutBlock) {
+        // var res = wait t timeout 500 { 0 } (spec 20.2.8, 7.2.6): the value of the timeout block when the wait gives nothing
+        var body = timeoutBlock.Children[0];
+        if (body.Children is not [{ Kind: "ExprStmt" } value]) {
+          throw Error("the timeout block of a wait that gives a value is one value for now: timeout 500 { 0 } (spec 20.2.8)", body);
         }
-        var block = clauses[0].Children.First(c => c.Kind == "Block");
-        if (block.Children is not [{ Kind: "ExprStmt" } single]) {
-          throw Error("the default of enforce wait is one value: default { 123 } (spec 20.2)", block);
-        }
-        var waited = child.Children[0];
-        waited.Add(Synthetic("WaitDefault", block).Add(single.Children[0]));
-        node.Children[index] = waited;
-        child = waited;
+        child.Children.Remove(timeoutBlock);
+        child.Add(Synthetic("WaitDefault", body).Add(value.Children[0]));
       }
       LowerWaitDefaults(child);
     }
+  }
+
+  // a wait always writes its timeout (spec 20.2.8); the waitables have none of their own
+  void RequireWaitTimeout(Node? timeoutNode, Node at) {
+    if (timeoutNode == null) {
+      throw Error("a wait writes its timeout: wait x timeout 500 (spec 20.2.8)", at);
+    }
+  }
+
+  readonly HashSet<Node> lateValues = new(ReferenceEqualityComparer.Instance);   // the names assigned by the return of a timeout block
+
+  void NoteLateValues(Node node, string target) {
+    if (node.Kind == "Assign" && node.Children[0] is { Kind: "Name" } name && name.Text == target) {
+      lateValues.Add(name);
+    }
+    node.Children.ForEach(child => NoteLateValues(child, target));
+  }
+
+  // the C flag of a wait whose timeout block runs after it, true when the wait gave nothing; null for any other wait (spec 20.2.8)
+  string? WaitNoteFlag(Node wait) {
+    if (wait.Children.FirstOrDefault(c => c.Kind == "WaitNote")?.Text is not string note) {
+      return null;
+    }
+    if (paramKeeps.Add((fn!, note))) {
+      fn!.Decls.Append($"  bool {note} = false;\n  (void){note};\n");
+    }
+    return note;
+  }
+
+  // the call of a wait: the silent exceptions it can leave (none: ""). A timeout is none of them, its note goes away
+  string WaitCall(string call, Node n, string exceptions) {
+    string temp = NewTemp();
+    if (exceptions == "") {
+      return $"({{ df_exception* {temp} = {call}; df_silent_desc = NULL; {temp}; }})";
+    }
+    return SilentCall($"({{ df_exception* {temp} = {call}; if (df_silent_desc == &df_note_late) {{ df_silent_desc = NULL; }} {temp}; }})", "Exception", exceptions, n);
   }
 
   // T x = wait t, var x = wait t: a value is wanted; a plain Task (a parameter, a field) does not know the result of its task (spec 20.9)
@@ -425,16 +512,26 @@ public class Task(u64 handle) {
     }
     var target = n.Children[0];
     var timeoutNode = n.Children.FirstOrDefault(c => c.Kind == "Timeout")?.Children[0];
-    if (timeoutNode == null) {
-      CheckWaitHasTimeout(target is { Kind: "Call", Children: [{ Kind: "Member" } calledMember, ..] } && TaskMethodTarget(target, scope) != null
-        ? calledMember.Children[0] : target, scope, n);   // spec 20.1, 20.2 (CodeGen.TaskHandles.cs)
-    }
     if (TaskMethodTarget(target, scope) is { } waitedCall) {
+      RequireWaitTimeout(timeoutNode, n);
       // wait t.getCount() timeout 500: a call through the handle that gives a value (spec 20.1)
       string callTimeout = timeoutNode == null ? "0" : Convert(ExprOf(timeoutNode, scope, "lapse"), "lapse", timeoutNode);
-      return TaskMethodCall(target, waitedCall.Receiver, waitedCall.Cls, true, callTimeout, scope);
+      if (n.Children.FirstOrDefault(c => c.Kind == "WaitDefault") is Node callDefault) {
+        // wait t.getCount() timeout 500 { 0 }: the value of the timeout block when the call gives nothing (spec 20.2.8)
+        string nothing = NewTemp();
+        var made = TaskMethodCall(target, waitedCall.Receiver, waitedCall.Cls, true, callTimeout, scope, nothing);
+        string value = NewTemp();
+        var other = ExprOf(callDefault.Children[0], scope, made.Type);
+        string otherCode = Convert(other, made.Type, callDefault);
+        return made with { Code = $"({{ bool {nothing} = false; {CType(made.Type)} {value} = {made.Code}; "
+          + $"if ({nothing}) {{ {value} = {(made.Type == "string" ? StrOwned(other, otherCode) : otherCode)}; }} {value}; }})" };
+      }
+      return TaskMethodCall(target, waitedCall.Receiver, waitedCall.Cls, true, callTimeout, scope, WaitNoteFlag(n));
     }
     var waited = ExprOf(target, scope);
+    if (!(IsNumeric(waited.Type) || waited.Type == "lapse" || n.Children.Any(c => c.Kind == "WaitTaken"))) {
+      RequireWaitTimeout(timeoutNode, n);
+    }
     if (IsNumeric(waited.Type) || waited.Type == "lapse") {
       if (timeoutNode != null) {
         throw Error("wait 250 waits a time: it has no timeout (spec 20.8)", n);
@@ -445,23 +542,31 @@ public class Task(u64 handle) {
       }
       return new Expr(TasksMode ? CheckRaise($"df_task_pause({lapse}, NULL)", "void") : $"df_time_sleep({lapse})", "void");   // wait 250, wait lapse(10) (spec 20.8); the cancel signal of a runnable (20.10)
     }
-    if (waited.Type == "Signal") {
+    if (waited.Type is "Signal" or "Token") {
       return SignalWait(n, waited, timeoutNode, scope);   // spec 20.3 (CodeGen.Signals.cs)
     }
     if (waited.Type == "SignalGroup") {
-      return SignalGroupWait(n, target, waited, timeoutNode, scope);   // spec 20.3 (CodeGen.Signals.cs)
+      return SignalGroupWait(n, waited, timeoutNode!, scope);   // spec 20.3 (CodeGen.Signals.cs)
     }
     if (waited.Type is not ("Task" or "Thread")) {
-      throw Error($"wait takes a task, a thread, a signal or a time, not {DisplayName(waited.Type)} (spec 20.2)", target);
+      throw Error($"wait takes a task, a thread, a signal, a token or a time, not {DisplayName(waited.Type)} (spec 20.2)", target);
+    }
+    if (!n.Children.Any(c => c.Kind == "WaitTaken")) {
+      CheckCanWait(target, waited, scope);   // spec 20.2.6
     }
     string ret = TaskHandleOf(target, scope)?.Ret ?? "void";
-    string timeoutCode = timeoutNode == null ? "0" : Convert(ExprOf(timeoutNode, scope, "lapse"), "lapse", timeoutNode);
-    // the handle: a Task made here lives until the end of the statement
-    string handle = $"({TempObject(waited).Code})->m_handle";
+    if (n.Children.FirstOrDefault(c => c.Kind == "WaitTaken") is Node taken) {
+      return new Expr(taken.Text!, ret, ret == "string" || IsClass(ret) || IsArr(ret));   // a branch of a wait on several waitables: the value is there
+    }
+    if (HoistTyping) {
+      if (ret == "void") {
+        throw Error(TaskHandleOf(target, scope) == null ? "this Task does not say what its task gives: wait on it gives no value (spec 20.9)"
+          : "this task returns nothing: wait on it gives no value", n);
+      }
+      return new Expr("0", ret, ret == "string" || IsClass(ret) || IsArr(ret));   // only the type is wanted
+    }
     string slot = NewTemp();
-    string error = NewTemp();
-    string call = Serving($"df_task_wait({handle}, {(ret == "void" ? "NULL, 0" : $"&{slot}, sizeof({slot})")}, {timeoutCode})");
-    string jump = $"if ({error}) {{ df_err = {error}; df_err_thrown = false; goto {Handler}; }}";
+    string outCode = ret == "void" ? "NULL, 0" : $"&{slot}, sizeof({slot})";
     bool fresh = ret == "string" || IsClass(ret) || IsArr(ret);
     if (n.Children.FirstOrDefault(c => c.Kind == "WaitDefault") is Node defaultNode) {
       // enforce wait ... default { v }: v when the wait gives nothing
@@ -470,14 +575,23 @@ public class Task(u64 handle) {
       }
       var fallback = ExprOf(defaultNode.Children[0], scope, ret);
       string note = NewTemp();
-      return new Expr($"({{ {CType(ret)} {slot}; df_exception* {error} = {call}; const df_descriptor* {note} = df_silent_desc; df_silent_desc = NULL; "
-        + $"{jump} if ({note}) {{ {slot} = {Convert(fallback, ret, defaultNode)}; }} {slot}; }})", ret, fresh);
+      string waitCode = WaitOne(n, waited, outCode, timeoutNode!, null, null, scope, note);
+      return new Expr($"({{ {CType(ret)} {slot} = {ZeroValue(ret)}; const df_descriptor* {note} = NULL; {waitCode} "
+        + $"if ({note}) {{ {slot} = {(ret == "string" ? StrOwned(fallback, Convert(fallback, ret, defaultNode)) : Convert(fallback, ret, defaultNode))}; }} {slot}; }})", ret, fresh);
     }
-    string waitCall = SilentCall(call, "Exception", "WaitTimeoutException,TaskAlreadyTerminatedException,TaskWasNotStartedException", n);
+    if (WaitNoteFlag(n) is string flag) {
+      if (ret == "void") {
+        throw Error("this wait gives no value: wait x timeout 500 { ... } is a statement (spec 20.2.8)", n);
+      }
+      string silent = NewTemp();
+      string noted = WaitOne(n, waited, outCode, timeoutNode!, null, null, scope, silent);
+      return new Expr($"({{ {CType(ret)} {slot} = {ZeroValue(ret)}; const df_descriptor* {silent} = NULL; {flag} = false; {noted} {flag} = {silent} != NULL; {slot}; }})", ret, fresh);
+    }
+    string waitCall = WaitOne(n, waited, outCode, timeoutNode!, "TaskAlreadyTerminatedException,TaskWasNotStartedException", null, scope);
     if (ret == "void") {
-      return new Expr($"({{ df_exception* {error} = {waitCall}; {jump} }})", "void");
+      return new Expr($"({{ {waitCall} }})", "void");
     }
-    return new Expr($"({{ {CType(ret)} {slot}; df_exception* {error} = {waitCall}; {jump} {slot}; }})", ret, fresh);
+    return new Expr($"({{ {CType(ret)} {slot} = {ZeroValue(ret)}; {waitCall} {slot}; }})", ret, fresh);
   }
 
   // ---------------------------------------------------------------- calls through the handle (spec 20.1)
@@ -487,7 +601,7 @@ public class Task(u64 handle) {
     && run.Name.Split('.')[^1] == "taskRun" && run.Params.Count == 0;
 
   static bool ContainsWait(Node node) =>
-    node.Kind is "Wait" or "WaitOn" || node.Kind is not ("Lambda" or "Fun") && node.Children.Any(ContainsWait);
+    node.Kind is "Wait" or "WaitOn" or "WaitMulti" || node.Kind is not ("Lambda" or "Fun") && node.Children.Any(ContainsWait);
 
   // before a statement of taskRun() that is a checkpoint (a return, an enforce, a wait in it): the calls waiting are served
   void EmitCheckpoint(Node s, StringBuilder sb, string pad) {
@@ -568,6 +682,9 @@ public class Task(u64 handle) {
     if (taskCallRecords.TryGetValue(f, out var known)) {
       return known;
     }
+    if (f.Ret == "Thread" || f.Params.Any(p => p.Type == "Thread")) {
+      throw Error("the handle of a thread never leaves its task (spec 20.1)", at);
+    }
     foreach (var p in f.Params) {
       if (p.IsVariadic || IsCountedType(p.Type) || IsWeakType(p.Type) || p.IsWeak || IsFunType(p.Type)) {
         throw Error($"'{p.Name}' of {f.Name.Split('.')[^1]}: a call through the handle does not pass variadic, counted, weak or function parameters yet (spec 20.1)", at);
@@ -634,7 +751,7 @@ public class Task(u64 handle) {
   }
 
   // t.method(args) through the handle (spec 20.1): posted when the method returns nothing; waited for with wait t.method() timeout n
-  Expr TaskMethodCall(Node call, Node receiverNode, ClassInfo cls, bool waited, string timeoutCode, Scope scope) {
+  Expr TaskMethodCall(Node call, Node receiverNode, ClassInfo cls, bool waited, string timeoutCode, Scope scope, string? nothing = null) {
     var member = call.Children[0];
     string name = member.Text!;
     var args = call.Children[1].Children;
@@ -722,8 +839,11 @@ public class Task(u64 handle) {
     string error = NewTemp();
     string result = NewTemp();
     string waitCall = SilentCall(Serving($"df_task_wait_call({handle}, &{rec}->head, {timeoutCode}, &{got})"), "Exception",
-      "WaitTimeoutException,TaskAlreadyTerminatedException", call);
+      "TaskAlreadyTerminatedException", call);
     code.Append($"bool {got}; df_exception* {error} = {waitCall}; {CType(f.Ret)} {result} = {ZeroValue(f.Ret)}; ");
+    if (nothing != null) {
+      code.Append($"{nothing} = !{got}; ");
+    }
     code.Append($"if ({got}) {{ {result} = {rec}->result; {rec}->taken = true; }} df_task_call_release(&{rec}->head); ");
     code.Append($"if ({error}) {{ df_err = {error}; df_err_thrown = false; goto {Handler}; }} {result}; }})");
     return new Expr(code.ToString(), f.Ret, f.Ret == "string" || !TaskCallValueType(f.Ret) && !IsMulti(f.Ret));
@@ -760,7 +880,13 @@ public class Task(u64 handle) {
       drop = ThreadRecord(currentFun!, s) + "_drop";
       give = $"df_thread_give_from((void*){currentFun!.CName}, &{{0}}, {mode})";
     }
-    string value = ReturnValueCode(s, scope, sb, pad) ?? ZeroValue(currentRet!);
+    givingValue = true;
+    string value;
+    try {
+      value = ReturnValueCode(s, scope, sb, pad) ?? ZeroValue(currentRet!);
+    } finally {
+      givingValue = false;
+    }
     string held = NewTemp();
     sb.Append($"{pad}{{\n{pad}  {CType(currentRet!)} {held} = {value};\n");
     sb.Append($"{pad}  if (!{string.Format(give, held)}) {{\n");

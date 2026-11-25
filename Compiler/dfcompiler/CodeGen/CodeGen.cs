@@ -138,7 +138,6 @@ sealed class VarInfo {
   public string? OwnFlag { get; set; }     // a string variable: the C flag that says whether it owns its string (CodeGen.Strings.cs)
   public bool ReadOnlyString { get; set; } // a string parameter or loop variable: a read-only borrow, never changed in place (spec 4.1)
   public bool LoopVar { get; set; }        // the plain variable of a for loop: a read-only lend of each item (spec 6.4)
-  public VarInfo? AliasOf { get; set; }    // string b = a: b is known to be the same string as a (spec 4.1, in place through an alias)
   public bool FnWrites { get; set; }       // a function value with a & capture (spec 13.3.3)
   public bool FnBorrows { get; set; }      // a function value that may borrow (a lambda with a borrowed capture, or a parameter): it is not
                                            // stored past its variables or returned (spec 13.3.4)
@@ -208,7 +207,8 @@ public sealed partial class CodeGen {
         throw Error($"setColors takes Console.Color values or null, not {value.Type}", arg);
       }
     }
-    return new Expr($"df_console_set_colors({codes[0]}, {codes[1]})", "void");
+    codes = ArgsInOrder(args.Cast<Node?>().ToList(), codes, out string prefix);
+    return ArgsFirst(new Expr($"df_console_set_colors({codes[0]}, {codes[1]})", "void"), prefix);
   }
 
   static readonly Dictionary<string, string> MathConsts = new() {
@@ -258,8 +258,12 @@ public sealed partial class CodeGen {
   // ---------------------------------------------------------------- entry
 
   public string Generate(Node program) {
+    programNode = program;
+    LowerIntegerLimits(program);   // uns.MAX, i8.MIN (spec 2.1)
     LowerMutexDecls(program);   // mutex T name = v timeout ms (spec 20.13, CodeGen.Mutex.cs)
     if (TasksMode) {
+      LowerTaskStarts(program);   // Task(MyTask).start(): one new handle (spec 20.1, CodeGen.TaskOwners.cs)
+      LowerWaitMulti(program, new List<Node>());   // the scopes of the waits on several waitables (spec 20.2.4, CodeGen.WaitMulti.cs)
       LowerWaitDefaults(program);   // enforce wait ... default { v } (spec 20.2, CodeGen.Tasks.cs)
       LowerTaskHandleTypes(program);   // Task<MyTask>, Task<*, i32> (spec 20.9)
       LowerEventTypes(program);   // Event<Size>, Sender<T> (spec 20.4, CodeGen.Events.cs)
@@ -893,13 +897,30 @@ public sealed partial class CodeGen {
     }
     pendingMoves.Clear();
     WarnLoopWithoutCheckpoint(s);   // spec 20.8, level 1
+    EmitStrDetaches(s, sb, scope, Pad(indent));   // strings behave as values (spec 4, CodeGen.StringValues.cs)
     EmitCheckpoint(s, sb, Pad(indent));   // a checkpoint of taskRun(): the calls through the handle are served (spec 20.8, CodeGen.Tasks.cs)
     if (s.Kind == "Wait") {
       sb.Append(Pad(indent)).Append(TaskWait(s, scope).Code).Append(";\n");   // a bare wait, wait t, wait 250 (spec 20.8)
       return;
     }
+    if (s.Kind is "WaitOn" or "WaitMulti" && s.Children.Any(c => c.Kind is "Catch" or "AtEnd" or "EnforceDefault")) {
+      EmitWaitClauses(s, sb, scope, indent);   // catch E on x, atEnd, default (spec 20.2.7, CodeGen.WaitMulti.cs)
+      return;
+    }
     if (s.Kind == "WaitOn") {
       EmitWaitOn(s, sb, scope, indent);   // wait on ev as data { } (spec 20.4.7, CodeGen.Events.cs)
+      return;
+    }
+    if (s.Kind == "WaitMulti") {
+      EmitWaitMulti(s, sb, scope, indent);   // spec 20.2.1 (CodeGen.WaitMulti.cs)
+      return;
+    }
+    if (s.Kind == "WaitBranchBody") {
+      EmitWaitBranchBody(s, sb, scope, indent);
+      return;
+    }
+    if (s.Kind == "WaitSetEnd") {
+      EmitWaitSetEnd(s, sb, Pad(indent));   // the scope of a wait on several waitables ends (spec 20.2.4)
       return;
     }
     if (s.Kind == "Semaphore") {
@@ -938,7 +959,6 @@ public sealed partial class CodeGen {
         }
         EmitDecl(s, sb, scope, pad);
         NoteTaskVar(s, scope);   // a Task variable made on its line knows its class (spec 20.9)
-        NoteNoTimeout(s, scope);   // made with no timeout: a wait on it needs one (spec 20.2)
         NoteEventVar(s, scope);   // Event<Size> (spec 20.4)
         return;
 
@@ -1066,7 +1086,9 @@ public sealed partial class CodeGen {
           // a result nobody keeps: say so to the C compiler (a call that checks an exception is a statement expression)
           sb.Append(pad).Append(e.Type == "void" || IsMulti(e.Type) ? e.Code : $"(void)({e.Code})").Append(";\n");
         } else {
-          Warn("expression result is not used", s);
+          if (e.Type != "void") {
+            Warn("expression result is not used", s);
+          }
           sb.Append(pad).Append($"(void)({e.Code});\n");
         }
         return;
@@ -1133,6 +1155,10 @@ public sealed partial class CodeGen {
 
       case "Switch":
         EmitSwitch(s, sb, scope, indent);
+        return;
+
+      case "TypeSwitchStmt":
+        EmitTypeSwitch(s, sb, scope, indent);   // switch value is ? { } (spec 11.3.7)
         return;
 
       case "Enforce":
@@ -1297,6 +1323,9 @@ public sealed partial class CodeGen {
       code = $"df_str_dup({code})";
       ownsString = "true";
     }
+    if (type == "string" && init != null) {
+      (code, ownsString) = StrKept(null, init.Kind == "Init" ? init.Children[0] : init, code, ownsString, scope);
+    }
     if (frames.Peek().Hoisted.TryGetValue(s.Text!, out var hoisted)) {
       // already created at the start of the scope (the scope has atEnd blocks)
       variable = hoisted;
@@ -1327,9 +1356,6 @@ public sealed partial class CodeGen {
     variable.FnBorrows = IsFunType(type) && init != null && FnMayBorrow(init.Children[0], scope);
     variable.FnBorrowed = variable.FnBorrows ? FnBorrowedOf(init!.Children[0], scope) : null;
     variable.FnWrites = IsFunType(type) && init != null && FnMayWrite(init.Children[0], scope);
-    if (type == "string" && init?.Children[0] is { Kind: "Name" } source && scope.Find(source.Text!) is VarInfo { Type: "string" } original) {
-      variable.AliasOf = original.AliasOf ?? original;
-    }
     if (init != null && !weak && IsArr(type) && ConstantArrayLength(init.Children[0]) is long length && !AssignedAgain(s.Text!)) {
       variable.KnownLength = length;
     }
@@ -1907,11 +1933,12 @@ public sealed partial class CodeGen {
       if (IsPointer(target.Type)) {
         return PointerAssign(target, value);   // the old value gives back its count (spec 12.1)
       }
-      if (target.Type == "string" && SharedFieldString(target, targetNode, s, scope) is string shared) {
-        return shared;   // k.label = a: the field takes the string of a (spec 4)
-      }
       if (target.Type == "string") {
-        return StrAssign(target, FreshCode(assigned, value), value);
+        var kept = (Code: value, Fresh: FreshCode(assigned, value));
+        if (target.Variable?.OwnFlag != null && targetNode.Kind == "Name") {
+          kept = StrKept(targetNode.Text, s.Children[1], kept.Code, kept.Fresh, scope);
+        }
+        return StrAssign(target, kept.Fresh, kept.Code);
       }
       return $"{target.Code} = {value}";
     }
@@ -1957,15 +1984,16 @@ public sealed partial class CodeGen {
     if (expected != null && n.Kind == "Call" && classInstanceArgs.TryGetValue(expected, out var declaredInstance) && declaredInstance.Args.Any(IsSetValue)) {
       declaredSetTarget = expected;   // Box<Num> b = Box<Num>(5): the copy keeps the set (spec 11.3.6)
     }
+    NoteStrCopyReads(n, scope);   // spec 2.5, 4: f(k.label, k.change())
     var e = ExprOfNode(n, scope, expected);
     e = EnforceSourceCall(n, e);
     if (IsFunType(e.Type) && n.Kind == "Call") {
       return e with { Fresh = true };   // a call gives a usage of the function value it returns (spec 13.3)
     }
     if (e.Type == "string?") {
-      return e with { Fresh = n.Kind == "Call" || (n.Kind is not ("Name" or "Member" or "Index" or "SafeMember") && e.Fresh) };   // a call gives a new string? (spec 7.1)
+      return StrCopyRead(n, e with { Fresh = n.Kind == "Call" || (n.Kind is not ("Name" or "Member" or "Index" or "SafeMember") && e.Fresh) });   // a call gives a new string? (spec 7.1)
     }
-    return e.Type == "string" ? e with { Fresh = StrNodeFresh(n, e) } : e;
+    return e.Type == "string" ? StrCopyRead(n, e with { Fresh = StrNodeFresh(n, e) }) : e;
   }
 
   Expr ExprOfNode(Node n, Scope scope, string? expected) {
@@ -2105,7 +2133,7 @@ public sealed partial class CodeGen {
         return Transmute(n, scope);
       case "Call":
         CheckGlobalCall(n, scope);   // spec 18.3
-        return DerefLend(RemoveCountingCall(n, scope) ?? CloneCall(n, scope) ?? Call(n, scope));   // a &T result of a value: (*address)
+        return SetDispatch(n, scope) ?? DerefLend(RemoveCountingCall(n, scope) ?? CloneCall(n, scope) ?? Call(n, scope));   // a &T result of a value: (*address)
       case "CtorChain":
         return CtorChainCall(n, scope);
       case "Member":
@@ -2165,6 +2193,7 @@ public sealed partial class CodeGen {
       case "WritablePointerOf":
         return PointerOf(n.Children[0], true, scope, n);   // &*x (spec 12.1)
       case "Copy": {
+        CheckTaskCopy(n, scope);   // t!: a handle has one owner (spec 20.1)
         if (HandlePlaceType(n.Children[0], scope) != null) {
           throw Error("a handle cannot be copied, only moved with -> (spec 22)", n);
         }
@@ -2360,6 +2389,8 @@ public sealed partial class CodeGen {
         "s" => "i16",
         "us" or "su" => "u16",
         "b" or "ub" or "bu" => "u8",
+        LimitI8 => "i8",
+        LimitI32 => "i32",
         _ => throw Error($"unknown suffix '{suffix}'", n)
       };
     }
@@ -2369,6 +2400,29 @@ public sealed partial class CodeGen {
       throw Error($"{value} doesn't fit in {type}", n);
     }
     return new Expr(IntConstCode(value, type), type);
+  }
+
+  // the suffixes of i8.MAX and i32.MAX: no literal of the program has them
+  const string LimitI8 = "\uFF42";
+  const string LimitI32 = "\uFF49";
+
+  // type.MIN and type.MAX of the integer types (spec 2.1): the literal of that type, a constant everywhere
+  static void LowerIntegerLimits(Node node) {
+    for (int index = 0; index < node.Children.Count; index++) {
+      var child = node.Children[index];
+      if (child is { Kind: "Member", Text: "MIN" or "MAX", Children: [{ Kind: "Name", Text: string written }] } && Normalize(written) is string type && IntTypes.Contains(type)) {
+        var (min, max) = IntRange(type);
+        var value = child.Text == "MIN" ? min : max;
+        string suffix = type switch { "i8" => LimitI8, "i16" => "s", "i32" => LimitI32, "i64" => "l", "u8" => "b", "u16" => "us", "u32" => "u", _ => "ul" };
+        var literal = Synthetic("Int", child, BigInteger.Abs(value) + suffix);
+        node.Children[index] = value < 0 ? Synthetic("Paren", child).Add(Synthetic("Neg", child).Add(literal)) : literal;
+        continue;
+      }
+      if (child is { Kind: "Member", Text: "MIN" or "MAX", Children: [{ Kind: "Name", Text: "r32" or "r64" or "real" or "bool" or "char" or "string" }] }) {
+        throw Error($"{child.Text} is a constant of the integer types, not of {child.Children[0].Text} (spec 2.1)", child);
+      }
+      LowerIntegerLimits(child);
+    }
   }
 
   static (BigInteger, BigInteger) IntRange(string t) {
@@ -2553,7 +2607,7 @@ public sealed partial class CodeGen {
       return Combine(op, lit, right, n);
     }
     var left = ExprOf(n.Children[0], scope, context);
-    if (HasEffects(n.Children[0]) && !IsLiteralNode(n.Children[1]) && left.Type is not ("void" or "null")) {
+    if ((HasEffects(n.Children[0]) && !IsLiteralNode(n.Children[1]) || HasEffects(n.Children[1]) && !IsLiteralNode(n.Children[0])) && left.Type is not ("void" or "null")) {
       // twice(&t) + t: the left side runs first, then the right one reads (left to right; C leaves the order open)
       string held = NewTemp();
       var combined = BinaryOp(op, left with { Code = held }, n.Children[1], scope, n);
@@ -2653,6 +2707,9 @@ public sealed partial class CodeGen {
     r = StrReadExpr(r);
     if (IsTimeType(l.Type) || IsTimeType(r.Type)) {
       return TimeOp(op, l, r, at);
+    }
+    if (SignalEquality(op, l, r) is Expr sameSignal) {
+      return sameSignal;   // spec 20.3 (CodeGen.Signals.cs)
     }
     if (op is "==" or "!=") {
       string equal = EqualsCode(l, r, at);
@@ -2924,6 +2981,9 @@ public sealed partial class CodeGen {
     }
     if (EventMaker(n, scope) is Expr eventMade) {
       return eventMade;   // Event.register(...), Event(name) (spec 20.4.3)
+    }
+    if (TokenMaker(n, scope) is Expr token) {
+      return token;   // Token.register(name), Token(name) (spec 20.3.2, CodeGen.Signals.cs)
     }
     if (RunnableSignalCall(n, scope) is Expr signalled) {
       return signalled;   // t.signal(s) (spec 20.3.1, CodeGen.Signals.cs)

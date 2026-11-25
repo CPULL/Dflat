@@ -363,17 +363,17 @@ static const df_descriptor df_desc_ReadLockBecameWriteLockException = { 55, "Rea
 static const df_descriptor df_desc_StringTruncatedException = { 56, "StringTruncatedException", &df_desc_Exception, true };
 static const df_descriptor df_desc_PrecisionLostException = { 57, "PrecisionLostException", &df_desc_Exception, true };
 /* Root.Tasks (spec 20.1, 20.2) */
-static const df_descriptor df_desc_WaitTimeoutException = { 58, "WaitTimeoutException", &df_desc_Exception, true };
 static const df_descriptor df_desc_TaskAlreadyTerminatedException = { 59, "TaskAlreadyTerminatedException", &df_desc_Exception, true };
 static const df_descriptor df_desc_TaskWasNotStartedException = { 60, "TaskWasNotStartedException", &df_desc_Exception, true };
 static const df_descriptor df_desc_CalledANotRunningTaskException = { 61, "CalledANotRunningTaskException", &df_desc_Exception, false };
 static const df_descriptor df_desc_TaskAlreadyStartedException = { 62, "TaskAlreadyStartedException", &df_desc_Exception, false };
 static const df_descriptor df_desc_ReturnOutsideATaskException = { 63, "ReturnOutsideATaskException", &df_desc_Exception, false };
-static const df_descriptor df_desc_WaitingWithoutTimeoutException = { 64, "WaitingWithoutTimeoutException", &df_desc_Exception, false };
 static const df_descriptor df_desc_ThreadStartedByAThreadException = { 65, "ThreadStartedByAThreadException", &df_desc_Exception, false };
 static const df_descriptor df_desc_SignalModeMismatchException = { 66, "SignalModeMismatchException", &df_desc_Exception, false };
 static const df_descriptor df_desc_ExclusiveSignalBusyException = { 67, "ExclusiveSignalBusyException", &df_desc_Exception, false };
 static const df_descriptor df_desc_ReservedSignalException = { 68, "ReservedSignalException", &df_desc_Exception, false };
+static const df_descriptor df_desc_WaitingOnANotOwnedTaskException = { 70, "WaitingOnANotOwnedTaskException", &df_desc_Exception, false };
+static const df_descriptor df_desc_TokenAlreadyRegisteredException = { 71, "TokenAlreadyRegisteredException", &df_desc_Exception, false };
 static const df_descriptor df_desc_DuplicateEventNameWithDataMismatchException = { 69, "DuplicateEventNameWithDataMismatchException", &df_desc_Exception, false };
 /* the soft kill (spec 20.10): the runnable ends at a checkpoint; no catch takes it (not an Exception), atEnd blocks and enforce scopes
    unwind as for any exception */
@@ -1145,6 +1145,20 @@ static void df_str_set(df_string* slot, bool* owned, df_string value, bool fresh
   }
   *slot = value;
   *owned = fresh;
+}
+
+/* a variable that only borrows its text takes a copy of its own (strings behave as values, spec 4) */
+static df_string* df_str_mine(df_string* slot, bool* owned) {
+  if (!*owned) {
+    *slot = df_str_dup(*slot);
+    *owned = true;
+  }
+  return slot;
+}
+
+/* the copy that a parameter took of its text ends with the function */
+static void df_str_keep_end(df_string* kept) {
+  df_str_free(*kept);
 }
 
 /* a place that always owns its string (a field, an item): a borrowed value is copied */

@@ -18,7 +18,6 @@ true
 Completed
 direct call: Return Outside A Task Exception
 not started
-no timeout: The wait has no timeout: give one to the wait, to start or to the constructor of the task
 10
 end
 ---- exit code 0 ----

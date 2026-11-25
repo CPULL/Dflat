@@ -1,0 +1,12 @@
+import Root
+import Root.Tasks
+
+class C {
+  fun i32 taskRun() { return 1 }
+}
+fun i32 w() { return 1 }
+class K(Thread<i32> th) {
+  fun i32 taskRun() { return 1 }
+}
+Thread th = Thread(w).start()
+Task k = Task(K, th)

@@ -1,0 +1,1 @@
+switchtype_jump_default.df(8): error: jump cannot go to another case of a type switch; jump #label# leaves it (spec 11.3.7)

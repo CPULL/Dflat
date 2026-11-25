@@ -1,0 +1,24 @@
+"text"
+true
+1.5
+"other"
+null
+show null
+[1.5,"two",false]
+[1.5,"two",false] true false
+a a"two"3
+b bfalse3
+give "given"
+first give first2.54
+int string
+string int
+n: 1.5
+n: "changed"
+"changed"
+static "changed"
+"changed"
+end of "changed"
+3"changed"
+a string: s
+never assigned
+---- exit code 0 ----

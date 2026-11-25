@@ -57,22 +57,20 @@ typedef struct df_task {
   void (*drop)(void*);                /* ends a value nobody collected */
   void* slot;                         /* the value waiting to be collected */
   bool full;
+  bool posted;                        /* the value in the slot comes from return? : nobody has to collect it */
   bool ended;                         /* taskRun() is over: no value will come */
   bool endTaken;                      /* a void task: a waiter saw its end (the next waits get TaskAlreadyTerminatedException) */
-  uint64_t nextTicket;                /* the waiters, in order */
-  uint64_t serving;
+  uint64_t id;                        /* of this runnable: never 0 (the main program), never used again */
+  uint64_t owner;                     /* who owns the handle, and who waits now: the owner or a borrower (spec 20.2.6) */
+  uint64_t holder;
+  uint64_t waiter;                    /* the runnable that waits for it now (waiting > 0) */
   int64_t waiting;
-  uint64_t* given;                    /* the tickets of the waiters that ran out of time, not yet reached */
-  size_t givenCount;
-  size_t givenCap;
+  int64_t interested;                 /* the registrations that keep a value of return? (spec 20.2.5) */
   /* the calls through the handle, in order */
   df_task_call* callsHead;
   df_task_call* callsTail;
   df_exception* postedError;          /* the exception of a posted call: raised at the next checkpoint (spec 20.1) */
   /* signals sent to this runnable (spec 20.3.1), under the lock of the signals */
-  struct df_sig_count* sigCounts;     /* Stable: the sends kept for this runnable, by signal */
-  size_t sigCountN;
-  size_t sigCountCap;
   int32_t cancelled;                  /* the cancel signal arrived (KnownSignals.Cancel, spec 20.10): it ends at its next checkpoint */
 } df_task;
 
@@ -94,6 +92,18 @@ static df_cond df_sig_changed = CONDITION_VARIABLE_INIT;
 static df_mutex df_sig_lock = PTHREAD_MUTEX_INITIALIZER;
 static df_cond df_sig_changed = PTHREAD_COND_INITIALIZER;
 #endif
+
+/* the wake-up shared by every waitable (spec 20.2): signals and events change under df_sig_lock; tasks and threads, after a change of their
+   own state, call df_wait_wake. A wait on several waitables reads df_wake_epoch, looks at its waitables (never holding df_sig_lock while
+   it takes the lock of a task), then sleeps on df_sig_changed while the epoch is the same: no wake-up is lost */
+static uint64_t df_wake_epoch = 0;
+#define DF_SIG_WAKE() do { df_wake_epoch++; df_cond_broadcast(&df_sig_changed); } while (0)
+
+static void df_wait_wake(void) {
+  df_mutex_lock(&df_sig_lock);
+  DF_SIG_WAKE();
+  df_mutex_unlock(&df_sig_lock);
+}
 
 static size_t df_task_all_n = 0;
 static size_t df_task_all_cap = 0;
@@ -123,6 +133,19 @@ static void df_task_all_remove(df_task* task) {
   df_mutex_unlock(&df_task_all_lock);
 }
 
+/* one more reference to a runnable found in df_task_all (its lock is held); false when its last reference has already gone: the thread
+   that released it is ending it, and it leaves the list before it is freed */
+static bool df_task_try_retain(df_task* task) {
+  int64_t refs = DF_ATOMIC_LOAD(task->refs);
+  while (refs > 0) {
+    if (DF_ATOMIC_CAS(task->refs, refs, refs + 1)) {
+      return true;
+    }
+    refs = DF_ATOMIC_LOAD(task->refs);
+  }
+  return false;
+}
+
 /* the cancel signal of the runnable this code runs in (spec 20.10): the exception that makes it end, raised once (cancelled 1 -> 2:
    its atEnd blocks may wait again); NULL when there is none */
 static df_exception* df_task_cancel_now(void) {
@@ -146,6 +169,9 @@ static int64_t df_task_slice(int64_t left) {
 
 static void df_task_release(uint64_t handle);
 
+/* the note of a wait that ran out of time: not an exception, only its timeout block sees it (spec 20.2.8) */
+static const df_descriptor df_note_late = { 0, "", NULL, true };
+
 /* a lapse in milliseconds, -1 for none (a null lapse); a number is already a lapse in milliseconds (spec 3.4) */
 static int64_t df_task_lapse_ms(int64_t l) {
   int64_t value = l >> 3;
@@ -157,6 +183,13 @@ static int64_t df_task_lapse_ms(int64_t l) {
     case 3: return value < 0 ? 0 : (value + 9999) / 10000;
     default: return -1;
   }
+}
+
+static uint64_t df_task_ids = 0;
+
+/* the runnable this code runs in: 0 the main program */
+static uint64_t df_task_me(void) {
+  return df_task_current ? df_task_current->id : 0;
 }
 
 static uint64_t df_task_new(void* obj, df_exception* (*run)(void*), const char* name, const char* result, int64_t timeout, bool linked,
@@ -174,6 +207,8 @@ static uint64_t df_task_new(void* obj, df_exception* (*run)(void*), const char* 
   task->threadFn = NULL;
   task->run = run;
   task->parent = linked ? df_task_current : NULL;
+  task->id = DF_ATOMIC_ADD(df_task_ids, 1);
+  task->owner = task->holder = df_task_me();
   if (task->parent) {
     DF_ATOMIC_ADD(task->parent->refs, 1);   /* the child keeps its parent known (spec 20.10) */
   }
@@ -249,9 +284,7 @@ static void df_task_release(uint64_t handle) {
   df_mutex_destroy(&task->lock);
   df_task_all_remove(task);
   df_task* parent = task->parent;
-  free(task->sigCounts);
   free(task->slot);
-  free(task->given);
   free(task);
   if (parent) {
     df_task_release((uint64_t)(uintptr_t)parent);
@@ -271,19 +304,6 @@ static void df_thread_cleanup(void) {
   for (unsigned i = 0; i < DF_FLAT_RING; i++) {
     free(df_flat_ring[i]);
     df_flat_ring[i] = NULL;
-  }
-}
-
-/* the turns of the waiters that ran out of time are skipped (the lock is held) */
-static void df_task_skip_given(df_task* task) {
-  for (size_t i = 0; i < task->givenCount;) {
-    if (task->given[i] == task->serving) {
-      task->serving++;
-      task->given[i] = task->given[--task->givenCount];
-      i = 0;
-    } else {
-      i++;
-    }
   }
 }
 
@@ -324,6 +344,7 @@ static void df_task_serve_calls(df_task* task) {
     call->done = true;
     df_cond_broadcast(&task->changed);
     df_mutex_unlock(&task->lock);
+    df_wait_wake();
     df_task_call_release(call);
   }
 }
@@ -411,25 +432,18 @@ static bool df_task_post_call(uint64_t handle, df_task_call* call) {
   task->callsTail = call;
   df_cond_broadcast(&task->changed);
   df_mutex_unlock(&task->lock);
+  df_wait_wake();   /* the task may wait on several waitables */
   return true;
 }
 
-/* wait t.method() [timeout n]: the caller waits for the call to be served; *got says whether its result is there. The exception
+/* wait t.method() timeout n: the caller waits for the call to be served; *got says whether its result is there. The exception
    of the method is the caller's; a timeout or a task that ends first leave a silent note */
 static df_exception* df_task_wait_call(uint64_t handle, df_task_call* call, int64_t timeout, bool* got) {
   df_task* task = (df_task*)(uintptr_t)handle;
   *got = false;
   int64_t ms = df_task_lapse_ms(timeout);
   df_mutex_lock(&task->lock);
-  if (ms < 0) {
-    ms = task->timeout;
-  }
-  if (ms < 0) {
-    df_mutex_unlock(&task->lock);
-    const char* text = "The wait has no timeout: give one to the wait, to start or to the constructor of the task";
-    return df_new_exception(&df_desc_WaitingWithoutTimeoutException, text, strlen(text), "wait");
-  }
-  int64_t until = df_mono_ms() + ms;
+  int64_t until = df_mono_ms() + (ms < 0 ? 0 : ms);
   df_exception* error = NULL;
   df_exception* cancelled = NULL;   /* the cancel signal that came while a call with lends ran */
   bool late = false;                /* the timeout ran out while a call with lends ran */
@@ -467,7 +481,7 @@ static df_exception* df_task_wait_call(uint64_t handle, df_task_call* call, int6
         if (cancel) {
           error = cancel;
         } else {
-          df_silent_desc = &df_desc_WaitTimeoutException;
+          df_silent_desc = NULL;   /* a timeout: no exception */
         }
         break;
       }
@@ -481,7 +495,7 @@ static df_exception* df_task_wait_call(uint64_t handle, df_task_call* call, int6
       error = cancel;
       break;
     } else if (left <= 0) {
-      df_silent_desc = &df_desc_WaitTimeoutException;
+      df_silent_desc = NULL;
       break;
     }
     if (df_serving != NULL && (df_task*)df_serving != task) {
@@ -508,7 +522,7 @@ static void df_task_give(df_task* task, void* value, int mode) {
     return;
   }
   df_mutex_lock(&task->lock);
-  if (mode == DF_GIVE_POST && task->waiting == 0) {
+  if (mode == DF_GIVE_POST && task->waiting == 0 && task->interested == 0) {
     df_mutex_unlock(&task->lock);
     if (task->drop) {
       task->drop(value);   /* return?: nobody waits now */
@@ -520,7 +534,9 @@ static void df_task_give(df_task* task, void* value, int mode) {
   }
   memcpy(task->slot, value, task->size);
   task->full = true;
+  task->posted = mode == DF_GIVE_POST;
   df_cond_broadcast(&task->changed);
+  df_wait_wake();   /* the lock of the task is held: allowed, df_sig_lock is never held while a task lock is taken */
   if (mode != DF_GIVE_POST) {
     int64_t ms = task->timeout;
     int64_t until = ms < 0 ? 0 : df_mono_ms() + ms;
@@ -585,7 +601,7 @@ static void df_task_send_cancel(df_task* task) {
   if (DF_ATOMIC_LOAD(task->cancelled) == 0) {
     DF_ATOMIC_STORE(task->cancelled, 1);
   }
-  df_cond_broadcast(&df_sig_changed);
+  DF_SIG_WAKE();
   df_mutex_unlock(&df_sig_lock);
   df_mutex_lock(&task->lock);
   if (task->status == DF_RUN_READY) {
@@ -594,6 +610,7 @@ static void df_task_send_cancel(df_task* task) {
   }
   df_cond_broadcast(&task->changed);
   df_mutex_unlock(&task->lock);
+  df_wait_wake();
 }
 
 static bool df_task_has_ended(df_task* task) {
@@ -612,8 +629,7 @@ static void df_task_cancel_children(df_task* task) {
     df_out_of_memory();
   }
   for (size_t i = 0; i < df_task_all_n; i++) {
-    if (df_task_all[i]->parent == task) {
-      DF_ATOMIC_ADD(df_task_all[i]->refs, 1);
+    if (df_task_all[i]->parent == task && df_task_try_retain(df_task_all[i])) {
       children[n++] = df_task_all[i];
     }
   }
@@ -695,8 +711,7 @@ static size_t df_task_subtree(df_task* top, df_task*** list, int64_t** levels) {
   size_t n = 0;
   for (size_t i = 0; i < df_task_all_n; i++) {
     int64_t depth = df_task_depth_below(df_task_all[i], top);
-    if (depth >= 0) {
-      DF_ATOMIC_ADD(df_task_all[i]->refs, 1);
+    if (depth >= 0 && df_task_try_retain(df_task_all[i])) {
       (*list)[n] = df_task_all[i];
       (*levels)[n++] = depth;
     }
@@ -761,12 +776,17 @@ static void df_task_serve_hook(void* task) {
   df_task_serve_calls((df_task*)task);
 }
 
+static void df_tokens_owner_ends(df_task* task);
+static void df_events_owner_ends(df_task* task);
+
 static void df_task_main(void* p) {
   df_task* task = (df_task*)p;
   df_task_current = task;
   df_cancel_flag = &task->cancelled;
   df_serve_hook = df_task_serve_hook;
   df_exception* failure = task->run(task->obj);   /* the last value (return val) is handed out inside run */
+  df_tokens_owner_ends(task);   /* spec 20.3.2 */
+  df_events_owner_ends(task);   /* spec 20.4.3 */
   df_mutex_lock(&task->lock);
   if (failure == NULL && task->postedError) {
     failure = task->postedError;   /* a posted call failed while the last value waited (spec 20.1) */
@@ -786,6 +806,7 @@ static void df_task_main(void* p) {
   task->ended = true;
   df_cond_broadcast(&task->changed);
   df_mutex_unlock(&task->lock);
+  df_wait_wake();
   df_task_cancel_children(task);
   df_thread_cleanup();
   df_task_release((uint64_t)(uintptr_t)task);
@@ -818,6 +839,7 @@ static int32_t df_task_start(uint64_t handle, int64_t timeout) {
     task->ended = true;
     df_cond_broadcast(&task->changed);
     df_mutex_unlock(&task->lock);
+    df_wait_wake();
     DF_ATOMIC_SUB(task->refs, 1);
     return 2;
   }
@@ -825,89 +847,49 @@ static int32_t df_task_start(uint64_t handle, int64_t timeout) {
   return 0;
 }
 
-/* wait task [timeout t] (spec 20.2): the next value into out (size bytes, zero when there is none). The exception that ended the task
-   is given to one waiter, as its error; a timeout, a task that ended, a task that never started leave a silent note (df_silent_desc) */
-static df_exception* df_task_wait(uint64_t handle, void* out, size_t size, int64_t timeout) {
-  df_task* task = (df_task*)(uintptr_t)handle;
-  if (size) {
-    memset(out, 0, size);
+/* the runnable of that id has not ended */
+static bool df_task_alive_id(uint64_t id) {
+  if (id == 0) {
+    return true;
   }
-  int64_t ms = df_task_lapse_ms(timeout);
-  df_mutex_lock(&task->lock);
-  if (ms < 0) {
-    ms = task->timeout;   /* constructor < start < wait (spec 20.1) */
-  }
-  if (ms < 0) {
-    /* no timeout from the wait, start or the constructor: a real exception (spec 20.1) */
-    df_mutex_unlock(&task->lock);
-    const char* text = "The wait has no timeout: give one to the wait, to start or to the constructor of the task";
-    return df_new_exception(&df_desc_WaitingWithoutTimeoutException, text, strlen(text), "wait");
-  }
-  uint64_t ticket = task->nextTicket++;
-  task->waiting++;
-  int64_t until = df_mono_ms() + ms;
-  const df_descriptor* note = NULL;
-  df_exception* error = NULL;
-  for (;;) {
-    df_task_skip_given(task);
-    if (ticket == task->serving) {
-      if (task->full) {
-        memcpy(out, task->slot, size < task->size ? size : task->size);
-        task->full = false;
-        break;
-      }
-      if (task->ended) {
-        if (task->failure) {
-          error = task->failure;   /* the exception that left taskRun(): this waiter gets it (spec 20.2) */
-          task->failure = NULL;
-        } else if (task->size == 0 && !task->endTaken) {
-          task->endTaken = true;   /* a void task: this wait was for its end */
-        } else {
-          note = &df_desc_TaskAlreadyTerminatedException;
-        }
-        break;
-      }
+  bool alive = false;
+  df_mutex_lock(&df_task_all_lock);
+  for (size_t i = 0; i < df_task_all_n && !alive; i++) {
+    if (df_task_all[i]->id == id) {
+      int32_t status = DF_ATOMIC_LOAD(df_task_all[i]->status);
+      alive = status == DF_RUN_READY || status == DF_RUN_RUNNING;
     }
-    df_exception* cancel = df_task_cancel_now();
-    int64_t left = until - df_mono_ms();
-    if (left <= 0 || cancel) {
-      note = cancel ? NULL : task->status == DF_RUN_READY ? &df_desc_TaskWasNotStartedException : &df_desc_WaitTimeoutException;
-      error = cancel;   /* a wait is a checkpoint (spec 20.10) */
-      if (ticket != task->serving) {
-        if (task->givenCount == task->givenCap) {
-          task->givenCap = task->givenCap ? task->givenCap * 2 : 8;
-          uint64_t* grown = (uint64_t*)realloc(task->given, task->givenCap * sizeof(uint64_t));
-          if (!grown) {
-            df_out_of_memory();
-          }
-          task->given = grown;
-        }
-        task->given[task->givenCount++] = ticket;   /* its turn is skipped when it comes */
-        task->waiting--;
-        df_cond_broadcast(&task->changed);
-        df_mutex_unlock(&task->lock);
-        if (note) {
-          df_silent_desc = note;
-        }
-        return error;
-      }
-      break;
-    }
-    if (df_serving != NULL && (df_task*)df_serving != task) {
-      df_mutex_unlock(&task->lock);   /* a wait in taskRun(): the calls through the handle meanwhile (spec 20.8) */
-      df_task_serve_calls((df_task*)df_serving);
-      df_mutex_lock(&task->lock);
-    }
-    df_cond_wait_ms(&task->changed, &task->lock, df_task_slice(left));
   }
-  task->serving++;
-  task->waiting--;
-  df_cond_broadcast(&task->changed);
-  df_mutex_unlock(&task->lock);
-  if (note) {
-    df_silent_desc = note;
+  df_mutex_unlock(&df_task_all_lock);
+  return alive;
+}
+
+/* how the code that waits has the handle (the compiler says it) */
+#define DF_HELD_ELSEWHERE 0   /* a field, a top-level variable, the place behind another name */
+#define DF_HELD_LENT 1        /* a & parameter */
+#define DF_HELD_OWNED 2       /* a variable that owns it */
+
+/* who can wait (spec 20.2.6): the owner; a borrower until it ends, and the owner not meanwhile. A task that has the handle in its fields was
+   given it: it is the owner from now on; a thread that reaches a handle of its task is not. The lock of the task is held */
+static bool df_task_may_wait(df_task* task, int32_t held) {
+  uint64_t me = df_task_me();
+  if (task->waiting > 0 && task->waiter != me) {
+    return false;   /* somebody waits for it now */
   }
-  return error;
+  if (task->holder == me) {
+    return true;
+  }
+  if (task->holder != task->owner && df_task_alive_id(task->holder)) {
+    return false;   /* it is lent */
+  }
+  if (held == DF_HELD_ELSEWHERE && df_task_current != NULL && df_task_current->threadFn != NULL && task->owner != me) {
+    return false;   /* a thread and a handle of its task */
+  }
+  task->holder = me;
+  if (held != DF_HELD_LENT) {
+    task->owner = me;
+  }
+  return true;
 }
 
 /* if t is Task<MyTask> mt, Task<*, i32> (spec 20.9): the class of the object (or a parent), the result taskRun() gives */
@@ -934,16 +916,38 @@ static bool df_task_linked(uint64_t handle) {
 #define DF_SIG_BROADCAST 0
 #define DF_SIG_EXCLUSIVE 1
 #define DF_SIG_SINGLE 2
-#define DF_SIG_STABLE 3
-#define DF_SIG_EXCLUSIVE_SAFE 4
+#define DF_SIG_EXCLUSIVE_SAFE 3
+#define DF_SIG_TOKEN 4   /* not a signal: a Token (spec 20.3.2), which counts what was produced and not consumed */
 
-typedef struct df_sig_waiter {
-  struct df_sig_waiter* next;
-  df_task* owner;     /* the runnable that waits; NULL: the main program */
-  bool woken;
-  int64_t* groupWon;  /* a wait on a SignalGroup: the index of the member that fired first (-1: none yet); NULL for one signal */
-  int64_t index;      /* ... and the index of this member */
-} df_sig_waiter;
+struct df_signal;
+struct df_event;
+#define DF_WS_NONE 0
+#define DF_WS_SIGNAL 1
+#define DF_WS_EVENT 2
+#define DF_WS_TASK 3     /* a task or a thread */
+
+/* the registration of a runnable for a waitable (spec 20.2.4): one for each, shared by all the waits of the runnable (below: wait) */
+typedef struct df_reg {
+  struct df_reg* next;     /* the registrations of the runnable */
+  struct df_reg* after;    /* the line of the signal or of the event */
+  int64_t refs;            /* the waits that use it */
+  int32_t kind;
+  df_task* owner;          /* the runnable; NULL: the main program */
+  void* mark;              /* ... as a waiter of events */
+  int32_t waiting;         /* the waits of the runnable that wait for it now */
+  int32_t running;         /* the blocks of the runnable that process it now */
+  bool inLine;
+  struct df_signal* sig;
+  bool pending;            /* a send kept for the next wait */
+  struct df_event* ev;
+  bool hasFrom;
+  uint64_t from;
+  df_task* task;
+  bool counted;            /* in task->interested */
+} df_reg;
+
+/* the registration takes the send of a signal of that mode (the lock is held; below) */
+static bool df_reg_offer(df_reg* reg, int32_t mode);
 
 typedef struct df_signal {
   struct df_signal* next;   /* the registry */
@@ -952,49 +956,17 @@ typedef struct df_signal {
   uint64_t number;
   char* name;               /* a copy of the name (byNumber: NULL) */
   size_t nameLen;
-  df_sig_waiter* head;
-  df_sig_waiter* tail;
-  int64_t stored;           /* Stable, ExclusiveSafe: the sends that nobody waited for */
+  df_reg* head;             /* the runnables registered for it, in line */
+  df_reg* tail;
+  int64_t stored;           /* ExclusiveSafe: the sends that nobody waited for; a token: its count */
+  bool registered;          /* a token: Token.register was called */
+  df_task* owner;           /* ... by this runnable (NULL: the main program) */
 } df_signal;
 
 static df_signal* df_sig_registry = NULL;
 
-typedef struct df_sig_count {
-  df_signal* sig;
-  int64_t count;
-} df_sig_count;
-
-/* the counter of a Stable signal kept for a runnable (the lock is held); NULL when there is none and make is false */
-static df_sig_count* df_sig_count_of(df_task* task, df_signal* sig, bool make) {
-  for (size_t i = 0; i < task->sigCountN; i++) {
-    if (task->sigCounts[i].sig == sig) {
-      return &task->sigCounts[i];
-    }
-  }
-  if (!make) {
-    return NULL;
-  }
-  if (task->sigCountN == task->sigCountCap) {
-    task->sigCountCap = task->sigCountCap ? task->sigCountCap * 2 : 4;
-    df_sig_count* grown = (df_sig_count*)realloc(task->sigCounts, task->sigCountCap * sizeof(df_sig_count));
-    if (!grown) {
-      df_out_of_memory();
-    }
-    task->sigCounts = grown;
-  }
-  task->sigCounts[task->sigCountN] = (df_sig_count){ sig, 0 };
-  return &task->sigCounts[task->sigCountN++];
-}
-
-/* a send nobody waited for, kept for this signal: the runnable's own first (t.signal(s)), then the one of the signal (the lock is held) */
+/* a send that is kept, or a token (the lock is held) */
 static bool df_sig_take_stored(df_signal* sig) {
-  if (df_task_current != NULL) {
-    df_sig_count* own = df_sig_count_of(df_task_current, sig, false);
-    if (own != NULL && own->count > 0) {
-      own->count--;
-      return true;
-    }
-  }
   if (sig->stored > 0) {
     sig->stored--;
     return true;
@@ -1062,51 +1034,25 @@ static uint64_t df_signal_find(int32_t mode, bool byNumber, uint64_t number, df_
   return sig && sig->mode == mode ? (uint64_t)(uintptr_t)sig : 0;
 }
 
-/* the first waiter leaves the queue, woken; a member of a group that another member already woke is skipped. false: nobody was
-   waiting (the lock is held) */
-static bool df_sig_wake_first(df_signal* sig) {
-  while (sig->head) {
-    df_sig_waiter* w = sig->head;
-    sig->head = w->next;
-    if (sig->head == NULL) {
-      sig->tail = NULL;
-    }
-    if (w->groupWon != NULL && *w->groupWon >= 0) {
-      continue;   /* its group has already fired */
-    }
-    w->woken = true;
-    if (w->groupWon != NULL) {
-      *w->groupWon = w->index;
-    }
-    return true;
+/* at the end of the line (the lock is held) */
+static void df_sig_enter(df_signal* sig, df_reg* reg) {
+  reg->after = NULL;
+  if (sig->tail) {
+    sig->tail->after = reg;
+  } else {
+    sig->head = reg;
   }
-  return false;
+  sig->tail = reg;
 }
 
-/* s.send() (spec 20.3): a Broadcast wakes every waiter, the other modes the first one; with nobody waiting a Stable or ExclusiveSafe
-   signal keeps the send, the others lose it */
-static void df_signal_send(uint64_t handle) {
-  df_signal* sig = (df_signal*)(uintptr_t)handle;
-  df_mutex_lock(&df_sig_lock);
-  if (sig->mode == DF_SIG_BROADCAST) {
-    while (df_sig_wake_first(sig)) {
-    }
-  } else if (!df_sig_wake_first(sig) && (sig->mode == DF_SIG_STABLE || sig->mode == DF_SIG_EXCLUSIVE_SAFE)) {
-    sig->stored++;   /* nobody waits: kept */
-  }
-  df_cond_broadcast(&df_sig_changed);
-  df_mutex_unlock(&df_sig_lock);
-}
-
-/* the waiter leaves the queue without being woken (its time ran out; the lock is held) */
-static void df_sig_leave(df_signal* sig, df_sig_waiter* w) {
-  df_sig_waiter* before = NULL;
-  for (df_sig_waiter* at = sig->head; at; before = at, at = at->next) {
-    if (at == w) {
+static void df_sig_leave(df_signal* sig, df_reg* reg) {
+  df_reg* before = NULL;
+  for (df_reg* at = sig->head; at; before = at, at = at->after) {
+    if (at == reg) {
       if (before) {
-        before->next = at->next;
+        before->after = at->after;
       } else {
-        sig->head = at->next;
+        sig->head = at->after;
       }
       if (sig->tail == at) {
         sig->tail = before;
@@ -1116,147 +1062,40 @@ static void df_sig_leave(df_signal* sig, df_sig_waiter* w) {
   }
 }
 
-/* wait s [timeout t] (spec 20.2, 20.3): the timeout of the wait, else the one of the signal; on timeout a silent WaitTimeoutException */
-static df_exception* df_signal_wait(uint64_t handle, int64_t timeout, int64_t own) {
-  df_signal* sig = (df_signal*)(uintptr_t)handle;
-  int64_t ms = df_task_lapse_ms(timeout);
-  if (ms < 0) {
-    ms = df_task_lapse_ms(own);
-  }
-  if (ms < 0) {
-    const char* text = "The wait has no timeout: give one to the wait or to the signal";
-    return df_new_exception(&df_desc_WaitingWithoutTimeoutException, text, strlen(text), "wait");
-  }
-  df_mutex_lock(&df_sig_lock);
-  if (df_sig_take_stored(sig)) {
-    df_mutex_unlock(&df_sig_lock);   /* a send that nobody waited for (Stable, ExclusiveSafe) */
-    return NULL;
-  }
-  if ((sig->mode == DF_SIG_EXCLUSIVE || sig->mode == DF_SIG_EXCLUSIVE_SAFE) && sig->head != NULL) {
-    df_mutex_unlock(&df_sig_lock);
-    const char* text = "This signal is Exclusive: it already has its listener";
-    return df_new_exception(&df_desc_ExclusiveSignalBusyException, text, strlen(text), "wait");
-  }
-  df_sig_waiter w = { NULL, df_task_current, false, NULL, 0 };
-  if (sig->tail) {
-    sig->tail->next = &w;
-  } else {
-    sig->head = &w;
-  }
-  sig->tail = &w;
-  int64_t until = df_mono_ms() + ms;
-  while (!w.woken) {
-    df_exception* cancel = df_task_cancel_now();
-    if (cancel) {
-      df_sig_leave(sig, &w);
-      df_mutex_unlock(&df_sig_lock);
-      return cancel;   /* a wait is a checkpoint (spec 20.10) */
-    }
-    int64_t left = until - df_mono_ms();
-    if (left <= 0) {
-      df_sig_leave(sig, &w);
-      df_mutex_unlock(&df_sig_lock);
-      df_silent_desc = &df_desc_WaitTimeoutException;
-      return NULL;
-    }
-    if (df_serving != NULL) {
-      df_mutex_unlock(&df_sig_lock);   /* a wait in taskRun(): the calls through the handle meanwhile (spec 20.8) */
-      df_task_serve_calls((df_task*)df_serving);
-      df_mutex_lock(&df_sig_lock);
-      if (w.woken) {
-        break;
+/* the registrations get the signal, in line: all of them, or the first that takes it, which goes to the end of the line. mine: only those
+   of the runnable only (t.signal(s)). false: nobody took it (the lock is held) */
+static bool df_sig_wake(df_signal* sig, bool all, bool mine, df_task* only) {
+  bool woke = false;
+  df_reg* last = sig->tail;   /* the ones that go back to the end are not seen twice */
+  for (df_reg* reg = sig->head; reg;) {
+    df_reg* next = reg == last ? NULL : reg->after;
+    if ((!mine || reg->owner == only) && df_reg_offer(reg, sig->mode)) {
+      df_sig_leave(sig, reg);
+      df_sig_enter(sig, reg);
+      woke = true;
+      if (!all) {
+        return true;
       }
     }
-    df_cond_wait_ms(&df_sig_changed, &df_sig_lock, df_task_slice(left));
+    reg = next;
   }
-  df_mutex_unlock(&df_sig_lock);
-  return NULL;
+  return woke;
 }
 
-/* wait g [timeout t] on a SignalGroup (spec 20.3): the first member to fire wins; *won is its index, -1 on timeout (a silent
-   WaitTimeoutException). The timeout of the wait, else the one of the group */
-static df_exception* df_signal_wait_any(uint64_t* handles, size_t count, int64_t timeout, int64_t own, int64_t* won) {
-  *won = -1;
-  int64_t ms = df_task_lapse_ms(timeout);
-  if (ms < 0) {
-    ms = df_task_lapse_ms(own);
-  }
-  if (ms < 0) {
-    const char* text = "The wait has no timeout: give one to the wait or to the group";
-    return df_new_exception(&df_desc_WaitingWithoutTimeoutException, text, strlen(text), "wait");
-  }
+/* s.send() (spec 20.3): a Broadcast wakes every waiter, the other modes the first one; with nobody waiting an ExclusiveSafe
+   signal keeps the send, the others lose it */
+static void df_signal_send(uint64_t handle) {
+  df_signal* sig = (df_signal*)(uintptr_t)handle;
   df_mutex_lock(&df_sig_lock);
-  for (size_t i = 0; i < count; i++) {
-    df_signal* sig = (df_signal*)(uintptr_t)handles[i];
-    if (df_sig_take_stored(sig)) {   /* a send nobody waited for (Stable, ExclusiveSafe) */
-      *won = (int64_t)i;
-      df_mutex_unlock(&df_sig_lock);
-      return NULL;
-    }
+  if (!df_sig_wake(sig, sig->mode == DF_SIG_BROADCAST, false, NULL) && sig->mode == DF_SIG_EXCLUSIVE_SAFE) {
+    sig->stored++;   /* nobody waits: kept */
   }
-  for (size_t i = 0; i < count; i++) {
-    df_signal* sig = (df_signal*)(uintptr_t)handles[i];
-    if ((sig->mode == DF_SIG_EXCLUSIVE || sig->mode == DF_SIG_EXCLUSIVE_SAFE) && sig->head != NULL) {
-      df_mutex_unlock(&df_sig_lock);
-      const char* text = "A signal of the group is Exclusive: it already has its listener";
-      return df_new_exception(&df_desc_ExclusiveSignalBusyException, text, strlen(text), "wait");
-    }
-  }
-  df_sig_waiter* nodes = (df_sig_waiter*)calloc(count ? count : 1, sizeof(df_sig_waiter));
-  if (!nodes) {
-    df_out_of_memory();
-  }
-  for (size_t i = 0; i < count; i++) {
-    df_signal* sig = (df_signal*)(uintptr_t)handles[i];
-    nodes[i].owner = df_task_current;
-    nodes[i].groupWon = won;
-    nodes[i].index = (int64_t)i;
-    if (sig->tail) {
-      sig->tail->next = &nodes[i];
-    } else {
-      sig->head = &nodes[i];
-    }
-    sig->tail = &nodes[i];
-  }
-  int64_t until = df_mono_ms() + ms;
-  df_exception* cancel = NULL;
-  while (*won < 0) {
-    cancel = df_task_cancel_now();
-    if (cancel) {
-      break;   /* a wait is a checkpoint (spec 20.10) */
-    }
-    int64_t left = until - df_mono_ms();
-    if (left <= 0) {
-      break;
-    }
-    if (df_serving != NULL) {
-      df_mutex_unlock(&df_sig_lock);   /* a wait in taskRun(): the calls through the handle meanwhile (spec 20.8) */
-      df_task_serve_calls((df_task*)df_serving);
-      df_mutex_lock(&df_sig_lock);
-      if (*won >= 0) {
-        break;
-      }
-    }
-    df_cond_wait_ms(&df_sig_changed, &df_sig_lock, df_task_slice(left));
-  }
-  for (size_t i = 0; i < count; i++) {
-    df_sig_leave((df_signal*)(uintptr_t)handles[i], &nodes[i]);   /* the members still in a queue */
-  }
+  DF_SIG_WAKE();
   df_mutex_unlock(&df_sig_lock);
-  free(nodes);
-  if (cancel) {
-    *won = -1;
-    return cancel;
-  }
-  if (*won < 0) {
-    df_silent_desc = &df_desc_WaitTimeoutException;
-  }
-  return NULL;
 }
 
 /* t.signal(s) (spec 20.3.1): s for that runnable only. Broadcast, Single, Exclusive: it counts only if the runnable waits on s now
-   (Broadcast: all its waits on s, the others: the first one), else it is lost; Stable: kept as a counter of the runnable when it does
-   not wait; ExclusiveSafe (the cancel signal): never lost, the runnable starts ending at its next checkpoint (spec 20.10) */
+   (Broadcast: all its waits on s, the others: the first one), else it is lost; ExclusiveSafe (the cancel signal): never lost, the runnable starts ending at its next checkpoint (spec 20.10) */
 static void df_signal_to(uint64_t runnable, uint64_t handle) {
   df_task* task = (df_task*)(uintptr_t)runnable;
   df_signal* sig = (df_signal*)(uintptr_t)handle;
@@ -1264,32 +1103,100 @@ static void df_signal_to(uint64_t runnable, uint64_t handle) {
   if (sig->mode == DF_SIG_EXCLUSIVE_SAFE) {
     DF_ATOMIC_STORE(task->cancelled, 1);
   }
-  bool woke = false;
-  for (df_sig_waiter* at = sig->head; at;) {
-    df_sig_waiter* next = at->next;
-    if (at->owner == task && (at->groupWon == NULL || *at->groupWon < 0)) {
-      df_sig_leave(sig, at);
-      at->woken = true;
-      if (at->groupWon != NULL) {
-        *at->groupWon = at->index;
-      }
-      woke = true;
-      if (sig->mode != DF_SIG_BROADCAST) {
-        break;
-      }
-    }
-    at = next;
-  }
-  if (!woke && sig->mode == DF_SIG_STABLE) {
-    df_sig_count_of(task, sig, true)->count++;
-  }
-  df_cond_broadcast(&df_sig_changed);
+  df_sig_wake(sig, sig->mode == DF_SIG_BROADCAST, true, task);
+  DF_SIG_WAKE();
   df_mutex_unlock(&df_sig_lock);
   if (sig->mode == DF_SIG_EXCLUSIVE_SAFE) {
     df_mutex_lock(&task->lock);
     df_cond_broadcast(&task->changed);   /* a wait of the runnable on its own state is a checkpoint too */
     df_mutex_unlock(&task->lock);
   }
+}
+
+/* ---- tokens (spec 20.3.2): a registry of their own, under the lock of the signals; a token is waited for as a signal, and what nobody
+   waits for stays in its count. A wait consumes one ---- */
+static df_signal* df_token_registry = NULL;
+
+/* the token of that name, made (not registered) when it is not there (the lock is held) */
+static df_signal* df_token_entry(df_string name) {
+  df_sv text = df_view(name);
+  for (df_signal* token = df_token_registry; token; token = token->next) {
+    if (token->nameLen == text.len && memcmp(token->name, text.p, text.len) == 0) {
+      return token;
+    }
+  }
+  df_signal* token = (df_signal*)calloc(1, sizeof(df_signal));
+  if (!token) {
+    df_out_of_memory();
+  }
+  token->mode = DF_SIG_TOKEN;
+  token->name = (char*)malloc(text.len + 1);
+  if (!token->name) {
+    df_out_of_memory();
+  }
+  memcpy(token->name, text.p, text.len);
+  token->name[text.len] = 0;
+  token->nameLen = text.len;
+  token->next = df_token_registry;
+  df_token_registry = token;
+  return token;
+}
+
+/* Token.register(name): 0 when the name is registered already */
+static uint64_t df_token_register(df_string name) {
+  df_mutex_lock(&df_sig_lock);
+  df_signal* token = df_token_entry(name);
+  bool taken = token->registered;
+  if (!taken) {
+    token->registered = true;
+    token->owner = df_task_current;
+    token->stored = 0;
+    DF_SIG_WAKE();
+  }
+  df_mutex_unlock(&df_sig_lock);
+  return taken ? 0 : (uint64_t)(uintptr_t)token;
+}
+
+static uint64_t df_token_find(df_string name) {
+  df_mutex_lock(&df_sig_lock);
+  df_signal* token = df_token_entry(name);
+  df_mutex_unlock(&df_sig_lock);
+  return (uint64_t)(uintptr_t)token;
+}
+
+/* jobs.produce(n): one for each waiter in line, the others stay in the count; skipped when the name is not registered */
+static void df_token_produce(uint64_t handle, uint64_t n) {
+  df_signal* token = (df_signal*)(uintptr_t)handle;
+  df_mutex_lock(&df_sig_lock);
+  if (token->registered && n > 0) {
+    while (n > 0 && df_sig_wake(token, false, false, NULL)) {
+      n--;
+    }
+    token->stored += (int64_t)n;
+    DF_SIG_WAKE();
+  }
+  df_mutex_unlock(&df_sig_lock);
+}
+
+static uint64_t df_token_count(uint64_t handle) {
+  df_mutex_lock(&df_sig_lock);
+  uint64_t count = (uint64_t)((df_signal*)(uintptr_t)handle)->stored;
+  df_mutex_unlock(&df_sig_lock);
+  return count;
+}
+
+/* a runnable ends: the tokens it registered are no more registered, and what they counted disappears */
+static void df_tokens_owner_ends(df_task* task) {
+  df_mutex_lock(&df_sig_lock);
+  for (df_signal* token = df_token_registry; token; token = token->next) {
+    if (token->registered && token->owner == task) {
+      token->registered = false;
+      token->owner = NULL;
+      token->stored = 0;
+    }
+  }
+  DF_SIG_WAKE();
+  df_mutex_unlock(&df_sig_lock);
 }
 
 static int32_t df_signal_mode(uint64_t handle) {
@@ -1323,6 +1230,7 @@ static bool df_signal_by_number(uint64_t handle) {
 typedef struct df_ev_item {
   struct df_ev_item* next;
   void* data;              /* a copy of the struct, owned by the item */
+  void (*drop)(void* data);   /* ... the end of it */
   uint64_t sender;         /* the id of its Sender<T> field (spec 20.4.6); 0: none */
   bool busy;               /* a waiter has it now */
   bool processed;          /* setProcessed() */
@@ -1331,13 +1239,6 @@ typedef struct df_ev_item {
   size_t seenN;
   size_t seenCap;
 } df_ev_item;
-
-typedef struct df_ev_waiter {
-  struct df_ev_waiter* next;
-  void* mark;
-  bool hasFrom;
-  uint64_t from;
-} df_ev_waiter;
 
 typedef struct df_event {
   struct df_event* next;    /* the registry */
@@ -1352,17 +1253,17 @@ typedef struct df_event {
   int32_t fullMode;
   int64_t keep;
   int64_t timeout;           /* milliseconds, from the registration */
+  df_task* owner;            /* the runnable that registered it (NULL: the main program) */
   df_ev_item* head;
   df_ev_item* tail;
   int64_t count;
-  df_ev_waiter* waiters;
+  df_reg* waiters;           /* the runnables registered for it, in line */
 } df_event;
 
-/* what an Event object holds: the event of its name, the struct it was written with, its own timeout (-1: the one of the event) */
+/* what an Event object holds: the event of its name, and the struct it was written with */
 typedef struct df_evref {
   df_event* ev;
   const char* type;
-  int64_t timeout;
 } df_evref;
 
 static df_event* df_ev_registry = NULL;
@@ -1411,14 +1312,13 @@ static df_event* df_ev_entry(df_string name) {
   return ev;
 }
 
-static uint64_t df_ev_ref(df_event* ev, const char* type, int64_t timeout) {
+static uint64_t df_ev_ref(df_event* ev, const char* type) {
   df_evref* ref = (df_evref*)malloc(sizeof(df_evref));
   if (!ref) {
     df_out_of_memory();
   }
   ref->ev = ev;
   ref->type = type;
-  ref->timeout = timeout;
   return (uint64_t)(uintptr_t)ref;
 }
 
@@ -1434,6 +1334,7 @@ static uint64_t df_event_register(df_string name, const char* type, size_t size,
   }
   if (!ev->registered) {
     ev->registered = true;
+    ev->owner = df_task_current;
     ev->type = type;
     ev->size = size;
     ev->copy = copy;
@@ -1443,18 +1344,18 @@ static uint64_t df_event_register(df_string name, const char* type, size_t size,
     ev->keep = keep < 1 ? 1 : keep;
     int64_t ms = df_task_lapse_ms(timeout);
     ev->timeout = ms < 0 ? 0 : ms;
-    df_cond_broadcast(&df_sig_changed);
+    DF_SIG_WAKE();
   }
   df_mutex_unlock(&df_sig_lock);
-  return df_ev_ref(ev, type, -1);
+  return df_ev_ref(ev, type);
 }
 
-/* Event(name, timeout:): the event of that name; registered or not yet (spec 20.4.3) */
-static uint64_t df_event_find(df_string name, const char* type, int64_t timeout) {
+/* Event(name): the event of that name; registered or not yet (spec 20.4.3) */
+static uint64_t df_event_find(df_string name, const char* type) {
   df_mutex_lock(&df_sig_lock);
   df_event* ev = df_ev_entry(name);
   df_mutex_unlock(&df_sig_lock);
-  return df_ev_ref(ev, type, df_task_lapse_ms(timeout));
+  return df_ev_ref(ev, type);
 }
 
 static void df_event_release(uint64_t handle) {
@@ -1484,7 +1385,7 @@ static bool df_ev_seen(df_ev_item* item, void* mark) {
 
 /* a waiter that waits now, has not had the item, and takes its sender (the lock is held) */
 static bool df_ev_someone_for(df_event* ev, df_ev_item* item) {
-  for (df_ev_waiter* w = ev->waiters; w; w = w->next) {
+  for (df_reg* w = ev->waiters; w; w = w->after) {
     if (!df_ev_seen(item, w->mark) && (!w->hasFrom || w->from == item->sender)) {
       return true;
     }
@@ -1492,10 +1393,11 @@ static bool df_ev_someone_for(df_event* ev, df_ev_item* item) {
   return false;
 }
 
-/* the first waiter in line (FIFO) that can have the item now (the lock is held) */
-static df_ev_waiter* df_ev_first_for(df_event* ev, df_ev_item* item) {
-  for (df_ev_waiter* w = ev->waiters; w; w = w->next) {
-    if (!df_ev_seen(item, w->mark) && (!w->hasFrom || w->from == item->sender)) {
+/* the first waiter in line (FIFO) that can have the item now (the lock is held): one that is registered but not waiting loses its turn,
+   and has the item later if it is still there (spec 20.4.5) */
+static df_reg* df_ev_first_for(df_event* ev, df_ev_item* item) {
+  for (df_reg* w = ev->waiters; w; w = w->after) {
+    if (w->waiting > 0 && !df_ev_seen(item, w->mark) && (!w->hasFrom || w->from == item->sender)) {
       return w;
     }
   }
@@ -1521,10 +1423,83 @@ static void df_ev_unlink(df_event* ev, df_ev_item* item) {
 }
 
 static void df_ev_free(df_event* ev, df_ev_item* item) {
-  ev->drop(item->data);
+  (void)ev;
+  item->drop(item->data);
   free(item->data);
   free(item->seen);
   free(item);
+}
+
+static void df_ev_mark_seen(df_ev_item* item, void* mark) {
+  if (item->seenN == item->seenCap) {
+    item->seenCap = item->seenCap ? item->seenCap * 2 : 4;
+    void** grown = (void**)realloc(item->seen, item->seenCap * sizeof(void*));
+    if (!grown) {
+      df_out_of_memory();
+    }
+    item->seen = grown;
+  }
+  item->seen[item->seenN++] = mark;
+}
+
+/* in line, in the order of arrival (spec 20.4.5; the lock is held) */
+static void df_ev_enter(df_event* ev, df_reg* w) {
+  df_reg** tail = &ev->waiters;
+  while (*tail) {
+    tail = &(*tail)->after;
+  }
+  w->after = NULL;
+  *tail = w;
+}
+
+/* the items that only a waiter that left was going to take: a volatile one, or a static one that somebody had already (the lock is held) */
+static void df_ev_sweep(df_event* ev) {
+  for (df_ev_item* item = ev->head; item;) {
+    df_ev_item* next = item->next;
+    if (!item->busy && (ev->mode == DF_EV_VOLATILE || item->seenN > 0) && !df_ev_someone_for(ev, item)) {
+      df_ev_unlink(ev, item);
+      df_ev_free(ev, item);
+    }
+    item = next;
+  }
+}
+
+/* a new volatile event (spec 20.2.5): the waits that are busy keep only the last one, the older ones go on to the other waiters (the lock
+   is held) */
+static void df_ev_replace_older(df_event* ev, df_ev_item* newest) {
+  for (df_reg* w = ev->waiters; w; w = w->after) {
+    if (w->waiting > 0 || (w->hasFrom && w->from != newest->sender)) {
+      continue;
+    }
+    for (df_ev_item* item = ev->head; item; item = item->next) {
+      if (item != newest && !item->busy && !df_ev_seen(item, w->mark) && (!w->hasFrom || w->from == item->sender)) {
+        df_ev_mark_seen(item, w->mark);
+        if (!df_ev_someone_for(ev, item)) {
+          item->stopped = true;   /* nobody else is in line for it */
+        }
+      }
+    }
+  }
+  for (df_ev_item* item = ev->head; item;) {
+    df_ev_item* next = item->next;
+    if (item->stopped && !item->busy) {
+      df_ev_unlink(ev, item);
+      df_ev_free(ev, item);
+    }
+    item = next;
+  }
+}
+
+/* a full queue (spec 20.4.4): the oldest events that some runnable has already processed leave first (the lock is held) */
+static void df_ev_make_room(df_event* ev) {
+  for (df_ev_item* item = ev->head; item && ev->count >= ev->keep;) {
+    df_ev_item* next = item->next;
+    if (!item->busy && item->seenN > 0) {
+      df_ev_unlink(ev, item);
+      df_ev_free(ev, item);
+    }
+    item = next;
+  }
 }
 
 /* ev.send(data) (spec 20.4): 0 not registered (skipped), 1 sent, 2 another struct, 3 discarded (a full static queue, or nobody waits
@@ -1538,13 +1513,19 @@ static int32_t df_event_send(uint64_t handle, const void* data, uint64_t sender)
     return state;
   }
   df_event* ev = ref->ev;
-  df_ev_item probe = { NULL, NULL, sender, false, false, false, NULL, 0, 0 };
-  bool waited = df_ev_someone_for(ev, &probe);
+  bool waited = false;
+  for (df_reg* w = ev->waiters; w && !waited; w = w->after) {
+    /* a wait that is busy keeps volatile events (the last one); a static event goes to the queue meanwhile, with its keep (spec 20.2.5) */
+    waited = (!w->hasFrom || w->from == sender) && (ev->mode == DF_EV_VOLATILE || w->waiting > 0);
+  }
   if (!waited && ev->mode == DF_EV_VOLATILE) {
     df_mutex_unlock(&df_sig_lock);
     return 3;   /* nobody waits for it: lost */
   }
-  if (!waited && ev->count >= ev->keep) {
+  if (ev->mode == DF_EV_STATIC) {
+    df_ev_make_room(ev);
+  }
+  if (!waited && ev->mode == DF_EV_STATIC && ev->count >= ev->keep) {
     if (ev->fullMode == DF_EVQ_DISCARD_NEWEST) {
       df_mutex_unlock(&df_sig_lock);
       return 3;
@@ -1566,6 +1547,11 @@ static int32_t df_event_send(uint64_t handle, const void* data, uint64_t sender)
           return 3;
         }
         df_cond_wait_ms(&df_sig_changed, &df_sig_lock, df_task_slice(left));
+        if (!ev->registered) {
+          df_mutex_unlock(&df_sig_lock);
+          return 0;   /* its owner ended meanwhile */
+        }
+        df_ev_make_room(ev);
       }
     }
   }
@@ -1578,6 +1564,7 @@ static int32_t df_event_send(uint64_t handle, const void* data, uint64_t sender)
     df_out_of_memory();
   }
   ev->copy(item->data, data);
+  item->drop = ev->drop;
   item->sender = sender;
   if (ev->tail) {
     ev->tail->next = item;
@@ -1586,112 +1573,609 @@ static int32_t df_event_send(uint64_t handle, const void* data, uint64_t sender)
   }
   ev->tail = item;
   ev->count++;
-  df_cond_broadcast(&df_sig_changed);
+  if (ev->mode == DF_EV_VOLATILE) {
+    df_ev_replace_older(ev, item);
+  }
+  DF_SIG_WAKE();
   df_mutex_unlock(&df_sig_lock);
   return 1;
 }
 
-static void df_ev_leave(df_event* ev, df_ev_waiter* w) {
-  df_ev_waiter* before = NULL;
-  for (df_ev_waiter* at = ev->waiters; at; before = at, at = at->next) {
-    if (at == w) {
-      if (before) {
-        before->next = at->next;
-      } else {
-        ev->waiters = at->next;
-      }
+static void df_ev_leave(df_event* ev, df_reg* w) {
+  for (df_reg** link = &ev->waiters; *link; link = &(*link)->after) {
+    if (*link == w) {
+      *link = w->after;
       return;
     }
   }
 }
 
-/* wait on ev [from x] as data [timeout t] (spec 20.4.7): the next item this waiter has not had; *out NULL when the event is not
-   registered (skipped) or on timeout (a silent WaitTimeoutException). The timeout of the wait, else of Event(name, timeout:), else of
-   the registration */
-static df_exception* df_event_take(uint64_t handle, int64_t timeout, bool hasFrom, uint64_t from, df_ev_item** out) {
-  df_evref* ref = (df_evref*)(uintptr_t)handle;
-  *out = NULL;
+/* a runnable ends: the events it registered are no more registered, and what is in their queues disappears; a block that has one ends
+   normally (spec 20.4.3) */
+static void df_events_owner_ends(df_task* task) {
   df_mutex_lock(&df_sig_lock);
-  int32_t state = df_ev_state(ref);
-  if (state == 0) {
-    df_mutex_unlock(&df_sig_lock);
-    return NULL;   /* not registered yet: skipped (spec 20.4.3) */
-  }
-  if (state == 2) {
-    df_mutex_unlock(&df_sig_lock);
-    const char* text = "This event is registered with another struct";
-    return df_new_exception(&df_desc_DuplicateEventNameWithDataMismatchException, text, strlen(text), "wait");
-  }
-  df_event* ev = ref->ev;
-  int64_t ms = df_task_lapse_ms(timeout);
-  if (ms < 0) {
-    ms = ref->timeout >= 0 ? ref->timeout : ev->timeout;
-  }
-  df_ev_waiter w = { NULL, (void*)&df_thread_mark, hasFrom, from };
-  df_ev_waiter** tail = &ev->waiters;   /* in line, in the order of arrival (spec 20.4.5) */
-  while (*tail) {
-    tail = &(*tail)->next;
-  }
-  *tail = &w;
-  int64_t until = df_mono_ms() + ms;
-  df_exception* result = NULL;
-  for (;;) {
-    df_ev_item* found = NULL;
-    for (df_ev_item* item = ev->head; item; item = item->next) {
-      if (!item->busy && !item->stopped && df_ev_first_for(ev, item) == &w) {
-        found = item;
-        break;
-      }
-    }
-    if (found) {
-      found->busy = true;
-      if (found->seenN == found->seenCap) {
-        found->seenCap = found->seenCap ? found->seenCap * 2 : 4;
-        void** grown = (void**)realloc(found->seen, found->seenCap * sizeof(void*));
-        if (!grown) {
-          df_out_of_memory();
-        }
-        found->seen = grown;
-      }
-      found->seen[found->seenN++] = w.mark;
-      *out = found;
-      break;
-    }
-    df_exception* cancel = df_task_cancel_now();
-    if (cancel) {
-      result = cancel;   /* a wait is a checkpoint (spec 20.10) */
-      break;
-    }
-    int64_t left = until - df_mono_ms();
-    if (left <= 0) {
-      df_silent_desc = &df_desc_WaitTimeoutException;
-      break;
-    }
-    if (df_serving != NULL) {
-      df_mutex_unlock(&df_sig_lock);   /* a wait in taskRun(): the calls through the handle meanwhile (spec 20.8) */
-      df_task_serve_calls((df_task*)df_serving);
-      df_mutex_lock(&df_sig_lock);
+  for (df_event* ev = df_ev_registry; ev; ev = ev->next) {
+    if (!ev->registered || ev->owner != task) {
       continue;
     }
-    df_cond_wait_ms(&df_sig_changed, &df_sig_lock, df_task_slice(left));
+    ev->registered = false;
+    ev->owner = NULL;
+    while (ev->head) {
+      df_ev_item* item = ev->head;
+      df_ev_unlink(ev, item);
+      if (item->busy) {
+        item->stopped = true;   /* freed by the end of its block */
+      } else {
+        df_ev_free(ev, item);
+      }
+    }
   }
-  df_ev_leave(ev, &w);
+  DF_SIG_WAKE();
   df_mutex_unlock(&df_sig_lock);
-  return result;
 }
 
 /* the end of the block of a waiter: the item goes to the next waiter, or ends (stopPropagation, or nobody else waits for it) */
-static void df_event_done(uint64_t handle, df_ev_item* item) {
-  df_evref* ref = (df_evref*)(uintptr_t)handle;
-  df_event* ev = ref->ev;
+static void df_ev_done(df_event* ev, df_ev_item* item) {
   df_mutex_lock(&df_sig_lock);
   item->busy = false;
   if (item->stopped || !df_ev_someone_for(ev, item)) {
     df_ev_unlink(ev, item);
     df_ev_free(ev, item);
   }
-  df_cond_broadcast(&df_sig_changed);
+  DF_SIG_WAKE();
   df_mutex_unlock(&df_sig_lock);
+}
+
+/* ---- wait (spec 20.2): every wait, on one waitable or on several, goes through a df_waitset, one for each wait statement, made at its
+   first run and ended with the scope of the wait. Its slots are the waitables as they are written; a branch has one slot or more. A slot
+   uses the registrations of the runnable (df_reg): one for each waitable, shared by all its waits, kept until the last scope that uses it
+   ends (20.2.4). What arrives meanwhile is kept for the next wait that names the waitable, by the rules of 20.2.5. waiting, running and
+   pending of a registration are under df_sig_lock ---- */
+
+/* the registrations of this runnable (its thread) */
+static DF_TLS df_reg* df_regs = NULL;
+
+static bool df_sig_kept(int32_t mode) {
+  return mode == DF_SIG_TOKEN || mode == DF_SIG_EXCLUSIVE_SAFE;
+}
+
+static bool df_reg_offer(df_reg* reg, int32_t mode) {
+  if (reg->pending) {
+    return false;   /* it has its one already (spec 20.2.5): another waiter can have it */
+  }
+  if (reg->waiting == 0 && (reg->running > 0 || df_sig_kept(mode))) {
+    return false;   /* the one being processed is of the same waitable; a token stays in its count */
+  }
+  reg->pending = true;
+  return true;
+}
+
+static df_reg* df_reg_new(int32_t kind) {
+  df_reg* reg = (df_reg*)calloc(1, sizeof(df_reg));
+  if (!reg) {
+    df_out_of_memory();
+  }
+  reg->kind = kind;
+  reg->refs = 1;
+  reg->owner = df_task_current;
+  reg->mark = (void*)&df_thread_mark;
+  reg->next = df_regs;
+  df_regs = reg;
+  return reg;
+}
+
+static df_reg* df_reg_signal(df_signal* sig) {
+  for (df_reg* reg = df_regs; reg; reg = reg->next) {
+    if (reg->kind == DF_WS_SIGNAL && reg->sig == sig) {
+      reg->refs++;
+      return reg;
+    }
+  }
+  df_reg* made = df_reg_new(DF_WS_SIGNAL);   /* it enters the queue in df_ws_register */
+  made->sig = sig;
+  return made;
+}
+
+/* branches on the same event with another from are other waitables (spec 20.2.4) */
+static df_reg* df_reg_event(df_event* ev, bool hasFrom, uint64_t from) {
+  for (df_reg* reg = df_regs; reg; reg = reg->next) {
+    if (reg->kind == DF_WS_EVENT && reg->ev == ev && reg->hasFrom == hasFrom && reg->from == from) {
+      reg->refs++;
+      return reg;
+    }
+  }
+  df_reg* made = df_reg_new(DF_WS_EVENT);
+  made->ev = ev;
+  made->hasFrom = hasFrom;
+  made->from = from;
+  return made;
+}
+
+/* the task keeps the values of return? for a registration that is not processing one (its lock is held by the caller) */
+static void df_reg_count(df_reg* reg) {
+  bool wanted = reg->running == 0;
+  if (wanted != reg->counted) {
+    reg->task->interested += wanted ? 1 : -1;
+    reg->counted = wanted;
+  }
+}
+
+static df_reg* df_reg_task(df_task* task) {
+  for (df_reg* reg = df_regs; reg; reg = reg->next) {
+    if (reg->kind == DF_WS_TASK && reg->task == task) {
+      reg->refs++;
+      return reg;
+    }
+  }
+  df_reg* made = df_reg_new(DF_WS_TASK);
+  made->task = task;
+  df_task_retain((uint64_t)(uintptr_t)task);
+  df_mutex_lock(&task->lock);
+  df_reg_count(made);
+  df_mutex_unlock(&task->lock);
+  return made;
+}
+
+/* the last scope that uses the registration ends: what is pending disappears, except what its source keeps (spec 20.2.4) */
+static void df_reg_release(df_reg* reg) {
+  if (--reg->refs > 0) {
+    return;
+  }
+  for (df_reg** link = &df_regs; *link; link = &(*link)->next) {
+    if (*link == reg) {
+      *link = reg->next;
+      break;
+    }
+  }
+  if (reg->kind == DF_WS_TASK) {
+    df_task* task = reg->task;
+    df_mutex_lock(&task->lock);
+    if (reg->counted) {
+      task->interested--;
+    }
+    if (task->full && task->posted && task->waiting == 0 && task->interested == 0) {
+      task->full = false;   /* a value of return? nobody waits for any more */
+      if (task->drop) {
+        task->drop(task->slot);
+      }
+    }
+    df_mutex_unlock(&task->lock);
+    df_task_release((uint64_t)(uintptr_t)task);
+  } else {
+    df_mutex_lock(&df_sig_lock);
+    if (reg->kind == DF_WS_SIGNAL) {
+      df_sig_leave(reg->sig, reg);
+    } else if (reg->inLine) {
+      df_ev_leave(reg->ev, reg);
+      df_ev_sweep(reg->ev);
+    }
+    DF_SIG_WAKE();
+    df_mutex_unlock(&df_sig_lock);
+  }
+  free(reg);
+}
+
+typedef struct df_ws_slot {
+  int32_t kind;            /* DF_WS_NONE: the variable is null, the slot is ignored (spec 20.2.3) */
+  int32_t branch;
+  size_t count;            /* a signal group has many registrations, the others one */
+  df_reg** regs;
+  const char* evType;
+  bool counted;            /* a task: in task->waiting, while the wait waits */
+  int32_t held;            /* ... DF_HELD_... */
+  bool ended;              /* a task that has nothing left to give */
+  bool started;
+  void* out;
+  size_t outSize;
+} df_ws_slot;
+
+typedef struct df_waitset {
+  int32_t branchN;
+  int32_t slotN;
+  int32_t last;            /* the last branch that ran: the next run starts from the one after it */
+  df_reg* running;         /* the registration whose block runs */
+  int32_t failed;          /* the slot that failed in the last run (catch E on x, spec 20.2.7); -1: none */
+  df_ws_slot* slots;
+} df_waitset;
+
+static df_waitset* df_ws_new(int32_t branches, int32_t slots) {
+  df_waitset* ws = (df_waitset*)calloc(1, sizeof(df_waitset));
+  if (!ws) {
+    df_out_of_memory();
+  }
+  ws->slots = (df_ws_slot*)calloc((size_t)slots, sizeof(df_ws_slot));
+  if (!ws->slots) {
+    df_out_of_memory();
+  }
+  ws->branchN = branches;
+  ws->slotN = slots;
+  ws->last = branches - 1;
+  ws->failed = -1;
+  return ws;
+}
+
+static void df_ws_clear(df_ws_slot* slot) {
+  for (size_t i = 0; i < slot->count; i++) {
+    df_reg_release(slot->regs[i]);
+  }
+  free(slot->regs);
+  slot->regs = NULL;
+  slot->count = 0;
+  slot->kind = DF_WS_NONE;
+  slot->ended = false;
+}
+
+static void df_ws_room(df_ws_slot* slot, size_t count) {
+  slot->regs = (df_reg**)calloc(count, sizeof(df_reg*));
+  if (!slot->regs) {
+    df_out_of_memory();
+  }
+  slot->count = count;
+}
+
+/* the waitables of this run: a slot whose variable holds another object, or null, is registered again (spec 20.2) */
+static void df_ws_set_signals(df_waitset* ws, int32_t index, int32_t branch, uint64_t* handles, size_t count) {
+  df_ws_slot* slot = &ws->slots[index];
+  slot->branch = branch;
+  size_t n = 0;
+  for (size_t i = 0; i < count; i++) {
+    if (handles[i] != 0) {
+      handles[n++] = handles[i];
+    }
+  }
+  if (slot->kind == DF_WS_SIGNAL && slot->count == n) {
+    bool same = true;
+    for (size_t i = 0; i < n; i++) {
+      same = same && slot->regs[i]->sig == (df_signal*)(uintptr_t)handles[i];
+    }
+    if (same) {
+      return;
+    }
+  }
+  df_ws_slot old = *slot;
+  slot->regs = NULL;
+  slot->count = 0;
+  slot->kind = DF_WS_NONE;
+  if (n > 0) {
+    df_ws_room(slot, n);
+    for (size_t i = 0; i < n; i++) {
+      slot->regs[i] = df_reg_signal((df_signal*)(uintptr_t)handles[i]);
+    }
+    slot->kind = DF_WS_SIGNAL;
+  }
+  df_ws_clear(&old);   /* after: a signal of both stays registered */
+}
+
+static void df_ws_set_signal(df_waitset* ws, int32_t index, int32_t branch, uint64_t handle) {
+  df_ws_set_signals(ws, index, branch, &handle, 1);
+}
+
+static void df_ws_set_event(df_waitset* ws, int32_t index, int32_t branch, uint64_t handle, bool hasFrom, uint64_t from) {
+  df_ws_slot* slot = &ws->slots[index];
+  df_evref* ref = (df_evref*)(uintptr_t)handle;
+  slot->branch = branch;
+  if (ref != NULL) {
+    slot->evType = ref->type;
+    if (slot->kind == DF_WS_EVENT && slot->regs[0]->ev == ref->ev && slot->regs[0]->hasFrom == hasFrom && slot->regs[0]->from == from) {
+      return;
+    }
+  }
+  df_ws_clear(slot);
+  if (ref != NULL) {
+    df_ws_room(slot, 1);
+    slot->regs[0] = df_reg_event(ref->ev, hasFrom, from);
+    slot->kind = DF_WS_EVENT;
+  }
+}
+
+static void df_ws_set_task(df_waitset* ws, int32_t index, int32_t branch, uint64_t handle, void* out, size_t outSize, int32_t held) {
+  df_ws_slot* slot = &ws->slots[index];
+  df_task* task = (df_task*)(uintptr_t)handle;
+  slot->branch = branch;
+  slot->out = out;
+  slot->outSize = outSize;
+  slot->held = held;
+  if (slot->kind == DF_WS_TASK && slot->regs[0]->task == task) {
+    return;
+  }
+  df_ws_clear(slot);
+  if (task != NULL) {
+    df_ws_room(slot, 1);
+    slot->regs[0] = df_reg_task(task);
+    slot->kind = DF_WS_TASK;
+  }
+}
+
+/* the signal of a slot that fired (its member) */
+static uint64_t df_ws_fired(df_waitset* ws, int32_t slot, int64_t member) {
+  return slot < 0 ? 0 : (uint64_t)(uintptr_t)ws->slots[slot].regs[member]->sig;
+}
+
+/* the task can still give something to a waiter (its lock is held) */
+static bool df_ws_task_alive(df_task* task) {
+  return !task->ended || task->full || task->failure != NULL || (task->size == 0 && !task->endTaken);
+}
+
+/* registers the slots that are not registered yet; the exception of the one that cannot be (spec 20.3: an Exclusive signal that has its
+   listener; 20.4.3: an event of another struct) */
+static df_exception* df_ws_register(df_waitset* ws) {
+  df_exception* error = NULL;
+  for (int32_t i = 0; i < ws->slotN && error == NULL; i++) {
+    df_ws_slot* slot = &ws->slots[i];
+    if (slot->kind == DF_WS_TASK) {
+      df_task* task = slot->regs[0]->task;
+      df_mutex_lock(&task->lock);
+      if (!slot->counted && df_ws_task_alive(task)) {
+        if (df_task_may_wait(task, slot->held)) {
+          task->waiting++;
+          task->waiter = df_task_me();
+          slot->counted = true;
+        } else {
+          const char* text = "This runnable neither owns nor borrows the handle of the task it waits for";
+          error = df_new_exception(&df_desc_WaitingOnANotOwnedTaskException, text, strlen(text), "wait");
+          ws->failed = i;
+        }
+      }
+      df_mutex_unlock(&task->lock);
+      continue;
+    }
+    df_mutex_lock(&df_sig_lock);
+    if (slot->kind == DF_WS_SIGNAL) {
+      for (size_t k = 0; k < slot->count && error == NULL; k++) {
+        df_reg* reg = slot->regs[k];
+        if (reg->inLine) {
+          continue;
+        }
+        if ((reg->sig->mode == DF_SIG_EXCLUSIVE || reg->sig->mode == DF_SIG_EXCLUSIVE_SAFE) && reg->sig->head != NULL) {
+          const char* text = "This signal is Exclusive: it already has its listener";
+          error = df_new_exception(&df_desc_ExclusiveSignalBusyException, text, strlen(text), "wait");
+        } else {
+          df_sig_enter(reg->sig, reg);
+          reg->inLine = true;
+        }
+      }
+    } else if (slot->kind == DF_WS_EVENT && slot->regs[0]->ev->registered) {   /* not registered yet: skipped, until it is (spec 20.4.3) */
+      df_reg* reg = slot->regs[0];
+      if (strcmp(reg->ev->type, slot->evType) != 0) {
+        const char* text = "This event is registered with another struct";
+        error = df_new_exception(&df_desc_DuplicateEventNameWithDataMismatchException, text, strlen(text), "wait");
+      } else if (!reg->inLine) {
+        df_ev_enter(reg->ev, reg);
+        reg->inLine = true;
+      }
+    }
+    df_mutex_unlock(&df_sig_lock);
+    if (error) {
+      ws->failed = i;
+    }
+  }
+  return error;
+}
+
+/* the branch is ready: the slot that is, with what it gave; -1 otherwise */
+static int32_t df_ws_try(df_waitset* ws, int32_t branch, int64_t* member, df_ev_item** item, df_exception** error) {
+  for (int32_t i = 0; i < ws->slotN; i++) {
+    df_ws_slot* slot = &ws->slots[i];
+    if (slot->branch != branch || slot->kind == DF_WS_NONE) {
+      continue;
+    }
+    if (slot->kind == DF_WS_TASK) {
+      df_task* task = slot->regs[0]->task;
+      bool ready = false;
+      df_mutex_lock(&task->lock);
+      slot->started = task->status != DF_RUN_READY;
+      if (slot->counted) {
+        if (task->full) {
+          if (slot->outSize) {
+            memcpy(slot->out, task->slot, slot->outSize < task->size ? slot->outSize : task->size);
+          }
+          task->full = false;
+          ready = true;
+        } else if (task->ended && task->failure) {
+          *error = task->failure;   /* the exception that left taskRun(): this waiter gets it (spec 20.2.7) */
+          task->failure = NULL;
+        } else if (task->ended && task->size == 0 && !task->endTaken) {
+          task->endTaken = true;   /* a void task: its end */
+          ready = true;
+        }
+      }
+      slot->ended = !df_ws_task_alive(task);
+      if (ready || *error) {
+        df_cond_broadcast(&task->changed);
+      }
+      df_mutex_unlock(&task->lock);
+      if (*error) {
+        ws->failed = i;
+        return -1;
+      }
+      if (ready) {
+        *member = 0;
+        return i;
+      }
+      continue;
+    }
+    df_mutex_lock(&df_sig_lock);
+    if (slot->kind == DF_WS_SIGNAL) {
+      for (size_t k = 0; k < slot->count; k++) {
+        df_reg* reg = slot->regs[k];
+        if (reg->pending || df_sig_take_stored(reg->sig)) {   /* the one that is kept, or a send nobody waited for (Stable, ExclusiveSafe) */
+          reg->pending = false;
+          *member = (int64_t)k;
+          df_mutex_unlock(&df_sig_lock);
+          return i;
+        }
+      }
+    } else if (slot->regs[0]->inLine && slot->regs[0]->ev->registered && strcmp(slot->regs[0]->ev->type, slot->evType) == 0) {
+      df_reg* reg = slot->regs[0];
+      for (df_ev_item* at = reg->ev->head; at; at = at->next) {
+        if (!at->busy && !at->stopped && df_ev_first_for(reg->ev, at) == reg) {
+          at->busy = true;
+          df_ev_mark_seen(at, reg->mark);
+          *item = at;
+          *member = 0;
+          df_mutex_unlock(&df_sig_lock);
+          return i;
+        }
+      }
+    }
+    df_mutex_unlock(&df_sig_lock);
+  }
+  return -1;
+}
+
+/* a wait on one waitable that can give nothing now: an event or a token that is not registered (skipped, spec 20.4.3), a task that has ended */
+static bool df_ws_useless(df_waitset* ws) {
+  df_ws_slot* slot = &ws->slots[0];
+  if (slot->kind == DF_WS_TASK) {
+    return slot->ended;
+  }
+  if (slot->kind == DF_WS_EVENT) {
+    df_mutex_lock(&df_sig_lock);
+    bool registered = slot->regs[0]->ev->registered;
+    df_mutex_unlock(&df_sig_lock);
+    return !registered;
+  }
+  if (slot->kind == DF_WS_SIGNAL && slot->regs[0]->sig->mode == DF_SIG_TOKEN) {
+    df_mutex_lock(&df_sig_lock);
+    bool registered = slot->regs[0]->sig->registered;
+    df_mutex_unlock(&df_sig_lock);
+    return !registered;
+  }
+  return false;
+}
+
+/* the registrations of the wait start (+1) or stop (-1) waiting now */
+static void df_ws_waiting(df_waitset* ws, int32_t change) {
+  df_mutex_lock(&df_sig_lock);
+  bool woke = false;
+  for (int32_t i = 0; i < ws->slotN; i++) {
+    for (size_t k = 0; k < ws->slots[i].count; k++) {
+      df_reg* reg = ws->slots[i].regs[k];
+      reg->waiting += change;
+      if (reg->kind == DF_WS_SIGNAL && reg->waiting == 0 && reg->pending && df_sig_kept(reg->sig->mode)) {
+        /* a token of a branch that did not run goes back to its count (spec 20.2.4) */
+        reg->pending = false;
+        if (reg->sig->mode != DF_SIG_TOKEN || reg->sig->registered) {
+          reg->sig->stored++;
+        }
+        woke = true;
+      }
+    }
+  }
+  if (woke) {
+    DF_SIG_WAKE();
+  }
+  df_mutex_unlock(&df_sig_lock);
+}
+
+/* a run of the wait: *won is the slot that gave something (-1: nothing, the timeout), with the member of the signal group or the item of the
+   event. block: its code follows, up to df_ws_done. A wait on one waitable leaves the silent notes of its task */
+static df_exception* df_ws_wait(df_waitset* ws, int64_t timeout, int32_t* won, int64_t* member, df_ev_item** item, bool single, bool block) {
+  *won = -1;
+  *member = 0;
+  *item = NULL;
+  ws->failed = -1;
+  int64_t ms = df_task_lapse_ms(timeout);
+  int64_t until = df_mono_ms() + (ms < 0 ? 0 : ms);
+  df_exception* error = NULL;
+  df_ws_waiting(ws, 1);
+  for (;;) {
+    df_mutex_lock(&df_sig_lock);
+    uint64_t epoch = df_wake_epoch;
+    df_mutex_unlock(&df_sig_lock);
+    error = df_ws_register(ws);
+    /* the branches take turns: from the one after the last that ran (spec 20.2.3) */
+    for (int32_t k = 1; k <= ws->branchN && *won < 0 && error == NULL; k++) {
+      *won = df_ws_try(ws, (ws->last + k) % ws->branchN, member, item, &error);
+    }
+    if (*won >= 0 || error) {
+      break;
+    }
+    error = df_task_cancel_now();   /* a wait is a checkpoint (spec 20.10) */
+    if (error || (single && df_ws_useless(ws))) {
+      break;
+    }
+    int64_t left = until - df_mono_ms();
+    if (left <= 0) {
+      break;
+    }
+    if (df_serving != NULL) {
+      df_task_serve_calls((df_task*)df_serving);   /* a wait in taskRun(): the calls through the handle meanwhile (spec 20.8) */
+    }
+    df_mutex_lock(&df_sig_lock);
+    if (epoch == df_wake_epoch) {
+      df_cond_wait_ms(&df_sig_changed, &df_sig_lock, df_task_slice(left));
+    }
+    df_mutex_unlock(&df_sig_lock);
+  }
+  df_ws_waiting(ws, -1);
+  if (single && *won < 0 && error == NULL && ws->slots[0].kind == DF_WS_TASK) {
+    df_silent_desc = ws->slots[0].ended ? &df_desc_TaskAlreadyTerminatedException
+      : !ws->slots[0].started ? &df_desc_TaskWasNotStartedException : &df_note_late;
+  } else if (single && *won < 0 && error == NULL) {
+    df_silent_desc = &df_note_late;
+  }
+  if (*won >= 0) {
+    ws->last = ws->slots[*won].branch;
+    if (block) {
+      df_reg* reg = ws->slots[*won].regs[*member];
+      ws->running = reg;
+      df_mutex_lock(&df_sig_lock);
+      reg->running++;
+      df_mutex_unlock(&df_sig_lock);
+    }
+  }
+  for (int32_t i = 0; i < ws->slotN; i++) {
+    df_ws_slot* slot = &ws->slots[i];
+    if (slot->kind != DF_WS_TASK) {
+      continue;
+    }
+    df_task* task = slot->regs[0]->task;
+    df_mutex_lock(&task->lock);
+    df_reg_count(slot->regs[0]);
+    if (slot->counted) {
+      task->waiting--;
+      slot->counted = false;
+    }
+    bool over = !df_ws_task_alive(task);
+    df_mutex_unlock(&task->lock);
+    df_wait_wake();   /* the next waiter may have its turn */
+    if (over && slot->regs[0] != ws->running) {
+      df_ws_clear(slot);   /* nothing more will come: the task is not kept */
+    }
+  }
+  return error;
+}
+
+/* the block of the branch has ended, in any way */
+static void df_ws_done(df_waitset* ws, df_ev_item* item) {
+  df_reg* reg = ws->running;
+  ws->running = NULL;
+  if (item != NULL) {
+    df_ev_done(reg->ev, item);
+  }
+  df_mutex_lock(&df_sig_lock);
+  reg->running--;
+  df_mutex_unlock(&df_sig_lock);
+  if (reg->kind == DF_WS_TASK) {
+    df_mutex_lock(&reg->task->lock);
+    df_reg_count(reg);   /* what it hands out from now on is for the next run */
+    df_mutex_unlock(&reg->task->lock);
+  }
+}
+
+/* the scope of the wait ends (spec 20.2.4) */
+static void df_ws_end(df_waitset** held) {
+  df_waitset* ws = *held;
+  if (ws == NULL) {
+    return;
+  }
+  *held = NULL;
+  for (int32_t i = 0; i < ws->slotN; i++) {
+    df_ws_clear(&ws->slots[i]);
+  }
+  free(ws->slots);
+  free(ws);
 }
 
 /* the very end of the program: the registry is freed, with the items left in the queues. An event that a runnable still uses (one that

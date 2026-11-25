@@ -1,0 +1,10 @@
+import Root
+import Root.Tasks
+
+class C {
+  fun i32 taskRun() { return 1 }
+}
+fun i32 w(&Task<C> t) { return wait t timeout 10 }
+Task<C> mine = Task(C).start()
+Thread a = Thread(w, &mine).start()
+Thread b = Thread(w, &mine).start()

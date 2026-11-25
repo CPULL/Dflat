@@ -1,0 +1,1 @@
+event_register_timeout_not_blocking.df(6): error: the timeout of a registration is how long a BlockSender send waits for room: it is given only with fullMode: EventQueueFullMode.BlockSender (spec 20.4.3)

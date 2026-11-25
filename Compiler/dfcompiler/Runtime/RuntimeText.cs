@@ -177,17 +177,33 @@ static int64_t df_str_indexof(df_string text, df_string value, bool cs) {
   return (int64_t)df_utf8_count(s.p, at);
 }
 
-static int64_t df_str_lastindexof(df_string text, df_string value, bool cs) {
+/* the first match that starts at the character 'start' or after it (spec 4.2) */
+static int64_t df_str_indexof_from(df_string text, df_string value, df_uns start, bool cs) {
+  df_sv s = df_view(text);
+  uint64_t from = 0;
+  for (df_uns k = 0; k < start; k++) {
+    if (from >= s.len) {
+      return -1;
+    }
+    df_utf8_next(s.p, s.len, &from);
+  }
+  uint64_t end;
+  uint64_t at = df_find(s, df_view(value), from, cs, &end);
+  return at == DF_NOT_FOUND ? -1 : (int64_t)df_utf8_count(s.p, at);
+}
+
+/* the last match that starts at the character 'start' or before it (spec 4.2) */
+static int64_t df_str_lastindexof_from(df_string text, df_string value, df_uns start, bool cs) {
   df_sv s = df_view(text);
   df_sv v = df_view(value);
   uint64_t at = 0;
   uint64_t last = DF_NOT_FOUND;
   uint64_t end;
-  while (true) {
+  for (df_uns k = 0; ; k++) {
     if (df_match_at(s, at, v, cs, &end)) {
       last = at;
     }
-    if (at >= s.len) {
+    if (at >= s.len || k >= start) {
       break;
     }
     df_utf8_next(s.p, s.len, &at);
@@ -196,6 +212,24 @@ static int64_t df_str_lastindexof(df_string text, df_string value, bool cs) {
     return -1;
   }
   return (int64_t)df_utf8_count(s.p, last);
+}
+
+static int64_t df_str_lastindexof(df_string text, df_string value, bool cs) {
+  return df_str_lastindexof_from(text, value, DF_UNS_MAX, cs);
+}
+
+static int64_t df_str_indexof_c_from(df_string s, uint32_t c, df_uns start, bool cs) {
+  df_string one = df_str_from_char(c);
+  int64_t at = df_str_indexof_from(s, one, start, cs);
+  df_str_free(one);
+  return at;
+}
+
+static int64_t df_str_lastindexof_c_from(df_string s, uint32_t c, df_uns start, bool cs) {
+  df_string one = df_str_from_char(c);
+  int64_t at = df_str_lastindexof_from(s, one, start, cs);
+  df_str_free(one);
+  return at;
 }
 
 static int64_t df_str_indexof_c(df_string s, uint32_t c, bool cs) {
@@ -333,7 +367,7 @@ static df_string df_str_trim_set(df_string s, df_string set) { return df_str_tri
 static df_string df_str_trim_left_set(df_string s, df_string set) { return df_str_trim_mode(s, 1, true, set); }
 static df_string df_str_trim_right_set(df_string s, df_string set) { return df_str_trim_mode(s, 2, true, set); }
 
-static df_string df_str_substr(df_string text, uint32_t start, uint32_t len) {
+static df_string df_str_substr(df_string text, df_uns start, df_uns len) {
   df_sv s = df_view(text);
   uint64_t a = df_str_offset(s, start);
   uint64_t i = a;
@@ -359,7 +393,7 @@ static df_string df_str_map_case(df_string text, bool upper) {
 static df_string df_str_toupper(df_string s) { return df_str_map_case(s, true); }
 static df_string df_str_tolower(df_string s) { return df_str_map_case(s, false); }
 
-static df_string df_str_pad(df_string text, uint32_t width, uint32_t pad, bool left) {
+static df_string df_str_pad(df_string text, df_uns width, uint32_t pad, bool left) {
   df_sv s = df_view(text);
   uint64_t n = df_str_chars(text);
   if (n >= width) {
@@ -378,8 +412,8 @@ static df_string df_str_pad(df_string text, uint32_t width, uint32_t pad, bool l
   return df_sb_done(&b);
 }
 
-static df_string df_str_pad_left(df_string s, uint32_t width, uint32_t pad) { return df_str_pad(s, width, pad, true); }
-static df_string df_str_pad_right(df_string s, uint32_t width, uint32_t pad) { return df_str_pad(s, width, pad, false); }
+static df_string df_str_pad_left(df_string s, df_uns width, uint32_t pad) { return df_str_pad(s, width, pad, true); }
+static df_string df_str_pad_right(df_string s, df_uns width, uint32_t pad) { return df_str_pad(s, width, pad, false); }
 
 /* text[pos]: the character at a position; IndexOutOfRangeException past the end */
 static uint32_t df_str_char_at(df_string text, uint64_t index, const char* function) {
@@ -415,28 +449,28 @@ static df_string df_str_splice(df_sv s, uint64_t from, uint64_t to, df_sv middle
 }
 
 /* insert, remove, replaceAt, append, prepend (spec 4.3): positions in characters; a position past the end is the end */
-static df_string df_str_insert(df_string text, uint32_t pos, df_string add) {
+static df_string df_str_insert(df_string text, df_uns pos, df_string add) {
   df_sv s = df_view(text);
   uint64_t at = df_str_offset(s, pos);
   return df_str_splice(s, at, at, df_view(add));
 }
 
-static df_string df_str_remove(df_string text, uint32_t pos, uint32_t len) {
+static df_string df_str_remove(df_string text, df_uns pos, df_uns len) {
   df_sv s = df_view(text);
   uint64_t from = df_str_offset(s, pos);
   uint64_t to = from;
-  for (uint32_t k = 0; k < len && to < s.len; k++) {
+  for (df_uns k = 0; k < len && to < s.len; k++) {
     df_utf8_next(s.p, s.len, &to);
   }
   df_sv none = { "", 0 };
   return df_str_splice(s, from, to, none);
 }
 
-static df_string df_str_replace_at(df_string text, uint32_t pos, uint32_t len, df_string add) {
+static df_string df_str_replace_at(df_string text, df_uns pos, df_uns len, df_string add) {
   df_sv s = df_view(text);
   uint64_t from = df_str_offset(s, pos);
   uint64_t to = from;
-  for (uint32_t k = 0; k < len && to < s.len; k++) {
+  for (df_uns k = 0; k < len && to < s.len; k++) {
     df_utf8_next(s.p, s.len, &to);
   }
   return df_str_splice(s, from, to, df_view(add));

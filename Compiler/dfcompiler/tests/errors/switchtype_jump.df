@@ -1,0 +1,10 @@
+// a jump to another case of a type switch (spec 11.3.7)
+import Root
+
+Generic Nums { i32, string }
+
+Nums n = 5
+switch n is ? {
+  i32: jump string
+  string: Console.log("string")
+}

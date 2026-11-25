@@ -1,7 +1,7 @@
 // Block strings (spec 4.4.4): above 4091 bytes a string is a chain of 4 KB blocks, changed where it is
 import Root
 
-// growing past 4091 bytes makes a block string; a borrow follows it
+// growing past 4091 bytes makes a block string; view keeps the text it took (spec 4)
 string text = "".padLeft(4000, 'a')
 string view = text
 for i32 round in 0..300 {
@@ -57,7 +57,7 @@ temp.clear()
 Console.log($"[{temp}] {tempView.len}")
 temp += "small again"
 temp.shrink()
-Console.log($"{temp} {temp.len} {tempView}")
+Console.log($"{temp} {temp.len} {tempView.len}")
 string longText = "".padLeft(4500, 'k')
 longText.remove(100, 4400)
 longText.shrink()

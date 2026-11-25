@@ -1,0 +1,10 @@
+// a member of the set with no case and no default (spec 11.3.7)
+import Root
+
+Generic Nums { i32, string, bool }
+
+Nums n = 5
+switch n is ? {
+  i32: Console.log("int")
+  string: Console.log("string")
+}

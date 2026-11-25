@@ -1,0 +1,1 @@
+wait_var_signal.df(6): error: the timeout block of a wait on a signal or a token gives no value: they give none (spec 20.3)

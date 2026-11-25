@@ -413,31 +413,29 @@ public sealed class Parser {
       // wait on ev [from x] as data [timeout t] { ... } (spec 20.4.7): the single-target form
       var start = Next();
       Next();   // on
-      var waitOn = new Node("WaitOn", start).Add(ParseUnary());
-      if (Peek.Kind is TokenKind.Ident or TokenKind.Keyword && Peek.Text == "from") {
-        var word = Next();
-        waitOn.Add(new Node("From", word).Add(ParseUnary()));
-      }
-      if (Peek.Kind is not (TokenKind.Ident or TokenKind.Keyword) || Peek.Text != "as") {
-        throw Error("wait on takes the name of the data: wait on resize as newsize timeout 200 { ... } (spec 20.4.7)");
-      }
-      Next();
-      waitOn.Text = ExpectIdent().Text;
-      if (Peek.Kind == TokenKind.Ident && Peek.Text == "timeout") {
-        var word = Next();
-        bool savedBrace = noBrace;
-        noBrace = true;
-        waitOn.Add(new Node("Timeout", word).Add(ParseTimeoutOperand()));
-        noBrace = savedBrace;
-      }
-      waitOn.Add(ParseBlock());
-      return waitOn;
+      return ParseWaitStatement(start);
+    }
+    if (Peek.Kind == TokenKind.Ident && Peek.Text == "wait" && PeekAt(1).Kind is TokenKind.Newline && NextLineWord(1, "on")) {
+      return ParseWaitMulti(Next());   // wait alone on its line, then the on branches (spec 20.2.1)
+    }
+    if (Peek.Kind == TokenKind.Ident && Peek.Text == "wait" && WaitStatementAhead()) {
+      return ParseWaitStatement(Next());   // wait t as res { ... } timeout 1000 { ... } (spec 20.2.1): on is optional with one waitable
     }
     if (Peek.Kind == TokenKind.Ident && Peek.Text == "wait" && PeekAt(1).Line == Peek.Line
         && PeekAt(1).Kind is TokenKind.Ident or TokenKind.Int or TokenKind.Real or TokenKind.String && !PeekAt(2).Is("=")) {
       // wait delay, wait t timeout 500 (spec 20.2): a wait, not the declaration of a variable delay of a type wait
       var start = Peek;
       var waitStatement = new Node("ExprStmt", start).Add(ParseExpr());
+      if (waitStatement.Children[0] is { Kind: "Wait", Children.Count: > 0 } waited && waited.Children[0].Kind != "Call") {
+        // wait t timeout 50 [{ ... }] catch E { ... }: the statement form; without a block its clauses are on the same line
+        var withClauses = new Node("WaitOn", start);
+        withClauses.Children.AddRange(waited.Children);
+        int before = withClauses.Children.Count;
+        ParseWaitClauses(withClauses, withClauses.Children[^1].Kind == "TimeoutBlock");
+        if (withClauses.Children.Count > before) {
+          return withClauses;
+        }
+      }
       EndStatement(caseBody);
       return waitStatement;
     }
@@ -575,6 +573,150 @@ public sealed class Parser {
     var simple = ParseSimple(!caseBody);
     EndStatement(caseBody);
     return simple;
+  }
+
+  // wait t as ..., wait t { ...: after wait, a name (a.b.c) and then as, from or { on the same line (spec 20.2.1)
+  bool WaitStatementAhead() {
+    var first = PeekAt(1);
+    if (first.Line != Peek.Line || first.Kind != TokenKind.Ident || first.Text == "on") {
+      return false;
+    }
+    int at = 1;
+    while (PeekAt(at + 1).Is(".") && PeekAt(at + 2).Kind == TokenKind.Ident) {
+      at += 2;
+    }
+    var after = PeekAt(at + 1);
+    if (after.Is("(")) {
+      // wait t.getCount() as n { }: a call where a waitable is named, an error of ParseWaitTarget (spec 20.2.1)
+      int depth = 0;
+      do {
+        at++;
+        var token = PeekAt(at);
+        if (token.Kind is TokenKind.Eof || token.Line != Peek.Line) {
+          return false;
+        }
+        depth += token.Is("(") ? 1 : token.Is(")") ? -1 : 0;
+      } while (depth > 0);
+      after = PeekAt(at + 1);
+    }
+    return after.Line == Peek.Line && (after.Is("{") || after.Kind is TokenKind.Ident or TokenKind.Keyword && after.Text is "as" or "from");
+  }
+
+  // the first word on the next lines (after skip tokens of this line) is word
+  bool NextLineWord(int skip, string word) {
+    int save = pos;
+    for (int i = 0; i < skip; i++) {
+      Next();
+    }
+    SkipNewlines();
+    bool found = Peek.Kind is TokenKind.Ident or TokenKind.Keyword && Peek.Text == word;
+    pos = save;
+    return found;
+  }
+
+  // timeout <operand> on the next line: the clause of a wait, not a statement that uses a variable named timeout
+  bool TimeoutClauseOnNextLine() {
+    int save = pos;
+    SkipNewlines();
+    bool found = Peek.Kind == TokenKind.Ident && Peek.Text == "timeout" && PeekAt(1).Line == Peek.Line
+      && PeekAt(1).Kind is TokenKind.Int or TokenKind.Real or TokenKind.Ident;
+    pos = save;
+    return found;
+  }
+
+  // the waitable of a branch: a variable or an object, never a call (spec 20.2.1)
+  Node ParseWaitTarget() {
+    bool savedBrace = noBrace;
+    noBrace = true;
+    var at = Peek;
+    var target = ParseUnary();
+    noBrace = savedBrace;
+    if (target.Kind == "Call") {
+      throw ErrorAt("a wait names a variable or an object, not a call: make the promise first, then wait on it (spec 20.2.1)", at);
+    }
+    return target;
+  }
+
+  // wait, then on its own lines: on x [, y] [from z] [as v] { ... } ..., then the clauses (spec 20.2.1); the word wait is read
+  Node ParseWaitMulti(Token start) {
+    var multi = new Node("WaitMulti", start);
+    while (NextLineWord(0, "on")) {
+      SkipNewlines();
+      var on = Next();
+      var branch = new Node("WaitBranch", on).Add(ParseWaitTarget());
+      while (AcceptOp(",")) {
+        branch.Add(ParseWaitTarget());
+      }
+      if (Peek.Kind is TokenKind.Ident or TokenKind.Keyword && Peek.Text == "from") {
+        var word = Next();
+        branch.Add(new Node("From", word).Add(ParseWaitTarget()));
+      }
+      if (Peek.Kind is TokenKind.Ident or TokenKind.Keyword && Peek.Text == "as") {
+        Next();
+        branch.Text = ExpectIdent().Text;
+      }
+      branch.Add(ParseBlock());
+      multi.Add(branch);
+    }
+    ParseWaitClauses(multi, true);
+    return multi;
+  }
+
+  // the clauses of a wait (spec 20.2.1): timeout t [{ ... }], catch E [ex] [on x], atEnd, default; after a closing brace they can be on the
+  // next line (14.2)
+  void ParseWaitClauses(Node wait, bool afterBrace) {
+    while (true) {
+      bool here = !IsNewline;
+      if (here && Peek.Kind == TokenKind.Ident && Peek.Text == "timeout" || afterBrace && TimeoutClauseOnNextLine()) {
+        SkipNewlines();
+        var word = Next();
+        bool savedBrace = noBrace;
+        noBrace = true;
+        wait.Add(new Node("Timeout", word).Add(ParseTimeoutOperand()));
+        noBrace = savedBrace;
+        afterBrace = IsOp("{") && Peek.Line == word.Line;
+        if (afterBrace) {
+          wait.Add(new Node("TimeoutBlock", Peek).Add(ParseBlock()));
+        }
+        continue;
+      }
+      if ((here || afterBrace) && PeekEnforceClause()) {
+        int save = pos;
+        SkipNewlines();
+        if (Peek.Text is "null" or "lockfail") {
+          pos = save;
+          return;
+        }
+        ParseOneEnforceClause(wait);
+        afterBrace = true;
+        continue;
+      }
+      return;
+    }
+  }
+
+  // wait [on] x [from y] [as v] [{ ... }] [timeout t [{ ... }]] (spec 20.2.1); the word wait is read, on too
+  Node ParseWaitStatement(Token start) {
+    bool savedBrace = noBrace;
+    var waitOn = new Node("WaitOn", start).Add(ParseWaitTarget());
+    if (Peek.Kind is TokenKind.Ident or TokenKind.Keyword && Peek.Text == "from") {
+      var word = Next();
+      noBrace = true;
+      waitOn.Add(new Node("From", word).Add(ParseUnary()));
+      noBrace = savedBrace;
+    }
+    if (Peek.Kind is TokenKind.Ident or TokenKind.Keyword && Peek.Text == "as") {
+      Next();
+      waitOn.Text = ExpectIdent().Text;
+    }
+    if (IsOp("{")) {
+      waitOn.Add(ParseBlock());
+      if (!IsNewline || TimeoutClauseOnNextLine()) {
+        SkipNewlines();   // } then timeout ... on the next line belongs to the wait, as atEnd (spec 20.2.1, 14.2)
+      }
+    }
+    ParseWaitClauses(waitOn, waitOn.Children[^1].Kind == "Block");
+    return waitOn;
   }
 
   Node ParseBlock(string? ownerName = null) {
@@ -946,7 +1088,14 @@ public sealed class Parser {
   // switch val { 1: a, 2: b \n 3, 4, 5: { ... } \n default: c }
   Node ParseSwitch() {
     var t = Next();
-    var node = new Node("Switch", t).Add(ParseCondition());
+    bool savedSubject = switchSubject;
+    switchSubject = true;
+    var subject = ParseCondition();
+    switchSubject = savedSubject;
+    if (IsKw("is") && PeekAt(1).Is("?")) {
+      return ParseTypeSwitchStatement(t, subject);
+    }
+    var node = new Node("Switch", t).Add(subject);
     SkipNewlines();
     var open = ExpectOp("{");
     bool saved = noBrace;
@@ -982,11 +1131,84 @@ public sealed class Parser {
     return node;
   }
 
+  bool switchSubject;   // the value of a switch is being read
+
+  // switch value is ? { Type name: ..., Type, Type: { ... } \n default: ... } (spec 11.3.7): the bodies are the ones of switch
+  Node ParseTypeSwitchStatement(Token t, Node subject) {
+    Next();
+    Next();
+    var node = new Node("TypeSwitchStmt", t).Add(subject);
+    var open = ExpectOp("{");
+    bool saved = noBrace;
+    noBrace = false;
+    SkipSeparators();
+    while (!IsOp("}")) {
+      if (AtEnd) {
+        throw ErrorAt("unclosed switch", open);
+      }
+      var arm = new Node("Case", Peek);
+      var labels = new Node("Values", Peek);
+      while (true) {
+        labels.Add(IsKw("default") ? new Node("Default", Next()) : ParseType(false));
+        if (Peek.Kind == TokenKind.Ident && PeekAt(1).Is(":")) {
+          arm.Text = Next().Text;   // Dog x: the object as that type
+        }
+        if (!AcceptOp(",")) {
+          break;
+        }
+        SkipNewlines();
+      }
+      var colon = ExpectOp(":");
+      arm.Add(labels);
+      if (IsOp("{")) {
+        arm.Add(ParseBlock());
+      } else if (Peek.Line != colon.Line) {
+        arm.Add(ParseCaseLines(colon, true));
+      } else {
+        arm.Add(ParseStatement(null, true));
+      }
+      node.Add(arm);
+      SkipSeparators();
+    }
+    Next();
+    noBrace = saved;
+    if (node.Children.Count < 2) {
+      throw ErrorAt("a type switch needs at least one case", open);
+    }
+    return node;
+  }
+
+  // "default:", "Type name:" or "Type, Type, ...:" ahead
+  bool AtTypeCaseLabel() {
+    if (IsKw("default")) {
+      return PeekAt(1).Is(":");
+    }
+    int save = pos;
+    bool saved = noBrace;
+    try {
+      while (true) {
+        ParseType(false);
+        if (Peek.Kind == TokenKind.Ident && PeekAt(1).Is(":")) {
+          Next();
+        }
+        if (!AcceptOp(",")) {
+          return IsOp(":");
+        }
+        SkipNewlines();
+      }
+    } catch (DfException) {
+      return false;
+    } finally {
+      pos = save;
+      noBrace = saved;
+    }
+  }
+
   // case body on the following lines, up to the next case or the end of the switch
-  Node ParseCaseLines(Token colon) {
+  Node ParseCaseLines(Token colon, bool types = false) {
     var block = new Node("Block", colon);
     SkipTerminators();
-    while (!IsOp("}") && !AtEnd && !AtCaseLabel()) {
+    while (!IsOp("}") && !AtEnd && !(types ? AtTypeCaseLabel() : AtCaseLabel())) {
       block.Add(ParseStatement());
       SkipTerminators();
     }
@@ -1205,27 +1427,31 @@ public sealed class Parser {
       if (hasElse) {
         throw Error("else is valid only when the enforce has no other clause (spec 7.2.1)");
       }
-      var c = Next();
-      if (c.Text == "catch") {
-        pos--;
-        node.Add(ParseCatch(true));
-      } else if (c.Text == "default") {
-        if (node.Children.Any(child => child.Kind == "EnforceDefault")) {
-          throw Error("an enforce has at most one default (spec 7.2.1)");
-        }
-        node.Add(new Node("EnforceDefault", c).Add(ParseBlock()));
-      } else if (c.Text == "atEnd") {
-        node.Add(new Node("AtEnd", c, "enforce").Add(ParseBlock()));
-      } else {
-        var clause = new Node(c.Text == "null" ? "EnforceNull" : "EnforceLockFail", c);
-        if (Peek.Kind == TokenKind.Ident && Peek.Text == "on") {
-          clause.Add(ParseOnList());
-        }
-        node.Add(clause.Add(ParseBlock()));
-      }
+      ParseOneEnforceClause(node);
     }
     if (PeekElse()) {
       throw Error("else is valid only when the enforce has no other clause (spec 7.2.1)");
+    }
+  }
+
+  void ParseOneEnforceClause(Node node) {
+    var c = Next();
+    if (c.Text == "catch") {
+      pos--;
+      node.Add(ParseCatch(true));
+    } else if (c.Text == "default") {
+      if (node.Children.Any(child => child.Kind == "EnforceDefault")) {
+        throw Error("an enforce has at most one default (spec 7.2.1)");
+      }
+      node.Add(new Node("EnforceDefault", c).Add(ParseBlock()));
+    } else if (c.Text == "atEnd") {
+      node.Add(new Node("AtEnd", c, "enforce").Add(ParseBlock()));
+    } else {
+      var clause = new Node(c.Text == "null" ? "EnforceNull" : "EnforceLockFail", c);
+      if (Peek.Kind == TokenKind.Ident && Peek.Text == "on") {
+        clause.Add(ParseOnList());
+      }
+      node.Add(clause.Add(ParseBlock()));
     }
   }
 
@@ -2293,6 +2519,9 @@ public sealed class Parser {
     var left = ParseBinary(level + 1);
     while (true) {
       if (level == ComparisonLevel && IsKw("is")) {
+        if (switchSubject && noBrace && PeekAt(1).Is("?") && PeekAt(2).Is("{")) {
+          return left;   // switch value is ? { }: the cases are read by ParseSwitch
+        }
         left = ParseIs(left);
         continue;
       }
@@ -2663,7 +2892,14 @@ public sealed class Parser {
           var waited = new Node("Wait", t).Add(ParseUnary());
           if (Peek.Kind == TokenKind.Ident && Peek.Text == "timeout" && Peek.Line == t.Line) {
             var word = Next();
+            bool savedBrace = noBrace;
+            noBrace = true;
             waited.Add(new Node("Timeout", word).Add(ParseTimeoutOperand()));
+            noBrace = savedBrace;
+            if (IsOp("{") && Peek.Line == word.Line) {
+              // wait t timeout 500 { 0 } (spec 20.2.8): the block of the timeout
+              waited.Add(new Node("TimeoutBlock", Peek).Add(ParseBlock()));
+            }
           }
           return waited;
         }

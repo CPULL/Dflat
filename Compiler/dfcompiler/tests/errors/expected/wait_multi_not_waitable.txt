@@ -1,0 +1,1 @@
+wait_multi_not_waitable.df(8): error: wait takes a task, a thread, a signal, a signal group, a token or an event, not i32 (spec 20.2.2)

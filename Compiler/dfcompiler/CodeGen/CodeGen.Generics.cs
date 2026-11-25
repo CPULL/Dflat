@@ -776,6 +776,9 @@ public sealed partial class CodeGen {
     if (TasksMode && subject.Type is "Task" or "Thread") {
       return TaskTypeSwitch(n, subject, scope, expected);   // chosen at run time by the class and the results (spec 20.9)
     }
+    if (IsClass(subject.Type)) {
+      return ObjectTypeSwitch(n, subject, scope, expected);   // chosen at run time by the class of the object (spec 11.3.7)
+    }
     string type = subject.Type;
     Node? chosen = null;
     bool sawDefault = false;

@@ -1,0 +1,29 @@
+[1.5 'two' false ]
+--- objects
+puppy
+woof
+a cat: meow
+not supported
+not supported
+dog, cat animal, animal, nothing
+--- set values
+5 3 5 8
+5 100 50
+i32 4, string s, other
+a new value: given
+still given
+made a animal
+woof
+--- one line, loops
+four
+five
+--- jump
+turn 1
+turn 2
+turn 3
+out
+the case of the outer switch
+--- exceptions
+never assigned
+caught
+---- exit code 0 ----

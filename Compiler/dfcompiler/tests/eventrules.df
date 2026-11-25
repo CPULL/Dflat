@@ -1,0 +1,119 @@
+// events (spec 20.4.3 .. 20.4.5): a runnable that is not waiting loses its turn, never the event; the owner; the full queue
+import Root
+import Root.Tasks
+
+struct Num { i32 n }
+struct Text { string s }
+
+class Reader {
+  i32 sum = 0
+  fun i32 taskRun() {
+    Event<Num> ev = Event("rules.turn")
+    while true {
+      wait on ev as d { sum += d.n } timeout 300 { return sum }
+    }
+    return sum
+  }
+}
+
+// the main program is registered and first in line, and does not wait: the reader has the events meanwhile, the main program later
+fun turn() {
+  Event<Num> ev = Event.register("rules.turn", EventMode.Static, keep: 4, fullMode: EventQueueFullMode.DiscardOldest)
+  wait on ev as none { Console.log("never") } timeout 1
+  Task reader = Task(Reader, timeout: 2000).start()
+  wait 50
+  ev.send(Num(1))
+  ev.send(Num(2))
+  wait 50
+  Console.log("sent")
+  i32 idle = 0
+  string mine = ""
+  while idle < 1 {
+    wait on ev as d { mine += $"{d.n} " } timeout 20 { idle++ }
+  }
+  Console.log($"main: {mine}")
+  Console.log($"reader: {wait reader timeout 2000}")
+}
+
+// volatile: lost when nobody is registered, kept (the last one) for a runnable that is registered
+fun volatileEvents() {
+  Event<Num> ev = Event.register("rules.volatile")
+  ev.send(Num(1))
+  wait on ev as d { Console.log("never: nobody was registered") } timeout 10 { Console.log("lost") }
+  ev.send(Num(2))
+  ev.send(Num(3))
+  wait on ev as d { Console.log($"kept {d.n}") } timeout 10 { Console.log("never") }
+  wait on ev as d { Console.log("never") } timeout 10 { Console.log("only the last") }
+}
+
+// the owner ends: the queue disappears, the name is not registered any more; another runnable registers it, with another struct
+class Owner {
+  fun taskRun() {
+    Event<Num> ev = Event.register("rules.owned", EventMode.Static, keep: 4)
+    ev.send(Num(7))
+    ev.send(Num(8))
+    wait 100
+  }
+}
+
+fun ownerEnds() {
+  Task owner = Task(Owner, timeout: 2000).start()
+  wait 50
+  {
+    Event<Num> ev = Event("rules.owned")
+    wait on ev as d {
+      Console.log($"got {d.n}")
+      wait 150                           // the owner ends now: this block ends normally
+      Console.log($"still {d.n}")
+    } timeout 1000
+    wait on ev as d { Console.log("never") } timeout 5000 { Console.log("not registered any more") }
+    ev.send(Num(9))
+  }
+  wait owner timeout 1000
+  Event<Text> again = Event.register("rules.owned", EventMode.Static, keep: 4)
+  again.send(Text("new owner " + 1.toStr()))
+  wait on again as t { Console.log(t.s) } timeout 100 { Console.log("never") }
+}
+
+// a full queue: the events that somebody had leave first, also for the runnable that has not had them; DiscardNewest only for the others
+class Slow {
+  string got = ""
+  fun ->string taskRun() {
+    Event<Num> ev = Event("rules.full")
+    while true {
+      wait on ev as d { got += $"{d.n} " } timeout 400 { return got }
+    }
+    return got
+  }
+}
+
+fun full() {
+  Event<Num> ev = Event.register("rules.full", EventMode.Static, keep: 2, fullMode: EventQueueFullMode.DiscardNewest)
+  ev.send(Num(1))
+  ev.send(Num(2))
+  ev.send(Num(3))                        // nobody had 1 and 2: the new one is discarded
+  string mine = ""
+  i32 idle = 0
+  while idle < 1 {
+    wait on ev as d { mine += $"{d.n} " } timeout 10 { idle++ }
+  }
+  Console.log($"first {mine}")
+  Task slow = Task(Slow, timeout: 2000).start()
+  wait 50
+  for i32 n in 10..16 {                  // the main program is registered too, and never has them now
+    ev.send(Num(n))
+    wait 20
+  }
+  Console.log($"slow {wait slow timeout 2000}")
+  mine = ""
+  idle = 0
+  while idle < 1 {
+    wait on ev as d { mine += $"{d.n} " } timeout 10 { idle++ }
+  }
+  Console.log($"main {mine}")
+}
+
+turn()
+volatileEvents()
+ownerEnds()
+full()

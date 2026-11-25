@@ -1,0 +1,13 @@
+import Root
+import Root.Tasks
+
+class Counter {
+  fun i32 taskRun() {
+    wait 1000
+    return 1
+  }
+  public fun i32 getCount() { return 3 }
+}
+
+Task<Counter> t = Task(Counter).start()
+wait t.getCount() as n { Console.log(n) } timeout 100

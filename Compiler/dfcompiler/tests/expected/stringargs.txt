@@ -1,0 +1,31 @@
+--- arguments
+[text 1 made at run time, long enough for a block | changed 2]
+[text 2 made at run time, long enough for a block | changed 3]
+[text 3 made at run time, long enough for a block | changed 4]
+[text 4 made at run time, long enough for a block | changed 5]
+[text 1 made at run time, long enough for a block | top changed]
+[text 5 made at run time, long enough for a block | changed 30]
+[ab | twice]
+[text 30 made at run time, long enough for a block | changed 7]
+text 7 made at run time, long enough for a block / changed 8
+[text 8 made at run time, long enough for a block | changed 9]
+--- operators
+text 9 made at run time, long enough for a block changed 10
+text 10 made at run time, long enough for a blockchanged 10
+false false
+1 1
+--- interpolation
+text 1000 made at run time, long enough for a block changed 12 text 12 made at run time, long enough for a block
+--- literals
+[text 12 made at run time, long enough for a block, changed 13, text 13 made at run time, long enough for a block]
+(text 13 made at run time, long enough for a block, changed 14)
+[a: text 14 made at run time, long enough for a block, b: changed 15]
+text 15 made at run time, long enough for a block / changed 16
+text 16 made at run time, long enough for a block / text 20 made at run time, long enough for a block
+changed 8 / text 7 made at run time, long enough for a block
+--- receivers
+true
+changed 18 17 made at run time, long enough for a block
+text 18 ma
+[text 19 made at run time, long enough for a block | changed 40]
+---- exit code 0 ----

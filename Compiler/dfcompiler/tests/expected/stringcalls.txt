@@ -1,0 +1,17 @@
+text 1 made at run time / text 2 made at run time
+text 2 made at run time / text 2 made at run time
+text 10 made at run time / text 11 made at run time
+text 11 made at run time / text 12 made at run time
+text 12 made at run time
+text 12 made at run time / <set>
+text 40 made at run time / was text 40 made at run time
+was text 40 made at run time!
+text 50 made at run time / text 60 made at run time
+in a box / text 70 made at run time
+a
+text 20 made at run time / text 22 made at run time
+text 31 made at run time / text 30 made at run time
+text 30 made at run time
+text 30 made at run time
+text 1 made at run time
+---- exit code 0 ----

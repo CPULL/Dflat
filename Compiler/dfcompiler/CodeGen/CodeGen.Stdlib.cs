@@ -8,8 +8,10 @@ namespace dfcompiler;
 // Silent: a silent standard exception the C function can leave a note of (spec 15.4).
 // Needs: runtime parts the C function uses ("text", "date", "u:<unicode table>").
 // Names: parameter names for named arguments (caseSensitive: false).
+// NamedOnly: the form that skips a parameter with a default, reached only by name (text.indexOf("x", caseSensitive: false)).
+// A parameter or a result of type int or uns has the native size of the target.
 sealed record StdFun(string[] Params, string Ret, string CName, bool Variadic = false, int MinArgs = 0,
-  string Tail = "", string? Silent = null, string[]? Needs = null, string[]? Names = null);
+  string Tail = "", string? Silent = null, string[]? Needs = null, string[]? Names = null, bool NamedOnly = false);
 
 // Standard library: Program, Console, Time, Math, Math32, Random, the string and char functions and the date and time
 // members. Built into the compiler; the C side is in Runtime.cs, RuntimeText.cs, RuntimeDate.cs and UnicodeTables.cs.
@@ -216,7 +218,11 @@ public sealed partial class CodeGen {
 
   // receiver: the C code of the value a method is called on (it becomes the first C argument)
   Expr StdCall(string path, List<StdFun> overloads, List<Node> args, Scope scope, Node at, string? receiver = null) {
-    if (args.Any(arg => arg.Kind == "Named")) {
+    overloads = overloads.Select(f => !f.Params.Contains("uns") && f.Ret != "int" ? f
+      : f with { Params = f.Params.Select(p => p == "uns" ? NativeUns : p).ToArray(), Ret = f.Ret == "int" ? NativeInt : f.Ret }).ToList();
+    if (!args.Any(arg => arg.Kind == "Named")) {
+      overloads = overloads.Where(f => !f.NamedOnly).ToList();
+    } else {
       // each overload orders the arguments its own way; the ones that cannot take these names drop out
       var viable = new List<(StdFun Fun, List<Node> Args)>();
       foreach (var overload in overloads) {
@@ -262,6 +268,15 @@ public sealed partial class CodeGen {
         }
       }
       if (costs.Count == 0) {
+        // the only one that the automatic conversions reach (spec 3.5.1)
+        var reached = sameCount.Where(f => args.Select((arg, index) => (arg, index))
+          .All(a => AutoFits(a.arg, f.Variadic ? f.Params[0] : f.Params[a.index], scope))).ToList();
+        if (reached.Count > 1) {
+          throw Error($"ambiguous call to {path}: several versions take these arguments through automatic conversions; write the cast (spec 3.5.1)", at);
+        }
+        costs.AddRange(reached.Select(f => (f, 0)));
+      }
+      if (costs.Count == 0) {
         throw Error($"no overload of {path} matches these arguments", at);
       }
       int best = costs.Min(entry => entry.Cost);
@@ -291,6 +306,12 @@ public sealed partial class CodeGen {
         codes.Add(paramType == "string" ? StrRead(new Expr(converted, "string", FreshCode(value, converted) == "true" && !IsStaticStr(converted))) : converted);
       }
     }
+    // the object, then the arguments in the order of the parameters (spec 2.5)
+    var parts = new List<Node?>(args);
+    if (receiver != null) {
+      parts.Insert(0, ReceiverOf(at));
+    }
+    codes = ArgsInOrder(parts, codes, out string prefix);
     if (chosen.Tail != "") {
       codes.Add(chosen.Tail);
     }
@@ -314,8 +335,11 @@ public sealed partial class CodeGen {
       string temp = NewTemp();
       call = $"({{ int64_t {temp} = {call}; (({CType(chosen.Ret)}){{ {temp} >= 0, ({CType(BaseOf(chosen.Ret))}){temp} }}); }})";
     }
-    return new Expr(call, chosen.Ret);
+    return ArgsFirst(new Expr(call, chosen.Ret), prefix);
   }
+
+  // x of x.name(...)
+  static Node? ReceiverOf(Node call) => call is { Kind: "Call" } && call.Children[0] is { Kind: "Member", Children.Count: > 0 } member ? member.Children[0] : null;
 
   // the arguments in the order of the parameters, or null when the names do not fit
   static List<Node>? NamedOrder(StdFun f, List<Node> args) {
@@ -356,6 +380,14 @@ public sealed partial class CodeGen {
       if (fits) {
         costs.Add((candidate, total));
       }
+    }
+    if (costs.Count == 0) {
+      var reached = candidates.Where(candidate => candidate.Args.Select((arg, index) => (arg, index))
+        .All(a => AutoFits(a.arg, candidate.Fun.Params[a.index], scope))).ToList();
+      if (reached.Count > 1) {
+        throw Error($"ambiguous call to {path}: several versions take these arguments through automatic conversions; write the cast (spec 3.5.1)", at);
+      }
+      costs.AddRange(reached.Select(candidate => (candidate, 0)));
     }
     if (costs.Count == 0) {
       throw Error($"no overload of {path} matches these arguments", at);

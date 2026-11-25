@@ -1,0 +1,42 @@
+// type.MIN and type.MAX of the integer types (spec 2.1)
+import Root
+
+const u16 LIMIT = u16.MAX
+fun last(uns at = uns.MAX) { Console.log(at == uns.MAX) }
+fun kind(i8 v) { Console.log("i8") }
+fun kind(i32 v) { Console.log("i32") }
+fun kind(u64 v) { Console.log("u64") }
+class Range {
+  public i32 low = i32.MAX
+  public i32 high = i32.MIN
+}
+
+Console.log($"{i8.MIN} {i8.MAX} {i16.MIN} {i16.MAX}")
+Console.log($"{i32.MIN} {i32.MAX} {i64.MIN} {i64.MAX}")
+Console.log($"{u8.MIN} {u8.MAX} {u16.MIN} {u16.MAX} {byte.MAX}")
+Console.log($"{u32.MIN} {u32.MAX} {u64.MIN} {u64.MAX}")
+Console.log($"{uns.MIN} {uns.MAX == u64.MAX} {int.MIN == i64.MIN} {int.MAX == i64.MAX}")
+Console.log(LIMIT)
+last()
+last(3)
+kind(i8.MIN)
+kind(i32.MAX)
+kind(u64.MAX)
+Range r = Range()
+for i32 v in [4, -2, 9] {
+  if v < r.low then r.low = v
+  if v > r.high then r.high = v
+}
+Console.log($"{r.low} {r.high}")
+u8 b = 255
+switch b {
+  u8.MIN: Console.log("min")
+  u8.MAX: Console.log("max")
+  default: Console.log("other")
+}
+i32 count = 0
+for u8 k = 250..=u8.MAX { count++ }
+Console.log(count)
+var m = u16.MAX
+Console.log(m.sizeof)
+Console.log(-i8.MAX)

@@ -1,12 +1,12 @@
-// automatic conversions do not choose between overloads (spec 3.5.1)
+// several versions are reached through automatic conversions: the cast is written (spec 3.5.1)
 import Root
 
 fun show(i32 v) {
   Console.log(v)
 }
 
-fun show(string s) {
-  Console.log(s)
+fun show(u16 v) {
+  Console.log(v)
 }
 
 i64 big = 5

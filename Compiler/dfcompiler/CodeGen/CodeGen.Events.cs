@@ -5,7 +5,7 @@ namespace dfcompiler;
 
 // Events (spec 20.4, Root.Tasks): a name, a struct of data, a sender that registers it and receivers that find it. The class Event is
 // written in Dflat (EventsPrelude) over a reference to the runtime event (RuntimeTasks: df_event, df_evref); Event.register(...),
-// Event(name), ev.send(data) and wait on ev [from x] as data [timeout t] { } are compiled here. Sender<T> (20.4.6) is a u64 field that holds
+// Event(name), ev.send(data) and wait on ev [from x] as data { } timeout t are compiled here. Sender<T> (20.4.6) is a u64 field that holds
 // the id of an object of T: the classes named in a Sender<T> get a hidden field df_oid, given at the creation of each object.
 public sealed partial class CodeGen {
   const string EventsPrelude = """
@@ -155,7 +155,7 @@ public class Event(u64 handle) {
     return $"df_event_full_name({name.Code}, \"{ns}\")";
   }
 
-  // Event.register(name, [Size], [mode], [timeout], timeout:, keep:, fullMode:) and Event(name, timeout:); null when the call is not one
+  // Event.register(name, [Size], [mode], [timeout], timeout:, keep:, fullMode:) and Event(name); null when the call is not one
   Expr? EventMaker(Node n, Scope scope) {
     if (!TasksMode || scope.Find("Event") != null || !classes.ContainsKey("Event")) {
       return null;
@@ -201,10 +201,17 @@ public class Event(u64 handle) {
     if (find && (named.ContainsKey("keep") || named.ContainsKey("fullMode") || mode != null)) {
       throw Error("the mode, keep and fullMode of an event are given by its registration (spec 20.4.4)", n);
     }
-    string timeoutCode = timeout == null ? "0" : Convert(ExprOf(timeout, scope, "lapse"), "lapse", timeout);
-    if (register && timeout == null) {
-      throw Error("the registration of an event gives its timeout: Event.register(name, timeout: 1000) (spec 20.4.3)", n);
+    if (find && timeout != null) {
+      throw Error("an event has no timeout for its receivers: the timeout is the one of the wait (spec 20.2.8, 20.4.3)", timeout);
     }
+    bool blockSender = named.TryGetValue("fullMode", out var fullModeNode) && fullModeNode is { Kind: "Member", Text: "BlockSender" };
+    if (register && timeout != null && !blockSender) {
+      throw Error("the timeout of a registration is how long a BlockSender send waits for room: it is given only with fullMode: EventQueueFullMode.BlockSender (spec 20.4.3)", timeout);
+    }
+    if (register && timeout == null && blockSender) {
+      throw Error("a BlockSender event gives how long a send waits for room: Event.register(name, ..., timeout: 1000) (spec 20.4.3)", n);
+    }
+    string timeoutCode = timeout == null ? "0" : Convert(ExprOf(timeout, scope, "lapse"), "lapse", timeout);
     string nameTemp = NewTemp();
     string result = NewTemp();
     string code;
@@ -217,7 +224,7 @@ public class Event(u64 handle) {
         + $"sizeof({CType(data)}), {copy}, {drop}, {modeCode}, {timeoutCode}, {keepCode}, {fullCode}); df_str_free({nameTemp}); "
         + $"if (!{result}) {{ df_raise(&df_desc_DuplicateEventNameWithDataMismatchException, {fn!.NameConst}); {RaiseJump} }} {result}; }})";
     } else {
-      code = $"({{ df_string {nameTemp} = {EventNameCode(positional[0], scope)}; uint64_t {result} = df_event_find({nameTemp}, \"{DisplayName(data)}\", {timeoutCode}); "
+      code = $"({{ df_string {nameTemp} = {EventNameCode(positional[0], scope)}; uint64_t {result} = df_event_find({nameTemp}, \"{DisplayName(data)}\"); "
         + $"df_str_free({nameTemp}); {result}; }})";
     }
     var made = Synthetic("Call", n).Add(Synthetic("Name", n, "Event"))
@@ -336,52 +343,6 @@ public class Event(u64 handle) {
     string drop = value.Fresh && StructHoldsObjects(data) ? StructDropCode(data, temp) : "";
     return new Expr($"({{ {CType(data)} {temp} = {Convert(value, data, args[0])}; int32_t {state} = df_event_send(({held.Code})->m_handle, &{temp}, {sender}); {drop} "
       + $"if ({state} == 2) {{ df_raise(&df_desc_DuplicateEventNameWithDataMismatchException, {fn!.NameConst}); {RaiseJump} }} }})", "void");
-  }
-
-  // wait on ev [from x] as data [timeout t] { ... } (spec 20.4.7): the block runs with the data of the next event, read-only; the event
-  // goes on to the next waiter when the block ends, also by an exception
-  void EmitWaitOn(Node s, StringBuilder sb, Scope scope, int indent) {
-    if (!TasksMode) {
-      throw Error("wait on is part of Root.Tasks: it needs import Root.Tasks (spec 20.0)", s);
-    }
-    string pad = Pad(indent);
-    var target = s.Children[0];
-    var waited = ExprOf(target, scope);
-    if (waited.Type != "Event") {
-      throw Error($"wait on takes an event, not {DisplayName(waited.Type)} (spec 20.4.7; the other targets are 20.2.1)", target);
-    }
-    string data = EventDataOf(target, scope) ?? throw Error("this Event does not say the struct of its data: Event<Size> (spec 20.4.2)", target);
-    var block = s.Children.First(c => c.Kind == "Block");
-    var timeoutNode = s.Children.FirstOrDefault(c => c.Kind == "Timeout")?.Children[0];
-    string timeoutCode = timeoutNode == null ? "0" : Convert(ExprOf(timeoutNode, scope, "lapse"), "lapse", timeoutNode);
-    string hasFrom = "false";
-    string from = "0";
-    if (s.Children.FirstOrDefault(c => c.Kind == "From") is Node fromNode) {
-      var senderField = structs[data].Fields.FirstOrDefault(f => senderFields.ContainsKey((data, f.Name)))
-        ?? throw Error($"{DisplayName(data)} has no Sender<...> field: from has nothing to compare (spec 20.4.6)", fromNode);
-      from = SenderIdCode(fromNode.Children[0], senderFields[(data, senderField.Name)], scope);
-      hasFrom = "true";
-    }
-    string handle = "df_evh" + NewTemp();
-    string item = "df_evi" + NewTemp();
-    fn!.Decls.Append($"  uint64_t {handle} = 0;\n  df_ev_item* {item} = NULL;\n  (void){handle};\n  (void){item};\n");
-    string error = NewTemp();
-    string call = SilentCall(Serving($"df_event_take({handle}, {timeoutCode}, {hasFrom}, {from}, &{item})"), "Exception", "WaitTimeoutException", s);
-    sb.Append($"{pad}{handle} = ({TempObject(waited).Code})->m_handle;\n");
-    sb.Append($"{pad}{{ df_exception* {error} = {call}; if ({error}) {{ df_err = {error}; df_err_thrown = false; goto {Handler}; }} }}\n");
-    sb.Append($"{pad}if ({item} != NULL) {{\n");
-    // the block: the data, read-only, on the item; the item goes on when the block ends (an atEnd of the block)
-    var inner = new Scope(scope);
-    CheckNotShadowing(s.Text!, scope, s);
-    var bound = new VarInfo(data, $"(*({CType(data)}*){item}->data)", true) { ReadOnlyStruct = true };
-    inner.Vars[s.Text!] = bound;
-    eventItems[bound] = item;
-    var done = Synthetic("ExprStmt", s).Add(Synthetic("CValue", s, $"df_event_done({handle}, {item})").Add(Synthetic("Type", s, "void")));
-    var wrapped = Synthetic("Block", block);
-    wrapped.Children.AddRange(block.Children);
-    wrapped.Add(Synthetic("AtEnd", block, "drop").Add(Synthetic("Block", block).Add(done)));
-    EmitBlock(wrapped, sb, inner, indent + 1);
-    sb.Append($"{pad}}}\n");
   }
 
   // data.processed, data.setProcessed(), data.stopPropagation() on the data of wait on (spec 20.4.5); null otherwise

@@ -1,0 +1,1 @@
+wait_catch_not_waitable.df(9): error: 'b' is not a waitable of this wait (spec 20.2.7)

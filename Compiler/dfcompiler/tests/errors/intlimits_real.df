@@ -1,0 +1,4 @@
+// MIN and MAX are of the integer types (spec 2.1)
+import Root
+
+Console.log(r64.MAX)

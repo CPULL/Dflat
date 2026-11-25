@@ -1,1 +1,1 @@
-wait_not_waitable.df(4): error: wait takes a task, a thread, a signal or a time, not string (spec 20.2)
+wait_not_waitable.df(4): error: wait takes a task, a thread, a signal, a token or a time, not string (spec 20.2)

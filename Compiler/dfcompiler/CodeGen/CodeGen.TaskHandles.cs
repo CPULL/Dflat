@@ -3,11 +3,10 @@ using dfparser;
 
 namespace dfcompiler;
 
-// Task handles, the leftovers of spec 20.9 and 20.2: Task<...> fields and function results, t = ... checked against what t says, the type
-// switch on a Task, and a wait with no timeout anywhere that the compiler can see.
+// Task handles, the leftovers of spec 20.9 and 20.2: Task<...> fields and function results, t = ... checked against what t says, and the
+// type switch on a Task.
 public sealed partial class CodeGen {
   readonly HashSet<VarInfo> typedTaskVars = new();        // Task<...> t: what it says is checked on every t = ...
-  readonly HashSet<VarInfo> noTimeoutVars = new();        // made on its line with no timeout (Task, Thread, Signal, Signal.group)
 
   // the Task<...> written in the declaration of a field (a field, or a primary parameter used as a field)
   TaskTypeSpec? FieldTaskSpec(FieldInfo field) =>
@@ -85,7 +84,6 @@ public sealed partial class CodeGen {
     var target = s.Children[0];
     var value = s.Children[1];
     if (target.Kind == "Name" && scope.Find(target.Text!) is VarInfo variable && variable.Type is "Task" or "Thread") {
-      noTimeoutVars.Remove(variable);
       if (typedTaskVars.Contains(variable)) {
         if (value.Kind != "Null") {
           CheckTaskHandleValue(taskHandles[variable], TaskHandleOf(value, scope), value);
@@ -100,7 +98,11 @@ public sealed partial class CodeGen {
       return;
     }
     if (target.Kind is "Name" or "Member" && value.Kind != "Null" && TaskHandleOfMember(target, scope) is TaskHandle wanted) {
-      CheckTaskHandleValue(wanted, TaskHandleOf(value, scope), value);   // a Task<...> field
+      var given = TaskHandleOf(value, scope);
+      if (given == null && currentFun is { IsCtor: true } or { IsInit: true } && (value.Kind == "Gift" ? value.Children[0] : value) is { Kind: "Name" } param && scope.Find(param.Text!) is { IsParam: true }) {
+        return;   // a primary parameter used as a field: checked by its call
+      }
+      CheckTaskHandleValue(wanted, given, value);   // a Task<...> field
     }
   }
 
@@ -139,6 +141,7 @@ public sealed partial class CodeGen {
           var bound = new VarInfo(subject.Type, cname, false);
           armScope.Vars[arm.Text] = bound;
           taskHandles[bound] = handle;
+          taskAliases[bound] = n.Children[0];
           bind = $"{CType(subject.Type)} {cname} = {held}; ";
         }
       }
@@ -167,56 +170,5 @@ public sealed partial class CodeGen {
     code.Append(fallback);
     code.Append(type == "void" ? " })" : $" {result}; }})");
     return new Expr(code.ToString(), type!, type == "string");
-  }
-
-  // Task(MyTask, ...), Thread(f, ...), Signal(...), Signal.group(...), and .start(...) on them: true when no timeout is written in any
-  static bool MadeWithoutTimeout(Node node) {
-    if (node.Kind == "Paren") {
-      return MadeWithoutTimeout(node.Children[0]);
-    }
-    if (node.Kind != "Call") {
-      return false;
-    }
-    bool hasTimeout = node.Children[1].Children.Any(arg => arg is { Kind: "Named", Text: "timeout" });
-    if (hasTimeout) {
-      return false;
-    }
-    if (node.Children[0] is { Kind: "Member", Text: "start" } start) {
-      return start.Children[0].Kind == "Call" && MadeWithoutTimeout(start.Children[0]);
-    }
-    return node.Children[0] is { Kind: "Name", Text: "Task" or "Thread" or "Signal" }
-      || node.Children[0] is { Kind: "Member", Text: "group" } group && group.Children[0] is { Kind: "Name", Text: "Signal" };
-  }
-
-  // x.start(timeout: ...) or x = ... anywhere in the code around: the timeout may come from there
-  static bool GetsTimeoutLater(Node code, string name) {
-    if (code.Kind == "Call" && code.Children[0] is { Kind: "Member", Text: "start" } start && start.Children[0] is { Kind: "Name" } held && held.Text == name
-        && code.Children[1].Children.Any(arg => arg is { Kind: "Named", Text: "timeout" } || arg.Kind != "Named")) {
-      return true;
-    }
-    if (code.Kind == "Assign" && code.Children[0] is { Kind: "Name" } assigned && assigned.Text == name) {
-      return true;
-    }
-    return code.Children.Any(child => GetsTimeoutLater(child, name));
-  }
-
-  // after a declaration: a Task, Thread, Signal or SignalGroup made on its line with no timeout
-  void NoteNoTimeout(Node decl, Scope scope) {
-    if (!TasksMode || !scope.Vars.TryGetValue(decl.Text!, out var variable) || variable.Type is not ("Task" or "Thread" or "Signal" or "SignalGroup")) {
-      return;
-    }
-    if (decl.Children.FirstOrDefault(c => c.Kind == "Init")?.Children[0] is Node init && MadeWithoutTimeout(init)) {
-      noTimeoutVars.Add(variable);
-    }
-  }
-
-  // wait x with no timeout: an error when nothing gives one, where the compiler sees it (spec 20.1, 20.2)
-  void CheckWaitHasTimeout(Node target, Scope scope, Node at) {
-    bool none = MadeWithoutTimeout(target)
-      || target.Kind == "Name" && scope.Find(target.Text!) is VarInfo variable && noTimeoutVars.Contains(variable)
-         && !GetsTimeoutLater(currentFun?.Node ?? ProgramNode!, target.Text!);
-    if (none) {
-      throw Error("this wait has no timeout: give one to the wait, to start or to the constructor (spec 20.1, 20.2)", at);
-    }
   }
 }

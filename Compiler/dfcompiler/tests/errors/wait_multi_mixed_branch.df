@@ -1,0 +1,9 @@
+import Root
+import Root.Tasks
+
+struct Size { u32 w }
+Signal a = Signal("multi.a")
+Event<Size> e = Event("multi.e")
+wait
+  on a, e as x { Console.log("x") }
+  timeout 100 { }

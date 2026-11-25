@@ -1,0 +1,6 @@
+// the timeout of a registration is only for BlockSender (spec 20.4.3)
+import Root.Tasks
+
+struct Data { i32 n }
+
+Event<Data> ev = Event.register("x.data", timeout: 1000)

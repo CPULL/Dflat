@@ -1,0 +1,8 @@
+import Root
+import Root.Tasks
+
+class C {
+  fun i32 taskRun() { return 1 }
+}
+Task t = Task(C).start()
+Task b = t!

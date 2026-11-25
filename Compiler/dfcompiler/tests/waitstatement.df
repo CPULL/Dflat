@@ -1,0 +1,65 @@
+// the statement forms of wait (spec 20.2.1, 20.2.8): a block for the waitable, a block for the timeout
+import Root
+import Root.Tasks
+
+class Slow {
+  fun i32 taskRun() {
+    wait 1000
+    return 1
+  }
+}
+
+class Quick {
+  fun i32 taskRun() {
+    return 42
+  }
+}
+
+struct Size { u32 w, u32 h }
+
+Task slow = Task(Slow).start()
+wait slow timeout 50 { Console.log("late: timeout block") }
+
+Task quick = Task(Quick).start()
+wait quick as res { Console.log($"task gave {res}") } timeout 2000 { Console.log("never") }
+
+Task slow2 = Task(Slow).start()
+wait on slow2 as res2 { Console.log("never") } timeout 50 { Console.log("on, timeout block") }
+
+Signal go = Signal("waitstatement.go")
+wait go { Console.log("never") } timeout 30 { Console.log("signal: timeout block") }
+
+Event<Size> resize = Event.register("waitstatement.resize")
+wait on resize as size { Console.log("never") } timeout 30 { Console.log("event: timeout block") }
+
+var v = wait slow timeout 30 { -1 }
+Console.log(v)
+
+// the timeout clause on the next line (spec 20.2.1, as atEnd)
+Task quick2 = Task(Quick).start()
+wait quick2 as r {
+  Console.log($"next line: {r}")
+}
+timeout 2000
+
+Task slow3 = Task(Slow).start()
+wait slow3 {
+  Console.log("never")
+}
+timeout 30 {
+  Console.log("next line: timeout block")
+}
+
+// a timeout block of several lines gives its value with return (spec 20.2.8, 7.2.6)
+Task slow4 = Task(Slow).start()
+i32 late = wait slow4 timeout 30 {
+  Console.log("several lines")
+  return -2
+}
+Console.log(late)
+Task quick3 = Task(Quick).start()
+i32 inTime = wait quick3 timeout 2000 {
+  Console.log("never")
+  return -3
+}
+Console.log(inTime)

@@ -1,0 +1,6 @@
+// an event has no timeout for its receivers: the timeout is the one of the wait (spec 20.2.8)
+import Root.Tasks
+
+struct Data { i32 n }
+
+Event<Data> ev = Event("x.data", timeout: 1000)

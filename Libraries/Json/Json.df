@@ -1,0 +1,498 @@
+import Root
+
+Generic JsonType { r64?, string, bool, JsonArray, JsonObject, JsonComment }
+
+class JSON {
+  public static fun JsonNode serialize(string json) { 
+    JsonParser parser = JsonParser(json, 0)
+    return parser.parseDocument()
+  }
+}
+
+class JsonArray {
+  public vec<JsonType> arr
+}
+
+class JsonObject {
+  public vec<JsonNode> obj
+}
+
+class JsonComment(string1k comment) {
+  public string1k comment
+}
+
+class JsonNode(string? key, JsonType value) {
+  public fun string serialize(JsonSerializationOptions options) {
+    JsonWriter writer = JsonWriter(options.PrettyPrint, options.AllowComments)
+    return writer.writeNode(this, 0)
+  }
+}
+
+bitfield32 JsonSerializationOptions { PrettyPrint:0, AllowComments:1 }
+
+class JsonWriter(bool pretty, bool allowComments) {
+
+  public fun string writeNode(JsonNode node, uns depth) {
+    string text = ""
+    if (node.key != null) {
+      text = writeString(node.key) + ":"
+      if (pretty) {
+        text = text + " "
+      }
+    }
+    return text + writeValue(node.value, depth)
+  }
+
+  fun string writeValue(JsonType value, uns depth) {
+    return value is ? {
+      JsonObject: writeObject(value, depth)
+      JsonArray: writeArray(value, depth)
+      JsonComment: writeComment(value)
+      string: writeString(value)
+      bool: writeBool(value)
+      r64?: writeNumber(value)
+    }
+  }
+
+  fun bool isComment(JsonType value) {
+    return value is ? {
+      JsonObject: false
+      JsonArray: false
+      JsonComment: true
+      string: false
+      bool: false
+      r64?: false
+    }
+  }
+
+  fun string writeObject(JsonObject source, uns depth) {
+    uns lastMember = 0
+    uns index = 0
+    while (index < source.obj.len) {
+      if (!isComment(source.obj[index].value)) {
+        lastMember = index
+      }
+      index++
+    }
+    string body = ""
+    bool wroteAny = false
+    index = 0
+    while (index < source.obj.len) {
+      JsonNode item = source.obj[index]
+      if (isComment(item.value)) {
+        if (allowComments) {
+          body = body + lineBreak(depth + 1) + writeValue(item.value, depth + 1)
+          wroteAny = true
+        }
+      } else {
+        body = body + lineBreak(depth + 1) + writeNode(item, depth + 1)
+        if (index < lastMember) {
+          body = body + ","
+        }
+        wroteAny = true
+      }
+      index++
+    }
+    if (!wroteAny) {
+      return "{}"
+    }
+    return "{" + body + lineBreak(depth) + "}"
+  }
+
+  fun string writeArray(JsonArray source, uns depth) {
+    uns lastItem = 0
+    uns index = 0
+    while (index < source.arr.len) {
+      if (!isComment(source.arr[index])) {
+        lastItem = index
+      }
+      index++
+    }
+    string body = ""
+    bool wroteAny = false
+    index = 0
+    while (index < source.arr.len) {
+      JsonType item = source.arr[index]
+      if (isComment(item)) {
+        if (allowComments) {
+          body = body + lineBreak(depth + 1) + writeValue(item, depth + 1)
+          wroteAny = true
+        }
+      } else {
+        body = body + lineBreak(depth + 1) + writeValue(item, depth + 1)
+        if (index < lastItem) {
+          body = body + ","
+        }
+        wroteAny = true
+      }
+      index++
+    }
+    if (!wroteAny) {
+      return "[]"
+    }
+    return "[" + body + lineBreak(depth) + "]"
+  }
+
+  fun string writeComment(JsonComment source) {
+    return "/*" + source.comment + "*/"
+  }
+
+  fun string writeString(string raw) {
+    string result = "\""
+    uns index = 0
+    while (index < raw.len) {
+      char current = raw[index]
+      if (current == '"') {
+        result = result + "\\\""
+      } else if (current == '\\') {
+        result = result + "\\\\"
+      } else if (current == '\n') {
+        result = result + "\\n"
+      } else if (current == '\r') {
+        result = result + "\\r"
+      } else if (current == '\t') {
+        result = result + "\\t"
+      } else if (current < ' ') {
+        result = result + "\\u00" + hexDigit((uns)current / 16) + hexDigit((uns)current % 16)
+      } else {
+        result = result + current
+      }
+      index++
+    }
+    return result + "\""
+  }
+
+  fun string writeBool(bool flag) {
+    if (flag) {
+      return "true"
+    }
+    return "false"
+  }
+
+  fun string writeNumber(r64? number) {
+    return "" + number
+  }
+
+  fun string lineBreak(uns depth) {
+    if (!pretty) {
+      return ""
+    }
+    string text = "\n"
+    for uns level = 1..=depth {
+      text = text + "  "
+    }
+    return text
+  }
+
+  fun char hexDigit(uns value) {
+    if (value < 10) {
+      return (char)((uns)'0' + value)
+    }
+    return (char)((uns)'A' + value - 10)
+  }
+
+}
+
+class JsonException(uns position) : Exception {
+}
+
+class JsonParser(string text, uns position) {
+
+  public fun JsonNode parseDocument() {
+    skipTrivia()
+    JsonNode root = JsonNode(null, parseValue())
+    skipTrivia()
+    if (position < text.len) {
+      throw JsonException("Unexpected content after the JSON value", position)
+    }
+    return root
+  }
+
+  fun JsonType parseValue() {
+    if (position >= text.len) {
+      throw JsonException("Unexpected end of input", position)
+    }
+    char current = text[position]
+    if (current == '{') {
+      return parseObject()
+    }
+    if (current == '[') {
+      return parseArray()
+    }
+    if (current == '"') {
+      return parseString()
+    }
+    if (current == '-' || isDigit(current)) {
+      return parseNumber()
+    }
+    if (matchWord("true")) {
+      return true
+    }
+    if (matchWord("false")) {
+      return false
+    }
+    if (matchWord("null")) {
+      r64? nothing = null
+      return nothing
+    }
+    throw JsonException("Unexpected character '" + current + "'", position)
+  }
+
+  fun JsonObject parseObject() {
+    JsonObject result = JsonObject()
+    position++
+    bool memberAllowed = true
+    bool closeAllowed = true
+    bool commaAllowed = false
+    while (true) {
+      skipWhitespace()
+      if (position >= text.len) {
+        throw JsonException("Unterminated object", position)
+      }
+      char current = text[position]
+      if (atComment()) {
+        result.obj.add(JsonNode(null, readComment()))
+      } else if (current == '}') {
+        if (!closeAllowed) {
+          throw JsonException("Trailing comma is not allowed", position)
+        }
+        position++
+        return result
+      } else if (current == ',') {
+        if (!commaAllowed) {
+          throw JsonException("Unexpected comma", position)
+        }
+        position++
+        memberAllowed = true
+        closeAllowed = false
+        commaAllowed = false
+      } else if (memberAllowed) {
+        if (current != '"') {
+          throw JsonException("Expected a string key", position)
+        }
+        string memberKey = parseString()
+        skipTrivia()
+        if (position >= text.len || text[position] != ':') {
+          throw JsonException("Expected ':' after the key", position)
+        }
+        position++
+        skipTrivia()
+        result.obj.add(JsonNode(memberKey, parseValue()))
+        memberAllowed = false
+        closeAllowed = true
+        commaAllowed = true
+      } else {
+        throw JsonException("Expected ',' or '}'", position)
+      }
+    }
+	return result
+  }
+
+  fun JsonArray parseArray() {
+    JsonArray result = JsonArray()
+    position++
+    bool itemAllowed = true
+    bool closeAllowed = true
+    bool commaAllowed = false
+    while (true) {
+      skipWhitespace()
+      if (position >= text.len) {
+        throw JsonException("Unterminated array", position)
+      }
+      char current = text[position]
+      if (atComment()) {
+        result.arr.add(readComment())
+      } else if (current == ']') {
+        if (!closeAllowed) {
+          throw JsonException("Trailing comma is not allowed", position)
+        }
+        position++
+        return result
+      } else if (current == ',') {
+        if (!commaAllowed) {
+          throw JsonException("Unexpected comma", position)
+        }
+        position++
+        itemAllowed = true
+        closeAllowed = false
+        commaAllowed = false
+      } else if (itemAllowed) {
+        result.arr.add(parseValue())
+        itemAllowed = false
+        closeAllowed = true
+        commaAllowed = true
+      } else {
+        throw JsonException("Expected ',' or ']'", position)
+      }
+    }
+	return result
+  }
+
+  fun string parseString() {
+    position++
+    string result = ""
+    while (true) {
+      if (position >= text.len) {
+        throw JsonException("Unterminated string", position)
+      }
+      char current = text[position]
+      if (current == '"') {
+        position++
+        return ->result
+      }
+      if (current < ' ') {
+        throw JsonException("Control character inside a string", position)
+      }
+      if (current != '\\') {
+        result = result + current
+        position++
+        continue
+      }
+      position++
+      if (position >= text.len) {
+        throw JsonException("Unterminated escape sequence", position)
+      }
+      char escaped = text[position]
+      if (escaped == '"') {
+        result = result + '"'
+      } else if (escaped == '\\') {
+        result = result + '\\'
+      } else if (escaped == '/') {
+        result = result + '/'
+      } else if (escaped == 'n') {
+        result = result + '\n'
+      } else if (escaped == 'r') {
+        result = result + '\r'
+      } else if (escaped == 't') {
+        result = result + '\t'
+      } else if (escaped == 'u') {
+        if (position + 4 >= text.len) {
+          throw JsonException("Incomplete \\u escape", position)
+        }
+        uns codeUnit = 0
+        for uns digitIndex = 1..=4 {
+          codeUnit = codeUnit * 16u + hexValue(text[position + digitIndex])
+        }
+        result = result + (char)codeUnit
+        position += 4
+      } else {
+        throw JsonException("Invalid escape sequence '\\" + escaped + "'", position)
+      }
+      position++
+    }
+	return result
+  }
+
+  fun r64? parseNumber() {
+    uns start = position
+    if (text[position] == '-') {
+      position++
+    }
+    if (position >= text.len || !isDigit(text[position])) {
+      throw JsonException("Invalid number", position)
+    }
+    if (text[position] == '0') {
+      position++
+    } else {
+      while (position < text.len && isDigit(text[position])) {
+        position++
+      }
+    }
+    if (position < text.len && text[position] == '.') {
+      position++
+      if (position >= text.len || !isDigit(text[position])) {
+        throw JsonException("Invalid number: digits expected after '.'", position)
+      }
+      while (position < text.len && isDigit(text[position])) {
+        position++
+      }
+    }
+    if (position < text.len && (text[position] == 'e' || text[position] == 'E')) {
+      position++
+      if (position < text.len && (text[position] == '+' || text[position] == '-')) {
+        position++
+      }
+      if (position >= text.len || !isDigit(text[position])) {
+        throw JsonException("Invalid number: digits expected in the exponent", position)
+      }
+      while (position < text.len && isDigit(text[position])) {
+        position++
+      }
+    }
+    return r64.parse(text.substr((u32)start, (u32)(position - start)))
+  }
+
+  fun JsonComment readComment() {
+    string content
+    position += 2
+    uns contentStart = position
+    if (text[position - 1] == '/') {
+      while (position < text.len && text[position] != '\n') {
+        position++
+      }
+      content = text.substr((u32)contentStart, (u32)(position - contentStart))
+	  content.trimRight("\r")
+    } else {
+      int endIndex = text.indexOf("*/", position)
+      if (endIndex < 0) {
+        throw JsonException("Unterminated comment", position)
+      }
+      content = text.substring(contentStart, endIndex - contentStart)
+      position = endIndex + 2
+    }
+    return JsonComment(content)
+  }
+
+  fun bool atComment() {
+    return position + 1 < text.len && text[position] == '/' && (text[position + 1] == '/' || text[position + 1] == '*')
+  }
+
+  fun skipWhitespace() {
+    while (position < text.len && isWhitespace(text[position])) {
+      position++
+    }
+  }
+
+  fun skipTrivia() {
+    skipWhitespace()
+    while (atComment()) {
+      readComment()
+      skipWhitespace()
+    }
+  }
+
+  fun bool matchWord(string word) {
+    if (position + word.len > text.len) {
+      return false
+    }
+    if (text.substr((u32)position, (u32)word.len) != word) {
+      return false
+    }
+    position += word.len
+    return true
+  }
+
+  fun bool isWhitespace(char value) {
+    return value == ' ' || value == '\t' || value == '\n' || value == '\r'
+  }
+
+  fun bool isDigit(char value) {
+    return value >= '0' && value <= '9'
+  }
+
+  fun uns hexValue(char value) {
+    if (value >= '0' && value <= '9') {
+      return (uns)value - (uns)'0'
+    }
+    if (value >= 'a' && value <= 'f') {
+      return (uns)value - (uns)'a' + 10
+    }
+    if (value >= 'A' && value <= 'F') {
+      return (uns)value - (uns)'A' + 10
+    }
+    throw JsonException("Invalid hex digit '" + value + "'", position)
+  }
+
+}
+
+

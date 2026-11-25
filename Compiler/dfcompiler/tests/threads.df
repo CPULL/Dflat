@@ -36,7 +36,7 @@ fun i32 broken() {
   throw Exception("thread broke")
 }
 
-fun u64 collect(Thread<u64> t) {
+fun u64 collect(&Thread<u64> t) {
   u64 sum = 0
   u64 v = wait t timeout 2000
   while v > 0 {
@@ -61,7 +61,7 @@ Console.log(res2)
 
 // a thread hands out many values
 Thread<u64> c = Thread(countDown, 4, timeout: 5000).start()
-Console.log(collect(c))
+Console.log(collect(&c))
 
 // a string argument and result
 string name = "thread"

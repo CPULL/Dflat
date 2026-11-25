@@ -1,0 +1,141 @@
+Dflat regex library - design notes (2026-11-24)
+v 0.0.1 by CPU 
+
+LIBRARY
+import lib regex
+namespace root.regex
+Main class is Regex()
+Written in Dflat itself, no external regex libraries (the compiler needs regex itself).
+Basic regex is simple enough to develop in df itself. It will be a good test.
+For now the pattern is a string in double quotes. The parser has to change to read
+the pattern directly (see PATTERN LITERAL).
+To check: what the compiler uses now. Syntax is similar to Notepad++.
+
+PATTERN LITERAL
+A regex is its own literal, not a string, delimited by '.
+No double escaping like "\\d+". The string form Regex("[abc]+(\\d*)$") is exactly
+what was wished to avoid. Literal ' is written \'
+
+ESCAPING
+Decision: . ^ - [ ] ( ) { } ? $ + * and the delimiter ' need escaping to be literal.
+All cases, also inside [] and {}.
+Inside {} also \| \, \{ \}
+| outside {} is a plain literal, no escape.
+(? is reserved, (\? for a literal. < and > need escaping as first char in a group
+(they start lookaround): (\< (\>
+$ should not stay in the middle of the expression, escaping it is ok.
+'abc$def' does not match abc + newline + def, $ is a position.
+The - char: unescaped - is always special, \- is always a literal.
+  Inside [ ] range: [a-z]
+  Inside { } range in counts: {0-6} {12-}
+  After an item lazy (minimum capture): .-
+
+ANCHORS AND DOT
+^ and $ are begin line and end line.
+. is any char. Newline is not matched by default, a flag decides.
+
+CHARACTER ESCAPES
+\t \n \r \f (form feed) \e (escape)
+\0 null (zero ascii char, byte 0). To check: \0 may be forbidden in dflat strings.
+\u = 4 hex digit unicode, \U = 6 hex digit unicode
+\b word boundary, \B non-boundary, as is.
+\N not newline
+
+CLASSES
+Defined: letters, digits, spaces (all whitespace), hex digits.
+Dropped: alphanumeric, 7-bit ascii. No unicode classes.
+\d digit, \D non-digit
+\w word char, \W non-word
+\s whitespace, \S non-space
+\a letters, \A non-letters
+\x hex digit, single letter, \X non-hex. \x{...} defines how many. Hex ignores
+upper/lowercase, the case flag decides. \h as fallback if \x finds a better use.
+Undecided: do \a and \w (and the case flag) cover only ASCII letters or also
+non-ASCII ones. Probably only latin1.
+Example: '0x\x{1-}' matches 0x0, 0xabcd31, 0xdaff, 0x12345
+
+SETS
+[abc] is a group of chars. - has to be escaped inside: [a\-z]
+^ at the start negates: [^abc]
+[a-f0-9]{0-6} is 0 to 6 hex digits.
+
+QUANTIFIERS AND COUNTS
+* and + classic. ? previous item is optional (standard syntax).
+{0-6} range, {2,4,6,8} list of counts, {1, 4-6,9,12-} mix, 12- is 12 or more.
+({0}) is an empty string. (.{0-}) or (.*) are strings that can be empty.
+Lazy: .- is the minimum capture compared to .+ (greedy). It works after any item.
+No lazy for *. Lazy counts: reversed range, [abc]{5-2} gets min 2 as lazy.
+? is not wanted for lazy.
+
+GROUPS, ALTERNATION, LOOKAROUND, BACKREFERENCES
+(x) capturing
+(x)? optional capture (null if absent)
+(?x) non-capturing
+{and|or} alternation. A | inside {} makes it alternation, counts only have digits , -
+{} with a single branch is not alternation, it has to be explicit with |.
+[abc]{0|1} is a char then 0 or 1.
+() is for captures, so parentheses are not used for alternation.
+Lookaround (sketched with a bare $, which is the end-of-line anchor, so the literal is \$):
+foo(>bar)
+foo(>^bar)
+(<\$)\d
+(<^\$)\d
+Backreferences: classic, used all the time. A backreference to a null capture fails
+the match. No named captures.
+
+FLAGS
+Inside {}. Uppercase enable, lowercase disable.
+I case sensitive, N multiline, S dot includes newline, G global.
+Defaults (classic): case sensitive, multiline off, dot excludes newline, global off.
+Flags can appear anywhere in the pattern, can change several times, and apply from
+that point to the right.
+The global flag cannot change inside the pattern, doing so is a compile error.
+Example {iGNs}: case insensitive, global on, multiline on, newlines off.
+
+MATCHING
+match searches anywhere in the text. ^ and $ limit it.
+With global on, empty matches are allowed (a* on baac: empty, aa, empty, empty).
+
+USAGE
+var rx = Regex("abc(.-)fg")
+var match = rx.match("abcfg") -> match.success == false
+var match = rx.match("abcdfg") -> match.success == true, first capture "d"
+var match = rx.match("abcddddfg") -> match.success == true, first capture "dddd"
+bool Regex.doesMatch(string text)
+RegexResult Regex.match(string text)
+No split, no named captures.
+In replacement \1 is the first group (Notepad++), \0 whole match (to check).
+A null capture in a replacement gives an empty string.
+
+RESULT TYPES
+struct RegexResult {
+  bool success
+  arr<RegexGroup> groups
+}
+struct RegexGroup {
+  string text
+  i32 index
+  arr<string?> groups
+}
+Each RegexGroup is one match (whole text and index) with its captures.
+Optional captures that did not match are null.
+
+REPLACE (open)
+string newstring = rex.replace("this is my orig string", "\1 then \3")
+fun string, i32 replace(string src, string replacement)
+i32 replace(&string src, string rep)    "Not sure"
+uns Regex.replace(string src, string dst)
+
+REGEX OBJECT AND COMPILE
+Properties: original pattern, options as a bitfield (case, newline, multiline, global),
+group count, compiled form (parsed once).
+struct Regex(string pattern) {
+  string pattern
+  RegexOptions options
+  i32 groupCount
+  arr<RegexNode> program
+}
+Explicit compile. Errors by exceptions (RegexSyntaxException for an invalid pattern).
+The constructor makes an uncompiled Regex. Using it without compile throws
+RegexNotCompiledException.
+var rx = Regex.compile("abc")   // static, constructs and compiles

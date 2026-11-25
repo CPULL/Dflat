@@ -435,12 +435,14 @@ public sealed partial class CodeGen {
     sb.Append($"{pad}if ({(checks.Count == 0 ? "1" : string.Join(" && ", checks.Select(check => check.Condition)))}) {{\n");
     var before = assign.Clone();
     var addedLocks = heldNow.Where(heldLocks.Add).ToList();
+    var addedNames = known.Where(enforcedNames.Add).ToList();
     activeMutexes.UnionWith(mutexesHere);   // the mutexes are used inside the block (spec 20.13)
     try {
       EmitBlock(block, sb, unwrapped, indent + 1);
     } finally {
       enforceSource = savedSource;
       heldLocks.ExceptWith(addedLocks);
+      enforcedNames.ExceptWith(addedNames);
       activeMutexes.ExceptWith(mutexesHere);
     }
     var states = new List<AssignState> { assign };

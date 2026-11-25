@@ -1,0 +1,1 @@
+switchtype_bind_two.df(8): error: 'x' binds the value of one member: write one type before it

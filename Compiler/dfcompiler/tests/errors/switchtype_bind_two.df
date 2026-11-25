@@ -1,0 +1,9 @@
+// a name belongs to one type (spec 11.3.7)
+import Root
+
+Generic Nums { i32, string }
+
+Nums n = 5
+switch n is ? {
+  i32, string x: Console.log("one")
+}

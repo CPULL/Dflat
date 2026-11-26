@@ -1,1 +1,1 @@
-bitfield8 Bad { None: 0 }
+bitfield8 Bad { NONE: 0 }

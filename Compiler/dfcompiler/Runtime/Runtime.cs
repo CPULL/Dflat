@@ -374,6 +374,7 @@ static const df_descriptor df_desc_ExclusiveSignalBusyException = { 67, "Exclusi
 static const df_descriptor df_desc_ReservedSignalException = { 68, "ReservedSignalException", &df_desc_Exception, false };
 static const df_descriptor df_desc_WaitingOnANotOwnedTaskException = { 70, "WaitingOnANotOwnedTaskException", &df_desc_Exception, false };
 static const df_descriptor df_desc_TokenAlreadyRegisteredException = { 71, "TokenAlreadyRegisteredException", &df_desc_Exception, false };
+static const df_descriptor df_desc_IncompatibleTypeInGenericException = { 72, "IncompatibleTypeInGenericException", &df_desc_Exception, true };
 static const df_descriptor df_desc_DuplicateEventNameWithDataMismatchException = { 69, "DuplicateEventNameWithDataMismatchException", &df_desc_Exception, false };
 /* the soft kill (spec 20.10): the runnable ends at a checkpoint; no catch takes it (not an Exception), atEnd blocks and enforce scopes
    unwind as for any exception */
@@ -1667,6 +1668,12 @@ static void df_fn_drop(df_fn* slot) {
 
 static void* df_tmpf(void* p, void (*fn)(void*));
 
+/* an item lent with & to a call keeps its collection frozen as an open iterator (spec 6.4, 13.1): the counter goes down with the
+   temporaries of the statement */
+static void df_iter_unfreeze(void* counter) {
+  (*(df_uns*)counter)--;
+}
+
 static void df_fn_ctx_release(void* ctx) {
   df_fn f = { NULL, (df_lhead*)ctx };
   df_fn_release(f);
@@ -2095,6 +2102,23 @@ static void df_rc_unweak(df_rc* rc) {
 }
 
 #define DF_RC_ALIVE(rc) ((rc) != NULL && (rc)->users > 0)
+
+/* a weak reference made strong (spec 12.7, Rust Weak::upgrade): one more user, only while the object is alive. The check and the count are
+   one atomic step: a last user that lets go meanwhile either ends the object first (the upgrade fails, enforce skips its block) or sees
+   this new user and keeps it alive */
+static bool df_rc_upgrade(df_rc* rc) {
+  if (rc == NULL) {
+    return false;
+  }
+  df_uns users = DF_ATOMIC_LOAD(rc->users);
+  while (users > 0) {
+    if (DF_ATOMIC_CAS(rc->users, users, users + 1)) {
+      return true;
+    }
+    users = DF_ATOMIC_LOAD(rc->users);
+  }
+  return false;
+}
 
 /* removeRefCounting() (spec 12.7, Rust Rc::try_unwrap): the last user takes the object out of the counting as a plain owned object and
    its variable becomes null; the weak references see the object as gone, and the block is freed when none of them needs it. With other

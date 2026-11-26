@@ -1,0 +1,3 @@
+import Root
+fun arr<i32?> make() { return [null] }
+make()[0] ??= 3

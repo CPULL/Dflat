@@ -1,0 +1,7 @@
+// a mutex as a field is not built yet: a compile error at its declaration, also when it is never used (spec 20.13)
+import Root
+import Root.Tasks
+class Bank {
+  mutex i32 balance = 0 timeout 500
+}
+Bank b = Bank()

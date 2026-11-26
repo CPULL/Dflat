@@ -1,0 +1,1 @@
+exception_replace_line.df(3): error: 'line' of an exception is set by the runtime: only message can be replaced (spec 15.2)

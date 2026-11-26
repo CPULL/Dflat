@@ -1,0 +1,35 @@
+// a weak reference made strong again while its last user lets go (spec 12.7): enforce w { } and if w is T x take the usage in one
+// atomic step, so the block is skipped once the object is gone and never runs on an object that ends under it
+import Root
+import Root.Tasks
+
+class Box(i32 start) {
+  public i32 n = start
+}
+
+fun i32 spin(%Box w) {
+  i32 seen = 0
+  for i in 0..2000000000 {
+    enforce w {
+      seen += w.n
+    } else {
+      return 1
+    }
+    if w is Box b {
+      seen += 0             // the test of is reads the object under a usage of its own; b is a new weak reference
+    }
+  }
+  return 2
+}
+
+i32 gone = 0
+for round in 0..30 {
+  @Box shared = @Box(1)
+  Thread t = Thread(spin, %shared).start()
+  i64 busy = 0
+  for k in 0..(round * 20000) { busy += k }
+  shared = null
+  i32 r = wait t timeout 10000
+  if r == 1 { gone++ }
+}
+Console.log($"rounds ended by the release: {gone}")

@@ -34,7 +34,7 @@ public static class PpVariables {
 
   public static CpuInfo? FindCpu(string name) => Cpus.FirstOrDefault(cpu => cpu.Name == name);
 
-  public static Dictionary<string, PpVariable> Build(string os, string cpu, int intBits, string build, int optLevel, string optMode, string languageVersion) {
+  public static Dictionary<string, PpVariable> Build(string os, string cpu, int intBits, string build, int optLevel, string optMode, string languageVersion, int realBits = 0) {
     var info = FindCpu(cpu) ?? throw new ArgumentException($"unknown cpu {cpu}");
     string[] cpuNames = Cpus.Select(c => c.Name).ToArray();
     var arch = Os.SelectMany(o => cpuNames.Select(c => o + "_" + c)).ToArray();
@@ -51,7 +51,7 @@ public static class PpVariables {
       ["bits"] = Number(info.Bits),
       ["int"] = Number(intBits),
       ["uns"] = Number(intBits),
-      ["real"] = Number(64),
+      ["real"] = Number(realBits > 0 ? realBits : info.Bits >= 64 ? 64 : 32),   // --native-real, else the size of the cpu, as the type real (spec 2.1, 19.1)
       ["endian"] = Word(info.Endian, "little", "big"),
       ["build"] = Word(build, "debug", "release"),
       ["exceptions"] = Word("on", "on", "off"),

@@ -242,7 +242,10 @@ public sealed partial class CodeGen {
       return;   // code of the compiler's own libraries (vec): not the program's business
     }
     string tag = level > 0 ? $"warning L{level}" : "warning";
-    warnings.Add($"({at.Line}): {tag}: {msg}");
+    string text = $"({at.Line}): {tag}: {msg}";
+    if (!warnings.Contains(text)) {
+      warnings.Add(text);   // the same warning on the same line once (a value can be compiled more than once, var x = ... infers it first)
+    }
   }
 
   string NewTemp() {
@@ -343,6 +346,8 @@ public sealed partial class CodeGen {
 
     LinkFreeingFunctions();   // [~T name] (spec 22)
     CheckCallbackAliases();   // spec 22
+    FinishFileVars(program);   // the top-level var declarations whose type needs the functions (spec 14.1)
+    PlanFileTaskHandles(program);   // what the top-level Task variables hold, for the functions that name them (spec 20.9)
     InferGivenResults();   // spec 13.1.1: a plain result that is built here is given
     CollectArgsOfReadCalls(program, null);   // spec 6.8.1: new arrays lent to calls whose result is only read
     ClassifyReturns();
@@ -1019,6 +1024,10 @@ public sealed partial class CodeGen {
       }
 
       case "Assign":
+        if (ItemNullAssign(s, scope) is Node nullAssign) {
+          EmitStmt(nullAssign, sb, scope, indent);   // a[i] ??= v: if a[i] == null { a[i] = v } (spec 7.1)
+          return;
+        }
         if (SetOwnedAssignCode(s, scope) is string setAssign) {
           sb.Append(pad).Append(setAssign).Append(";\n");   // the old value ends (spec 11.3.6.1)
           return;
@@ -1036,6 +1045,10 @@ public sealed partial class CodeGen {
 
       case "MultiAssign":
         EmitMultiAssign(s, sb, scope, pad);
+        return;
+
+      case "ReplaceField":
+        EmitReplaceField(s, sb, scope, indent);   // replace message = ... in a constructor (spec 11.1.1)
         return;
 
       case "ExprStmt": {
@@ -1304,7 +1317,7 @@ public sealed partial class CodeGen {
       code = FnDeclCode(s, initValue, code);   // the variable holds a usage of the function value (spec 13.3.5)
     }
     if (type == "string?") {
-      if (!IsOptStringDecl(s) && !LibraryCode) {
+      if (!IsOwnedOptStringDecl(s) && !LibraryCode) {
         throw NotSupported("a string? declared with var: write string? " + s.Text + " (spec 7.1)", s);
       }
       if (initValue != null) {
@@ -1391,6 +1404,8 @@ public sealed partial class CodeGen {
     Node? usage = null;
     if (s.Children[0].Kind == "Is" && s.Children[0].Text != null) {
       (condition, thenScope, usage) = IsBinding(s.Children[0], scope);   // if v is Circle c { }
+    } else if (SetIsAndBinding(s.Children[0], scope) is var (andCondition, andScope)) {
+      (condition, thenScope) = (andCondition, andScope);   // if k is i32 x && x > 3 { } (spec 11.3.6.1)
     } else {
       condition = BoolOf(ExprOf(s.Children[0], scope), s);
     }
@@ -1987,6 +2002,9 @@ public sealed partial class CodeGen {
     NoteStrCopyReads(n, scope);   // spec 2.5, 4: f(k.label, k.change())
     var e = ExprOfNode(n, scope, expected);
     e = EnforceSourceCall(n, e);
+    if (expected != null && e.Type != expected && IsSetValue(e.Type) && !IsSetValue(expected) && SetReadable(expected) && !LibraryCode) {
+      return SetValueRead(e, expected, n, false);   // i32 v = k, string s = k (spec 11.3.6.1)
+    }
     if (IsFunType(e.Type) && n.Kind == "Call") {
       return e with { Fresh = true };   // a call gives a usage of the function value it returns (spec 13.3)
     }
@@ -2442,7 +2460,7 @@ public sealed partial class CodeGen {
       raw = raw[..^1];
     }
     double d = double.Parse(raw, CultureInfo.InvariantCulture);
-    string type = isFloat || expected == "r32" ? "r32" : "r64";
+    string type = isFloat || expected == "r32" ? "r32" : expected == "r64" ? "r64" : NativeReal;   // unsuffixed: the native real (spec 2.1)
     string lit = d.ToString("R", CultureInfo.InvariantCulture);
     if (!lit.Contains('.') && !lit.Contains('E')) {
       lit += ".0";
@@ -2845,6 +2863,9 @@ public sealed partial class CodeGen {
     }
     if (e.Type == to) {
       return e;
+    }
+    if (IsSetValue(e.Type) && !IsSetValue(to) && SetReadable(to)) {
+      return SetValueRead(e, to, n, true);   // (i32)k (spec 11.3.6.1)
     }
     if (e.Type == "null") {
       return new Expr(Convert(e, to, n), to);

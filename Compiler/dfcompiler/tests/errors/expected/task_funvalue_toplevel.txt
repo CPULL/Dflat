@@ -1,0 +1,1 @@
+task_funvalue_toplevel.df(5): error: the top-level variable 'counter' cannot be used by the code of a task (a lambda at line 5, reached from Runner.taskRun): a task sees only constants, refcounted objects, weak references, mutex variables and globals (spec 20.12)

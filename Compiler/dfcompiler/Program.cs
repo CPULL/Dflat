@@ -24,7 +24,7 @@ public static class Program {
   static readonly int[] BuiltNativeSizes = { 32, 64 };
 
   const string Usage = "usage: dfcompiler <file.df | project.dsprj | folder> [--output <file>] [--target <target>] [--os <os>] [--cpu <cpu>] "
-    + "[--native-int <bits>] [--emit-c] [--cc <path-to-clang>] [--coptlev <0-3>] [--coptmode <size|speed>] [--debug | --release] "
+    + "[--native-int <bits>] [--native-real <bits>] [--emit-c] [--cc <path-to-clang>] [--coptlev <0-3>] [--coptmode <size|speed>] [--debug | --release] "
     + "[--run [-- program arguments]] | --version\n"
     + "  target: win-x64 win-x32 linux-x64 linux-arm64 osx-x64 osx-arm64, or CL:<options passed as they are to clang>\n"
     + "  os: windows linux osx; cpu: x86 x64 arm64 (the other cpus of the specification are not supported yet)\n"
@@ -38,6 +38,7 @@ public static class Program {
     public string? Os { get; set; }
     public string? Cpu { get; set; }
     public int? NativeInt { get; set; }
+    public int? NativeReal { get; set; }
     public string? Cc { get; set; }
     public bool? EmitC { get; set; }
     public int? OptLevel { get; set; }
@@ -211,6 +212,9 @@ public static class Program {
 
     // the native size of int and uns: --native-int, then native-int= of the project, then the size of the cpu
     int nativeInt = cli.NativeInt ?? project.NativeInt ?? cpuInfo.Bits;
+    // the native size of real and of the unsuffixed real literals: --native-real, then native-real= of the project, then the size of the cpu
+    int nativeReal = cli.NativeReal ?? project.NativeReal ?? (cpuInfo.Bits >= 64 ? 64 : 32);
+    CodeGen.NativeReal = nativeReal == 64 ? "r64" : "r32";
     var limits = new Dictionary<string, int>(project.Limits);   // the limits of the generated copies: the command line wins over the project
     foreach (var (limitKey, limitValue) in cli.Limits) {
       limits[limitKey] = limitValue;
@@ -235,7 +239,7 @@ public static class Program {
     var runFiles = new List<string>();      // ... and the ones copied next to the program
     try {
       // the preprocessor (spec 19.1) builds the code that is compiled; its variables come from the options
-      var variables = PpVariables.Build(os, cpu, nativeInt, build, optLevel, optMode, LanguageVersion);
+      var variables = PpVariables.Build(os, cpu, nativeInt, build, optLevel, optMode, LanguageVersion, nativeReal);
       Preprocessor preprocessor;
       try {
         preprocessor = new Preprocessor(variables, projectVariables);
@@ -464,6 +468,9 @@ public static class Program {
         case "--native-int":
           settings.NativeInt = ParseNativeSize(Value(ref i, "--native-int"), "--native-int");
           break;
+        case "--native-real":
+          settings.NativeReal = ParseNativeReal(Value(ref i, "--native-real"), "--native-real");
+          break;
         case "--cc":
           settings.Cc = Value(ref i, "--cc");
           break;
@@ -562,6 +569,14 @@ public static class Program {
       throw new UsageException($"--COptLev takes a number from 0 to 3, not '{text}'");
     }
     return level;
+  }
+
+  // the native size of real (spec 2.1, 19.1): 32 (r32) or 64 (r64); r16 and r128 are not built
+  static int ParseNativeReal(string text, string option) {
+    if (!int.TryParse(text, out int bits) || bits is not (32 or 64)) {
+      throw new UsageException($"{option} takes 32 or 64 bits, not '{text}' (r16 and r128 are not built yet)");
+    }
+    return bits;
   }
 
   static int ParseNativeSize(string text, string option) {
@@ -698,6 +713,9 @@ public static class Program {
             break;
           case "native-int":
             settings.NativeInt = ParseNativeSize(value, key);
+            break;
+          case "native-real":
+            settings.NativeReal = ParseNativeReal(value, key);
             break;
           case "cc":
             settings.Cc = value;

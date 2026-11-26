@@ -1,4 +1,4 @@
-none = None, all = CanRead | CanWrite | CanSeek | IsNetwork | Top, all as number = 2147483663
+none = NONE, all = CanRead | CanWrite | CanSeek | IsNetwork | Top, all as number = 2147483663
 updated = CanRead | IsNetwork
 both = CanRead | CanWrite, number 3
 isSet read+write: true
@@ -6,7 +6,7 @@ isSet read+seek: false
 isAnySet read+seek: true
 isAnySet seek: false
 setAs off: CanWrite, setAs on: CanSeek
-Flags.None.set: Top, number 2147483648
+Flags.NONE.set: Top, number 2147483648
 not CanRead = CanWrite | CanSeek | IsNetwork | Top
 and = CanWrite, xor = CanRead
 (Flags)255 = CanRead | CanWrite | CanSeek | IsNetwork, number 15

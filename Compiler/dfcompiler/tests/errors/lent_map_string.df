@@ -1,0 +1,4 @@
+import Root
+fun mark(&string s) { s = "x" }
+map<i32, string> m = [1: "a"]
+mark(&m[1])

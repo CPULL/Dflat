@@ -1,3 +1,5 @@
-Generic Nums { i32, u64 }
-Nums k = (i32)1
-i32 x = k
+class Dog {
+}
+Generic Pets { Dog, i32 }
+Pets p = Dog()
+Dog d = p

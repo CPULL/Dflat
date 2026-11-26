@@ -1,0 +1,5 @@
+class Animal(string name) {
+  public string name
+}
+class Bird(string called) : Animal {
+}

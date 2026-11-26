@@ -1,0 +1,6 @@
+// a static mutex field is not built yet (spec 20.13)
+import Root
+import Root.Tasks
+class Bank {
+  public static mutex i32 total = 0 timeout 500
+}

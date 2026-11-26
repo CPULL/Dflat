@@ -1,0 +1,26 @@
+// fields of a function type (spec 13.3.2) from a trait and static ones, called by obj.f(), this.f(), f() inside the class, through a
+// variable of the trait type and by Class.f()
+import Root
+trait Clickable {
+  public fun() onClick
+  public i32(i32) twice = (i32 x) { x * 2 }
+}
+class Button : Clickable {
+  public static fun() onAny
+  public static i32(i32) plusOne = (i32 x) { x + 1 }
+  public fun press() {
+    onClick()
+    this.onClick()
+    Console.log(twice(5))
+    onAny()
+    Console.log(plusOne(1))
+  }
+}
+Button b = Button()
+b.onClick = () { Console.log("clicked") }
+Button.onAny = () { Console.log("any") }
+b.press()
+Clickable c = b
+c.onClick()
+Console.log(c.twice(7))
+Console.log(Button.plusOne(9))

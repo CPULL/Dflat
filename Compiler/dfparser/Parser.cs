@@ -391,6 +391,14 @@ public sealed class Parser {
 
   Node ParseStatementCore(string? ownerName, bool caseBody) {
     classMember = ownerName != null;   // a field of a class can have accessor blocks (spec 11.1.4)
+    if (ownerName == null && Peek.Kind == TokenKind.Ident && Peek.Text == "replace" && PeekAt(1).Kind == TokenKind.Ident && PeekAt(1).Line == Peek.Line
+        && PeekAt(2).Is("=")) {
+      // replace message = s + num (spec 11.1.1): a field of a parent set by a constructor; a word here, not a keyword
+      var word = Next();
+      var field = Next();
+      Next();
+      return new Node("ReplaceField", word, field.Text).Add(ParseExpr());
+    }
     if (ownerName == null && Peek.Kind == TokenKind.Ident && Peek.Text == "semaphore" && PeekAt(1).Kind == TokenKind.Ident && PeekAt(1).Line == Peek.Line
         && (PeekAt(2).Is("=") || PeekAt(2).Kind is TokenKind.Newline or TokenKind.Eof || PeekAt(2).Is("}") || PeekAt(2).Is(";")
             || PeekAt(2).Kind == TokenKind.Ident && PeekAt(2).Text == "timeout")) {
@@ -1585,7 +1593,7 @@ public sealed class Parser {
       var type = ParseType();
       // arr<i32>[100] samples: the size or capacity on the declaration (spec 6.3)
       Node? size = null;
-      if (IsOp("[") && type.Kind == "Type" && type.Text is "arr" or "vec" or "hmap" or "hset" or "set" or "bset" && type.Children.Count > 0) {
+      if (IsOp("[") && type.Kind == "Type" && type.Text is "arr" or "vec" or "hmap" or "hset" or "set" or "bset" or "list" or "map" && type.Children.Count > 0) {
         var open = Next();
         bool savedBrace = noBrace;
         noBrace = false;
@@ -2113,11 +2121,19 @@ public sealed class Parser {
   }
 
   // : Parent, TraitA, TraitB
-  Node ParseBases(Token at) {
+  // owner: the class whose header can pass arguments to its parent, Animal(called, 4) (spec 11.1.1); kept on the class as ParentArgs
+  Node ParseBases(Token at, Node? owner = null) {
     var bases = new Node("Bases", at);
     do {
       SkipNewlines();
+      var baseStart = Peek;
       var baseType = ParseType(false);
+      if (IsOp("(")) {
+        if (owner == null) {
+          throw Error("only the header of a class passes arguments, to its parent class (spec 11.1.1)");
+        }
+        owner.Add(new Node("ParentArgs", baseStart, baseType.Text).Add(ParseArgs()));
+      }
       // Sequence with (Item is u32, Key is string)
       if (Peek.Kind == TokenKind.Ident && Peek.Text == "with" && PeekAt(1).Is("(")) {
         var word = Next();
@@ -2154,7 +2170,7 @@ public sealed class Parser {
       node.Add(ps);
     }
     if (IsOp(":")) {
-      node.Add(ParseBases(Next()));
+      node.Add(ParseBases(Next(), node));
     }
     // class Box<Item>(...) where Item : Named { }
     int afterHeader = pos;

@@ -178,6 +178,56 @@ public class Task(u64 handle) {
 
   readonly Dictionary<VarInfo, TaskHandle> taskHandles = new();
 
+  // the top-level Task and Thread variables, by name: the functions reach them by name, not through their scope (spec 14.1, 20.9)
+  readonly Dictionary<string, TaskHandle> fileTaskHandles = new();
+  readonly Dictionary<string, Node> fileTaskTypeNodes = new();   // the type written on a top-level Task or Thread variable (DeclareFileVars)
+
+  // before the code: what each top-level Task or Thread variable holds. Task<...> says it; a plain one knows its task when its declaration and
+  // every assignment of the program (top level and functions) give a task of the same class with the same results; otherwise it knows
+  // nothing, as a local that is given different tasks
+  void PlanFileTaskHandles(Node program) {
+    if (!TasksMode) {
+      return;
+    }
+    var empty = new Scope(null);
+    var assigned = new Dictionary<string, List<Node>>();
+    void Walk(Node node) {
+      if (node.Kind == "Assign" && node.Text == "=" && node.Children.Count == 2 && node.Children[0].Kind == "Name") {
+        string name = node.Children[0].Text!;
+        if (!assigned.TryGetValue(name, out var values)) {
+          assigned[name] = values = new List<Node>();
+        }
+        values.Add(node.Children[1]);
+      }
+      foreach (var child in node.Children) {
+        Walk(child);
+      }
+    }
+    Walk(program);
+    // the top-level variables the functions use: their declarations are assignments by now (DeclareFileVars), the line that gave the
+    // value is one of the assignments
+    foreach (var (name, typeNode) in fileTaskTypeNodes) {
+      if (taskTypeSpecs.TryGetValue(typeNode, out var spec)) {
+        fileTaskHandles[name] = ResolveTaskSpec(spec);
+        continue;
+      }
+      var values = assigned.TryGetValue(name, out var given) ? given : new List<Node>();
+      var handles = new List<TaskHandle?>();
+      foreach (var value in values.Where(value => value.Kind != "Null")) {
+        TaskHandle? handle;
+        try {
+          handle = TaskHandleOf(value, empty);
+        } catch (CompileException) {
+          handle = null;   // reported where the value is compiled
+        }
+        handles.Add(handle);
+      }
+      if (handles.Count > 0 && handles.All(handle => handle != null) && handles.Distinct().Count() == 1) {
+        fileTaskHandles[name] = handles[0]!.Value;
+      }
+    }
+  }
+
   // Task<...> as written: the class (null for *) and the result types; the type node keeps only Task (one C type for every handle)
   sealed record TaskTypeSpec(string? ClassName, List<Node> Results, Node At);
   readonly Dictionary<Node, TaskTypeSpec> taskTypeSpecs = new(ReferenceEqualityComparer.Instance);
@@ -273,6 +323,10 @@ public class Task(u64 handle) {
     }
     if (node.Kind == "Name" && scope.Find(node.Text!) is VarInfo variable && taskHandles.TryGetValue(variable, out var known)) {
       return known;
+    }
+    if (node.Kind == "Name" && scope.Find(node.Text!) is null or { IsLocal: false } && fileVars.ContainsKey(node.Text!) && IsFileVarHere(node.Text!, node)
+        && fileTaskHandles.TryGetValue(node.Text!, out var topLevel)) {
+      return topLevel;   // a top-level Task named in a function, or at top level once it forgot (spec 20.9)
     }
     return TaskHandleOfMember(node, scope);   // a Task<...> field, a function or a method that gives a Task<...> (CodeGen.TaskHandles.cs)
   }

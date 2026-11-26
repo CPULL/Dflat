@@ -150,6 +150,7 @@ public sealed partial class CodeGen {
     ["ReservedSignalException"] = 68,   // spec 20.3: a number below 4096 that KnownSignals does not name
     ["WaitingOnANotOwnedTaskException"] = 70,   // spec 20.2.6: a wait by a runnable that neither owns nor borrows the handle
     ["TokenAlreadyRegisteredException"] = 71,   // spec 20.3.2: a token registered again with the same name
+    ["IncompatibleTypeInGenericException"] = 72,   // spec 11.3.6.1: a set value read as a type its member does not convert to
     ["DuplicateEventNameWithDataMismatchException"] = 69   // spec 20.4.3: an event name used with another struct
   };
 

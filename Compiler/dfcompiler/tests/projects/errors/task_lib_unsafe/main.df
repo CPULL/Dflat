@@ -1,0 +1,13 @@
+namespace app
+import Root
+import Root.Tasks
+import lib ulib
+import tests.ulib
+
+class Worker {
+  fun i32 taskRun() {
+    return safe(4) + unsafe(1)
+  }
+}
+Task t = Task(Worker).start()
+Console.log(wait t timeout 2000)

@@ -1,0 +1,37 @@
+// the header passes arguments to the constructor of the parent class (spec 11.1.1): header parameters, constants and statics
+import Root
+
+class Animal(string name, i32 legs) {
+  public string name
+  public i32 legs
+  public fun string describe() { return $"{name} has {legs} legs" }
+}
+
+class Dog(string called, string breed) : Animal(nameConstructor(called), 4) {
+  public string breed
+  static fun string nameConstructor(string n) {
+    return n + " the dog"
+  }
+}
+
+class Bird(string called) : Animal(called, countLegs(called, 2)) {
+  public bool flies = true
+  static fun i32 countLegs(string n, i32 l) {
+    if n == "tripod" { return 3 }
+    return l
+  }
+}
+
+class Puppy(string petName) : Dog(petName, "mixed") {
+  public Puppy(i32 age) : Puppy("pup" + age) {
+  }
+}
+
+Dog d = Dog("rex", "beagle")
+Console.log($"{d.describe()}, {d.breed}")
+Bird b = Bird("tweety")
+Console.log($"{b.describe()} {b.flies}")
+Bird t = Bird("tripod")
+Console.log(t.describe())
+Puppy p = Puppy(3)
+Console.log($"{p.describe()}, {p.breed}")

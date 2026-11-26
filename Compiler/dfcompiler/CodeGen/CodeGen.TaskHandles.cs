@@ -97,6 +97,13 @@ public sealed partial class CodeGen {
       }
       return;
     }
+    if (target.Kind == "Name" && scope.Find(target.Text!) == null && fileTaskTypeNodes.TryGetValue(target.Text!, out var topType)
+        && taskTypeSpecs.TryGetValue(topType, out var topSpec)) {
+      if (value.Kind != "Null") {
+        CheckTaskHandleValue(ResolveTaskSpec(topSpec), TaskHandleOf(value, scope), value);   // a top-level Task<...> (spec 20.9)
+      }
+      return;
+    }
     if (target.Kind is "Name" or "Member" && value.Kind != "Null" && TaskHandleOfMember(target, scope) is TaskHandle wanted) {
       var given = TaskHandleOf(value, scope);
       if (given == null && currentFun is { IsCtor: true } or { IsInit: true } && (value.Kind == "Gift" ? value.Children[0] : value) is { Kind: "Name" } param && scope.Find(param.Text!) is { IsParam: true }) {

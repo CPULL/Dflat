@@ -1,0 +1,60 @@
+// an item of a vec, a list or a map lent with & to a call (spec 13.1, 6.4): the collection is frozen as an open iterator while the call runs,
+// free again after it (also after an exception); a missing key is added first. c[k] ??= v on items (spec 7.1): the index runs once
+import Root
+
+class Store {
+  public map<string, i32> counts = ["a": 1]
+  public vec<i32> nums = [1, 2]
+  public list<i32> items = [10, 20]
+
+  public fun growMap(&i32 x) {
+    x += 1
+    counts["z"] = 9
+    catch ModifyingIteratedCollectionException { Console.log("map frozen") }
+  }
+  public fun growVec(&i32 x) {
+    x += 1
+    nums.add(3)
+    catch ModifyingIteratedCollectionException { Console.log("vec frozen") }
+  }
+  public fun shrinkList(&i32 x) {
+    x += 1
+    items.removeAt(0)
+    catch ModifyingIteratedCollectionException { Console.log("list frozen") }
+  }
+  public fun failing(&i32 x) {
+    x += 1
+    throw Exception("inside")
+  }
+  public fun run() {
+    growMap(&counts["a"])
+    counts["z"] = 9                         // free again after the call
+    Console.log(counts)
+    growVec(&nums[0])
+    nums.add(3)
+    Console.log(nums)
+    shrinkList(&items[1])
+    items.removeAt(0)
+    Console.log(items)
+    failing(&counts["new"])                  // a missing key is added first
+    catch Exception ex { Console.log($"caught {ex.message}") }
+  }
+  public fun after() {
+    counts["w"] = 1                          // the failed call let the map go
+    Console.log(counts)
+  }
+}
+
+fun i32 next(&i32 calls) {
+  calls++
+  return 1
+}
+
+Store s = Store()
+s.run()
+s.after()
+arr<i32?> a = [null, 5]
+i32 calls = 0
+a[next(&calls)] ??= 99                       // the index runs once; 5 is not null, it stays
+a[0] ??= 7
+Console.log($"{a} {calls}")

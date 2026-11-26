@@ -1,0 +1,6 @@
+class Pet {
+  public string name = "x"
+  public fun rename() {
+    replace name = "y"
+  }
+}

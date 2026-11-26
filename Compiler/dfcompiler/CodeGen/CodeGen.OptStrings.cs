@@ -63,6 +63,14 @@ public sealed partial class CodeGen {
   }
 
   // a string? declared with its type written (string? x): its string ends with the scope
+  // string? s = ..., or var s = f() where every function f of that name gives a string? (spec 7.1): the variable owns its string
+  bool IsOwnedOptStringDecl(Node decl) => IsOptStringDecl(decl) || IsVarOptStringDecl(decl);
+
+  bool IsVarOptStringDecl(Node decl) =>
+    decl.Children.FirstOrDefault(child => TypeNodeKinds.Contains(child.Kind)) is { Kind: "Type", Text: "var", Children.Count: 0 }
+    && decl.Children.FirstOrDefault(child => child.Kind == "Init")?.Children[0] is { Kind: "Call" } call
+    && CalleesOf(call) is { Count: > 0 } callees && callees.All(f => f.Ret == "string?");
+
   static bool IsOptStringDecl(Node decl) =>
     decl.Children.FirstOrDefault(child => TypeNodeKinds.Contains(child.Kind)) is { Kind: "Nullable" } nullable
     && nullable.Children.FirstOrDefault() is { Kind: "Type", Text: "string", Children.Count: 0 };

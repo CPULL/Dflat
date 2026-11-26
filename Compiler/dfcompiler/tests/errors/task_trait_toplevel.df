@@ -1,0 +1,18 @@
+import Root
+import Root.Tasks
+i32 counter = 0
+trait Step {
+  public fun act() { }
+}
+class Loud : Step {
+  replace fun act() { counter++ }
+}
+class Adder {
+  fun i32 taskRun() {
+    Step s = Loud()
+    s.act()
+    return 0
+  }
+}
+Task t = Task(Adder).start()
+wait t timeout 2000

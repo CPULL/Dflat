@@ -1,0 +1,1 @@
+replace_private_field.df(8): error: 'secret' of Pet is not public: replace sets only the public fields of a parent (spec 11.1.1)

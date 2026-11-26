@@ -1,0 +1,5 @@
+rex the dog has 4 legs, beagle
+tweety has 2 legs true
+tripod has 3 legs
+pup3 the dog has 4 legs, mixed
+---- exit code 0 ----

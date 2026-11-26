@@ -132,6 +132,7 @@ sealed partial class SourceLoader {
       Array.Fill(kept, "");
       kept[first] = lines[first];
       var symbols = new Dictionary<int, (string Symbol, bool Error)>();   // by the line of the declaration
+      var taskUnsafe = new HashSet<int>();   // the functions that use what the code of a task cannot see (taskunsafe, spec 20.12)
       var records = new Dictionary<int, (string Record, string? Layout)>();   // the classes: by the line of their header
       var ctorLines = new HashSet<int>();                                       // the constructors, written as static functions
       string? className = null;
@@ -164,6 +165,9 @@ sealed partial class SourceLoader {
           if (method.Success) {
             kept[line] = method.Groups["decl"].Value;
             symbols[nsBase + line + 1] = (method.Groups["sym"].Value, method.Groups["err"].Success);
+            if (method.Groups["unsafe"].Success) {
+              taskUnsafe.Add(nsBase + line + 1);
+            }
             continue;
           }
           kept[line] = text;   // a public field
@@ -186,6 +190,9 @@ sealed partial class SourceLoader {
         if (fun.Success) {
           kept[line] = fun.Groups["decl"].Value;
           symbols[nsBase + line + 1] = (fun.Groups["sym"].Value, fun.Groups["err"].Success);
+          if (fun.Groups["unsafe"].Success) {
+            taskUnsafe.Add(nsBase + line + 1);
+          }
         }
         // public global Sequence Numbers -> gl_counters_Numbers lock 0: a global of the library (its lock is the library's)
         var global = DfiGlobalLine.Match(text);
@@ -225,6 +232,9 @@ sealed partial class SourceLoader {
           fun.Add(new Node("Imported", new Token(TokenKind.Ident, symbol.Symbol, fun.Line, 0), symbol.Symbol));
           if (symbol.Error) {
             fun.Add(new Node("ImportedError", new Token(TokenKind.Ident, "error", fun.Line, 0)));
+          }
+          if (taskUnsafe.Contains(fun.Line)) {
+            fun.Add(new Node("ImportedTaskUnsafe", new Token(TokenKind.Ident, "taskunsafe", fun.Line, 0)));
           }
           if (ctorLines.Contains(fun.Line)) {
             fun.Add(new Node("ImportedCtor", new Token(TokenKind.Ident, "", fun.Line, 0)));
@@ -270,7 +280,7 @@ sealed partial class SourceLoader {
 
   // public [static] fun <results> <name>(<params>) -> <symbol> [error]   |   unrestricted fun ...
   static readonly System.Text.RegularExpressions.Regex DfiFunLine =
-    new(@"^(?<decl>(public|unrestricted)\s.*\bfun\b.*\))\s*->\s*(?<sym>[A-Za-z_][A-Za-z0-9_]*)(?<err>\s+error)?\s*$");
+    new(@"^(?<decl>(public|unrestricted)\s.*\bfun\b.*\))\s*->\s*(?<sym>[A-Za-z_][A-Za-z0-9_]*)(?<err>\s+error)?(?<unsafe>\s+taskunsafe)?\s*$");
 
   static IEnumerable<string> List(string? text) =>
     (text ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);

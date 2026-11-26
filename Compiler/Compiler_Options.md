@@ -28,7 +28,8 @@ Option names are not case sensitive. The arguments after `CL:`, file names and p
 - `--fixed-grow-step <items>` (spec 6.8.2): for small targets, a `vec` grows by this many items each time (from 1 to 65536) instead of doubling; `--double-grow-limit` and `--further-grow-factor` are then not used. `reserve(n)` still makes room for at least `n`. In the project file: `fixed-grow-step=`.
 - `--native-int <bits>`, `--native-real <bits>`, `--native-addr <bits>` force the native size of the integers, of the reals and of the addresses to the specified number of bits. There is no option for `uns`: it always has the same size as `int`. For example `--native-int 32` forces the native size of the integers to be 32 bits. Sizes supported are 8, 16, 32, 64, 128, 256 (some may not be possible on specific target architectures, and a type may accept only some of them, for example a real has no 8 bits).
   - The native size of `int` and `uns` (and of the unsuffixed integer literals) comes from `--native-int`, then `native-int=` of the project, then the size of the cpu (`--cpu`, the target, or the machine running the compiler: 64 on `x64` and `arm64`, 32 on `x86`; `arm64_32` is a 64-bit cpu with 32-bit addresses, so `int` is 64 and `addr` is 32). `addr` has its own size (`--native-addr`) so that 8-bit cpus can be supported.
-  - Built today: `--native-int` with 32 and 64 (the other sizes give an error); `--native-real` and `--native-addr` are not built yet.
+  - The native size of `real` (and of the unsuffixed real literals) comes from `--native-real`, then `native-real=` of the project, then the size of the cpu (64 on `x64` and `arm64`, 32 on `x86`).
+  - Built today: `--native-int` with 32 and 64, `--native-real` with 32 and 64 (the other sizes give an error); `--native-addr` is not built yet.
 - `--cachealign <number>` the alignment for cache lines, in bytes. The default is 64 bytes.
 
 ## Other options to be checked
@@ -45,7 +46,7 @@ Option names are not case sensitive. The arguments after `CL:`, file names and p
 - Root file and root namespace: which file starts the program, and the name of the root namespace (`namespace local` is built from the folder path).
 
 ## Preprocessor variables
-The variables of the preprocessor (spec 19.1) that are set by the compiler take their values from these options. `endian` and `bits` come from the cpu, `arch` is `<os>_<cpu>`, and `ram` is 4gb until a custom architecture defines it (planned). The native sizes `int` and `uns` are the size of the cpu (64 bits on x64, 32 bits on x86; `uns` has the size of `int`) unless `--native-int` forces another size; `real` is 64 until `--native-real` is built. `version` is the language version (the version of the specification the compiler was built for).
+The variables of the preprocessor (spec 19.1) that are set by the compiler take their values from these options. `endian` and `bits` come from the cpu, `arch` is `<os>_<cpu>`, and `ram` is 4gb until a custom architecture defines it (planned). The native sizes `int` and `uns` are the size of the cpu (64 bits on x64, 32 bits on x86; `uns` has the size of `int`) unless `--native-int` forces another size; `real` follows `--native-real`, else the size of the cpu. `version` is the language version (the version of the specification the compiler was built for).
 
 | Variable | Option |
 |---|---|

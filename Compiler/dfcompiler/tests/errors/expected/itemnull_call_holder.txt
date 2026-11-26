@@ -1,0 +1,1 @@
+itemnull_call_holder.df(3): error: c[k] ??= v names the collection by a variable or a field: keep it in a variable first

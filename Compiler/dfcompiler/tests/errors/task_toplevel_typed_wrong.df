@@ -1,0 +1,22 @@
+// a top-level Task<Worker> given a task of another class in a function (spec 20.9)
+import Root
+import Root.Tasks
+class Other {
+  fun string taskRun() {
+    return "x"
+  }
+}
+class Worker {
+  fun i32 taskRun() {
+    return 7
+  }
+}
+Task<Worker> t
+fun start() {
+  t = Task(Other).start()
+}
+fun i32 collect() {
+  return wait t timeout 2000
+}
+start()
+Console.log(collect())

@@ -55,8 +55,7 @@ public sealed partial class CodeGen {
     ["u256"] = "u256",
     ["r16"] = "r16",
     ["r128"] = "r128",
-    ["dec"] = "dec",
-    ["real"] = "real"
+    ["dec"] = "dec"
   };
 
   static readonly Dictionary<string, string> ParamFeatures = new();

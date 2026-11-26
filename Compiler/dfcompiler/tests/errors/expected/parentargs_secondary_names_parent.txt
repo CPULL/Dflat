@@ -1,0 +1,1 @@
+parentargs_secondary_names_parent.df(5): error: a constructor of Bird must reach the primary constructor: write : Bird(...) after its parameters

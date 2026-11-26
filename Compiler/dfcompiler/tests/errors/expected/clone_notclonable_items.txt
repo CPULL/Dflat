@@ -1,0 +1,1 @@
+clone_notclonable_items.df(7): error: vec<Key> cannot be cloned: its items (Key) cannot be cloned: Key is notclonable (spec 12.6)

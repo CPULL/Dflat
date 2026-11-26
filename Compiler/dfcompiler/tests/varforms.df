@@ -1,0 +1,33 @@
+// var with a value whose type needs the functions (spec 7.1, 14.1): var s = f() where f gives a string? (the variable owns its string), and a top-level
+// var used by functions, declared from a call (its type is known once the functions are registered)
+import Root
+class Shelf {
+  public fun string? pick(i32 n) {
+    if n > 0 { return $"book {n}" }
+    return null
+  }
+}
+fun string? find(bool ok) {
+  if ok { return "found " + "it" }
+  return null
+}
+var top = find(true)
+fun show() {
+  Console.log(top ?? "none")
+}
+fun loop() {
+  Shelf s = Shelf()
+  for i in 0..3 {
+    var b = s.pick(i)
+    Console.log(b ?? "empty")
+    b = find(i == 2)
+    Console.log(b ?? "no")
+  }
+}
+show()
+loop()
+fun i32 start() { return 41 }
+var total = start()
+fun count() { total++ }
+count()
+Console.log(total)

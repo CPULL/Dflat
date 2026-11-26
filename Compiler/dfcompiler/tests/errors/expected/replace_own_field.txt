@@ -1,0 +1,1 @@
+replace_own_field.df(4): error: 'name' is a field of Pet itself: assign it without replace (spec 11.1.1)

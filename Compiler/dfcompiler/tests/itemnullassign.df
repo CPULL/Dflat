@@ -1,0 +1,14 @@
+// ??= on items of arr, vec, list and map (spec 7.1)
+import Root
+arr<i32?> a = [null, 5]
+a[0] ??= 7
+Console.log(a[0])
+list<string?> l = [null, "x"]
+l[0] ??= "y"
+Console.log(l[0])
+map<string, i32?> m = ["a": null]
+m["a"] ??= 3
+Console.log(m)
+vec<i32?> v = [null]
+v[0] ??= 4
+Console.log(v[0])

@@ -1,0 +1,6 @@
+// a mutex as a field of a trait is not built yet (spec 20.13)
+import Root
+import Root.Tasks
+trait Guarded {
+  mutex i32 level = 0 timeout 500
+}

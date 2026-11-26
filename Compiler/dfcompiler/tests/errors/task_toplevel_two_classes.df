@@ -1,0 +1,22 @@
+// a top-level Task given tasks of two classes knows nothing: wait on it gives no value (spec 20.9)
+import Root
+import Root.Tasks
+class Worker {
+  fun i32 taskRun() {
+    return 7
+  }
+}
+class Other {
+  fun string taskRun() {
+    return "x"
+  }
+}
+Task t = Task(Worker).start()
+fun again() {
+  t = Task(Other).start()
+}
+fun i32 collect() {
+  return wait t timeout 2000
+}
+again()
+Console.log(collect())

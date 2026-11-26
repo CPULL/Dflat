@@ -1,0 +1,1 @@
+task_override_toplevel.df(8): error: the top-level variable 'counter' cannot be used by the code of a task (Derived.act, reached from Adder.taskRun): a task sees only constants, refcounted objects, weak references, mutex variables and globals (spec 20.12)

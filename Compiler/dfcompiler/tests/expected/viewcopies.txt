@@ -1,0 +1,6 @@
+a changed 2
+[one, two, three, ...] (4 items) [two, three, five]
+[2, 3, 4] [2, 3, 4]
+[y, z]
+keys cannot be cloned
+---- exit code 0 ----

@@ -17,6 +17,11 @@ public sealed partial class CodeGen {
 
   // before the code: a mutex declaration keeps its timeout aside; the declaration itself is a plain one
   void LowerMutexDecls(Node node, bool top = true) {
+    if (node.Kind is "Class" or "Trait" && node.Children.FirstOrDefault(child => child.Kind == "Block") is Node body
+        && body.Children.FirstOrDefault(member => member.Kind == "Decl"
+          && member.Children.FirstOrDefault(c => c.Kind == "Mods")?.Text?.Split(' ').Contains("mutex") == true) is Node field) {
+      throw NotSupported("a mutex as a field (spec 20.13): declare it at the top level of the program, or as a global", field);
+    }
     foreach (var child in node.Children) {
       LowerMutexDecls(child, false);
       if (top && mutexDeclLocks.TryGetValue(child, out var topLock)) {

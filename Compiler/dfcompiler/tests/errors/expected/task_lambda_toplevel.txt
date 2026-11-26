@@ -1,0 +1,1 @@
+task_lambda_toplevel.df(6): error: the top-level variable 'counter' cannot be used by the code of a task (a lambda at line 6, reached from Adder.taskRun): a task sees only constants, refcounted objects, weak references, mutex variables and globals (spec 20.12)

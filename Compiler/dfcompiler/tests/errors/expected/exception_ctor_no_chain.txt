@@ -1,0 +1,1 @@
+exception_ctor_no_chain.df(2): error: a constructor of the exception Oops must reach its primary constructor, which takes the message first: write : Oops(...) after its parameters (spec 15.2)

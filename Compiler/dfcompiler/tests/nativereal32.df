@@ -1,0 +1,13 @@
+// options: --native-real 32
+// --native-real (spec 2.1, 19.1): real, the unsuffixed real literals and the preprocessor variable real follow it; r64 stays r64
+import Root
+real x = 2.5
+var y = 1.25
+##if real == 32
+Console.log("real is 32")
+##else
+Console.log("real is 64")
+##endif
+Console.log(x + y)
+r64 wide = 0.1
+Console.log(wide)

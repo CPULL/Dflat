@@ -466,6 +466,7 @@ public sealed partial class CodeGen {
       writingLambdas.Add(n);
     }
     string fnType = MakeFunType(ret, ps.Select(ParamTypeText));
+    NoteLambda(lambda, fnType);   // the function that writes it reaches its body; a call of a function value may reach it (spec 20.12)
     if (!hasContext) {
       return new Expr($"((df_fn){{ (void*){lambda.CName}, NULL }})", fnType);
     }
@@ -698,6 +699,7 @@ public sealed partial class CodeGen {
   // f(args) where f is a function value: a null one raises UnassignedFunctionCallException (spec 13.3.2)
   Expr FnValueCall(Expr callee, List<Node> args, Scope scope, Node at) {
     var (ret, types) = FunParts(callee.Type);
+    NoteFunValueCall(callee.Type);   // what the code of a task reaches through it (spec 20.12)
     if (args.Any(arg => arg.Kind == "Named")) {
       throw Error("a function value takes its arguments by position", at);
     }
@@ -764,6 +766,12 @@ public sealed partial class CodeGen {
         return FnValueCall(ExprOf(callee, scope), args, scope, at);
       }
     }
+    // a static field of a function type: Button.onAny() (spec 13.3.2)
+    if (callee.Kind == "Member" && FunFieldNames.Contains(callee.Text!) && callee.Children[0] is { Kind: "Name" } owner && scope.Find(owner.Text!) == null
+        && classes.TryGetValue(owner.Text!, out var ownerClass) && FindField(ownerClass, callee.Text!) is { IsStatic: true } staticField
+        && IsFunType(staticField.Type) && LookupMethods(ownerClass, callee.Text!).Count == 0) {
+      return FnValueCall(ExprOf(callee, scope), args, scope, at);
+    }
     if (callee.Kind is "Lambda" or "Paren" or "Call" or "Index") {
       var value = ExprOf(callee, scope);
       if (!IsFunType(value.Type)) {
@@ -803,8 +811,9 @@ public sealed partial class CodeGen {
 
   // the names of the fields of a function type of every class: obj.name(...) may call a function value
   HashSet<string>? funFieldNames;
-  HashSet<string> FunFieldNames => funFieldNames ??= classes.Values.SelectMany(cls => cls.Fields).Where(member => IsFunType(member.Type))
-    .Select(member => member.Name).ToHashSet();
+  // the names of the fields of a function type, in the classes and in the traits (a class gets the fields of its traits)
+  HashSet<string> FunFieldNames => funFieldNames ??= classes.Values.SelectMany(cls => cls.Fields).Concat(traits.Values.SelectMany(trait => trait.Fields))
+    .Where(member => IsFunType(member.Type)).Select(member => member.Name).ToHashSet();
 
   // a collection keeps its items: a function value that borrows variables cannot go in (spec 13.3.4)
   void CheckStoredFunction(FunSig f, ParamSig param, Node arg, Scope scope) {

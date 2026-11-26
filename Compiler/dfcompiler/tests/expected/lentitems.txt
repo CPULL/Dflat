@@ -1,0 +1,10 @@
+map frozen
+[a: 2, z: 9]
+vec frozen
+[2, 2, 3]
+list frozen
+[21]
+caught inside
+[a: 2, new: 1, w: 1, ...] (4 items)
+[7, 5] 1
+---- exit code 0 ----

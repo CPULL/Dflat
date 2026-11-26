@@ -1,0 +1,1 @@
+sized_list.df(2): error: a list has no capacity: the form list<T>[n] name does not apply (spec 6.3); vec<T>[n] has one

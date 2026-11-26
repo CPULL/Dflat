@@ -1,0 +1,80 @@
+// set values read as a type (spec 11.3.6.1): T v = k converts the member it holds by the automatic conversions (level 3 warning when one
+// can saturate), (T)k by the cast; any other member gives the default of T and the silent IncompatibleTypeInGenericException (72);
+// the name of if k is T x also exists after && in the same condition; is never converts
+import Root
+Generic Nums { i32, u64 }
+Generic Crazy { i32, string }
+Generic Mixed { u8, r64, char }
+
+fun string label(string s) {
+  return s
+}
+
+fun i64 twice(i64 n) {
+  return n * 2
+}
+
+class Holder {
+  public Crazy value
+}
+
+fun i32 back(Holder h) {
+  return h.value                          // a field, as a result
+}
+
+fun caught() {
+  Crazy c3 = "text"
+  i32 e = c3
+  Console.log(e)
+  catch IncompatibleTypeInGenericException ex { Console.log($"caught {ex.id}") }
+}
+
+i32 five = 5
+Nums k = five
+i32 v = k                                 // level 3 warning: u64 can saturate
+Console.log(v)
+k = 9999999999ul
+v = k                                     // saturates
+Console.log(v)
+i32 w = (i32)k                            // no warning
+Console.log(w)
+u8 small = (u8)k
+Console.log(small)
+Console.log(twice(k))                     // an argument: u64 into i64
+k = five
+if k is i32 x && x > 3 { Console.log($"over 3: {x}") }
+if k is i32 x && x > 30 && x < 100 { Console.log("never") } else { Console.log("not over 30") }
+if k is u64 n && n > 0 { Console.log("never") }
+i32 minusOne = -1
+k = minusOne
+if k is u64 n { Console.log("never") } else { Console.log("-1 is an i32, not a u64") }
+
+Crazy c1 = "hello"
+Crazy c2 = -12
+i32 a = c1                                // 0
+string b = c2                             // ""
+string c = c1
+i32 d = c2
+Console.log($"[{a}] [{b}] [{c}] [{d}]")
+Console.log(label(c1))
+c1 = "changed"
+Console.log(c)                            // its own text
+string s = (string)c1
+Console.log(s)
+Holder h = Holder()
+h.value = c2
+Console.log(back(h))
+h.value = c1
+string fromField = h.value
+Console.log(fromField)
+caught()
+
+Mixed m = 'A'
+i32 code = m                              // char to integer
+Console.log(code)
+r64 real = 2.75
+m = real
+i32 truncated = (i32)m                    // the cast truncates
+i32 notAuto = m                           // a real is not converted automatically to an integer
+r32 narrow = m
+Console.log($"{truncated} {notAuto} {narrow}")

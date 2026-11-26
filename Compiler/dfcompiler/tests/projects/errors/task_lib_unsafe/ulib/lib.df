@@ -1,0 +1,19 @@
+// lib.df: one public function uses a top-level variable of the library, one does not; the interface marks the first taskunsafe (spec 20.12)
+namespace tests.ulib
+import Root
+import Root.Tasks
+
+i32 hits = 0
+
+fun note() {
+  hits++
+}
+
+public fun i32 safe(i32 n) {
+  return n * 2
+}
+
+public fun i32 unsafe(i32 n) {
+  note()
+  return n
+}

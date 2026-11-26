@@ -7,7 +7,8 @@ namespace dfcompiler;
 // The interface of a compiled Dflat library (.dfi, spec 15.8): what a program needs to use the binary of the library, for the compiler only.
 // It starts with the DFI block (the compiler that built it, the library, its namespace, the runtime chunks and the stdlib parts it needs),
 // then the public declarations in Dflat, each with the C symbol it maps to (-> as in a .dflib, spec 22) and "error" when the function
-// returns an error part. A class gives its record, then its C layout for the target it was built for (layout-<target>: { ... }), then its
+// returns an error part, then "taskunsafe" when it uses (at any depth) top-level variables or static fields that the code of a task cannot
+// see (spec 20.12). A class gives its record, then its C layout for the target it was built for (layout-<target>: { ... }), then its
 // public members. Example:
 //
 //   DFI {
@@ -141,7 +142,7 @@ public sealed partial class CodeGen {
     foreach (var (enumName, node) in enumNodes.Where(pair => Mine(pair.Value.Line) && ModsOf(pair.Value).Contains("public"))) {
       var info = enums[enumName];
       var written = info.Bitfield
-        ? info.Entries.Where(entry => entry.Name is not ("None" or "All")).Select(entry => $"{entry.Name}: {BitPosition(entry.Value)}")
+        ? info.Entries.Where(entry => entry.Name is not ("NONE" or "ALL")).Select(entry => $"{entry.Name}: {BitPosition(entry.Value)}")
         : info.Entries.Select(entry => $"{entry.Name}: {entry.Value}");
       string kind = info.Bitfield ? "bitfield" + Bits(info.ValueType) : "enum";
       entries.Add((NsOf(node.Line), $"public {kind} {SourceMap.PrintName(enumName)} {{ {string.Join(", ", written)} }}\n"));
@@ -238,6 +239,9 @@ public sealed partial class CodeGen {
     sb.Append(" -> ").Append(ExportName(f));
     if (PairReturn(f)) {
       sb.Append(" error");
+    }
+    if (TasksMode && !f.IsCtor && (taskUnsafeCache ??= TaskUnsafeFuns()).Contains(f)) {
+      sb.Append(" taskunsafe");   // it uses what the code of a task cannot see (spec 20.12)
     }
     return sb.ToString();
   }

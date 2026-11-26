@@ -1,0 +1,7 @@
+class Animal(string name) {
+  public string name
+}
+class Bird(string called) : Animal(called) {
+  public Bird(i32 n) : Animal("x") {
+  }
+}

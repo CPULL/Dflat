@@ -1,0 +1,14 @@
+// real (spec 2.1, 19.1): the native real, r64 on x64 and r32 on x86, as int and uns are the native integers
+import Root
+real x = 2.5
+int i = 3
+real y = x * i
+Console.log(y)
+fun real half(real v) {
+  return v / 2
+}
+Console.log(half(y))
+arr<real> values = [1.5, 2.5]
+Console.log(values[1])
+real? maybe = null
+Console.log(maybe ?? 4.0)

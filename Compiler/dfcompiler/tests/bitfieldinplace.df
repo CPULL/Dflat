@@ -5,16 +5,16 @@ import Root
 bitfield8 Flags { One: 0, Two: 1, Three: 2 }
 
 class Holder {
-  public Flags state = Flags.None
+  public Flags state = Flags.NONE
 }
 
 fun show(Flags f) {
   Console.log($"lent: {f.set(Flags.Three)}, still {f}")
 }
 
-Flags f = Flags.None
+Flags f = Flags.NONE
 Flags n = f.set(Flags.One)
-Console.log($"{n} / {f}")                // One / None
+Console.log($"{n} / {f}")                // One / NONE
 f.set(Flags.Two)
 Console.log(f)                           // Two
 f.toggle(Flags.One | Flags.Two)
@@ -28,7 +28,7 @@ show(f)
 Holder h = Holder()
 h.state.set(Flags.Two)
 Console.log(h.state)                     // Two
-arr<Flags> all = [Flags.None, Flags.None]
+arr<Flags> all = [Flags.NONE, Flags.NONE]
 all[1].set(Flags.One)
 Console.log(all)
 const Flags fixed = Flags.Two
@@ -37,6 +37,6 @@ Console.log(fixed.set(Flags.One))        // a new value from a const
 Flags? maybe = null
 Console.log(maybe)
 maybe = Flags.One
-Console.log(maybe ?? Flags.None)
-Flags plain = maybe ?? Flags.None
+Console.log(maybe ?? Flags.NONE)
+Flags plain = maybe ?? Flags.NONE
 Console.log(plain.isSet(Flags.One))

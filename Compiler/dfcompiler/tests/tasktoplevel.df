@@ -1,0 +1,53 @@
+// a top-level Task named in functions (spec 14.1, 20.9): it knows its task when its declaration and every assignment of the program give
+// the same class; a Task<...> says it, and its assignments in functions are checked
+import Root
+import Root.Tasks
+
+class Worker {
+  fun i32 taskRun() {
+    return 42
+  }
+}
+
+class Builder {
+  fun string taskRun() {
+    return "built"
+  }
+}
+
+fun i32 collect(&Task<Worker> w) {
+  return wait w timeout 2000
+}
+
+Task first = Task(Worker).start()
+fun i32 waitFirst() {
+  return wait first timeout 2000         // the task of its line is known here
+}
+
+Task second = Task(Worker).start()
+fun i32 lendSecond() {
+  return collect(&second)                 // lent with & from a function
+}
+
+Task third
+fun startThird() {
+  third = Task(Worker).start()            // given in a function
+}
+fun i32 waitThird() {
+  return wait third timeout 2000
+}
+
+Task<Builder> typed
+fun startTyped() {
+  typed = Task(Builder).start()
+}
+fun string waitTyped() {
+  return wait typed timeout 2000
+}
+
+Console.log(waitFirst())
+Console.log(lendSecond())
+startThird()
+Console.log(waitThird())
+startTyped()
+Console.log(waitTyped())

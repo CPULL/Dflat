@@ -1,0 +1,99 @@
+// replace <field> = <expression> (spec 11.1.1, 15.2): a constructor sets a public field of a parent, after the parent's constructor; the old
+// value is released (the object ends); constructors in the body of an exception class reach the primary one; replace message is cut to 2 KB
+import Root
+
+class CountException(i32 count) : Exception {
+  public i32 count
+  public CountException(i32 n, string1k what) : CountException("", n) {
+    replace message = $"{what}: {n}"
+  }
+}
+
+class Pet {
+  public string name = "unnamed"
+  public i32 legs = 4
+  public Pet() {
+  }
+}
+
+class Bird : Pet {
+  public Bird(string called) : Pet() {
+    replace name = called + " the bird"
+    replace legs = 2
+  }
+}
+
+fun fail() {
+  throw CountException(7, "items")
+}
+
+fun failPlain() {
+  throw CountException("plain message", 3)
+}
+
+fun run() {
+  fail()
+  catch CountException ex { Console.log($"{ex.message} / {ex.count}") }
+}
+
+fun runPlain() {
+  failPlain()
+  catch CountException ex { Console.log($"{ex.message} / {ex.count}") }
+}
+
+
+class Res(string name) {
+  public string label = name
+} atEnd {
+  Console.log($"end {name}")
+}
+
+class Holder {
+  public Res a = Res("from parent")
+  public string text = "parent text"
+  public Holder() {
+  }
+}
+
+class Child : Holder {
+  public Child(bool none) : Holder() {
+    if none {
+      replace a = null
+    } else {
+      replace a = Res("from child")
+    }
+    replace text = "child text"
+  }
+}
+
+fun big() {
+  string1k part = "0123456789"
+  throw Big(part)
+}
+
+class Big(string1k part) : Exception {
+  public Big(string1k part, i32 times) : Big("", part) {
+    string s = ""
+    for i in 0..times { s += part }
+    replace message = s
+  }
+}
+
+fun tryBig() {
+  throw Big("0123456789", 300)
+  catch Big ex { Console.log(ex.message.len) }
+}
+
+run()
+runPlain()
+Bird bird = Bird("tweety")
+Console.log($"{bird.name} {bird.legs}")
+Pet pet = Pet()
+Console.log($"{pet.name} {pet.legs}")
+Console.log("making c1")
+Child c1 = Child(true)
+Console.log($"c1 made: {c1.text}")
+Console.log("making c2")
+Child c2 = Child(false)
+Console.log($"c2 made: {c2.a.label}")
+tryBig()

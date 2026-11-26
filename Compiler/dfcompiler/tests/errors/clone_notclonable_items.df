@@ -1,0 +1,7 @@
+// a collection whose items cannot be cloned cannot be cloned either (spec 12.6)
+import Root
+notclonable class Key(i32 id) {
+  public i32 id
+}
+vec<Key> keys = [Key(1)]
+var c = keys!

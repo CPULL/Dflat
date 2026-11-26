@@ -1,0 +1,5 @@
+class Oops : Exception {
+  public Oops(i32 code) : Oops("") {
+    replace line = 5
+  }
+}

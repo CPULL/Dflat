@@ -1,0 +1,12 @@
+import Root
+import Root.Tasks
+i32 counter = 0
+class Runner {
+  fun() job = () { counter++ }
+  fun i32 taskRun() {
+    job()
+    return 0
+  }
+}
+Task t = Task(Runner).start()
+wait t timeout 2000

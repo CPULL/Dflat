@@ -1,0 +1,9 @@
+class Pet {
+  public Pet() {
+  }
+}
+class Cat : Pet {
+  public Cat() : Pet() {
+    replace whiskers = 3
+  }
+}

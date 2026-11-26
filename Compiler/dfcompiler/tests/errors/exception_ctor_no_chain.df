@@ -1,0 +1,5 @@
+class Oops(i32 code) : Exception {
+  public Oops(i32 code, bool loud) {
+    replace message = "loud"
+  }
+}

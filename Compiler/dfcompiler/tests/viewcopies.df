@@ -1,0 +1,49 @@
+// copies of views (spec 6.5, 12.6): view!, view.clone(), view.tryClone() and c[a..b].clone() give a new collection of the type of the
+// collection with the items of the view (objects cloned); tryClone raises ObjectNotClonableException for items that cannot be cloned
+import Root
+
+class Dog(string name) {
+  public string name
+}
+
+notclonable class Key(i32 id) {
+  public i32 id
+}
+
+fun vec<Dog> firstTwo(View<vec<Dog>> w) {
+  return w!
+}
+
+fun list<string> middle(View<list<string>> w) {
+  return w.clone()
+}
+
+fun tryKeys(vec<Key> keys) {
+  var view = keys[0..1]
+  var copy = view.tryClone()
+  Console.log(copy.len)
+  catch ObjectNotClonableException { Console.log("keys cannot be cloned") }
+}
+
+vec<Dog> dogs = [Dog("a"), Dog("b"), Dog("c")]
+var copied = firstTwo(dogs[0..2])
+copied[0].name = "changed"
+Console.log($"{dogs[0].name} {copied[0].name} {copied.len}")
+
+list<string> words = ["one", "two", "three", "four"]
+var mid = middle(words[1..3])
+mid.add("five")
+Console.log($"{words} {mid}")
+
+arr<i32> numbers = [1, 2, 3, 4, 5]
+var view = numbers[1..4]
+var nums = view!
+var again = view.tryClone()
+Console.log($"{nums} {again}")
+
+vec<string> names = ["x", "y", "z"]
+var tail = names[1..].clone()
+Console.log(tail)
+
+vec<Key> keys = [Key(1), Key(2)]
+tryKeys(keys)

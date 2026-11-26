@@ -1,0 +1,30 @@
+// sized declarations arr<T>[n] name (spec 6.8.1): the size on the declaration, with nothing or [], in every place a declaration goes
+import Root
+
+trait Cells {
+  public arr<i32>[6] cells
+}
+
+class Box(i32 size) : Cells {
+  public arr<i32>[size] items
+  public arr<string>[2] labels = []
+  public static arr<i32>[7] shared
+  public fun i32 make<T>(T v) {
+    arr<i32>[9] tmp
+    return (i32)tmp.len
+  }
+}
+
+fun i32 count() { return 4 }
+
+fun i32 local(i32 k) {
+  arr<string>[k] names
+  return (i32)names.len
+}
+
+arr<i32>[3] top
+arr<i32>[count()] computed
+arr<i32>[2] filled = [5, 6]
+Box b = Box(5)
+Console.log($"{top.len} {computed.len} {filled[1]} {local(2)}")
+Console.log($"{b.items.len} {b.labels.len} {b.cells.len} {Box.shared.len} {b.make(1)}")

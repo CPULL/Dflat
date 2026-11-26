@@ -40,6 +40,15 @@ public sealed partial class CodeGen {
     if (cls.IsException) {
       return "it is an exception";
     }
+    // a collection of the compiler clones its items: one whose items cannot be cloned cannot be cloned either (its clone slot stays empty,
+    // tryClone raises ObjectNotClonableException)
+    if ((IsVec(cls.Name) || IsList(cls.Name) || IsMap(cls.Name) || IsSet(cls.Name)) && classInstanceArgs.TryGetValue(cls.Name, out var instance)) {
+      foreach (string item in instance.Args.Where(arg => IsClass(arg) && !IsTraitType(arg) && arg != cls.Name)) {
+        if (NotClonableReason(ObjInfo(item)) is string itemReason) {
+          return $"its items ({DisplayName(item)}) cannot be cloned: {itemReason}";
+        }
+      }
+    }
     return null;
   }
 
@@ -60,7 +69,7 @@ public sealed partial class CodeGen {
       throw NotSupported(NodeFeatures["Copy"], at);
     }
     if (IsView(value.Type)) {
-      throw NotSupported("c[a..b]! (a copy of a view)", at);
+      return CopyView(value, at, false);   // view!, view.clone(): a new collection with the items of the view (spec 6.5, 12.6)
     }
     var cls = ObjInfo(value.Type);
     if (NotClonableReason(cls) is string reason) {
@@ -73,7 +82,7 @@ public sealed partial class CodeGen {
   // (notclonable, a parent, an exception: decided at run time, so it also works on trait values); null gives null, as clone()
   Expr TryCloneExpr(Expr value, Node at) {
     if (IsView(value.Type)) {
-      throw NotSupported("c[a..b].tryClone() (a copy of a view)", at);
+      return CopyView(value, at, true);   // view.tryClone(): ObjectNotClonableException when an item cannot be cloned (spec 12.6)
     }
     string source = NewTemp();
     string copy = NewTemp();
@@ -88,6 +97,10 @@ public sealed partial class CodeGen {
   Expr? CloneCall(Node call, Scope scope) {
     if (call.Children[0] is not { Kind: "Member", Text: "clone" or "tryClone" } callee || call.Children.Count > 1 && call.Children[1].Children.Count > 0) {
       return null;
+    }
+    if (callee.Children[0] is { Kind: "Index" } ranged && ranged.Children.Count == 2 && ranged.Children[1].Kind == "Range"
+        && ranged.Children[0].Kind != "GenericRef" && TryExprType(ranged.Children[0], scope) is string rangedType && IndexCollectionElem(rangedType) != null) {
+      return CopyRange(ranged, scope, callee.Text == "tryClone");   // c[a..b].clone(), c[a..b].tryClone(): no view is made (spec 6.5)
     }
     Expr receiver;
     try {
@@ -211,7 +224,7 @@ public sealed partial class CodeGen {
   }
 
   // c[a..b]!: a new collection of the same kind (arr, vec, list) with a copy of the items of the range; objects are cloned, as by ! (spec 12.6)
-  Expr CopyRange(Node index, Scope scope) {
+  Expr CopyRange(Node index, Scope scope, bool tryClone = false) {
     var range = index.Children[1];
     var obj = ExprOf(index.Children[0], scope);
     string elem = IndexCollectionElem(obj.Type) ?? throw Error($"a range copy works on arr, vec and list, not on {obj.Type} (spec 6.5)", index);
@@ -232,10 +245,47 @@ public sealed partial class CodeGen {
       sb.Append($"df_uns {end} = {IndexArgument(range.Children[1], scope)}; ");
     }
     sb.Append($"if ({start} > {end} || {end} > {length}) {outside} ");
+    sb.Append(CopyItems(obj.Type, elem, held, start, $"({end} - {start})", index, tryClone));
+    return new Expr(sb.ToString(), obj.Type, true);
+  }
+
+  // a view value copied into a new collection of its collection type (spec 6.5): the collection, the start and the count of the view
+  Expr CopyView(Expr view, Node at, bool tryClone) {
+    view = TempObject(view);   // a view made for this copy ends with the statement
+    var viewClass = ObjInfo(view.Type);
+    var source = FindField(viewClass, "collection") ?? FindField(viewClass, "items") ?? throw Error($"{DisplayName(view.Type)} is not a view of arr, vec or list (spec 6.5)", at);
+    string collType = source.Type;
+    string elem = IndexCollectionElem(collType) ?? throw Error($"a view copy works on arr, vec and list, not on {DisplayName(collType)} (spec 6.5)", at);
+    cloneUsed = true;
+    string held = NewTemp();
+    string viewHeld = NewTemp();
+    string start = NewTemp();
+    string amount = NewTemp();
+    var sb = new System.Text.StringBuilder();
+    sb.Append($"({{ {CType(view.Type)} {viewHeld} = {NullChecked(view.Code, view.Type)}; {CType(collType)} {held} = {viewHeld}->{source.CName}; ");
+    sb.Append($"df_uns {start} = {viewHeld}->{FindField(viewClass, "start")!.CName}; df_uns {amount} = {viewHeld}->{FindField(viewClass, "count")!.CName}; ");
+    if (!IsArr(collType)) {
+      sb.Append($"if ({held} == NULL) {{ df_raise(&df_desc_UsageOfDestroyedObjectException, {fn!.NameConst}); {RaiseJump} }} ");   // its collection ended
+    }
+    sb.Append(CopyItems(collType, elem, held, start, amount, at, tryClone));
+    return new Expr(sb.ToString(), collType, true);
+  }
+
+  // the items from start, amount of them, copied into a new collection of the type of the source; the code ends the statement expression.
+  // tryClone: an item whose class cannot be cloned raises ObjectNotClonableException before anything is copied (spec 12.6)
+  string CopyItems(string collType, string elem, string held, string start, string amount, Node index, bool tryClone) {
+    var sb = new System.Text.StringBuilder();
+    var obj = new Expr(held, collType);
+    var scope = new Scope(null);
     bool owning = IsClass(elem) || IsArr(elem) || elem is "string" or "string?" || IsFunType(elem) || IsTuple(elem) || StructHoldsObjects(elem);
-    string Copy(string item) => owning ? CloneValue(item, elem, index) : item;
+    if (tryClone && IsClass(elem)) {
+      sb.Append(ForEachSourceItem(collType, held, start, amount, item =>
+        $"if ({item} != NULL && ((const df_object*)({item}))->cls->clone == NULL) {{ df_raise(&df_desc_ObjectNotClonableException, {fn!.NameConst}); {RaiseJump} }} "));
+    }
+    string Copy(string item) => !owning ? item
+      : tryClone && IsClass(elem) ? $"(({CType(elem)})(({item}) != NULL ? ((const df_object*)({item}))->cls->clone((const void*)({item})) : NULL))"
+      : CloneValue(item, elem, index);
     string result = NewTemp();
-    string amount = $"({end} - {start})";
     if (IsArr(obj.Type)) {
       string next = NewTemp();
       sb.Append($"{CType(obj.Type)} {result} = {{ ({CType(elem)}*)df_calloc({amount} > 0 ? {amount} : 1, sizeof({CType(elem)})), {amount} }}; df_uns {next} = 0; ");
@@ -257,6 +307,6 @@ public sealed partial class CodeGen {
       }
     }
     sb.Append($"{result}; }})");
-    return new Expr(sb.ToString(), obj.Type, true);
+    return sb.ToString();
   }
 }

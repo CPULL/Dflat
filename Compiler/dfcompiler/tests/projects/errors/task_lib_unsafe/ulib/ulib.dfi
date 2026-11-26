@@ -1,0 +1,13 @@
+DFI {
+ compiler: 0.0.209alpha
+ library: ulib
+ namespace: tests.ulib
+ runtime: tasks
+ stdlib: 
+}
+namespace tests.ulib
+public fun i32 safe(i32 n) -> f_ulib_safe
+public fun i32 unsafe(i32 n) -> f_ulib_unsafe taskunsafe
+ids -> df_libids_ulib
+atLibStart -> df_libstart_ulib
+atEnd -> df_libend_ulib

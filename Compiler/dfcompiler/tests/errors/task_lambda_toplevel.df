@@ -1,0 +1,12 @@
+import Root
+import Root.Tasks
+i32 counter = 0
+class Adder {
+  fun i32 taskRun() {
+    fun() bump = () { counter++ }
+    bump()
+    return 0
+  }
+}
+Task t = Task(Adder).start()
+wait t timeout 2000

@@ -1,11 +1,11 @@
-One / None
+One / NONE
 Two
 One
 Three
 Three
 lent: Three, still Three
 Two
-[None, One]
+[NONE, One]
 One | Two
 null
 One

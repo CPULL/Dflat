@@ -1,0 +1,2 @@
+import Root
+map<i32, string>[5] x

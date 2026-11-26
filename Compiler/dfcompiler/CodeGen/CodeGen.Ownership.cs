@@ -335,7 +335,7 @@ public sealed partial class CodeGen {
   HashSet<Node> AddImplicitDrops(Frame frame, List<Node> statements) {
     var drops = new List<Node>();
     var owners = new HashSet<Node>();
-    foreach (var statement in statements.Where(statement => statement.Kind == "Decl" && (IsStringDecl(statement) || IsOptStringDecl(statement) || IsFunDecl(statement)))) {
+    foreach (var statement in statements.Where(statement => statement.Kind == "Decl" && (IsStringDecl(statement) || IsOwnedOptStringDecl(statement) || IsFunDecl(statement)))) {
       owners.Add(statement);
       drops.Add(StrDropNode(statement.Text!, statement));
     }
@@ -841,7 +841,7 @@ public sealed partial class CodeGen {
     if (statements.Count == 0 || statements.Any(s => s.Kind is "AtEnd" or "AtEndOf" or "Catch" or "Label")) {
       return statements;
     }
-    if (!statements.Any(s => (s.Kind == "Decl" && (IsPointerDecl(s) || IsCountedDecl(s) || ObjectTypeOf(s) != null || IsStringDecl(s) || IsOptStringDecl(s) || IsFunDecl(s) || IsStructObjDecl(s) || IsBigStructDecl(s)
+    if (!statements.Any(s => (s.Kind == "Decl" && (IsPointerDecl(s) || IsCountedDecl(s) || ObjectTypeOf(s) != null || IsStringDecl(s) || IsOwnedOptStringDecl(s) || IsFunDecl(s) || IsStructObjDecl(s) || IsBigStructDecl(s)
           || IsArrTypeNode(s.Children.FirstOrDefault(child => TypeNodeKinds.Contains(child.Kind)))))
         || (s.Kind == "MultiAssign" && s.Children[0].Children.Any(target => target.Kind == "Decl" && IsStringDecl(target))))) {
       return statements;
@@ -1802,9 +1802,10 @@ public sealed partial class CodeGen {
 
   // enforce w { }: inside the block w is a counted variable of its own, a temporary usage taken when the block starts and released on every
   // way out of it (the usual release of a counted variable at the end of its scope)
+  // the usage was taken by the check of the enforce (df_rc_upgrade): the temporary counted variable holds it and releases it at the end
   Node EnforcedWeakBlock(Node block, string name, string type, string blockCode, bool writable) {
     var use = Synthetic("Decl", block, name).Add(Synthetic("Type", block, type)).Add(Synthetic("Counted", block)).Add(Synthetic("EnforceUse", block))
-      .Add(Synthetic("Init", block).Add(Synthetic("CValue", block, $"df_rc_use({blockCode})").Add(Synthetic("Type", block, "@" + type))));
+      .Add(Synthetic("Init", block).Add(Synthetic("CValue", block, blockCode).Add(Synthetic("Type", block, "@" + type))));
     if (writable) {
       use.Add(Synthetic("ReadWrite", block));   // &%T: the temporary usage is read/write, the enforce holds the lock (spec 12.7)
     }

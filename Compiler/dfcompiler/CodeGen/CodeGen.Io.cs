@@ -86,7 +86,7 @@ public class File(string path) {
     File.check(p)
     return result
   }
-  public static fun bool delete(string path, Root.IO.DeleteOptions options = Root.IO.DeleteOptions.None) {
+  public static fun bool delete(string path, Root.IO.DeleteOptions options = Root.IO.DeleteOptions.NONE) {
     string p = File.fixPath(path)
     bool result = Root.IO.Native.Delete(p, (i32)options)
     u64 silent = File.check(p)
@@ -167,7 +167,7 @@ public class File(string path) {
   //OPEN-OBJECT
   public fun bool exists() { File.exists(full) }
   // the wrappers pass the silent exceptions of the static functions on, whatever their class: they catch them and throw them again
-  public fun bool delete(Root.IO.DeleteOptions options = Root.IO.DeleteOptions.None) {
+  public fun bool delete(Root.IO.DeleteOptions options = Root.IO.DeleteOptions.NONE) {
     return File.delete(full, options)
     catch SilentException e { throw e }
   }

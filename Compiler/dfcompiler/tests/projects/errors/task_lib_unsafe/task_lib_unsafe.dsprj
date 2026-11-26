@@ -1,0 +1,3 @@
+; a task that calls a function of a compiled library that uses the top-level state of its library is a compile error (spec 20.12)
+source=main.df
+include=ulib

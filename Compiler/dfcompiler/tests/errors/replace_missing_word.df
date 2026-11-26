@@ -1,0 +1,10 @@
+class Pet {
+  public string name = "x"
+  public Pet() {
+  }
+}
+class Cat : Pet {
+  public Cat() : Pet() {
+    name = "y"
+  }
+}

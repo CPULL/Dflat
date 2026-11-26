@@ -1,0 +1,18 @@
+5
+2147483647
+2147483647
+255
+19999999998
+over 3: 5
+not over 30
+-1 is an i32, not a u64
+[0] [] [hello] [-12]
+hello
+hello
+changed
+-12
+changed
+caught 72
+65
+2 0 2.75
+---- exit code 0 ----

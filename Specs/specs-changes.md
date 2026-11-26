@@ -807,3 +807,15 @@
 - 2.1 `type.MIN` and `type.MAX` for the integer types
 - 3.5.1, 13.2 When no version of a function matches, the only one that the automatic conversions reach is called
 - 4.2 `substr`, `insert`, `remove`, `replaceAt`, `padLeft`, `padRight` take `uns`
+- 11.3.6.1 A set value is read as a type: `T v = k` converts the member it holds by the automatic conversions (level 3 warning when one can saturate), `(T)k` by the cast; any other member gives the default of `T` and the silent `IncompatibleTypeInGenericException` (15.3 #72); the name of `if k is T x` also exists in the rest of the condition after `&&`
+- 11.1.1 `replace <field> = <expression>` in a constructor body sets a public field of a parent (the old value is released); a plain `=` on a field of a parent there is a compile error; 15.2 constructors in the body of an exception class reach its primary constructor, `replace message` is truncated to 2 KB
+- 15.8 A library built with `Root.Tasks` marks in its interface the functions that use what the code of a task cannot see (20.12)
+- 12.7 The check of `enforce w` on a weak reference and its temporary usage are one step, also with threads and tasks; `if w is T x` reads the object under a usage of its own
+- 20.9 A top-level `Task` or `Thread` variable is known in the functions that use it: from `Task<...>`, or when its declaration and every assignment give the same task
+- 20.12 The code of a task also includes the lambdas it writes, any lambda of the function type of a value it calls, the methods that replace the ones it calls, the accessors of the properties it uses and the marked functions of compiled libraries
+- 11.1.1 The primary constructor passes arguments to the constructor of the parent class in the header (`class Dog(string called) : Animal(called, 4)`): header parameters, constants and statics only; not for traits nor exception classes
+- 13.1, 6.4 `&x` also names an item of a `list` and the value of a key of a map (`f(&m["a"])`); the collection counts it as an open iterator while the call runs
+- 7.1 `??=` works on items: `a[i] ??= v`, `l[i] ??= v`, `m[k] ??= v` (a missing key reads as null)
+- 6.5 A view held in a variable or a parameter is copied with `view!`, `view.clone()` and `view.tryClone()`, as `c[a..b]!`
+- 12.6 A collection whose items cannot be cloned cannot be cloned either
+- 3.1.1 The constants of every bitfield are `.NONE` and `.ALL` (were `.None` and `.All`)

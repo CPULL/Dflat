@@ -1,0 +1,1 @@
+parentargs_missing.df(4): error: Animal has no constructor without parameters: pass its arguments in the header, class Bird(...) : Animal(...), or name it in a constructor of the body (spec 11.1.1)

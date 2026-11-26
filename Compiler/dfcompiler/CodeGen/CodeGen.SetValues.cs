@@ -8,7 +8,8 @@ namespace dfcompiler;
 // the set (the hash of the type name of 6.2.1 is what the hash and the order will use). Tag 0 is the generic null of a value never
 // assigned, so a zeroed df_setv (a new field, item or variable) is that null: it prints null, is is false on it, a type switch goes to
 // default or raises UnassignedTypeException. Built so far: native members that fit in 64 bits (numbers up to 64 bits, bool, char, enums,
-// bitfields); a value is written from a member (a literal follows the rule of 11.3.6.1) and read only through is and is ? { }.
+// bitfields); a value is written from a member (a literal follows the rule of 11.3.6.1) and read through is and is ? { }, or as a type
+// (i32 v = k, (i32)k: SetValueRead).
 public sealed partial class CodeGen {
   static readonly HashSet<string> SetValueNatives = new() {
     "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "r32", "r64", "bool", "char"
@@ -214,6 +215,72 @@ public sealed partial class CodeGen {
     var inner = new Scope(scope);
     inner.Vars[n.Text!] = new VarInfo(member, cname, false);
     return (condition, inner);
+  }
+
+  // if k is i32 x && x > 3 { }: x exists in the rest of the condition after && and in the block, never in else (spec 11.3.6.1)
+  (string Condition, Scope BlockScope)? SetIsAndBinding(Node condition, Scope scope) {
+    var rest = new List<Node>();
+    var left = condition;
+    while (left is { Kind: "Binary", Text: "&&" }) {
+      rest.Insert(0, left.Children[1]);
+      left = left.Children[0];
+    }
+    if (rest.Count == 0 || left is not { Kind: "Is", Text: not null } || TryExprType(left.Children[0], scope) is not string type || !IsSetValue(type)) {
+      return null;
+    }
+    var (test, inner) = SetIsBinding(left, ExprOf(left.Children[0], scope), scope);
+    var code = new StringBuilder($"({test}");
+    foreach (var part in rest) {
+      code.Append($" && {BoolOf(ExprOf(part, inner), part)}");
+    }
+    return (code.Append(')').ToString(), inner);
+  }
+
+  // the types a set value can be read as (i32 v = k, (i32)k): the natives, their nullable forms, enums and string (spec 11.3.6.1)
+  bool SetReadable(string to) {
+    string plain = to.EndsWith('?') ? to[..^1] : to;
+    return to == "string" || SetValueNatives.Contains(plain) || IsEnumType(plain) || SetValueNullableNatives.Contains(to);
+  }
+
+  static bool NumberOrChar(string type) => IsNumeric(type) || type == "char";
+
+  // i32 v = k, (i32)k: the value of the member k holds, converted to the type. With =, the automatic conversions of 3.5.1 (a level 3
+  // warning when a member can saturate); with a cast, the cast between numbers and char. Any other member gives the default of the type
+  // and the silent IncompatibleTypeInGenericException (72); a value never assigned raises UnassignedTypeException (spec 11.3.6.1)
+  Expr SetValueRead(Expr e, string to, Node at, bool cast) {
+    e = SetTemp(e, at);
+    var members = SetValueMembers(e.Type, at);
+    string toBase = to.EndsWith('?') ? to[..^1] : to;
+    string held = NewTemp();
+    string result = NewTemp();
+    string incompatible = SilentCaught(StandardExceptions["IncompatibleTypeInGenericException"])
+      ? $"df_raise(&df_desc_IncompatibleTypeInGenericException, {fn!.NameConst}); {RaiseJump}" : "";
+    var saturating = new List<string>();
+    var cases = new StringBuilder();
+    int warningsBefore = warnings.Count;
+    for (int index = 0; index < members.Count; index++) {
+      string member = members[index];
+      var value = new Expr(UnwrapSetValue(held, member), member);
+      string? code = null;
+      if (member == to) {
+        code = to == "string" ? $"df_str_dup({value.Code})" : value.Code;   // the result is a string of its own: the set value keeps its text
+      } else if (cast && NumberOrChar(member) && NumberOrChar(toBase) && !(RealTypes.Contains(member) && toBase == "char")) {
+        code = CastExpr(value, to, at).Code;
+      } else if (!cast && NumberOrChar(member) && AutoAssignable(to, member)) {
+        code = Convert(value, to, at);
+        bool keeps = member == "char" ? !IsInt(toBase) || Bits(toBase) >= 32 : Assignable(to, member) || IsInt(member) && RealTypes.Contains(toBase);
+        if (!keeps) {
+          saturating.Add(member);
+        }
+      }
+      cases.Append(code != null ? $"case {index + 1}u: {result} = {code}; break; " : $"case {index + 1}u: {{ {incompatible} break; }} ");
+    }
+    warnings.RemoveRange(warningsBefore, warnings.Count - warningsBefore);   // one warning for the line, below
+    if (saturating.Count > 0) {
+      Warn($"a value of the set {DisplayName(e.Type)} read as {DisplayName(to)}: {string.Join(", ", saturating.Select(DisplayName))} can saturate (spec 11.3.6.1)", at, 3);
+    }
+    cases.Append($"default: {{ df_raise(&df_desc_UnassignedTypeException, {fn!.NameConst}); {RaiseJump} }} ");
+    return new Expr($"({{ {SetValueCType()} {held} = {e.Code}; {CType(to)} {result} = {ZeroValue(to)}; switch ({held}.tag) {{ {cases}}} {result}; }})", to, to == "string");
   }
 
   // k is ? { i32 x: ..., u64 x: ..., default: ... } on a set value: chosen at run time by the tag; every member needs a case or default

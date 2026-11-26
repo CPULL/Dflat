@@ -23,6 +23,7 @@ public sealed partial class CodeGen {
     "Binary" => n.Text == "+" || (n.Text == "??" && e.Fresh),
     "Paren" or "Gift" or "Wait" => e.Fresh,   // wait t: the value the task gave
     "TypeSwitch" => e.Fresh,   // a string type switch gives a string of its own
+    "Cast" => e.Fresh,   // (string)k on a set value: a string of its own (spec 11.3.6.1)
     "Member" => e.Fresh && e.Code.StartsWith("df_str_dup_cstr("),   // ex.message, ex.function: a new string made from the C text of the exception
     _ => false
   };

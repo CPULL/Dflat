@@ -784,19 +784,27 @@ public sealed partial class CodeGen {
       throw Error($"{DisplayName(cls.Parent.Name)} has only private constructors: it cannot be inherited", cls.Node);
     }
     var implicitParent = ImplicitParentInit(cls);
-    bool hasPrimary = cls.Node.Children.Any(child => child.Kind == "PrimaryCtor");
+    // an exception class always has its primary constructor (message first, spec 15.2): the ones of its body reach it
+    bool hasPrimary = cls.Node.Children.Any(child => child.Kind == "PrimaryCtor") || cls.IsException;
+    var headerArgs = HeaderParentArgs(cls, hasPrimary);   // class Dog(string called) : Animal(called, 4) (spec 11.1.1)
     if (hasPrimary || cls.CtorNodes.Count == 0) {
-      if (cls.Parent != null && implicitParent == null && PrivateParentInit(cls)) {
+      if (headerArgs != null) {
+        implicitParent = null;   // the header names the constructor of the parent
+      } else if (cls.Parent != null && implicitParent == null && PrivateParentInit(cls)) {
         throw Error($"the constructor of {DisplayName(cls.Parent.Name)} without parameters is private: a subclass cannot call it", cls.Node);
       }
-      if (cls.Parent != null && implicitParent == null && cls.IsException) {
+      if (headerArgs == null && cls.Parent != null && implicitParent == null && cls.IsException) {
         ExceptionParentArgs(cls, true);   // names the parameter of the parent the class does not repeat (spec 15.2)
       }
-      if (cls.Parent != null && implicitParent == null) {
-        throw NotSupported($"Passing arguments to the constructor of the parent class {cls.Parent.Name}", cls.Node);
+      if (headerArgs == null && cls.Parent != null && implicitParent == null) {
+        throw Error($"{DisplayName(cls.Parent.Name)} has no constructor without parameters: pass its arguments in the header, "
+          + $"class {DisplayName(cls.Name)}(...) : {DisplayName(cls.Parent.Name)}(...), or name it in a constructor of the body (spec 11.1.1)", cls.Node);
       }
-      // the traits first (their constructors without parameters), then the fields
+      // the parent first (with the arguments of the header), then the traits (their constructors without parameters), then the fields
       var primaryBlock = Synthetic("Block", at);
+      if (headerArgs != null) {
+        primaryBlock.Add(Synthetic("ExprStmt", headerArgs).Add(Synthetic("CtorChain", headerArgs, headerArgs.Text).Add(headerArgs.Children[0])));
+      }
       foreach (var statement in TraitInitStatements(cls, at, null).Concat(block.Children)) {
         primaryBlock.Add(statement);
       }
@@ -872,9 +880,6 @@ public sealed partial class CodeGen {
   // initializers), then its body. With : Foo(...): that constructor of the class does all of it, then the body. With : Parent(...):
   // that constructor of the parent, the fields, then the body. There is no default constructor.
   void BuildBodyConstructors(ClassInfo cls, Node fieldBlock, bool hasPrimary, FunSig? implicitParent, List<FunSig> inits, List<FunSig> ctors) {
-    if (cls.IsException) {
-      throw NotSupported("Constructors in the body of an exception class", cls.CtorNodes[0]);
-    }
     int index = 0;
     foreach (var member in cls.CtorNodes) {
       Node? selfCall = null;
@@ -899,6 +904,9 @@ public sealed partial class CodeGen {
       }
       if (selfCall != null && (parentCall ?? traitCalls.Values.FirstOrDefault()) is Node extra) {
         throw Error($"a constructor that calls another constructor of {cls.Name} cannot also call {extra.Text}: the other constructor does it", extra);
+      }
+      if (hasPrimary && selfCall == null && cls.IsException) {
+        throw Error($"a constructor of the exception {cls.Name} must reach its primary constructor, which takes the message first: write : {cls.Name}(...) after its parameters (spec 15.2)", member);
       }
       if (hasPrimary && selfCall == null) {
         // no field may be left in an unpredictable state: every constructor reaches the primary one
@@ -935,6 +943,7 @@ public sealed partial class CodeGen {
         block.Add(statement);
       }
       if (member.Children.FirstOrDefault(child => child.Kind == "Block") is Node body) {
+        CheckParentFieldWrites(cls, body, paramsNode);   // replace is required on a field of a parent (spec 11.1.1)
         foreach (var statement in body.Children) {
           block.Add(statement);
         }
@@ -962,6 +971,49 @@ public sealed partial class CodeGen {
   }
 
   const string InitsSuffix = ".__ctor";
+
+  // the arguments the header passes to the constructor of the parent (spec 11.1.1): only to the parent class, not to a trait nor from an
+  // exception class; they use the header parameters, constants and statics, never an instance member (the object is not built yet)
+  Node? HeaderParentArgs(ClassInfo cls, bool hasPrimary) {
+    var parentArgs = cls.Node.Children.FirstOrDefault(child => child.Kind == "ParentArgs");
+    if (parentArgs == null) {
+      return null;
+    }
+    string named = ResolveType(Synthetic("Type", parentArgs, parentArgs.Text));
+    if (cls.Parent == null || named != cls.Parent.Name) {
+      throw Error(traits.ContainsKey(named)
+        ? $"a trait takes no arguments in the header: its constructor without parameters runs, or a constructor of the body names it (spec 11.1.1)"
+        : $"only the parent class takes arguments in the header (spec 11.1.1)", parentArgs);
+    }
+    if (cls.IsException) {
+      throw Error($"an exception class repeats the header parameters of its parent instead: class {DisplayName(cls.Name)}(...) : {DisplayName(cls.Parent.Name)} (spec 15.2)", parentArgs);
+    }
+    if (!hasPrimary && cls.CtorNodes.Count > 0) {
+      throw Error($"the arguments of the header go with the primary constructor: {DisplayName(cls.Name)} has only constructors in its body, which name the parent themselves (spec 11.1.1)", parentArgs);
+    }
+    var headerNames = cls.PrimaryParams.Select(param => param.Name).ToHashSet();
+    void Walk(Node node, HashSet<string> local) {
+      if (node.Kind is "This" or "Super") {
+        throw Error("the arguments of the parent in the header cannot use this: the object is not built yet (spec 11.1.1)", node);
+      }
+      if (node.Kind is "Lambda" or "Closure") {
+        return;
+      }
+      if (node.Kind == "Name" && node.Text != null && !headerNames.Contains(node.Text) && !local.Contains(node.Text)
+          && FindField(cls, node.Text) is FieldInfo { IsStatic: false } field) {
+        throw Error($"'{node.Text}' is a field of {DisplayName(field.Owner.Name)}: the arguments of the parent in the header use the header parameters, constants and statics (spec 11.1.1)", node);
+      }
+      if (node.Kind == "Call" && node.Children[0] is { Kind: "Name" } callee && !headerNames.Contains(callee.Text!)
+          && LookupMethods(cls, callee.Text!).Any() && LookupMethods(cls, callee.Text!).All(method => !method.IsStatic)) {
+        throw Error($"'{callee.Text}' is a method of the object: the arguments of the parent in the header can call static functions only (spec 11.1.1)", callee);
+      }
+      foreach (var child in node.Children) {
+        Walk(child, local);
+      }
+    }
+    Walk(parentArgs.Children[0], new HashSet<string>());
+    return parentArgs;
+  }
 
   // A destructor fragment (spec 11.4): the atEnd after a constructor. It runs when the object dies and sees the class members and the
   // parameters and locals of its constructor: the ones it uses become hidden fields of the object (__f<n>_<name>), so they live until it
@@ -1376,42 +1428,69 @@ public sealed partial class CodeGen {
       try {
         type = ResolveDeclType(decl, new Scope(null));
       } catch (CompileException) {
-        throw NotSupported($"a top-level variable used by a function, declared with var from a value known only when the program runs: write the type of '{name}'", decl);
-      }
-      fileVars[name] = decl.Line;
-      bool counted = IsCountedDecl(decl);
-      bool weak = decl.Children.Any(child => child.Kind is "Weak" or "WeakInit");
-      if (counted || weak) {
-        // @T and %T: the C variable holds the counting block, as for a local (spec 12.7); the functions of the file see it as a variable of
-        // an outer scope (fileScope), so reads, enforce, assignments and is done. are the ones of the locals; a task sees it (spec 20.12)
-        sharedFileVars.Add(name);
-        string baseType = IsCountedType(type) ? CountedBase(type) : IsWeakType(type) ? type[1..] : type;
-        fileScope.Vars[name] = new VarInfo(baseType, $"g_{name}", false) {
-          IsCounted = counted, IsWeak = weak, IsWritable = decl.Children.Any(child => child.Kind == "ReadWrite")
-        };
-        sharedFileVarOrder.Add((name, weak));
-        classGlobals.Append($"static df_rc* g_{name};\n");
-        var sharedInit = decl.Children.FirstOrDefault(child => child.Kind is "Init" or "WeakInit");
-        int at = program.Children.IndexOf(decl);
-        if (sharedInit == null || sharedInit.Text == "default") {
-          program.Children.RemoveAt(at);
-        } else {
-          program.Children[at] = Synthetic("Assign", decl, "=").Add(Synthetic("Name", decl, name)).Add(sharedInit.Children[0]);
-        }
+        deferredFileVars.Add(decl);   // var total = make(): its type is known once the functions are registered (FinishFileVars)
         continue;
       }
-      fileVarOrder.Add((name, type));
-      globalConsts[name] = ($"g_{name}", type);
-      globalConstOrder.Add(name);   // zero or null at program start
-      classGlobals.Append($"static {CType(type)} g_{name};\n");
-      // the declaration gives the value when its line runs (spec 14.1)
-      var init = decl.Children.FirstOrDefault(child => child.Kind == "Init");
-      int index = program.Children.IndexOf(decl);
-      if (init == null) {
-        program.Children.RemoveAt(index);
-      } else {
-        program.Children[index] = Synthetic("Assign", decl, "=").Add(Synthetic("Name", decl, name)).Add(init.Children[0]);
+      DeclareFileVar(program, decl, type);
+    }
+  }
+
+  // the top-level variables declared with var from a value whose type needs the functions and methods (var total = make()): their type,
+  // once those are registered (spec 14.1); one that is still unknown (a value read from another var declared this way) is refused
+  readonly List<Node> deferredFileVars = new();
+
+  void FinishFileVars(Node program) {
+    foreach (var decl in deferredFileVars) {
+      string type;
+      try {
+        type = ResolveDeclType(decl, new Scope(null));
+      } catch (CompileException) {
+        throw NotSupported($"a top-level variable used by a function, declared with var from a value known only when the program runs: write the type of '{decl.Text}'", decl);
       }
+      DeclareFileVar(program, decl, type);
+    }
+    deferredFileVars.Clear();
+  }
+
+  // one top-level variable used by the functions: a C global, its declaration becomes the assignment of its line (spec 14.1)
+  void DeclareFileVar(Node program, Node decl, string type) {
+    string name = decl.Text!;
+    fileVars[name] = decl.Line;
+    bool counted = IsCountedDecl(decl);
+    bool weak = decl.Children.Any(child => child.Kind is "Weak" or "WeakInit");
+    if (counted || weak) {
+      // @T and %T: the C variable holds the counting block, as for a local (spec 12.7); the functions of the file see it as a variable of
+      // an outer scope (fileScope), so reads, enforce, assignments and is done. are the ones of the locals; a task sees it (spec 20.12)
+      sharedFileVars.Add(name);
+      string baseType = IsCountedType(type) ? CountedBase(type) : IsWeakType(type) ? type[1..] : type;
+      fileScope.Vars[name] = new VarInfo(baseType, $"g_{name}", false) {
+        IsCounted = counted, IsWeak = weak, IsWritable = decl.Children.Any(child => child.Kind == "ReadWrite")
+      };
+      sharedFileVarOrder.Add((name, weak));
+      classGlobals.Append($"static df_rc* g_{name};\n");
+      var sharedInit = decl.Children.FirstOrDefault(child => child.Kind is "Init" or "WeakInit");
+      int at = program.Children.IndexOf(decl);
+      if (sharedInit == null || sharedInit.Text == "default") {
+        program.Children.RemoveAt(at);
+      } else {
+        program.Children[at] = Synthetic("Assign", decl, "=").Add(Synthetic("Name", decl, name)).Add(sharedInit.Children[0]);
+      }
+      return;
+    }
+    fileVarOrder.Add((name, type));
+    if (type is "Task" or "Thread" && decl.Children.FirstOrDefault(child => child.Kind == "Type") is Node taskType) {
+      fileTaskTypeNodes[name] = taskType;   // what it holds is planned before the code (PlanFileTaskHandles, spec 20.9)
+    }
+    globalConsts[name] = ($"g_{name}", type);
+    globalConstOrder.Add(name);   // zero or null at program start
+    classGlobals.Append($"static {CType(type)} g_{name};\n");
+    // the declaration gives the value when its line runs (spec 14.1)
+    var init = decl.Children.FirstOrDefault(child => child.Kind == "Init");
+    int index = program.Children.IndexOf(decl);
+    if (init == null) {
+      program.Children.RemoveAt(index);
+    } else {
+      program.Children[index] = Synthetic("Assign", decl, "=").Add(Synthetic("Name", decl, name)).Add(init.Children[0]);
     }
   }
 
@@ -1854,12 +1933,15 @@ public sealed partial class CodeGen {
   // the C address of what &x names; the type must be the one of the parameter
   string WritableAddress(Node target, Scope scope, string type, Node at) {
     if (target.Kind is not ("Name" or "Member" or "Index")) {
-      throw Error("& needs a variable, a field or an array item", at);
+      throw Error("& needs a variable, a field or an item of an arr, a vec, a list or a map", at);
     }
     if (target.Kind == "Index") {
       var obj = ExprOf(target.Children[0], scope);
+      if (target.Children[0].Kind != "GenericRef" && LentItemAddress(obj, target, scope, type, at) is string lentItem) {
+        return lentItem;   // f(&l[0]), f(&m["a"]): the collection is frozen for the call (spec 6.4, 13.1)
+      }
       if (!IsArr(obj.Type) || target.Children[0].Kind == "GenericRef") {
-        throw Error("& needs a variable, a field or an array item", at);
+        throw Error("& needs a variable, a field or an item of an arr, a vec, a list or a map", at);
       }
       if (ArrElem(obj.Type) != type) {
         throw Error($"the parameter is a {type}, not a {ArrElem(obj.Type)}", at);
@@ -2340,8 +2422,9 @@ public sealed partial class CodeGen {
     fn!.Decls.Append($"  df_rc* {block} = NULL;\n");
     string held = NewTemp();
     string obj = NewTemp();
-    string condition = $"({{ df_rc* {held} = {weak.Code}; {CType(weak.Type)} {obj} = DF_RC_ALIVE({held}) ? DF_RC_OBJ({CType(weak.Type)}, {held}) : NULL; "
-      + $"bool ok_{obj} = {IsTest(obj, target, weak.Type, n)}; {block} = ok_{obj} ? {held} : NULL; ok_{obj}; }})";
+    // the object is read under a usage of its own (df_rc_upgrade), so a last user that lets go meanwhile cannot end it during the test
+    string condition = $"({{ df_rc* {held} = {weak.Code}; bool up_{obj} = df_rc_upgrade({held}); {CType(weak.Type)} {obj} = up_{obj} ? DF_RC_OBJ({CType(weak.Type)}, {held}) : NULL; "
+      + $"bool ok_{obj} = up_{obj} && {IsTest(obj, target, weak.Type, n)}; if (up_{obj}) {{ df_rc_release({held}); }} {block} = ok_{obj} ? {held} : NULL; ok_{obj}; }})";
     var use = Synthetic("Decl", n, n.Text).Add(Synthetic("Type", n, target.Name)).Add(Synthetic("Weak", n))
       .Add(Synthetic("WeakInit", n).Add(Synthetic("CValue", n, $"df_rc_weak({block})").Add(Synthetic("Type", n, target.Name))));
     if (IsWritableRef(weak)) {

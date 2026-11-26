@@ -302,6 +302,7 @@ public sealed partial class CodeGen {
       locked.Add(name.Text!);
     }
     var unwrapped = new Scope(scope);
+    var upgrades = new Dictionary<string, (string Flag, string Held)>();   // the weak references made strong by the check (spec 12.7)
     var heldNow = new List<string>();   // the locks this enforce holds while its block runs (a &@string is read there, spec 12.7)
     var mutexesHere = new List<string>();
     foreach (var name in names) {
@@ -341,8 +342,13 @@ public sealed partial class CodeGen {
       if (WeakRef(name, scope) is CountedRefInfo weak) {
         // a weak reference (spec 12.7): the object must still be alive; inside the block the name is a temporary usage, read/write for a &%T,
         // which also takes the lock
-        checks.Add((name.Text!, $"DF_RC_ALIVE({weak.Code})", false));
-        block = EnforcedWeakBlock(block, name.Text!, weak.Type, weak.Code, IsWritableRef(weak));
+        // the check takes the usage in one atomic step (df_rc_upgrade): a last user that lets go meanwhile cannot end the object under the block
+        string upFlag = "df_up" + NewTemp();
+        string upHeld = "df_upb" + NewTemp();
+        fn!.Decls.Append($"  bool {upFlag} = false;\n  df_rc* {upHeld} = NULL;\n  (void){upFlag};\n  (void){upHeld};\n");
+        checks.Add((name.Text!, $"({upFlag} = df_rc_upgrade({upHeld} = {weak.Code}))", false));
+        upgrades[name.Text!] = (upFlag, upHeld);
+        block = EnforcedWeakBlock(block, name.Text!, weak.Type, upHeld, IsWritableRef(weak));
         if (IsWritableRef(weak)) {
           AddLock(name, weak.Code);
         }
@@ -431,7 +437,12 @@ public sealed partial class CodeGen {
     foreach (var (flag, _) in locks) {
       sb.Append($"{pad}{flag} = false;\n");
     }
-    string releaseLocks = string.Join(" ", locks.Select(l => $"if ({l.Flag}) {{ {l.Unlock}; }}"));   // a failed check: the locks taken end
+    foreach (var (flag, _) in upgrades.Values) {
+      sb.Append($"{pad}{flag} = false;\n");
+    }
+    // a failed check: the locks taken end, and so do the usages taken by the weak references that were made strong
+    string releaseLocks = string.Join(" ", locks.Select(l => $"if ({l.Flag}) {{ {l.Unlock}; }}")
+      .Concat(upgrades.Values.Select(u => $"if ({u.Flag}) {{ {u.Flag} = false; df_rc_release({u.Held}); }}")));
     sb.Append($"{pad}if ({(checks.Count == 0 ? "1" : string.Join(" && ", checks.Select(check => check.Condition)))}) {{\n");
     var before = assign.Clone();
     var addedLocks = heldNow.Where(heldLocks.Add).ToList();
@@ -470,7 +481,7 @@ public sealed partial class CodeGen {
         // a lock check is not run again: its flag says whether the lock was taken
         var chosen = isLock ? lockClauses.FirstOrDefault(clause => clause.On.Contains(name)).Clause ?? defaultClause
           : nullClauses.FirstOrDefault(clause => clause.On.Contains(name)).Clause ?? nullCatch ?? defaultClause;
-        string failed = isLock ? locks[lockIndex++].Flag : $"({condition})";
+        string failed = isLock ? locks[lockIndex++].Flag : upgrades.TryGetValue(name, out var upgrade) ? upgrade.Flag : $"({condition})";
         sb.Append(inner).Append(first ? "" : "} else ").Append($"if (!{failed}) {{\n");
         first = false;
         assign = before.Clone();

@@ -1,36 +1,139 @@
 import Root
+import Root.io
 
 Generic JsonType { r64?, string, bool, JsonArray, JsonObject, JsonComment }
 
 class JSON {
-  public static fun JsonNode serialize(string json) { 
-    JsonParser parser = JsonParser(json, 0)
+  public static fun JsonNode parse(string json, JsonSerializationOptions options) { 
+    JsonParser parser = JsonParser(json, 0, options)
     return parser.parseDocument()
+  }
+  public static fun string serialize(JsonNode node, JsonSerializationOptions options) {
+    JsonWriter writer = JsonWriter(options)
+	string res = writer.writeNode(node, 0)
+    return ->res
   }
 }
 
 class JsonArray {
-  public vec<JsonType> arr
+  public vec<JsonType> arr = []
 }
 
 class JsonObject {
-  public vec<JsonNode> obj
+  public vec<JsonNode> obj = []
 }
 
-class JsonComment(string1k comment) {
-  public string1k comment
+class JsonComment(string comment) {
+  public string comment
 }
 
 class JsonNode(string? key, JsonType value) {
-  public fun string serialize(JsonSerializationOptions options) {
-    JsonWriter writer = JsonWriter(options.PrettyPrint, options.AllowComments)
-    return writer.writeNode(this, 0)
+  public string? key
+  public JsonType value
+  
+  
+  public fun bool isNull() { 
+    value is ? {
+	  r64?: value==null ? { true, false },
+	  default: false 
+	} 
   }
+  public fun bool isNumber() { 
+    value is ? {
+	  r64?: value==null ? { false, true },
+	  default: false 
+	} 
+  }
+  public fun bool isString() { 
+    value is ? {
+	  string: true,
+	  default: false 
+	} 
+  }
+  public fun bool isBool() { 
+    value is ? {
+	  bool: true,
+	  default: false 
+	} 
+  }
+  public fun bool isObject() { 
+    value is ? {
+	  JsonObject: true,
+	  default: false 
+	} 
+  }
+  public fun bool isArray() { 
+    value is ? {
+	  JsonArray: true,
+	  default: false 
+	} 
+  }
+  public fun bool isComment() { 
+    value is ? {
+	  JsonComment: true,
+	  default: false 
+	} 
+  }
+  
+  
+  public fun JsonNode get(string targetKey) {
+    if value is JsonObject jo {
+      for child in jo.obj {
+        if child.key == targetKey {
+          return child
+        }
+      }
+    }
+    return null
+  }
+  
+  public fun bool hasKey(string targetKey) {
+    get(targetKey) != null
+  }
+  
+  public fun bool set(string targetKey, JsonType newValue) {
+    if value is JsonObject jo {
+      for child in jo.obj {
+        if child.key == targetKey {
+          child.value = newValue
+          return true
+        }
+      }
+      jo.obj.add(JsonNode(targetKey, newValue))
+      return true
+    }
+    return false
+  }
+  
+  public fun bool remove(string targetKey) {
+    if value is JsonObject jo {
+	  int pos = -1
+      for i = 0..jo.obj.len {
+        if jo.obj[i].key == targetKey {
+		  pos = (int)i
+		  break
+        }
+      }
+	  if pos !=-1 {
+	    jo.obj.removeAt((uns)pos)
+        return true
+      }
+    }
+    return false
+  }  
 }
 
-bitfield32 JsonSerializationOptions { PrettyPrint:0, AllowComments:1 }
+bitfield32 JsonSerializationOptions { PrettyPrint:0, AllowCommentsInSerialization:1, NoStrict:2, AllowCommentsInParsing:3 }
 
-class JsonWriter(bool pretty, bool allowComments) {
+fun string formatException(string msg, uns pos, string text) {
+  string part = pos > 16 ? { text.substr(pos-16, 32), text.substr(0, 32) }
+  return $"JSON Error: {msg} at position {pos}: {part}\n{text}"
+}
+
+
+class JsonWriter(JsonSerializationOptions options) {
+  bool pretty = options.isSet(JsonSerializationOptions.PrettyPrint)
+  bool allowComments = options.isSet(JsonSerializationOptions.AllowCommentsInSerialization)
 
   public fun string writeNode(JsonNode node, uns depth) {
     string text = ""
@@ -40,38 +143,27 @@ class JsonWriter(bool pretty, bool allowComments) {
         text = text + " "
       }
     }
-    return text + writeValue(node.value, depth)
+    string val = writeValue(node.value, depth)
+    return ->text + val
   }
 
-  fun string writeValue(JsonType value, uns depth) {
-    return value is ? {
-      JsonObject: writeObject(value, depth)
-      JsonArray: writeArray(value, depth)
-      JsonComment: writeComment(value)
-      string: writeString(value)
-      bool: writeBool(value)
-      r64?: writeNumber(value)
-    }
-  }
 
-  fun bool isComment(JsonType value) {
-    return value is ? {
-      JsonObject: false
-      JsonArray: false
-      JsonComment: true
-      string: false
-      bool: false
-      r64?: false
-    }
+  fun bool isComment(JsonNode j) {
+    if j.value is JsonComment {
+	  return true
+	}
+    return false
   }
 
   fun string writeObject(JsonObject source, uns depth) {
     uns lastMember = 0
     uns index = 0
     while (index < source.obj.len) {
-      if (!isComment(source.obj[index].value)) {
-        lastMember = index
-      }
+		if source.obj[index].value is JsonComment {
+		}
+		else {
+		  lastMember = index
+		}
       index++
     }
     string body = ""
@@ -79,9 +171,9 @@ class JsonWriter(bool pretty, bool allowComments) {
     index = 0
     while (index < source.obj.len) {
       JsonNode item = source.obj[index]
-      if (isComment(item.value)) {
+      if source.obj[index].value is JsonComment jc {
         if (allowComments) {
-          body = body + lineBreak(depth + 1) + writeValue(item.value, depth + 1)
+          body = body + lineBreak(depth + 1) + writeComment(jc)
           wroteAny = true
         }
       } else {
@@ -98,12 +190,26 @@ class JsonWriter(bool pretty, bool allowComments) {
     }
     return "{" + body + lineBreak(depth) + "}"
   }
-
+  
+  fun string writeValue(JsonType value, uns depth) {
+    return value is ? {
+      JsonObject: writeObject(value, depth),
+      JsonArray: writeArray(value, depth),
+      JsonComment: writeComment(value),
+      string: writeString(value),
+      bool: writeBool(value),
+      r64?: writeNumber(value),
+	  default: "null"
+    }
+  }
+  
   fun string writeArray(JsonArray source, uns depth) {
     uns lastItem = 0
     uns index = 0
     while (index < source.arr.len) {
-      if (!isComment(source.arr[index])) {
+	  if source.arr[index] is JsonComment jc {
+	  }
+	  else {
         lastItem = index
       }
       index++
@@ -113,9 +219,9 @@ class JsonWriter(bool pretty, bool allowComments) {
     index = 0
     while (index < source.arr.len) {
       JsonType item = source.arr[index]
-      if (isComment(item)) {
+	  if source.arr[index] is JsonComment jc {
         if (allowComments) {
-          body = body + lineBreak(depth + 1) + writeValue(item, depth + 1)
+          body = body + lineBreak(depth + 1) + writeComment(jc)
           wroteAny = true
         }
       } else {
@@ -178,10 +284,10 @@ class JsonWriter(bool pretty, bool allowComments) {
       return ""
     }
     string text = "\n"
-    for uns level = 1..=depth {
-      text = text + "  "
+    for uns level = 0..depth {
+      text += "  "
     }
-    return text
+    return ->text
   }
 
   fun char hexDigit(uns value) {
@@ -193,24 +299,23 @@ class JsonWriter(bool pretty, bool allowComments) {
 
 }
 
-class JsonException(uns position) : Exception {
-}
-
-class JsonParser(string text, uns position) {
+class JsonParser(string text, uns position, JsonSerializationOptions options) {
+  bool lenient = options.isSet(JsonSerializationOptions.NoStrict)
+  bool parseComments = options.isSet(JsonSerializationOptions.AllowCommentsInParsing)
 
   public fun JsonNode parseDocument() {
     skipTrivia()
     JsonNode root = JsonNode(null, parseValue())
     skipTrivia()
     if (position < text.len) {
-      throw JsonException("Unexpected content after the JSON value", position)
+      throw Exception(formatException("Unexpected content after the JSON value", position, text))
     }
     return root
   }
 
   fun JsonType parseValue() {
     if (position >= text.len) {
-      throw JsonException("Unexpected end of input", position)
+      throw Exception(formatException("Unexpected end of input", position, text))
     }
     char current = text[position]
     if (current == '{') {
@@ -219,7 +324,7 @@ class JsonParser(string text, uns position) {
     if (current == '[') {
       return parseArray()
     }
-    if (current == '"') {
+    if (current == '"' || (lenient && current == '\'')) {
       return parseString()
     }
     if (current == '-' || isDigit(current)) {
@@ -235,7 +340,7 @@ class JsonParser(string text, uns position) {
       r64? nothing = null
       return nothing
     }
-    throw JsonException("Unexpected character '" + current + "'", position)
+    throw Exception(formatException("Unexpected character '" + current + "'", position, text))
   }
 
   fun JsonObject parseObject() {
@@ -247,42 +352,51 @@ class JsonParser(string text, uns position) {
     while (true) {
       skipWhitespace()
       if (position >= text.len) {
-        throw JsonException("Unterminated object", position)
+        throw Exception(formatException("Unterminated object", position, text))
       }
       char current = text[position]
       if (atComment()) {
-        result.obj.add(JsonNode(null, readComment()))
+        if (parseComments) {
+          result.obj.add(JsonNode(null, readComment()))
+        } else {
+          readComment()
+        }
       } else if (current == '}') {
-        if (!closeAllowed) {
-          throw JsonException("Trailing comma is not allowed", position)
+        if (!closeAllowed && !lenient) {
+          throw Exception(formatException("Trailing comma is not allowed", position, text))
         }
         position++
         return result
       } else if (current == ',') {
         if (!commaAllowed) {
-          throw JsonException("Unexpected comma", position)
+          throw Exception(formatException("Unexpected comma", position, text))
         }
         position++
         memberAllowed = true
         closeAllowed = false
         commaAllowed = false
       } else if (memberAllowed) {
-        if (current != '"') {
-          throw JsonException("Expected a string key", position)
+        string memberKey = ""
+        if (current == '"' || (lenient && current == '\'')) {
+          memberKey = parseString()
+        } else if (lenient) {
+          memberKey = parseBareKey()
+        } else {
+          throw Exception(formatException("Expected a string key", position, text))
         }
-        string memberKey = parseString()
         skipTrivia()
         if (position >= text.len || text[position] != ':') {
-          throw JsonException("Expected ':' after the key", position)
+          throw Exception(formatException("Expected ':' after the key", position, text))
         }
         position++
         skipTrivia()
-        result.obj.add(JsonNode(memberKey, parseValue()))
+		var jn = JsonNode(memberKey, parseValue())
+        result.obj.add(->jn)
         memberAllowed = false
         closeAllowed = true
         commaAllowed = true
       } else {
-        throw JsonException("Expected ',' or '}'", position)
+        throw Exception(formatException("Expected ',' or '}'", position, text))
       }
     }
 	return result
@@ -297,20 +411,24 @@ class JsonParser(string text, uns position) {
     while (true) {
       skipWhitespace()
       if (position >= text.len) {
-        throw JsonException("Unterminated array", position)
+        throw Exception(formatException("Unterminated array", position, text))
       }
       char current = text[position]
       if (atComment()) {
-        result.arr.add(readComment())
+        if (parseComments) {
+          result.arr.add(readComment())
+        } else {
+          readComment()
+        }
       } else if (current == ']') {
-        if (!closeAllowed) {
-          throw JsonException("Trailing comma is not allowed", position)
+        if (!closeAllowed && !lenient) {
+          throw Exception(formatException("Trailing comma is not allowed", position, text))
         }
         position++
         return result
       } else if (current == ',') {
         if (!commaAllowed) {
-          throw JsonException("Unexpected comma", position)
+          throw Exception(formatException("Unexpected comma", position, text))
         }
         position++
         itemAllowed = true
@@ -322,26 +440,42 @@ class JsonParser(string text, uns position) {
         closeAllowed = true
         commaAllowed = true
       } else {
-        throw JsonException("Expected ',' or ']'", position)
+        throw Exception(formatException("Expected ',' or ']'", position, text))
       }
     }
 	return result
   }
 
+  fun string parseBareKey() {
+    uns keyStart = position
+    while (position < text.len && text[position] != ':' && !isWhitespace(text[position])) {
+      char current = text[position]
+      if (current == ',' || current == '\'' || current == '"') {
+        throw Exception(formatException("Invalid character '" + current + "' in an unquoted key", position, text))
+      }
+      position++
+    }
+    if (position == keyStart) {
+      throw Exception(formatException("Expected a key", position, text))
+    }
+    return text.substr((u32)keyStart, (u32)(position - keyStart))
+  }
+
   fun string parseString() {
+    char quote = text[position]
     position++
     string result = ""
     while (true) {
       if (position >= text.len) {
-        throw JsonException("Unterminated string", position)
+        throw Exception(formatException("Unterminated string", position, text))
       }
       char current = text[position]
-      if (current == '"') {
+      if (current == quote) {
         position++
         return ->result
       }
       if (current < ' ') {
-        throw JsonException("Control character inside a string", position)
+        throw Exception(formatException("Control character inside a string", position, text))
       }
       if (current != '\\') {
         result = result + current
@@ -350,7 +484,7 @@ class JsonParser(string text, uns position) {
       }
       position++
       if (position >= text.len) {
-        throw JsonException("Unterminated escape sequence", position)
+        throw Exception(formatException("Unterminated escape sequence", position, text))
       }
       char escaped = text[position]
       if (escaped == '"') {
@@ -359,6 +493,12 @@ class JsonParser(string text, uns position) {
         result = result + '\\'
       } else if (escaped == '/') {
         result = result + '/'
+      } else if (lenient && escaped == '\'') {
+        result = result + '\''
+      } else if (escaped == 'b') {
+        result = result + (char)8u
+      } else if (escaped == 'f') {
+        result = result + (char)12u
       } else if (escaped == 'n') {
         result = result + '\n'
       } else if (escaped == 'r') {
@@ -367,7 +507,7 @@ class JsonParser(string text, uns position) {
         result = result + '\t'
       } else if (escaped == 'u') {
         if (position + 4 >= text.len) {
-          throw JsonException("Incomplete \\u escape", position)
+          throw Exception(formatException("Incomplete \\u escape", position, text))
         }
         uns codeUnit = 0
         for uns digitIndex = 1..=4 {
@@ -376,7 +516,7 @@ class JsonParser(string text, uns position) {
         result = result + (char)codeUnit
         position += 4
       } else {
-        throw JsonException("Invalid escape sequence '\\" + escaped + "'", position)
+        throw Exception(formatException("Invalid escape sequence '\\" + escaped + "'", position, text))
       }
       position++
     }
@@ -389,7 +529,7 @@ class JsonParser(string text, uns position) {
       position++
     }
     if (position >= text.len || !isDigit(text[position])) {
-      throw JsonException("Invalid number", position)
+      throw Exception(formatException("Invalid number", position, text))
     }
     if (text[position] == '0') {
       position++
@@ -401,7 +541,7 @@ class JsonParser(string text, uns position) {
     if (position < text.len && text[position] == '.') {
       position++
       if (position >= text.len || !isDigit(text[position])) {
-        throw JsonException("Invalid number: digits expected after '.'", position)
+        throw Exception(formatException("Invalid number: digits expected after '.'", position, text))
       }
       while (position < text.len && isDigit(text[position])) {
         position++
@@ -413,7 +553,7 @@ class JsonParser(string text, uns position) {
         position++
       }
       if (position >= text.len || !isDigit(text[position])) {
-        throw JsonException("Invalid number: digits expected in the exponent", position)
+        throw Exception(formatException("Invalid number: digits expected in the exponent", position, text))
       }
       while (position < text.len && isDigit(text[position])) {
         position++
@@ -423,7 +563,10 @@ class JsonParser(string text, uns position) {
   }
 
   fun JsonComment readComment() {
-    string content
+    if (!lenient && !parseComments) {
+      throw Exception(formatException("Comments are not allowed", position, text))
+    }
+    string content = ""
     position += 2
     uns contentStart = position
     if (text[position - 1] == '/') {
@@ -433,12 +576,19 @@ class JsonParser(string text, uns position) {
       content = text.substr((u32)contentStart, (u32)(position - contentStart))
 	  content.trimRight("\r")
     } else {
-      int endIndex = text.indexOf("*/", position)
-      if (endIndex < 0) {
-        throw JsonException("Unterminated comment", position)
+	  bool closed = false
+      while (position + 1 < text.len) {
+        if (text[position] == '*' && text[position + 1] == '/') {
+          closed = true
+          break
+        }
+        position++
       }
-      content = text.substring(contentStart, endIndex - contentStart)
-      position = endIndex + 2
+      if (!closed) {
+        throw Exception(formatException("Unterminated comment", position, text))
+      }
+      content = text.substr((u32)contentStart, (u32)(position - contentStart))
+      position += 2
     }
     return JsonComment(content)
   }
@@ -468,6 +618,9 @@ class JsonParser(string text, uns position) {
     if (text.substr((u32)position, (u32)word.len) != word) {
       return false
     }
+    if (position + word.len < text.len && isWordChar(text[position + word.len])) {
+      return false
+    }
     position += word.len
     return true
   }
@@ -480,6 +633,10 @@ class JsonParser(string text, uns position) {
     return value >= '0' && value <= '9'
   }
 
+  fun bool isWordChar(char value) {
+    return (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') || isDigit(value) || value == '_'
+  }
+
   fun uns hexValue(char value) {
     if (value >= '0' && value <= '9') {
       return (uns)value - (uns)'0'
@@ -490,9 +647,33 @@ class JsonParser(string text, uns position) {
     if (value >= 'A' && value <= 'F') {
       return (uns)value - (uns)'A' + 10
     }
-    throw JsonException("Invalid hex digit '" + value + "'", position)
+    throw Exception(formatException("Invalid hex digit '" + value + "'", position, text))
   }
 
 }
 
 
+fun main(arr<string> params) {
+  string json = "{\"test\":true,,\"testarr\":[123, \"string\", {\"obj\":-1.2}]}"
+  if params.len < 2{
+    Console.log("Usage: json <file.json> [-pp] [-pc] [-sc] [-ns]\n-pp enables prettyprint\n-pc reads comments in json\n-sc writes comments when serializing\n-ns allows no strict json")
+	return
+  }
+
+  File jf = File(params[1])
+  json = jf.readAllText()
+  JsonSerializationOptions opts
+  for i = 2..params.len {
+    if params[i]=="--pp" || params[i]=="-pp" || params[i]=="pp" then opts.set(JsonSerializationOptions.PrettyPrint)
+    if params[i]=="--pc" || params[i]=="-pc" || params[i]=="pc" then opts.set(JsonSerializationOptions.AllowCommentsInParsing)
+    if params[i]=="--sc" || params[i]=="-sc" || params[i]=="sc" then opts.set(JsonSerializationOptions.AllowCommentsInSerialization)
+    if params[i]=="--ns" || params[i]=="-ns" || params[i]=="ns" then opts.set(JsonSerializationOptions.NoStrict)
+  }
+  var test = JSON.parse(json, opts)
+  Console.log(JSON.serialize(test, opts))
+  
+  catch Exception ex {
+    Console.log("Error: " + ex.message)
+	Console.log("Original:\n" + json)
+  }
+}

@@ -131,10 +131,10 @@ public sealed partial class CodeGen {
     int bits = int.Parse(keyword["bitfield".Length..]);
     info.Bitfield = true;
     info.ValueType = "u" + bits;
-    info.Entries.Add(("None", 0));
+    info.Entries.Add(("NONE", 0));
     var used = new Dictionary<int, string>();
     foreach (var entry in node.Children.Where(child => child.Kind == "Entry")) {
-      if (entry.Text is "None" or "All") {
+      if (entry.Text is "NONE" or "ALL") {
         throw Error($"'{entry.Text}' exists on every bitfield: it cannot be declared", entry);
       }
       if (info.Find(entry.Text!) != null) {
@@ -161,13 +161,13 @@ public sealed partial class CodeGen {
     if (node.Children.Any(child => child.Kind == "Fun")) {
       throw Error("a bitfield cannot have functions", node);
     }
-    info.Entries.Add(("All", info.Mask));
+    info.Entries.Add(("ALL", info.Mask));
 
-    // toStr: None, or the flags that are set joined with " | "
+    // toStr: NONE, or the flags that are set joined with " | "
     string cType = CType(info.Name);
     var text = new StringBuilder($"static df_string df_enum_str_{info.Name}({cType} value) {{\n  df_string result = df_str_lit(\"\", 0);\n  bool first = true;\n");
-    text.Append($"  if (value == 0) {{ return {CString(CodePoints("None"))}; }}\n");
-    foreach (var entry in info.Entries.Where(entry => entry.Name is not ("None" or "All"))) {
+    text.Append($"  if (value == 0) {{ return {CString(CodePoints("NONE"))}; }}\n");
+    foreach (var entry in info.Entries.Where(entry => entry.Name is not ("NONE" or "ALL"))) {
       text.Append($"  if (value & {IntConstCode(entry.Value, info.ValueType)}) {{\n");
       text.Append($"    result = first ? {CString(CodePoints(entry.Name))} : df_str_cat(result, {CString(CodePoints(" | " + entry.Name))});\n");
       text.Append("    first = false;\n  }\n");

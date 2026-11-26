@@ -1,0 +1,13 @@
+items: 7 / 7
+plain message / 3
+tweety the bird 2
+unnamed 4
+making c1
+end from parent
+c1 made: child text
+making c2
+end from parent
+c2 made: from child
+2047
+end from child
+---- exit code 0 ----

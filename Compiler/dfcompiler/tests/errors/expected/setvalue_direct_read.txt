@@ -1,1 +1,1 @@
-setvalue_direct_read.df(3): error: a value of the set Nums is read with if k is T x { } or k is ? { } (spec 11.3.6.1)
+setvalue_direct_read.df(5): error: feature not supported: a value of the set Pets read as Dog (built: numbers, bool, char, enums, date, time, clock, lapse, addr, string); read it with if k is T x { } or k is ? { } (spec 11.3.6.1)

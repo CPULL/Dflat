@@ -68,13 +68,16 @@ public sealed partial class CodeGen {
 
   bool IsKnownType(string t) {
     return SignedTypes.Contains(t) || UnsignedTypes.Contains(t) || RealTypes.Contains(t)
-      || t is "bool" or "char" or "string" or "string1k" or "byte" or "uns" or "int" or "date" or "time" or "clock" or "lapse" or "Exception" or "addr" || IsEnum(t) || IsClass(t) || IsStruct(t)
+      || t is "bool" or "char" or "string" or "string1k" or "byte" or "uns" or "int" or "real" or "date" or "time" or "clock" or "lapse" or "Exception" or "addr" || IsEnum(t) || IsClass(t) || IsStruct(t)
       || IsHandle(t);
   }
 
   // the native integer types (spec 2.1): int and uns, and the unsuffixed integer literals; the size of the cpu or of --native-int, set
   // for each compilation (i64 / u64 on x64, i32 / u32 on x86)
   public static string NativeInt { get; set; } = "i64";
+
+  // real (spec 2.1, 19.1): the size of the cpu, r64 on x64 and r32 on x86 (--native-real is not built yet)
+  public static string NativeReal { get; set; } = "r64";
 
   // the names a .dflib defines only in the target blocks of other targets (spec 22): set from the loader
   public static Dictionary<string, string> OtherTargetNames { get; set; } = new();
@@ -83,7 +86,7 @@ public sealed partial class CodeGen {
   // true in a release build: an index outside a collection is a panic (spec 6.1)
   public static bool ReleaseBuild { get; set; }
 
-  static string Normalize(string t) => t switch { "byte" => "u8", "uns" => NativeUns, "int" => NativeInt, _ => t };
+  static string Normalize(string t) => t switch { "byte" => "u8", "uns" => NativeUns, "int" => NativeInt, "real" => NativeReal, _ => t };
 
   static string Family(string t) {
     if (SignedTypes.Contains(t)) {
@@ -754,6 +757,13 @@ public sealed partial class CodeGen {
     }
     if (to == "string" && e.Type == "string1k") {
       return $"df_s1k_to_str({e.Code})";
+    }
+    if (IsSetValue(e.Type) && !LibraryCode && !IsSetValue(to) && SetReadable(to) && to != "string") {
+      return SetValueRead(e, to, at, false).Code;   // i32 v = k (spec 11.3.6.1); a string is read in ExprOf, where it is known to be new
+    }
+    if (IsSetValue(e.Type) && !LibraryCode && !IsSetValue(to)) {
+      throw NotSupported($"a value of the set {DisplayName(e.Type)} read as {DisplayName(to)} (built: numbers, bool, char, enums, date, time, clock, lapse, addr, string); "
+        + "read it with if k is T x { } or k is ? { } (spec 11.3.6.1)", at);
     }
     if (IsSetValue(e.Type) && !LibraryCode) {
       throw Error($"a value of the set {DisplayName(e.Type)} is read with if k is T x {{ }} or k is ? {{ }} (spec 11.3.6.1)", at);

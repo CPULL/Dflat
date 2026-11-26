@@ -1,0 +1,1 @@
+sized_map.df(2): error: a map has no capacity: the form map<K, V>[n] name does not apply (spec 6.3); hmap<K, V>[n] has one

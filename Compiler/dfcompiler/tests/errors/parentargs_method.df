@@ -1,0 +1,6 @@
+class Animal(string name) {
+  public string name
+  public fun string tag() { return "x" }
+}
+class Bird(string called) : Animal(tag()) {
+}

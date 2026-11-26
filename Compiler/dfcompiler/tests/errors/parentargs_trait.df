@@ -1,0 +1,7 @@
+trait Named {
+  public string label = ""
+}
+class Animal {
+}
+class Bird(string called) : Animal, Named(called) {
+}

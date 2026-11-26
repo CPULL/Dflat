@@ -1,0 +1,9 @@
+found it
+empty
+no
+book 1
+no
+book 2
+found it
+42
+---- exit code 0 ----

@@ -542,6 +542,12 @@ public sealed partial class CodeGen {
     if (size != null && typeNode is { Text: "set" or "bset" } && vecPrelude) {
       throw Error("a set has no capacity: the form set<T>[n] name does not apply (spec 6.3); hset<T>[n] has one", node);
     }
+    if (size != null && typeNode is { Text: "list" }) {
+      throw Error("a list has no capacity: the form list<T>[n] name does not apply (spec 6.3); vec<T>[n] has one", node);
+    }
+    if (size != null && typeNode is { Text: "map" }) {
+      throw Error("a map has no capacity: the form map<K, V>[n] name does not apply (spec 6.3); hmap<K, V>[n] has one", node);
+    }
     if (size == null || typeNode is not ({ Text: "arr" or "vec" or "hset", Children.Count: 1 } or { Text: "hmap", Children.Count: 2 })) {
       return;   // the others (hset, list, ...) are not built (EmitDecl says so)
     }

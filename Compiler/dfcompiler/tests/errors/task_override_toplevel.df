@@ -1,0 +1,18 @@
+import Root
+import Root.Tasks
+i32 counter = 0
+class Base {
+  public fun act() { }
+}
+class Derived : Base {
+  replace fun act() { counter++ }
+}
+class Adder {
+  fun i32 taskRun() {
+    Base b = Derived()
+    b.act()
+    return 0
+  }
+}
+Task t = Task(Adder).start()
+wait t timeout 2000

@@ -1,0 +1,1 @@
+main.df(8): error: unsafe of a compiled library uses top-level variables or static fields of its library, which the code of a task cannot see (reached from Worker.taskRun, spec 20.12)

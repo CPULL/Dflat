@@ -1,0 +1,39 @@
+// Captures of more types (spec 13.3.1, H6): x! copies a tuple, a struct, a nullable value, a string? with their parts; ->x moves them (a
+// number is copied); &x writes a nullable value, a tuple, a string? of the caller
+import Root
+struct P { i32 x, i32 y }
+struct N { string name, i32 v }
+fun go() {
+  (i32, string) pair = (1, $"one {1}")
+  N named = N($"n{2}", 2)
+  i32? maybe = 5
+  string? text = $"t{3}"
+  P point = P(1, 2)
+  string() copies = (; pair!, named!, maybe!, text!, point!) {
+    return $"{pair} {named} {maybe ?? -1} {text ?? "-"} {point}"
+  }
+  pair = (9, "changed")
+  text = null
+  Console.log(copies())
+  string() again = copies!
+  Console.log(again())
+  i32 count = 3
+  (i32, string) moving = (2, $"two {2}")
+  string? owned = $"owned {4}"
+  string() moves = (; ->count, ->moving, ->owned) {
+    return $"{count} {moving} {owned ?? "-"}"
+  }
+  Console.log(moves())
+  i32? slot = null
+  (i32, i32) acc = (0, 0)
+  string? note = null
+  fun(i32) writes = (i32 n; &slot, &acc, &note) {
+    slot = n
+    acc = (acc.0 + n, acc.1 + 1)
+    note = $"seen {n}"
+  }
+  writes(4)
+  writes(6)
+  Console.log($"{slot ?? -1} {acc} {note ?? "-"}")
+}
+go()

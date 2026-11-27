@@ -174,6 +174,9 @@ public sealed partial class CodeGen {
   // holds a value
   bool IsOwningNullableTuple(string type) => IsNullable(type) && TupleHoldsArrays(BaseOf(type));
 
+  // the value of a map or an hmap that owns what it holds: the items of ItemOwnsParts and a string? (its text is the map's own, spec 6.6)
+  bool MapValueOwns(string value) => ItemOwnsParts(value) || value == "string?";
+
   Node? tupleItemAt;   // a place for the errors of the helpers below (the first declaration of such a collection)
 
   // the C function that ends the parts of a tuple item
@@ -181,7 +184,8 @@ public sealed partial class CodeGen {
     string name = "df_tidrop_" + System.Text.RegularExpressions.Regex.Replace(type, @"[^A-Za-z0-9_]", "_");
     if (tupleItemHelpers.Add(name)) {
       structProtos.Append($"static void {name}({CType(type)} v);\n");
-      string drops = IsOwningNullableTuple(type) ? $"if (v.has) {{ {TupleDropCode(BaseOf(type), "v.val")}}}"
+      string drops = type == "string?" ? "if (v.has) { df_str_free(v.val); }"
+        : IsOwningNullableTuple(type) ? $"if (v.has) {{ {TupleDropCode(BaseOf(type), "v.val")}}}"
         : SetOwns(type) ? SetDropCode(type, "v", tupleItemAt ?? genericSets[type])   // a set value that owns (spec 11.3.6.1)
         : StructHoldsObjects(type) ? StructDropCode(type, "v") : TupleDropCode(type, "v");   // the helpers of the parts come first
       tupleItemCode.Append($"static void {name}({CType(type)} v) {{\n  {drops}\n}}\n\n");
@@ -194,7 +198,8 @@ public sealed partial class CodeGen {
     string name = "df_tidup_" + System.Text.RegularExpressions.Regex.Replace(type, @"[^A-Za-z0-9_]", "_");
     if (tupleItemHelpers.Add(name)) {
       structProtos.Append($"static {CType(type)} {name}({CType(type)} v);\n");
-      string copies = IsOwningNullableTuple(type) ? $"if (c.has) {{ {TupleCopies(null, BaseOf(type), "c.val", at ?? tupleItemAt!)}}}"
+      string copies = type == "string?" ? "if (c.has) { c.val = df_str_dup(c.val); }"
+        : IsOwningNullableTuple(type) ? $"if (c.has) {{ {TupleCopies(null, BaseOf(type), "c.val", at ?? tupleItemAt!)}}}"
         : SetOwns(type) ? $"c = {SetCloneCode(type, "c", at ?? tupleItemAt ?? genericSets[type])};"   // spec 11.3.6.1
         : StructHoldsObjects(type) ? $"c = {StructCloneHelper(type)}(c);" : TupleCopies(null, type, "c", at ?? tupleItemAt!);
       tupleItemCode.Append($"static {CType(type)} {name}({CType(type)} v) {{\n  {CType(type)} c = v;\n  {copies}\n  return c;\n}}\n\n");

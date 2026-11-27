@@ -1,0 +1,10 @@
+class A {
+  public i32 seen
+  public A(&i32 r) {
+    r++
+  } atEnd {
+    seen = r
+  }
+}
+i32 v = 1
+A a = A(&v)

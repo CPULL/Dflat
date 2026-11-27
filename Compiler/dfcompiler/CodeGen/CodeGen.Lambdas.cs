@@ -321,6 +321,9 @@ public sealed partial class CodeGen {
       } else if (IsArr(type) || IsClass(type) && !IsTraitType(type)) {
         var copy = ExprOf(Synthetic("Copy", at).Add(Synthetic("Name", at, name)), scope);
         OwnedCapture(name, type, copy.Code, fields, inits, ends, clones, lambda, at);
+      } else if (IsValueCapture(type)) {
+        var read = ExprOf(Synthetic("Name", at, name), scope, type);
+        ValueCapture(name, type, read.Fresh ? read.Code : CaptureCopy(type, read.Code, at), fields, inits, ends, clones, lambda, at);
       } else {
         throw NotSupported($"{name}! of a {type} property in a lambda (spec 13.3.1)", at);
       }
@@ -373,8 +376,8 @@ public sealed partial class CodeGen {
               lambda.LambdaVars.Add((name, new VarInfo(type, $"(*({cType}*)c->p_{name})", false) { RefSlot = true, BorrowsArray = IsArr(type) }));
               break;
             }
-            if (!IsPlainValueType(type) && !IsClass(type)) {
-              throw NotSupported($"&{name} of a {type} in a lambda (numbers, bool, char, dates, objects, strings and arrays are built)", at);
+            if (!IsPlainValueType(type) && !IsClass(type) && !IsValueCapture(type) && !IsFunType(type)) {
+              throw NotSupported($"&{name} of a {type} in a lambda (spec 13.3.1)", at);
             }
           }
           borrows = true;
@@ -421,6 +424,8 @@ public sealed partial class CodeGen {
             // a clone (12.6): the lambda owns it
             var copy = ExprOf(Synthetic("Copy", at).Add(Synthetic("Name", at, name)), scope);
             OwnedCapture(name, type, copy.Code, fields, inits, ends, clones, lambda, at);
+          } else if (IsValueCapture(type)) {
+            ValueCapture(name, type, CaptureCopy(type, outer.CName, at), fields, inits, ends, clones, lambda, at);   // a copy with its own parts
           } else {
             throw NotSupported($"{name}! of a {type} in a lambda (spec 13.3.1)", at);
           }
@@ -448,6 +453,19 @@ public sealed partial class CodeGen {
             borrows |= outer.FnBorrows;
             BorrowsThrough(outer);
             lambda.LambdaVars.Add((name, new VarInfo(type, field, false) { FnBorrows = outer.FnBorrows, FnWrites = outer.FnWrites }));
+          } else if (IsPlainValueType(type) || IsValueCapture(type) && CaptureDrop(type, "x", at) == "") {
+            // ->n of a number, a nullable number, a tuple or a struct of them: a copy (nothing to move, spec 11.3.11)
+            fields.Append($"  {cType} v_{name};\n");
+            inits.Append($"c_->v_{name} = {outer.CName}; ");
+            lambda.LambdaVars.Add((name, new VarInfo(type, field, false)));
+          } else if (IsValueCapture(type)) {
+            // ->t of a string?, a tuple, a struct or a set value that owns parts: they move into the lambda, the variable is left empty
+            if (outer.IsParam) {
+              throw Error($"'{name}' is a parameter: it only borrows its value, ->{name} cannot take it", at);
+            }
+            ValueCapture(name, type, outer.CName, fields, inits, ends, clones, lambda, at);
+            inits.Append($"{outer.CName} = {ZeroValue(type)}; ");
+            pendingMoves.Add((outer, $"moved away with ->{name}"));   // a later use is a compile error (spec 12.4)
           } else {
             throw NotSupported($"->{name} of a {type} in a lambda (spec 13.3.1)", at);
           }
@@ -541,6 +559,73 @@ public sealed partial class CodeGen {
   }
 
   // a capture the lambda owns (a clone or a move): an object (dropped) or an array (its items end with it) when the lambda ends
+  // the types a capture keeps as a value of the lambda (spec 13.3.1): nullable values, string?, tuples, structs and set values
+  bool IsValueCapture(string type) =>
+    type == "string?" || IsNullable(type) && !IsClass(BaseOf(type)) || IsTuple(type) || IsStruct(type) || IsSetValue(type);
+
+  // a capture of a value type: a field of the lambda that owns its parts, ended with the lambda, copied with its parts by a clone of it
+  void ValueCapture(string name, string type, string value, StringBuilder fields, StringBuilder inits, StringBuilder ends, StringBuilder clones, FunSig lambda, Node at) {
+    string field = $"c->v_{name}";
+    fields.Append($"  {CType(type)} v_{name};\n");
+    inits.Append($"c_->v_{name} = {value}; ");
+    string drop = CaptureDrop(type, field, at);
+    if (drop != "") {
+      ends.Append($"  {drop}\n");
+    }
+    clones.Append($"  n->v_{name} = {CaptureCopy(type, field, at)};\n");
+    lambda.LambdaVars.Add((name, new VarInfo(type, field, false)));
+  }
+
+  // a copy of a value with its own parts, as a clone makes it (CloneValue), also inside a nullable tuple
+  string CaptureCopy(string type, string source, Node at) {
+    if (IsNullable(type) && IsTuple(BaseOf(type))) {
+      string held = NewTemp();
+      string inner = CaptureCopy(BaseOf(type), $"{held}.val", at);
+      return inner == $"{held}.val" ? source : $"({{ {CType(type)} {held} = {source}; if ({held}.has) {{ {held}.val = {inner}; }} {held}; }})";
+    }
+    if (IsClass(type) || IsArr(type)) {
+      cloneUsed = true;
+    }
+    return CloneValue(source, type, at);
+  }
+
+  // the end of what a value copied by CaptureCopy owns; "" when it owns nothing
+  string CaptureDrop(string type, string place, Node at) {
+    if (type == "string") {
+      return $"df_str_free({place});";
+    }
+    if (type == "string?") {
+      return $"df_opt_str_drop(&{place});";
+    }
+    if (IsFunType(type)) {
+      return $"df_fn_release({place});";
+    }
+    if (IsCountedType(type)) {
+      return $"df_rc_release({place});";
+    }
+    if (IsArr(type)) {
+      return $"{ArrDropHelper(type)}({place});";
+    }
+    if (IsClass(type)) {
+      return $"if ({place}) {{ df_drop((void*){place}); }}";
+    }
+    if (SetOwns(type)) {
+      return SetDropCode(type, place, at);
+    }
+    if (StructHoldsObjects(type)) {
+      return StructDropCode(type, place);
+    }
+    if (IsNullable(type) && IsTuple(BaseOf(type))) {
+      string inner = CaptureDrop(BaseOf(type), $"{place}.val", at);
+      return inner == "" ? "" : $"if ({place}.has) {{ {inner} }}";
+    }
+    if (IsTuple(type)) {
+      var elems = TupleElems(type);
+      return string.Join(" ", Enumerable.Range(0, elems.Count).Select(index => CaptureDrop(elems[index].Type, $"{place}.e{index}", at)).Where(code => code != ""));
+    }
+    return "";
+  }
+
   void OwnedCapture(string name, string type, string value, StringBuilder fields, StringBuilder inits, StringBuilder ends, StringBuilder clones, FunSig lambda, Node at) {
     string cType = CType(type);
     if (IsArr(type)) {
@@ -588,7 +673,7 @@ public sealed partial class CodeGen {
     "Paren" => FnMayBorrow(value.Children[0], scope),
     "Call" or "Null" => false,
     "Member" or "Index" => false,              // a field or an item keeps only values that do not borrow
-    "Copy" => FnMayBorrow(value.Children[0], scope),
+    "Copy" or "Gift" => FnMayBorrow(value.Children[0], scope),   // ->f: what f holds
     _ => true
   };
 
@@ -596,7 +681,7 @@ public sealed partial class CodeGen {
   List<VarInfo>? FnBorrowedOf(Node value, Scope scope) => value.Kind switch {
     "Lambda" => borrowingLambdas.Contains(value) ? lambdaBorrowed.GetValueOrDefault(value) : new List<VarInfo>(),
     "Name" => scope.Find(value.Text!) is VarInfo variable ? (variable.FnBorrows ? variable.FnBorrowed : new List<VarInfo>()) : null,
-    "Paren" or "Copy" => FnBorrowedOf(value.Children[0], scope),
+    "Paren" or "Copy" or "Gift" => FnBorrowedOf(value.Children[0], scope),
     _ => FnMayBorrow(value, scope) ? null : new List<VarInfo>()
   };
 
@@ -653,11 +738,8 @@ public sealed partial class CodeGen {
     if (op != "=") {
       throw Error($"'{op}' is not defined on a function value", at);
     }
-    if (target.Variable == null && !target.IsField && !target.IsStatic) {
-      throw NotSupported("a function value in this place (spec 13.3.2)", at);
-    }
-    if (target.Variable is { IsParam: true }) {
-      throw Error($"'{targetNode.Text}' is a parameter: it is read-only", at);
+    if (target.Variable is { IsParam: true, RefSlot: false }) {
+      throw Error($"'{targetNode.Text}' is a parameter: it is read-only (a & parameter can be assigned, spec 13.3.2)", at);
     }
     var value = ExprOf(valueNode, scope, target.Type);
     string converted = Convert(value, target.Type, valueNode);
@@ -684,8 +766,28 @@ public sealed partial class CodeGen {
 
   // the argument of a function-type parameter: a borrow; a new lambda ends with the statement
   string FnArg(ParamSig param, Node arg, Scope scope) {
-    if (param.IsGift || IsByPointer(param) || arg.Kind is "Gift" or "WritableAddressOf") {
-      throw NotSupported("&, -> and the other markers on a function-type parameter (spec 13.3.2)", arg);
+    if (IsByPointer(param) && param.Ref == 2) {
+      // &fun(i32) f: the callee can give the caller's variable another function value (spec 13.3.2, 13.1)
+      if (arg.Kind != "WritableAddressOf") {
+        throw Error($"'{param.Name}' can change the function value: write &{(arg.Kind == "Name" ? arg.Text : "x")} at the call", arg);
+      }
+      return ReferenceArg(param, arg, scope);
+    }
+    if (param.IsGift) {
+      // ->fun(i32) f: the callee takes a usage of its own and may keep it (a field), so the value cannot borrow (spec 13.3.2, 13.3.4)
+      var given = arg.Kind == "Gift" ? arg.Children[0] : arg;
+      bool borrowedBefore = given.Kind != "Lambda" && FnMayBorrow(given, scope);   // ->g: what g holds, before the move empties it
+      var taken = arg.Kind == "Gift" ? GiftExpr(arg, scope) : ExprOf(arg, scope, param.Type);
+      if (borrowedBefore || given.Kind == "Lambda" && FnMayBorrow(given, scope)) {   // a lambda says what it borrows once it is compiled
+        throw Error($"this function value borrows variables, so it cannot be given to '{param.Name}', which may keep it: capture them with x! or ->x (spec 13.3.4)", arg);
+      }
+      if (!taken.Fresh && taken.Type != "null" && given.Kind != "Lambda") {   // a lambda without captures has no usage to give: nothing to own
+        throw Error($"'{param.Name}' takes the function value: write ->{(arg.Kind == "Name" ? arg.Text : "x")}, or give a new lambda (spec 13.3.2)", arg);
+      }
+      return Convert(taken, param.Type, arg);
+    }
+    if (IsByPointer(param) || arg.Kind is "Gift" or "WritableAddressOf") {
+      throw Error($"'{param.Name}' borrows the function value: remove the {(arg.Kind == "Gift" ? "->" : "&")}", arg);
     }
     var value = ExprOf(arg, scope, param.Type);
     string converted = Convert(value, param.Type, arg);
@@ -745,6 +847,9 @@ public sealed partial class CodeGen {
   // a call whose callee is a function value: a variable or parameter of a function type, a lambda, a call that returns one. Null otherwise.
   Expr? TryFnValueCall(Node callee, List<Node> args, Scope scope, Node at) {
     if (callee.Kind == "Name" && scope.Find(callee.Text!) is VarInfo variable && IsFunType(variable.Type)) {
+      if (movedVars.TryGetValue(variable, out var movedTo)) {
+        throw Error($"'{callee.Text}' was {movedTo}: it cannot be used until it gets a new value (spec 12.4)", callee);
+      }
       return FnValueCall(new Expr(variable.CName, variable.Type), args, scope, at);
     }
     // a field of a function type: onKey(5) inside a method of the class, obj.onKey(5), this.onKey(5) (spec 13.3.2)
@@ -803,7 +908,7 @@ public sealed partial class CodeGen {
     }
     string name = callee.Text!;
     if (funs.ContainsKey(name) || genericFuns.ContainsKey(name) || classes.ContainsKey(name) || traits.ContainsKey(name) || Stdlib.ContainsKey(name)
-        || name is "string" or "Panic" or "date" or "time" || IsEnum(name) || ExceptionId(name) != null || nameAliases.ContainsKey(name) || typeAliases.ContainsKey(name)) {
+        || name is "string" or "Panic" or "date" or "time" || IsEnum(name) || ExceptionId(name) != null || nameAliases.ContainsKey(name, callee) || typeAliases.ContainsKey(name, callee)) {
       return false;
     }
     return currentFlowFun?.Class is not ClassInfo cls || LookupMethods(cls, name).Count == 0;

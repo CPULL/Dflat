@@ -30,7 +30,7 @@ public sealed partial class CodeGen {
       throw Error($"hset items of type {DisplayName(args[0])} are not built yet (this version: integers, bool, char, enums, reals, date, time, clock, lapse, string, string?, string1k, string1k?, tuples of them, strings and Keyable objects, structs of exact natives, strings and Keyable objects, sets of exact natives, Keyable classes)", at);
     }
     if (!hashed && !MapKeyBuilt(args[0])) {
-      throw Error($"set items of type {DisplayName(args[0])} are not built yet (this version: integers, bool, char, enums, reals, date, time, string, string?, string1k, string1k?, tuples of them, strings and Keyable objects, structs of exact natives, strings and Keyable objects, sets of exact natives, Keyable classes)", at);
+      throw Error($"set items of type {DisplayName(args[0])} are not built yet (this version: integers, bool, char, enums, reals, date, time, clock, lapse, string, string?, string1k, string1k?, tuples of them, strings and Keyable objects, structs of exact natives, strings and Keyable objects, sets of exact natives, Keyable classes)", at);
     }
     if (IsSetValue(args[0]) && !SetOwns(args[0])) {
       SetKeyHelpers(args[0], at);   // the C helpers of set value keys (CodeGen.SetValueKeys.cs)
@@ -66,7 +66,7 @@ public sealed partial class CodeGen {
         // not a variable or a field: a value
       }
     }
-    string itemType = MapKey(LValue(target, scope).Type);
+    string itemType = MapKey(target.Kind == "Index" ? ExprOf(target, scope).Type : LValue(target, scope).Type);   // h[k] += x: the set of an entry
     if (otherType != null && IsItemCollection(otherType)) {
       string otherItem = IsArr(otherType) ? ArrElem(otherType) : IsVec(otherType) ? VecElem(otherType) : IsList(otherType) ? ListElem(otherType) : MapKey(otherType);
       if (otherItem != itemType) {

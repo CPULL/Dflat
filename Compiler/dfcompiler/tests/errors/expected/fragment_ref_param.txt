@@ -1,0 +1,1 @@
+fragment_ref_param.df(3): error: the destructor fragment keeps 'r' until the object dies: a & parameter is lent only for the call, so it cannot be kept; copy it into a local of the constructor and use that

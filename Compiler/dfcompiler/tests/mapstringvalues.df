@@ -1,0 +1,62 @@
+// string?, string1k and string1k? as values of map and hmap (spec 6.6, F9): the map owns the text of a string?, frees the replaced and
+// removed ones, a variable that reads one takes its copy
+import Root
+class Holder {
+  public map<string, string?> notes = map<string, string?>()
+}
+fun go() {
+  map<i32, string?> b = map<i32, string?>()
+  for i in [1, 2, 3, 4] {
+    b[(i32)i] = $"v{i}"
+  }
+  b[5] = null
+  b.removeAt(2)
+  b.swap(1, 3)
+  for k, v in b {
+    Console.print($"{k}={v ?? "null"} ")
+  }
+  Console.log("")
+  var copy = b!
+  b[1] = $"changed {1}"
+  bool found, string? got = b.tryGet(4)
+  Console.log($"{copy} {b} {found} {got ?? "-"} {b.keyOf("v4")} {b.has(null)}")
+  b.clear()
+  Console.log($"{b.len} {copy.len}")
+  hmap<string, string?> h = hmap<string, string?>()
+  h["a"] = $"x{1}"
+  h["a"] = $"y{2}"
+  h["n"] = null
+  h.removeAt("n")
+  Console.log($"{h}")
+  Holder hd = Holder()
+  hd.notes["k"] = $"note {7}"
+  hd.notes["k"] = null
+  hd.notes["j"] = $"other {8}"
+  Console.log($"{hd.notes}")
+  map<i32, string1k> f = map<i32, string1k>()
+  f[1] = $"fixed {3}"
+  string1k read = f[1]
+  f[1] = "gone"
+  Console.log($"{read} {f}")
+}
+go()
+fun ->map<i32, string?> make() {
+  map<i32, string?> b = map<i32, string?>()
+  for i in [1, 2, 3] {
+    string? t = $"item {i}"
+    b[(i32)i] = t
+  }
+  string? local = "a" + $"{9}"
+  b[9] = local
+  local = "other"
+  return b
+}
+fun go2() {
+  var b = make()
+  b[1] = $"new {5}"
+  Console.log($"{b}")
+  string? got = b[2]
+  b[2] = null
+  Console.log($"{got ?? "-"} {b}")
+}
+go2()

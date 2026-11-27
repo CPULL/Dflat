@@ -222,8 +222,8 @@ public sealed partial class CodeGen {
   };
 
   readonly Dictionary<string, List<FunSig>> funs = new();   // name → overloads
-  readonly Dictionary<string, string> nameAliases = new();
-  readonly Dictionary<string, string> typeAliases = new();
+  readonly AliasTable nameAliases = new();   // per file (spec 16)
+  readonly AliasTable typeAliases = new();
   readonly List<string> warnings = new();
   string? currentRet;
   int loopDepth;
@@ -532,14 +532,18 @@ public sealed partial class CodeGen {
       RegisterFunAlias(a, target);   // alias [stdcall] fun i32(i32) as Name: a function type, the type of a callback (spec 22)
       return;
     }
+    if (target.Kind == "Type" && target.Children.Count > 0 && genericClasses.ContainsKey(target.Text!)) {
+      typeAliases.Set(a.Text!, ResolveType(target), a.Line);   // alias Source<string> as SourceString: the copy (spec 16)
+      return;
+    }
     if (target.Kind != "Type" || target.Children.Count > 0) {
       throw Error("alias target must be a plain name or type", a);
     }
     string t = target.Text!;
     if (IsKnownType(t)) {
-      typeAliases[a.Text!] = Normalize(t);
+      typeAliases.Set(a.Text!, Normalize(t), a.Line);
     } else {
-      nameAliases[a.Text!] = t;
+      nameAliases.Set(a.Text!, t, a.Line);
     }
   }
 
@@ -642,7 +646,8 @@ public sealed partial class CodeGen {
       ps.Add(new ParamSig(p.Text!, variadic ? "arr<" + paramType + ">" : paramType, def?.Children[0]) {
         IsWritable = p.Children.Any(child => child.Kind == "ReadWrite"),
         IsVariadic = variadic,
-        IsGift = p.Kind == "GiftParam" && (IsClass(paramType) || paramType == "string" || IsArr(paramType) || StructHoldsObjects(paramType) || SetOwns(paramType)),
+        IsGift = p.Kind == "GiftParam" && (IsClass(paramType) || paramType == "string" || IsArr(paramType) || StructHoldsObjects(paramType) || SetOwns(paramType)
+          || (IsFunType(paramType) || paramType == "string?") && funNode.Line < LibraryLine),   // ->fun, ->string? of the program (the collections of the library copy their items)
         IsTupleGift = p.Kind == "GiftParam" && TupleHoldsArrays(paramType),
         Ref = reference,
         IsWeak = weakParam,
@@ -684,14 +689,20 @@ public sealed partial class CodeGen {
     var gives = marked.Where(mark => mark[0] == 'g').Select(mark => int.Parse(mark[1..])).ToHashSet();
     var writableCounted = marked.Where(mark => mark[0] == 'r').Select(mark => int.Parse(mark[1..])).ToHashSet();
     var writes = marked.Where(mark => mark[0] == 'w').Select(mark => int.Parse(mark[1..])).ToHashSet();
+    var lentParts = new HashSet<int>();
     foreach (int written in writes) {
       string writtenType = IsMulti(ret) ? TupleElems(ret)[written].Type : ret;
       if (!(IsClass(writtenType) || IsArr(writtenType))) {
         if (IsMulti(ret)) {
-          throw NotSupported("& results of values among several results (spec 13.1.1)", rets!);
+          lentParts.Add(written);   // fun &i32, string pick(): that result is the address of a place (spec 13.1.1)
+          continue;
         }
         ret = "&" + ret;   // fun &i32 scoreRef(): the address of the place (spec 13.1.1)
       }
+    }
+    if (lentParts.Count > 0) {
+      var parts = TupleElems(ret);
+      ret = "*(" + string.Join(",", parts.Select((part, index) => (lentParts.Contains(index) ? "&" : "") + part.Type + (part.Name != null ? " " + part.Name : ""))) + ")";
     }
     foreach (int given in gives) {
       string givenType = IsMulti(ret) ? TupleElems(ret)[given].Type : ret;
@@ -791,10 +802,10 @@ public sealed partial class CodeGen {
       }
       // a reference parameter is a pointer in C; the body reads and writes through it, a read-only one cannot be assigned
       scope.Vars[p.Name] = IsByPointer(p)
-        ? new VarInfo(p.Type, $"(*{ParamName(p)})", p.Ref == 1) { ReadOnlyStruct = p.Ref == 1 && IsStruct(p.Type), ReadOnlyRef = p.Ref == 1 && IsArr(p.Type), RefSlot = p.Ref == 2 && (IsClass(p.Type) || IsArr(p.Type) || p.Type == "string"), BorrowsArray = p.Ref == 2 && IsArr(p.Type) }
+        ? new VarInfo(p.Type, $"(*{ParamName(p)})", p.Ref == 1) { ReadOnlyStruct = p.Ref == 1 && IsStruct(p.Type), ReadOnlyRef = p.Ref == 1 && IsArr(p.Type), RefSlot = p.Ref == 2 && (IsClass(p.Type) || IsArr(p.Type) || p.Type == "string" || IsFunType(p.Type) || p.Type == "string?"), BorrowsArray = p.Ref == 2 && IsArr(p.Type) }
         : StringVar(new VarInfo(p.Type, "v_" + p.Name, false) { Own = p.IsGift || p.IsHandleGift, ReadOnlyRef = PlainLend(p), ReadOnlyString = p.Type == "string" && !p.IsGift, IsWeak = p.IsWeak, BorrowsArray = IsArr(p.Type) && !p.IsGift, OwnsArray = OwnsGivenArray(f, p), ReadOnlyStruct = IsStruct(p.Type) && !p.IsGift, OwnsStruct = p.IsGift && IsStruct(p.Type) });
       scope.Vars[p.Name].IsParam = true;
-      scope.Vars[p.Name].FnBorrows = IsFunType(p.Type);   // a function parameter may borrow (spec 13.3.4)
+      scope.Vars[p.Name].FnBorrows = IsFunType(p.Type) && !p.IsGift;   // a function parameter may borrow (spec 13.3.4); one given with -> owns its captures
       if (scope.Vars[p.Name].OwnFlag is string flag) {
         // a parameter borrows its string (one taken with -> owns it); assigned again, it may own the new one
         fn.Decls.Append($"  bool {flag} = {(p.IsGift ? "true" : "false")};\n  (void){flag};\n");
@@ -812,8 +823,17 @@ public sealed partial class CodeGen {
     foreach (var p in f.Params.Where(p => p.IsGift && SetOwns(p.Type) && f.Node.Line < LibraryLine)) {
       statements.Insert(0, SetDropNode(p.Name, f.Node));   // ->Pets p: its value ends with the function (spec 11.3.6.1)
     }
-    foreach (var p in f.Params.Where(p => p.IsGift && !IsArr(p.Type) && !(p.Type == "string" && !IsByPointer(p)) && !IsStruct(p.Type) && !SetOwns(p.Type))) {
+    foreach (var p in f.Params.Where(p => p.IsGift && !IsArr(p.Type) && !(p.Type == "string" && !IsByPointer(p)) && !IsStruct(p.Type) && !SetOwns(p.Type) && !IsFunType(p.Type) && p.Type != "string?")) {
       statements.Insert(0, DropNode(p.Name, f.Node));
+    }
+    foreach (var p in f.Params.Where(p => p.IsGift && p.Type == "string?" && !IsByPointer(p))) {
+      // ->string? s: the text ends with the function, unless it was moved on (spec 7.1)
+      statements.Insert(0, Synthetic("AtEnd", f.Node, "drop").Add(Synthetic("Block", f.Node).Add(Synthetic("RawC", f.Node, $"df_opt_str_drop(&v_{p.Name});"))));
+    }
+    foreach (var p in f.Params.Where(p => p.IsGift && IsFunType(p.Type) && !IsByPointer(p))) {
+      // ->fun() h: the usage of the function value ends with the function, unless it was moved on (->h leaves it empty, spec 13.3.2)
+      string held = $"v_{p.Name}";
+      statements.Insert(0, Synthetic("AtEnd", f.Node, "drop").Add(Synthetic("Block", f.Node).Add(Synthetic("RawC", f.Node, $"df_fn_release({held}); {held} = (df_fn){{0}};"))));
     }
     foreach (var p in f.Params.Where(p => p.IsGift && StructHoldsObjects(p.Type))) {
       statements.Insert(0, StructDropNode(p.Name, f.Node));   // ->S p: its strings and objects end with the function (spec 11.1.5.3)
@@ -1303,14 +1323,14 @@ public sealed partial class CodeGen {
       }
       initValue = value;
       code = tupleArrDecls.Contains(s) ? TupleOwnedCode(init.Children[0], value, type, init) : Convert(value, type, init);
-      if (structObjDecls.Contains(s)) {
+      if (structObjDecls.Contains(s) || maybeStructObjDecls.Contains(s) && StructHoldsObjects(type)) {
         code = StructOwnedCode(value, type, init);   // its own strings and objects (spec 11.1.5.3)
       }
     }
     if (init != null && IsPointer(type) && s.Children.First(c => TypeNodeKinds.Contains(c.Kind)) is { Kind: "Pointer" or "WritablePointer" } boundedType && boundedType.Children.Count > 1) {
       code = PointerBound(code, type, boundedType.Children[1].Children[0], scope);   // *i32{count} p = ... (spec 12.1)
     }
-    if (StructHoldsObjects(type) && !structObjDecls.Contains(s) && !LibraryCode) {
+    if (StructHoldsObjects(type) && !structObjDecls.Contains(s) && !maybeStructObjDecls.Contains(s) && !LibraryCode) {
       throw NotSupported($"this declaration of a struct that holds strings or objects (write its type: {type} {s.Text} = ...)", s);
     }
     if (IsFunType(type)) {
@@ -1378,7 +1398,7 @@ public sealed partial class CodeGen {
     if (tupleArrDecls.Contains(s)) {
       variable.OwnsTuple = true;   // spec 6.8.1
     }
-    if (structObjDecls.Contains(s)) {
+    if (structObjDecls.Contains(s) || maybeStructObjDecls.Contains(s) && StructHoldsObjects(type)) {
       variable.OwnsStruct = true;   // spec 11.1.5.3
     }
     if (IsArr(type) && init != null && !GivesOwnArray(init.Children[0])) {
@@ -2084,8 +2104,10 @@ public sealed partial class CodeGen {
         if (BareEnumEntry(n.Text!) == null && OtherTargetNames.TryGetValue(n.Text!, out var otherTargets)) {
           throw Error($"'{n.Text}' has no definition for this target in its .dflib, only for {otherTargets} (spec 22)", n);
         }
-        if (traits.TryGetValue(n.Text!, out var viewed) && scope.Find("this") != null && IsSubtype(scope.Find("this")!.Type, viewed.Name)) {
-          return new Expr("self", viewed.Name);   // TraitName.member inside a class that implements it
+        if (scope.Find("this") is VarInfo self && (traits.TryGetValue(n.Text!, out var viewed)
+            || classes.TryGetValue(self.Type, out var selfClass) && QualifiedTrait(selfClass, n.Text!, n) is ClassInfo copy && (viewed = copy) != null)
+            && IsSubtype(self.Type, viewed.Name)) {
+          return new Expr("self", viewed.Name);   // TraitName.member inside a class that implements it (also an alias of a copy, spec 11.3.2)
         }
         if (n.Text == "parent" && currentClass?.Parent != null && scope.Find("this") != null) {
           return new Expr($"(({CType(currentClass.Parent.Name)})self)", currentClass.Parent.Name);
@@ -2973,10 +2995,10 @@ public sealed partial class CodeGen {
       return GenericRefClass(n);   // Stack<i32>.create(): the copy of the generic class
     }
     if (n.Kind == "Name") {
-      if (nameAliases.TryGetValue(n.Text!, out var name)) {
+      if (nameAliases.TryGetValue(n.Text!, n, out var name)) {
         return name;
       }
-      return typeAliases.TryGetValue(n.Text!, out var type) && IsEnum(type) ? type : n.Text;
+      return typeAliases.TryGetValue(n.Text!, n, out var type) && IsEnum(type) ? type : n.Text;
     }
     if (n.Kind == "Member") {
       var p = Path(n.Children[0]);
@@ -3106,8 +3128,9 @@ public sealed partial class CodeGen {
     }
 
     // TraitName.name(): the trait's own function, inside a class that implements it
-    if (callee.Kind == "Member" && callee.Children[0] is { Kind: "Name" } traitName && traits.TryGetValue(traitName.Text!, out var qualified)
-        && scope.Find(traitName.Text!) == null && scope.Find("this") != null) {
+    if (callee.Kind == "Member" && callee.Children[0] is { Kind: "Name" } traitName && scope.Find(traitName.Text!) == null && scope.Find("this") is VarInfo selfVar
+        && (traits.TryGetValue(traitName.Text!, out var qualified)
+          || classes.TryGetValue(selfVar.Type, out var selfOwner) && QualifiedTrait(selfOwner, traitName.Text!, traitName) is ClassInfo copyTrait && (qualified = copyTrait) != null)) {
       return TraitDirectCall(qualified, callee.Text!, args, scope, n);
     }
 

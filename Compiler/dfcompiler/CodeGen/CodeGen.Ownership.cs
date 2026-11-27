@@ -33,6 +33,8 @@ public sealed partial class CodeGen {
         var types = IsMulti(f.Ret) ? TupleElems(f.Ret).Select(elem => elem.Type).ToList() : new List<string> { f.Ret };
         var locals = new Dictionary<string, Node>();
         CollectDeclarations(f.Node, locals);
+        builtAssigns = new Dictionary<string, List<Node>>();
+        CollectPlainAssigns(f.Node, builtAssigns);
         foreach (var returned in CollectReturns(f.Node).Where(ret => ret.Children.Count == types.Count)) {
           for (int index = 0; index < types.Count; index++) {
             string type = types[index];
@@ -53,18 +55,49 @@ public sealed partial class CodeGen {
   bool IsBuiltResult(Node value, string type, Dictionary<string, Node> locals, int depth) => depth < 8 && value.Kind switch {
     "Paren" => IsBuiltResult(value.Children[0], type, locals, depth + 1),
     "Gift" or "Copy" => true,
-    "List" => IsArr(type),
+    "List" => IsArr(type) || IsVec(type) || IsList(type) || IsSet(type) || IsMap(type),   // [1, 2], []: a new collection
     "Interp" => type == "string",
     "TypeSwitch" => type == "string",   // a string type switch always gives a string of its own (TypeSwitch, SetTypeSwitch)
     "Binary" => type == "string" && value.Text == "+",
+    "Map" or "MapLit" => IsMap(type) || IsSet(type) || IsVec(type) || IsList(type),
     "Call" => value.Children[0] is { Kind: "Name" } callee && classes.ContainsKey(callee.Text!)
+      || value.Children[0] is { Kind: "GenericRef" } genericRef && genericRef.Children[0] is { Kind: "Name" } genericName
+        && genericClasses.TryGetValue(genericName.Text!, out var genericClass) && genericClass.Node.Kind == "Class"   // map<i32, i32>(), Stack<i32>(): a new object
       || CalleesOf(value) is { Count: > 0 } callees && callees.All(f => f.Gives.Contains(0)) || IsArr(type) && IsNewArray(value)
       || (type == "string" || IsArr(type)) && CalleesOf(value).Count == 0,
-    "Name" => locals.TryGetValue(value.Text!, out var decl)
-      && decl.Children.FirstOrDefault(child => child.Kind == "Init")?.Children[0] is Node init
-      && init.Kind is not ("Name" or "Paren") && IsBuiltResult(init, type, locals, depth + 1),   // Dog view = made borrows: not built here
+    "Name" => locals.TryGetValue(value.Text!, out var decl) && LocalBuilt(value.Text!, decl, type, locals, depth),
+
     _ => false
   };
+
+  // the plain assignments (x = value) of each local of the function being inferred
+  Dictionary<string, List<Node>> builtAssigns = new();
+
+  static void CollectPlainAssigns(Node node, Dictionary<string, List<Node>> assigns) {
+    if (node.Kind == "Assign" && node.Text == "=" && node.Children[0] is { Kind: "Name" } target) {
+      if (!assigns.TryGetValue(target.Text!, out var list)) {
+        assigns[target.Text!] = list = new List<Node>();
+      }
+      list.Add(node.Children[1]);
+    }
+    foreach (var child in node.Children) {
+      CollectPlainAssigns(child, assigns);
+    }
+  }
+
+  // a local holds a value built here: its declaration and every later x = value give a new one (null and no value count as nothing), and at
+  // least one of them does; Dog view = made borrows (spec 13.1.1)
+  bool LocalBuilt(string name, Node decl, string type, Dictionary<string, Node> locals, int depth) {
+    var sources = new List<Node>();
+    if (decl.Children.FirstOrDefault(child => child.Kind == "Init")?.Children[0] is Node init) {
+      sources.Add(init);
+    }
+    if (builtAssigns.TryGetValue(name, out var later)) {
+      sources.AddRange(later);
+    }
+    var values = sources.Where(source => source.Kind != "Null").ToList();
+    return values.Count > 0 && values.All(source => source.Kind is not ("Name" or "Paren") && IsBuiltResult(source, type, locals, depth + 1));
+  }
 
   // an object-returning function returns new or moved objects (true) or borrowed ones (false)
   void ClassifyReturns() {
@@ -360,6 +393,12 @@ public sealed partial class CodeGen {
     foreach (var statement in statements.Where(statement => statement.Kind == "Decl" && IsStructObjDecl(statement))) {
       owners.Add(statement);   // a struct that holds strings or objects: they end with the scope (spec 11.1.5.3)
       structObjDecls.Add(statement);
+      drops.Add(StructDropNode(statement.Text!, statement));
+    }
+    foreach (var statement in statements.Where(statement => statement.Kind == "Decl" && MaybeStructVarDecl(statement) && !structObjDecls.Contains(statement))) {
+      // var b = a, var b = h.n, var b = v[0], a!, ->a: the type is known only when the declaration is compiled; if it is a struct that holds
+      // strings or objects, b takes its own and ends them with the scope (the drop does nothing for the other types)
+      maybeStructObjDecls.Add(statement);
       drops.Add(StructDropNode(statement.Text!, statement));
     }
     // (also with one value for each target, Pet a, i32 n = q, 3: the struct is a new one or a clone)
@@ -713,7 +752,7 @@ public sealed partial class CodeGen {
       return false;
     }
     string first = path.Split('.')[0];
-    if (nameAliases.TryGetValue(first, out var target)) {
+    if (nameAliases.TryGetValue(first, call, out var target)) {
       first = target.Split('.')[0];
     }
     return first == "Root";
@@ -907,6 +946,30 @@ public sealed partial class CodeGen {
     if (StructHoldsObjects(value.Type) && (!LibraryCode || operand.Kind == "Name")) {
       // spec 11.1.5.3; in the collections of the library, ->value of a ->T parameter leaves it empty (it ends with the function)
       return StructGift(operand, value, scope, n);
+    }
+    if (value.Type == "string?" && !LibraryCode) {
+      // ->s of a string?: its text moves, the variable is left null (spec 7.1)
+      var heldText = LValue(operand, scope);
+      if (heldText.Variable is { IsParam: true, Own: false, RefSlot: false }) {
+        throw Error($"'{operand.Text}' is a parameter: it only borrows its string?, ->{operand.Text} cannot take it", n);
+      }
+      if (operand.Kind == "Name" && heldText.Variable != null) {
+        pendingMoves.Add((heldText.Variable, $"moved away with ->{operand.Text}"));
+      }
+      string movedText = NewTemp();
+      return new Expr($"({{ df_opt_string {movedText} = {heldText.Code}; {heldText.Code} = (df_opt_string){{0}}; {movedText}; }})", value.Type, true);
+    }
+    if (IsFunType(value.Type) && !LibraryCode) {
+      // ->f of a function value: its usage moves, the variable is left empty (spec 13.3.2)
+      var held = LValue(operand, scope);
+      if (held.Variable is { IsParam: true, Own: false }) {
+        throw Error($"'{operand.Text}' is a parameter: it only borrows its function, ->{operand.Text} cannot take it", n);
+      }
+      if (operand.Kind == "Name" && held.Variable != null) {
+        pendingMoves.Add((held.Variable, $"moved away with ->{operand.Text}"));   // a later use is a compile error (spec 12.4)
+      }
+      string movedFn = NewTemp();
+      return new Expr($"({{ df_fn {movedFn} = {held.Code}; {held.Code} = (df_fn){{0}}; {movedFn}; }})", value.Type, true);
     }
     if (!IsClass(value.Type)) {
       if (GiftWarningApplies() && n.Text != "named-result") {   // the return of the named results of a .dflib mapping (spec 22) gives them all

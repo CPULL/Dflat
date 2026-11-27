@@ -1,0 +1,1 @@
+capture_moved_optstr.df(4): error: 'owned' was moved away with ->owned: it cannot be used until it gets a new value (spec 12.4)

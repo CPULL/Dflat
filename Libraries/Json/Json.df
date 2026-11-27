@@ -1,7 +1,7 @@
 import Root
 import Root.io
 
-Generic JsonType { r64?, string, bool, JsonArray, JsonObject, JsonComment }
+Generic JsonType { JsonNull, JsonNum, string, bool, JsonArray, JsonObject, JsonComment }
 
 class JSON {
   public static fun JsonNode parse(string json, JsonSerializationOptions options) { 
@@ -13,6 +13,34 @@ class JSON {
 	string res = writer.writeNode(node, 0)
     return ->res
   }
+}
+
+// Object classes
+
+class JsonNull {
+	// Nothing is required here, it is a null
+}
+
+class JsonNum {
+	public JsonNum(r64 v) {
+		isFloat = true
+		floatValue = v
+	}
+	public JsonNum(i64 v) {
+		isFloat = false
+		intValue = v
+	}
+	public bool isFloat
+	public r64 floatValue
+	public i64 intValue
+	unrestricted fun string write() {
+		if isFloat {
+			return floatValue.toStr()
+		} 
+		else {
+			return intValue.toStr()
+		}
+	}
 }
 
 class JsonArray {
@@ -27,6 +55,8 @@ class JsonComment(string comment) {
   public string comment
 }
 
+// Main Json node class
+
 class JsonNode(string? key, JsonType value) {
   public string? key
   public JsonType value
@@ -34,45 +64,45 @@ class JsonNode(string? key, JsonType value) {
   
   public fun bool isNull() { 
     value is ? {
-	  r64?: value==null ? { true, false },
-	  default: false 
-	} 
+			JsonNull: true,
+		  default: false 
+		} 
   }
   public fun bool isNumber() { 
     value is ? {
-	  r64?: value==null ? { false, true },
-	  default: false 
-	} 
+	  	JsonNum: true,
+			default: false 
+		} 
   }
   public fun bool isString() { 
     value is ? {
-	  string: true,
-	  default: false 
-	} 
+			string: true,
+			default: false 
+		} 
   }
   public fun bool isBool() { 
     value is ? {
-	  bool: true,
-	  default: false 
-	} 
+			bool: true,
+			default: false 
+		} 
   }
   public fun bool isObject() { 
     value is ? {
-	  JsonObject: true,
-	  default: false 
-	} 
+			JsonObject: true,
+			default: false 
+		} 
   }
   public fun bool isArray() { 
     value is ? {
-	  JsonArray: true,
-	  default: false 
-	} 
+			JsonArray: true,
+			default: false 
+		} 
   }
   public fun bool isComment() { 
     value is ? {
-	  JsonComment: true,
-	  default: false 
-	} 
+			JsonComment: true,
+			default: false 
+		} 
   }
   
   
@@ -129,7 +159,6 @@ fun string formatException(string msg, uns pos, string text) {
   string part = pos > 16 ? { text.substr(pos-16, 32), text.substr(0, 32) }
   return $"JSON Error: {msg} at position {pos}: {part}\n{text}"
 }
-
 
 class JsonWriter(JsonSerializationOptions options) {
   bool pretty = options.isSet(JsonSerializationOptions.PrettyPrint)
@@ -198,8 +227,9 @@ class JsonWriter(JsonSerializationOptions options) {
       JsonComment: writeComment(value),
       string: writeString(value),
       bool: writeBool(value),
-      r64?: writeNumber(value),
-	  default: "null"
+      JsonNum: writeNumber(value),
+			JsonNull: "null",
+		  default: "null"
     }
   }
   
@@ -275,8 +305,8 @@ class JsonWriter(JsonSerializationOptions options) {
     return "false"
   }
 
-  fun string writeNumber(r64? number) {
-    return "" + number
+  fun string writeNumber(JsonNum number) {
+    return number.write()
   }
 
   fun string lineBreak(uns depth) {
@@ -337,8 +367,7 @@ class JsonParser(string text, uns position, JsonSerializationOptions options) {
       return false
     }
     if (matchWord("null")) {
-      r64? nothing = null
-      return nothing
+      return JsonNull()
     }
     throw Exception(formatException("Unexpected character '" + current + "'", position, text))
   }
@@ -523,7 +552,7 @@ class JsonParser(string text, uns position, JsonSerializationOptions options) {
 	return result
   }
 
-  fun r64? parseNumber() {
+  fun JsonNum parseNumber() {
     uns start = position
     if (text[position] == '-') {
       position++
@@ -559,7 +588,13 @@ class JsonParser(string text, uns position, JsonSerializationOptions options) {
         position++
       }
     }
-    return r64.parse(text.substr((u32)start, (u32)(position - start)))
+		string number = text.substr(start, position - start)
+		if number.indexOf('.') != -1 {
+			return JsonNum(r64.parse(number))
+		}
+		else {
+    	return JsonNum(i64.parse(number))
+		}
   }
 
   fun JsonComment readComment() {
@@ -662,7 +697,7 @@ fun main(arr<string> params) {
 
   File jf = File(params[1])
   json = jf.readAllText()
-  JsonSerializationOptions opts
+  JsonSerializationOptions opts = JsonSerializationOptions.NONE
   for i = 2..params.len {
     if params[i]=="--pp" || params[i]=="-pp" || params[i]=="pp" then opts.set(JsonSerializationOptions.PrettyPrint)
     if params[i]=="--pc" || params[i]=="-pc" || params[i]=="pc" then opts.set(JsonSerializationOptions.AllowCommentsInParsing)

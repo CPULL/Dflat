@@ -1,0 +1,5 @@
+(1, one 1) N { name: n2, v: 2 } 5 t3 P { x: 1, y: 2 }
+(1, one 1) N { name: n2, v: 2 } 5 t3 P { x: 1, y: 2 }
+3 (2, two 2) owned 4
+6 (10, 2) seen 6
+---- exit code 0 ----

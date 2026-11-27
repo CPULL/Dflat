@@ -77,6 +77,24 @@ public sealed partial class CodeGen {
         sb.Append($"{pad}df_rc* {temp} = {CountedPartReturn(s.Children[index], scope, CountedBase(elems[index].Type), s.Children[index], writablePart)};\n");   // spec 12.7
         continue;
       }
+      if (IsValueLend(elems[index].Type)) {
+        // a &T result of a value among several: the address of the place (spec 13.1.1)
+        string lentType = elems[index].Type[1..];
+        var place = s.Children[index];
+        CheckWritableLend(place, lentType, scope);
+        string address;
+        if (place.Kind == "Call") {
+          var lentCall = ExprOf(place, scope);
+          if (lentCall.Type != lentType) {
+            throw Error($"this result lends a {DisplayName(lentType)}, not a {DisplayName(lentCall.Type)}", place);
+          }
+          address = $"(&{lentCall.Code})";
+        } else {
+          address = PlaceAddress(place, lentType, scope);
+        }
+        sb.Append($"{pad}{CType(elems[index].Type)} {temp} = {address};\n");
+        continue;
+      }
       var value = ExprOf(s.Children[index], scope, elems[index].Type);
       if (elems[index].Type == "string") {
         value = StrReturned(value, s.Children[index], scope);
@@ -194,6 +212,37 @@ public sealed partial class CodeGen {
             throw Error($"a counted variable takes a counted value or an object the function gives (->{DisplayName(newType)}) (spec 12.7)", targets[index]);
           }
           resolved.Add(new Expr($"df_rc_new((void*)({temp}.e{index}))", CountedUsageType));
+          continue;
+        }
+        if (IsValueLend(elems[index].Type)) {
+          string lentType = elems[index].Type[1..];
+          var target = targets[index];
+          if (target.Kind == "Decl" && target.Children.Any(child => child.Kind == "ReadWrite")) {
+            // &i32 a, string b = k.pick(): a keeps the address of the place, read/write; the lender stays locked until its last use (spec 13.1.1)
+            if (TargetType(target, scope) != lentType) {
+              throw Error($"this result lends a {DisplayName(lentType)}, not a {DisplayName(TargetType(target, scope)!)}", target);
+            }
+            CheckNotShadowing(target.Text!, scope, target);
+            frames.Peek().Hoisted.TryGetValue(target.Text!, out var hoistedLend);
+            VarInfo lendVar;
+            if (hoistedLend is { LendPointer: string hoistedPointer }) {
+              lendVar = hoistedLend;
+              sb.Append($"{pad}{hoistedPointer} = {temp}.e{index};\n");
+            } else {
+              string pointer = $"l_{target.Text}_{++tempCounter}";
+              lendVar = new VarInfo(lentType, $"(*{pointer})", false) { LendPointer = pointer, RefSlot = lentType == "string" };
+              sb.Append($"{pad}{CType(lentType)}* {pointer} = {temp}.e{index};\n");
+            }
+            lendVar.IsLocal = currentFun != null && !fn!.IsMain;
+            scope.Vars[target.Text!] = lendVar;
+            assign.Unassigned.Remove(lendVar);
+            if (!LibraryCode && followingStatements.TryGetValue(target, out var after) && LenderPaths(values[0], scope) is { Count: > 0 } lenders) {
+              LockLenders(target, after, lenders, true, true, scope);   // the following statements are recorded for each new variable
+            }
+            resolved.Add(null);
+            continue;
+          }
+          resolved.Add(new Expr($"(*{temp}.e{index})", lentType, false));   // i32 a, ... = k.pick(): a copy of the value
           continue;
         }
         resolved.Add(new Expr($"{temp}.e{index}", elems[index].Type, true));
@@ -376,6 +425,9 @@ public sealed partial class CodeGen {
     if (target.Kind != "Decl" || !target.Children.Any(child => child.Kind == "ReadWrite") || IsCountedDecl(target)
         || target.Children.Any(child => child.Kind == "Weak")) {
       return;
+    }
+    if (value == null && scope.Find(target.Text!) is { LendPointer: not null }) {
+      return;   // &i32 a, ... = k.pick(): declared already, as the lend of a &T result of a value (spec 13.1.1)
     }
     string type = ResolveType(target.Children.First(child => TypeNodeKinds.Contains(child.Kind)));
     if (!IsClass(type)) {

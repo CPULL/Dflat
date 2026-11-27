@@ -1,0 +1,4 @@
+trait Mapper<Key> {
+  placeholder Key
+  public fun Key apply(Key k)
+}

@@ -1,0 +1,9 @@
+1=v3 3=v1 4=v4 5=null 
+[1: v3, 3: v1, 4: v4, ...] (4 items) [1: changed 1, 3: v1, 4: v4, ...] (4 items) true v4 4 true
+0 4
+[a: y2]
+[j: other 8, k: null]
+fixed 3 [1: gone]
+[1: new 5, 2: item 2, 3: item 3, ...] (4 items)
+item 2 [1: new 5, 2: null, 3: item 3, ...] (4 items)
+---- exit code 0 ----

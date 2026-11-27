@@ -71,7 +71,7 @@ public sealed partial class CodeGen {
         callbackSignatureDepth--;
       }
     }
-    typeAliases[a.Text!] = fun;
+    typeAliases.SetEverywhere(a.Text!, fun);   // a callback type: a declaration, seen everywhere (spec 22)
     if (native != null) {
       callbackConventions[a.Text!] = native.Text ?? "cdecl";
       callbackAliasNodes.Add((fun, a));   // checked once the structs are known (CheckCallbackAliases)
@@ -90,7 +90,7 @@ public sealed partial class CodeGen {
   string? CallbackPointee(Node pointedNode, Node at, bool writable) {
     string? pointee = null;
     string? shown = null;
-    if (pointedNode is { Kind: "Type", Children.Count: 0 } named && StripLibraryQualifier(named.Text!) is string name && typeAliases.TryGetValue(name, out var aliased) && IsFunType(aliased)) {
+    if (pointedNode is { Kind: "Type", Children.Count: 0 } named && StripLibraryQualifier(named.Text!, named.Line) is string name && typeAliases.TryGetValue(name, named, out var aliased) && IsFunType(aliased)) {
       pointee = $"[{callbackConventions.GetValueOrDefault(name, "cdecl")}]{aliased}";
       shown = name.Contains('.') ? name[(name.LastIndexOf('.') + 1)..] : name;
     } else if (pointedNode.Kind == "FunType") {

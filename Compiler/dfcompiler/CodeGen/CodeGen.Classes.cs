@@ -68,6 +68,7 @@ sealed class ClassInfo {
   public bool IsTrait { get; init; }
   public ClassInfo? Super { get; set; }                       // the parent trait
   public List<ClassInfo> Traits { get; } = new();             // the traits a class lists in its header
+  public HashSet<string> AliasedTraits { get; } = new();       // copies of a generic trait written through an alias in the header (spec 11.3.2)
   public List<ImplInfo> Impls { get; } = new();
   public List<FunSig> TraitMethods { get; } = new();          // the methods of a trait, in slot order
   public FunSig? InitFun { get; set; }                        // a trait: its property initializers and constructor body (__tinit)
@@ -172,27 +173,40 @@ public sealed partial class CodeGen {
       bool sawTrait = false;
       foreach (var baseType in bases.Children) {
         string baseName = baseType.Text ?? "";
+        bool viaAlias = false;
+        if (baseType.Children.Count == 0 && !classes.ContainsKey(baseName) && !traits.ContainsKey(baseName) && !genericClasses.ContainsKey(baseName)
+            && typeAliases.TryGetValue(baseName, baseType, out var aliasedBase) && traits.ContainsKey(aliasedBase)) {
+          baseName = aliasedBase;   // class Both : Source<i32>, SourceString with alias Source<string> as SourceString (spec 11.3.2, 16)
+          viaAlias = true;
+        }
         if (baseName is "Root.Class" or "Class") {
           Warn("Root.Class is the implicit base of every class and is never written", baseType, 1);
           continue;
         }
-        if (genericClasses.TryGetValue(baseName, out var genericBase) && genericBase.IsTrait) {
-          // Container<string> or Sequence with (Item is u32): the copy of the generic trait
+        if (genericClasses.TryGetValue(baseName, out var genericBase)) {
+          // Container<string> or Sequence with (Item is u32): the copy of the generic trait; Stack<i32>: the copy of a generic parent class
           var withNode = baseType.Children.FirstOrDefault(child => child.Kind == "With");
           var typeArgNodes = baseType.Children.Where(child => child.Kind != "With").ToList();
           List<string> traitArgs;
           if (genericBase.HasPlaceholders) {
-            if (typeArgNodes.Count > 0) {
+            var typeParams = genericBase.TypeParams;
+            if (typeArgNodes.Count > 0 && typeParams.Count == 0) {
               throw Error($"'{baseName}' has placeholders, not type parameters: write {baseName} with (...)", baseType);
             }
-            if (withNode == null) {
-              throw Error($"'{baseName}' has placeholders: fix them, as in {baseName} with ({genericBase.Params[0].Name} is type)", baseType);
+            if (typeArgNodes.Count == 0 && typeParams.Count > 0) {
+              throw Error($"'{baseName}' is generic: write its type arguments, {baseName}<...> with (...)", baseType);
             }
-            foreach (var bind in withNode.Children.Where(bind => !genericBase.Params.Any(p => p.Name == bind.Text))) {
+            if (withNode == null) {
+              throw Error($"'{baseName}' has placeholders: fix them, as in {baseName}{(typeParams.Count > 0 ? "<...>" : "")} with ({genericBase.Placeholders[0].Name} is type)", baseType);
+            }
+            foreach (var bind in withNode.Children.Where(bind => !genericBase.Placeholders.Any(p => p.Name == bind.Text))) {
               throw Error($"'{bind.Text}' is not a placeholder of {baseName}", bind);
             }
-            traitArgs = new List<string>();
-            foreach (var placeholder in genericBase.Params) {
+            traitArgs = typeParams.Count > 0 ? TypeArgsOf(typeArgNodes, typeParams) : new List<string>();
+            if (traitArgs.Count != typeParams.Count) {
+              throw Error($"{baseName} takes {typeParams.Count} type argument(s), not {traitArgs.Count}", baseType);
+            }
+            foreach (var placeholder in genericBase.Placeholders) {
               var bind = withNode.Children.FirstOrDefault(b => b.Text == placeholder.Name)
                 ?? throw Error($"the placeholder '{placeholder.Name}' of {baseName} is not fixed: add ({placeholder.Name} is type) to 'with'", baseType);
               traitArgs.Add(ResolveType(bind.Children[0]));
@@ -210,9 +224,6 @@ public sealed partial class CodeGen {
             }
           }
           baseName = ClassInstanceName(genericBase, traitArgs, baseType);
-          if (cls.Traits.Any(existing => classInstanceArgs.TryGetValue(existing.Name, out var other) && other.Template == genericBase)) {
-            throw Error($"feature not supported yet (a class that implements the generic trait {genericBase.Name} more than once)", baseType);
-          }
         } else if (baseType.Children.Count > 0) {
           throw baseType.Children.Any(child => child.Kind == "With")
             ? Error($"'{baseName}' has no placeholders: 'with' does not apply", baseType)
@@ -236,9 +247,12 @@ public sealed partial class CodeGen {
         } else if (traits.TryGetValue(baseName, out var trait)) {
           sawTrait = true;
           if (cls.Traits.Contains(trait)) {
-            throw Error($"the trait '{baseName}' is listed twice", baseType);
+            throw Error($"the trait '{DisplayName(baseName)}' is listed twice", baseType);
           }
           cls.Traits.Add(trait);
+          if (viaAlias) {
+            cls.AliasedTraits.Add(trait.Name);
+          }
         } else {
           throw Error($"unknown parent class or trait '{baseName}'", baseType);
         }
@@ -330,12 +344,6 @@ public sealed partial class CodeGen {
     return false;
   }
 
-  void RejectAtEnd(Node node) {
-    if (node.Children.Any(child => child.Kind == "AtEnd" && child.Text == "trailing")) {
-      throw NotSupported("atEnd after a class or constructor (destructors)", node);
-    }
-  }
-
   void RegisterFields(ClassInfo cls) {
     var node = cls.Node;
     var primary = node.Children.FirstOrDefault(child => child.Kind == "PrimaryCtor");
@@ -344,11 +352,26 @@ public sealed partial class CodeGen {
         if (ParamFeatures.TryGetValue(p.Kind, out var feature)) {
           throw NotSupported(feature, p);
         }
-        if (p.Kind == "VariadicParam") {
-          throw NotSupported("Variadic constructor parameters", p);
-        }
         var def = p.Children.FirstOrDefault(child => child.Kind == "Default");
         string type = ResolveType(p.Children[0]);
+        if (p.Kind == "VariadicParam") {
+          // class Bag(i32 items...): a read-only arr<T> for the construction (spec 13.4); kept as a field, the field gets a copy of its own, as
+          // a plain array parameter does (spec 11.1.1)
+          if (p != primary.Children[^1]) {
+            throw Error("a variadic parameter (T name...) must be the last one", p);
+          }
+          CheckVariadicParam(p, type);
+          string items = "arr<" + type + ">";
+          if (cls.PrimaryParams.Any(existing => existing.Name == p.Text)) {
+            throw Error($"duplicate parameter '{p.Text}'", p);
+          }
+          cls.PrimaryParams.Add(new ParamSig(p.Text!, items, null) { IsVariadic = true });
+          if (PrimaryParamUsedAsField(cls, p.Text!)) {
+            CheckFieldName(cls, p.Text!, p);
+            cls.Fields.Add(new FieldInfo(p.Text!, items, cls, p) { FromParam = true });
+          }
+          continue;
+        }
         if (cls.PrimaryParams.Any(existing => existing.Name == p.Text)) {
           throw Error($"duplicate parameter '{p.Text}'", p);
         }
@@ -357,7 +380,16 @@ public sealed partial class CodeGen {
           continue;
         }
         if (p.Kind == "WritableRefParam") {
-          throw NotSupported("Reference parameters on constructors", p);
+          // class Counter(&i32 total): written during the construction (field initializers and constructor bodies); the lend lasts only
+          // for the call, so it cannot be kept as a field (spec 11.1.1, 13.1)
+          if (PrimaryParamUsedAsField(cls, p.Text!)) {
+            throw Error($"'{p.Text}' is lent with & only for the construction: it cannot be kept as a field (a method, an accessor or a lambda uses it); copy what you need into a field (spec 11.1.1)", p);
+          }
+          if (def != null) {
+            throw Error($"the writable reference '{p.Text}' cannot have a default value: it needs a variable", p);
+          }
+          cls.PrimaryParams.Add(new ParamSig(p.Text!, type, null) { Ref = 2 });
+          continue;
         }
         bool weakParam = p.Children.Any(child => child.Kind == "Weak");
         if (weakParam && !IsClass(type)) {
@@ -386,7 +418,7 @@ public sealed partial class CodeGen {
         }
         bool writableWeak = weakParam && p.Children.Any(child => child.Kind == "ReadWrite");
         cls.PrimaryParams.Add(new ParamSig(p.Text!, weakParam ? "_" + type : type, def?.Children[0]) {
-          IsGift = (p.Kind == "GiftParam" || implicitGift) && (IsClass(type) || type == "string" || IsArr(type)), IsWeak = weakParam, IsWritable = writableWeak,
+          IsGift = (p.Kind == "GiftParam" || implicitGift) && (IsClass(type) || type == "string" || IsArr(type)) || p.Kind == "GiftParam" && IsFunType(type), IsWeak = weakParam, IsWritable = writableWeak,
           IsImplicitGift = implicitGift, GivenTo = implicitGift ? $"the constructor of {DisplayName(cls.Name)}" : null
         });
         if (cls.IsException && cls.Parent != null && cls.Parent.PrimaryParams.Any(parentParam => parentParam.Name == p.Text)) {
@@ -482,7 +514,7 @@ public sealed partial class CodeGen {
         case "Enum":
           throw NotSupported("Nested types", member);
         case "AtEnd":
-          throw NotSupported("atEnd in a class body", member);
+          throw Error("an atEnd in a class body: the destructor of a class is the atEnd written after its closing brace, } atEnd { } (spec 11.4)", member);
         default:
           throw Error($"'{member.Kind}' is not allowed in a class body", member);
       }
@@ -643,6 +675,10 @@ public sealed partial class CodeGen {
       if (isOverride && explicitVisibility) {
         throw Error("a replacing function takes the visibility of the original: write none on it", member);
       }
+      if (member.Children.FirstOrDefault(child => child.Kind == "ImplOf") is Node implOf) {
+        QualifiedImplementation(cls, member, implOf, isOverride, isStatic);
+        continue;
+      }
       var f = RegisterFun(member, null, cls)!;
       f.Class = cls;
       f.IsAccessor = member.Children.Any(child => child.Kind == "AccessorFun");
@@ -731,6 +767,42 @@ public sealed partial class CodeGen {
       f.Visibility = above.Visibility;
       cls.Vtable[f.Slot] = f;
     }
+  }
+
+  // replace fun string SourceString.take(): the implementation of the method of one trait of the class, when two traits (two copies of
+  // a generic trait) have it with the same parameters (spec 11.2, 11.3.2). Its name is Class.Trait.name: a call without the trait does
+  // not see it; the trait's table of the class takes it (BuildImpls)
+  void QualifiedImplementation(ClassInfo cls, Node member, Node implOf, bool isOverride, bool isStatic) {
+    string bare = member.Text!;
+    var trait = QualifiedTrait(cls, implOf.Text!, implOf);
+    if (trait == null || !AllTraits(cls).Contains(trait)) {
+      throw Error($"'{implOf.Text}' is not a trait of {DisplayName(cls.Name)}: replace fun ... {implOf.Text}.{bare}(...) names one of its traits", implOf);
+    }
+    if (!isOverride || isStatic) {
+      throw Error($"{implOf.Text}.{bare} answers a function of a trait: write it as replace fun ... {implOf.Text}.{bare}(...)", member);
+    }
+    member.Text = trait.Name + "." + bare;
+    var f = RegisterFun(member, null, cls)!;
+    f.Class = cls;
+    f.IsOverride = true;
+    FunSig? ofTrait = null;
+    for (var t = trait; t != null && ofTrait == null; t = t.Super) {
+      if (funs.TryGetValue(t.Name + "." + bare, out var methods)) {
+        ofTrait = methods.FirstOrDefault(g => !g.IsStatic && ParamTypes(g).SequenceEqual(ParamTypes(f)));
+      }
+    }
+    if (ofTrait == null) {
+      throw Error($"'{bare}' replaces nothing: {DisplayName(trait.Name)} has no function with this signature", member);
+    }
+    if (ofTrait.Ret != f.Ret) {
+      throw Error($"it returns {DisplayName(ofTrait.Ret)}, like the function of {DisplayName(trait.Name)} it answers", member);
+    }
+    CheckOverrideMarkers(ofTrait, f, member);
+    f.Visibility = ofTrait.Visibility;
+    f.IsAsParent = ofTrait.IsAsParent;
+    f.IsUnrestricted = ofTrait.IsUnrestricted;
+    f.Slot = cls.Vtable.Count;
+    cls.Vtable.Add(f);
   }
 
   // The primary constructor: an init function (fills the fields of one class on an existing object) and the
@@ -888,6 +960,12 @@ public sealed partial class CodeGen {
       var chain = member.Children.FirstOrDefault(child => child.Kind == "Chain");
       foreach (var call in chain?.Children ?? new List<Node>()) {
         string target = call.Text!;
+        // a generic parent or trait is named without its arguments, which the header gives: : Box(7, 9) for Box<i32>
+        if (cls.Parent != null && target != cls.Parent.Name && target == TemplateName(cls.Parent)) {
+          target = call.Text = cls.Parent.Name;
+        } else if (IntroducedTraits(cls).Where(trait => trait.Name != target && TemplateName(trait) == target).ToList() is { Count: 1 } generic) {
+          target = call.Text = generic[0].Name;
+        }
         if (target == cls.Name) {
           selfCall = selfCall == null ? call : throw Error($"a constructor calls one other constructor of {cls.Name}", call);
         } else if (cls.Parent != null && target == cls.Parent.Name) {
@@ -923,9 +1001,6 @@ public sealed partial class CodeGen {
         throw Error("a constructor takes only a visibility (public, internal or private)", member);
       }
       var paramsNode = member.Children.First(child => child.Kind == "Params");
-      if (paramsNode.Children.FirstOrDefault(p => p.Kind == "VariadicParam") is Node variadic) {
-        throw NotSupported("Variadic constructor parameters", variadic);
-      }
       var block = Synthetic("Block", member);
       if ((selfCall ?? parentCall) is Node called) {
         block.Add(Synthetic("ExprStmt", called).Add(Synthetic("CtorChain", called, called.Text).Add(called.Children[0])));
@@ -979,12 +1054,15 @@ public sealed partial class CodeGen {
     if (parentArgs == null) {
       return null;
     }
-    string named = ResolveType(Synthetic("Type", parentArgs, parentArgs.Text));
+    string named = cls.Parent != null && parentArgs.Text == TemplateName(cls.Parent)
+      ? cls.Parent.Name   // class Crate : Box<string>(...): the copy of the generic parent
+      : ResolveType(Synthetic("Type", parentArgs, parentArgs.Text));
     if (cls.Parent == null || named != cls.Parent.Name) {
       throw Error(traits.ContainsKey(named)
         ? $"a trait takes no arguments in the header: its constructor without parameters runs, or a constructor of the body names it (spec 11.1.1)"
         : $"only the parent class takes arguments in the header (spec 11.1.1)", parentArgs);
     }
+    parentArgs.Text = named;   // the chain calls the copy of a generic parent (Box__string)
     if (cls.IsException) {
       throw Error($"an exception class repeats the header parameters of its parent instead: class {DisplayName(cls.Name)}(...) : {DisplayName(cls.Parent.Name)} (spec 15.2)", parentArgs);
     }
@@ -1031,12 +1109,25 @@ public sealed partial class CodeGen {
     var used = new HashSet<string>();
     CollectNames(fragment, used);
     var renames = new Dictionary<string, string>();
+    var weakKept = new List<(string Name, string Type, bool Writable, Node At)>();
 
     foreach (var p in paramsNode.Children.Where(p => used.Contains(p.Text!))) {
-      if (p.Kind is not ("Param" or "GiftParam") || p.Children.Any(child => child.Kind is "Weak")) {
-        throw NotSupported("A destructor fragment that uses a reference or weak parameter", p);
+      if (p.Kind == "WritableRefParam") {
+        throw Error($"the destructor fragment keeps '{p.Text}' until the object dies: a & parameter is lent only for the call, so it cannot be kept; copy it into a local of the constructor and use that", p);
+      }
+      if (p.Kind is not ("Param" or "GiftParam")) {
+        throw NotSupported("A destructor fragment that uses a variadic parameter", p);
       }
       string type = ResolveType(p.Children[0]);
+      if (p.Children.Any(child => child.Kind is "Weak")) {
+        // %Dog w: the fragment keeps a weak reference of its own in a hidden weak field, read through enforce (spec 12.7)
+        // and a weak local of the same name, since enforce reads a weak variable, not a field; the constructor keeps its parameter
+        bool writableWeak = p.Children.Any(child => child.Kind == "ReadWrite");
+        cls.Fields.Add(new FieldInfo(Hidden(p.Text!), type, cls, p) { Hidden = true, IsWeak = true, IsWritable = writableWeak });
+        statements.Add(Assignment(Hidden(p.Text!), Synthetic("Name", p, p.Text), p, false));
+        weakKept.Add((p.Text!, type, writableWeak, p));
+        continue;
+      }
       if (p.Children.Any(child => child.Kind == "Counted")) {
         // @Dog d: the fragment keeps a usage of its own in a hidden counted field, released with the object (spec 12.7)
         cls.Fields.Add(new FieldInfo(Hidden(p.Text!), type, cls, p) { Hidden = true, IsCounted = true });
@@ -1044,15 +1135,15 @@ public sealed partial class CodeGen {
         renames[p.Text!] = Hidden(p.Text!);
         continue;
       }
-      if (IsArr(type)) {
-        throw NotSupported("A destructor fragment that uses an array parameter", p);
+      if (IsArr(type) && p.Kind != "GiftParam") {
+        throw Error($"the destructor fragment keeps '{p.Text}' until the object dies: a borrowed array cannot be kept, take it with ->{DisplayName(type)} {p.Text}", p);
       }
       if (IsClass(type) && p.Kind != "GiftParam") {
         throw Error($"the destructor fragment keeps '{p.Text}' until the object dies: a borrowed object cannot be kept, take it with ->{type} {p.Text}", p);
       }
       AddHiddenField(cls, Hidden(p.Text!), type, p);
       Node source = Synthetic("Name", p, p.Text);
-      if (p.Kind == "GiftParam" && (IsClass(type) || type == "string")) {
+      if (p.Kind == "GiftParam" && (IsClass(type) || type == "string" || IsArr(type))) {
         source = Synthetic("Gift", p).Add(source);   // the object moves into the object, for the fragment
       }
       statements.Add(Assignment(Hidden(p.Text!), source, p, false));
@@ -1063,38 +1154,76 @@ public sealed partial class CodeGen {
       var decls = new List<(Node Parent, Node Decl)>();
       CollectDecls(body, decls);
       foreach (var group in decls.Where(d => used.Contains(d.Decl.Text!) && !renames.ContainsKey(d.Decl.Text!)).GroupBy(d => d.Decl.Text!)) {
-        if (group.Count() > 1) {
-          throw NotSupported("A destructor fragment that uses a name declared twice in its constructor", group.Last().Decl);
+        // a name declared in several scopes of the constructor (if / else, loops): one hidden field, the last value written wins; with
+        // different types it is a compile error (spec 14.2)
+        string? groupType = null;
+        bool groupCounted = false, groupWeak = false;
+        foreach (var (outer, first) in group) {
+          // the same name again while the first one is still in scope: the error of any block, which the hidden field would hide
+          int from = outer.Children.IndexOf(first);
+          if (group.FirstOrDefault(other => other.Decl != first && outer.Children.Skip(from + 1).Any(child => child == other.Decl || Contains(child, other.Decl))) is { Decl: Node again }) {
+            throw Error($"'{again.Text}' is already declared in this block or an enclosing one", again);
+          }
         }
-        var (parent, decl) = group.First();
-        var typeNode = decl.Children[0];
-        if (typeNode is { Kind: "Type", Text: "var" }) {
-          throw Error($"the destructor fragment keeps '{decl.Text}': write its type instead of var", decl);
+        foreach (var (parent, decl) in group) {
+          var typeNode = decl.Children[0];
+          if (typeNode is { Kind: "Type", Text: "var" }) {
+            throw Error($"the destructor fragment keeps '{decl.Text}': write its type instead of var", decl);
+          }
+          if (decl.Children.Any(child => child.Kind == "Size")) {
+            throw NotSupported("A destructor fragment that uses a sized local of this collection type", decl);
+          }
+          string type = ResolveType(typeNode);
+          bool countedLocal = decl.Children.Any(child => child.Kind == "Counted");
+          bool weakLocal = decl.Children.Any(child => child.Kind is "Weak" or "WeakInit");
+          if (groupType == null) {
+            groupType = type;
+            groupCounted = countedLocal;
+            groupWeak = weakLocal;
+            if (weakLocal) {
+              // a weak local: a hidden weak field, read through enforce in the fragment (spec 12.7)
+              cls.Fields.Add(new FieldInfo(Hidden(decl.Text!), type, cls, decl) { Hidden = true, IsWeak = true, IsWritable = decl.Children.Any(child => child.Kind == "ReadWrite") });
+            } else if (countedLocal) {
+              cls.Fields.Add(new FieldInfo(Hidden(decl.Text!), type, cls, decl) { Hidden = true, IsCounted = true });   // a counted local: a hidden counted field
+            } else {
+              AddHiddenField(cls, Hidden(decl.Text!), type, decl);   // an array local (arr<T>[n] too): the object owns the array until it dies
+            }
+          } else if (type != groupType || countedLocal != groupCounted || weakLocal != groupWeak) {
+            throw Error($"'{decl.Text}' is declared with two types in the constructor and its destructor fragment uses it: give the two variables different names (spec 14.2)", decl);
+          }
+          if (weakLocal) {
+            // the constructor keeps its weak local (enforce reads a weak variable, not a field): the hidden field takes a copy after the
+            // declaration and after every assignment of the local
+            parent.Children.Insert(parent.Children.IndexOf(decl) + 1, Assignment(Hidden(decl.Text!), Synthetic("Name", decl, decl.Text), decl, false));
+            continue;
+          }
+          // the declaration becomes the assignment of the hidden field (nothing when it has no value: the field starts as zero, or keeps
+          // the value of an earlier declaration of the same name)
+          int at = parent.Children.IndexOf(decl);
+          parent.Children.RemoveAt(at);
+          if (decl.Children.FirstOrDefault(child => child.Kind is "Init" or "WeakInit") is Node init && !(init.Kind == "WeakInit" && init.Text == "default")) {
+            parent.Children.Insert(at, Assignment(Hidden(decl.Text!), init.Children[0], decl, false));
+          }
         }
-        if (decl.Children.Any(child => child.Kind is "Weak" or "Size")) {
-          throw NotSupported("A destructor fragment that uses a weak or sized local", decl);
-        }
-        string type = ResolveType(typeNode);
-        if (IsArr(type)) {
-          throw NotSupported("A destructor fragment that uses an array local", decl);
-        }
-        bool countedLocal = decl.Children.Any(child => child.Kind == "Counted");
-        if (countedLocal) {
-          cls.Fields.Add(new FieldInfo(Hidden(decl.Text!), type, cls, decl) { Hidden = true, IsCounted = true });   // a counted local: a hidden counted field
+        if (groupWeak) {
+          CopyAfterAssignments(body, group.Key, Hidden(group.Key));
+          weakKept.Add((group.Key, groupType!, cls.Fields.First(field => field.Name == Hidden(group.Key)).IsWritable, group.First().Decl));
         } else {
-          AddHiddenField(cls, Hidden(decl.Text!), type, decl);
-        }
-        renames[decl.Text!] = Hidden(decl.Text!);
-        // the declaration becomes the assignment of the hidden field (nothing when it has no value: the field starts as zero)
-        int at = parent.Children.IndexOf(decl);
-        parent.Children.RemoveAt(at);
-        if (decl.Children.FirstOrDefault(child => child.Kind == "Init") is Node init) {
-          parent.Children.Insert(at, Assignment(Hidden(decl.Text!), init.Children[0], decl, false));
+          renames[group.Key] = Hidden(group.Key);
         }
       }
       RenameToFields(body, renames);
     }
     RenameToFields(fragment, renames);
+    // the fragment reads each kept weak reference through a weak local of its own name: %Dog w = this.__f<n>_w
+    foreach (var (name, type, writable, at) in weakKept.AsEnumerable().Reverse()) {
+      var decl = Synthetic("Decl", at, name).Add(Synthetic("Type", at, type)).Add(Synthetic("Weak", at))
+        .Add(Synthetic("WeakInit", at).Add(Synthetic("Member", at, Hidden(name)).Add(Synthetic("Name", at, "this"))));
+      if (writable) {
+        decl.Add(Synthetic("ReadWrite", at));
+      }
+      fragment.Children.Insert(0, decl);
+    }
 
     string seq = FragmentSeq(cls);
     if (FindField(cls, seq) == null) {
@@ -1147,6 +1276,9 @@ public sealed partial class CodeGen {
     return f;
   }
 
+  // the name of the generic a copy was made from (Box for Box__i32); the name itself for any other class or trait
+  string TemplateName(ClassInfo cls) => classInstanceArgs.TryGetValue(cls.Name, out var instance) ? instance.Template.Name : cls.Name;
+
   static void AddHiddenField(ClassInfo cls, string name, string type, Node at) {
     cls.Fields.Add(new FieldInfo(name, type, cls, at) { Hidden = true });
   }
@@ -1157,6 +1289,21 @@ public sealed partial class CodeGen {
     }
     foreach (var child in node.Children) {
       CollectNames(child, names);
+    }
+  }
+
+  static bool Contains(Node node, Node target) => node.Children.Any(child => child == target || Contains(child, target));
+
+  // name = ... as a statement: the hidden field of a destructor fragment takes the new value right after it
+  static void CopyAfterAssignments(Node node, string name, string field) {
+    for (int i = 0; i < node.Children.Count; i++) {
+      var child = node.Children[i];
+      if (child.Kind == "Assign" && child.Children[0] is { Kind: "Name" } target && target.Text == name) {
+        node.Children.Insert(i + 1, Assignment(field, Synthetic("Name", child, name), child, false));
+        i++;
+        continue;
+      }
+      CopyAfterAssignments(child, name, field);
     }
   }
 
@@ -2085,8 +2232,28 @@ public sealed partial class CodeGen {
       return FnArg(param, arg, scope);   // spec 13.3
     }
     if (param.Type == "string?") {
-      if (IsByPointer(param) || param.IsGift) {
-        throw NotSupported("&string? and ->string? parameters (a string? parameter borrows, spec 7.1)", arg);
+      if (IsByPointer(param) && param.Ref == 2) {
+        // &string? s: the callee can give the caller's variable another text, or null (spec 7.1, 13.1)
+        if (arg.Kind != "WritableAddressOf") {
+          throw Error($"'{param.Name}' can change the string?: write &{(arg.Kind == "Name" ? arg.Text : "x")} at the call", arg);
+        }
+        return ReferenceArg(param, arg, scope);
+      }
+      if (param.IsGift) {
+        // ->string? s: the callee owns the text; ->x moves it out of x (left null), a new text is given as it is (spec 7.1, 13.1)
+        if (arg.Kind == "Gift" && arg.Children[0] is { Kind: "Name" } givenName && scope.Find(givenName.Text!) is VarInfo { Type: "string?" } givenVar) {
+          if (givenVar.IsParam && !givenVar.Own) {
+            throw Error($"'{givenName.Text}' is a parameter: it only borrows its string?, ->{givenName.Text} cannot take it", arg);
+          }
+          pendingMoves.Add((givenVar, $"moved away with ->{givenName.Text}"));
+          string moved = NewTemp();
+          return $"({{ df_opt_string {moved} = {givenVar.CName}; {givenVar.CName} = (df_opt_string){{0}}; {moved}; }})";
+        }
+        var givenText = ExprOf(arg, scope, param.Type);
+        if (!givenText.Fresh && givenText.Type != "null" && arg.Kind is not ("Literal" or "String" or "Interp")) {
+          throw Error($"'{param.Name}' takes the string?: write ->{(arg.Kind == "Name" ? arg.Text : "x")}, or give a new text (spec 7.1)", arg);
+        }
+        return OptStrOwned(givenText, arg);
       }
       if (arg.Kind is "Gift" or "WritableAddressOf") {
         throw Error($"'{param.Name}' borrows the string?: remove the {(arg.Kind == "Gift" ? "->" : "&")}", arg);

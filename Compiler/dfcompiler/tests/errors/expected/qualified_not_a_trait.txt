@@ -1,0 +1,1 @@
+qualified_not_a_trait.df(5): error: 'Other' is not a trait of Only: replace fun ... Other.take(...) names one of its traits

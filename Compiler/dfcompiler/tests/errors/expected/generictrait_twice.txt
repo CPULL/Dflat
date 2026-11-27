@@ -1,1 +1,1 @@
-generictrait_twice.df(7): error: feature not supported yet (a class that implements the generic trait Container more than once)
+generictrait_twice.df(7): error: Both implements Container<string> and Container<i32>, and 'Get' clashes: give one an alias, alias Container<i32> as ... , and write the alias in the header (spec 11.3.2)

@@ -1,0 +1,1 @@
+sibling.df(3): error: unknown type 'small'

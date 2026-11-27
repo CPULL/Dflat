@@ -1,0 +1,12 @@
+class A {
+  public i32 seen
+  public A() {
+    i32 k = 0
+    for i in [1, 2] {
+      i32 k = 7
+    }
+  } atEnd {
+    seen = k
+  }
+}
+A a = A()

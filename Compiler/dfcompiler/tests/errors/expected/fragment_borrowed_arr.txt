@@ -1,0 +1,1 @@
+fragment_borrowed_arr.df(3): error: the destructor fragment keeps 'xs' until the object dies: a borrowed array cannot be kept, take it with ->arr<i32> xs

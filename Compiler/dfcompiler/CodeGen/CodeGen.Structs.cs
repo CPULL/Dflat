@@ -120,6 +120,9 @@ public sealed partial class CodeGen {
     return (long)value;
   }
 
+  bool PlainTupleField(string type) =>
+    TupleElems(type).All(part => IsPlainValueType(part.Type) || IsNullable(part.Type) && IsPlainValueType(BaseOf(part.Type)) || IsTuple(part.Type) && PlainTupleField(part.Type));
+
   void CheckStructFieldType(string type, Node at) {
     if (IsArr(type)) {
       throw Error("a struct cannot have an array of undefined size: an arr field needs a size known at compile time, arr<T>[N] (spec 11.1.5.4)", at);
@@ -146,6 +149,13 @@ public sealed partial class CodeGen {
     }
     if (IsSetName(type)) {
       return;   // a set value: what it owns is cloned and ended with the struct (spec 11.3.6.1)
+    }
+    if (IsTuple(type)) {
+      // a tuple field of values (numbers, bool, char, dates, enums, nullable ones, tuples of them): stored in the struct, copied with it
+      if (!PlainTupleField(type)) {
+        throw NotSupported($"a tuple field that holds strings, objects, arrays or function values ({DisplayName(type)}); a tuple of values is built", at);
+      }
+      return;
     }
     throw NotSupported($"{type} inside a struct", at);
   }

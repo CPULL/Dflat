@@ -1,0 +1,1 @@
+fragment_two_types.df(7): error: 'k' is declared with two types in the constructor and its destructor fragment uses it: give the two variables different names (spec 14.2)

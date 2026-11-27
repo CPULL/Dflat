@@ -1,0 +1,7 @@
+trait Mapper<Key> {
+  placeholder Out
+  public fun Out apply(Key k)
+}
+class Len : Mapper with (Out is i32) {
+  replace fun i32 apply(string k) { return 0 }
+}

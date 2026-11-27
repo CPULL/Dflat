@@ -1,0 +1,39 @@
+// &string? and ->string? parameters (spec 7.1, H6): &s lets the callee change the text or set null, also on a map value; ->s gives
+// the text to the callee (->x leaves x null, a new text is given as it is)
+import Root
+class Box {
+  string? kept
+  public fun keep(->string? s) { kept = ->s }
+  public fun show() { Console.log(kept ?? "empty") }
+}
+fun mark(&string? s) { s = (s ?? "none") + "?" }
+fun clear(&string? s) { s = null }
+fun ->string? echo(->string? s) { return s }
+fun consume(->string? s) { Console.log("consumed " + (s ?? "null")) }
+fun go() {
+  string? a = $"text {1}"
+  mark(&a)
+  string? b = null
+  mark(&b)
+  Console.log($"{a ?? "-"} {b ?? "-"}")
+  clear(&a)
+  Console.log(a ?? "cleared")
+  Box box = Box()
+  string? c = $"kept {2}"
+  box.keep(->c)
+  box.show()
+  box.keep($"new {3}")
+  box.show()
+  box.keep(null)
+  box.show()
+  string? d = $"echo {4}"
+  string? e = echo(->d)
+  Console.log(e ?? "-")
+  consume($"temp {5}")
+  map<i32, string?> m = map<i32, string?>()
+  m[1] = "x"
+  mark(&m[1])
+  mark(&m[2])
+  Console.log($"{m}")
+}
+go()

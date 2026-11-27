@@ -1,0 +1,14 @@
+N { name: changed, v: 1 } N { name: a1, v: 1 } N { name: h3, v: 7 } N { name: h3, v: 3 } N { name: x1, v: 1 } N { name: a1, v: 1 }
+N { name: p, v: 99 } N { name: p, v: 2 }
+rex copy
+plain
+  dog plain ends
+  dog copy ends
+  dog rex ends
+typed:
+  dog copy ends
+  dog rex ends
+var:
+  dog copy2 ends
+  dog max ends
+---- exit code 0 ----

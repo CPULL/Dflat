@@ -1,0 +1,53 @@
+// var declarations of structs that hold strings or objects (spec 11.1.5.3, F18): var b = a, a!, a field, an item, ->a, a parameter;
+// each takes its own copy and ends it with its scope
+import Root
+class Dog {
+  public string name
+  public Dog(string name) { this.name = name }
+} atEnd {
+  Console.log("  dog " + name + " ends")
+}
+struct N { string name, i32 v }
+struct D { Dog dog, i32 v }
+class H { public N n = N($"h{3}", 3) }
+fun show(N p) {
+  var copy = p
+  copy.v = 99
+  Console.log($"{copy} {p}")
+}
+fun go() {
+  N a = N($"a{1}", 1)
+  var b = a
+  b.name = "changed"
+  var c = a!
+  H h = H()
+  var d = h.n
+  d.v = 7
+  vec<N> v = [N($"x{1}", 1)]
+  var e = v[0]
+  var f = ->a
+  Console.log($"{b} {c} {d} {h.n} {e} {f}")
+  show(N("p", 2))
+  D one = D(Dog("rex"), 1)
+  var two = one
+  two.dog.name = "copy"
+  Console.log($"{one.dog.name} {two.dog.name}")
+  Dog plain = Dog("plain")
+  var borrowed = plain
+  Console.log(borrowed.name)
+}
+go()
+fun typed() {
+  D one = D(Dog("rex"), 1)
+  D two = one
+  two.dog.name = "copy"
+}
+fun inferred() {
+  D one = D(Dog("max"), 1)
+  var two = one
+  two.dog.name = "copy2"
+}
+Console.log("typed:")
+typed()
+Console.log("var:")
+inferred()

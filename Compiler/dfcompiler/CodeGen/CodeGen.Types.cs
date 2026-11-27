@@ -27,13 +27,13 @@ public sealed partial class CodeGen {
   bool IsBitfield(string type) => enums.TryGetValue(type, out var info) && info.Bitfield;
 
   // fs.DeleteOptions with alias Root.IO as fs, Root.IO.DeleteOptions, String.StringEncoding: the library enum's own name
-  string StripLibraryQualifier(string name) {
+  string StripLibraryQualifier(string name, int line) {
     int dot = name.IndexOf('.');
     if (dot < 0) {
       return name;
     }
     string first = name[..dot];
-    string full = (nameAliases.TryGetValue(first, out var target) ? target : first) + name[dot..];
+    string full = (nameAliases.TryGetValue(first, line, out var target) ? target : first) + name[dot..];
     foreach (string library in new[] { "Root.IO.", "Root.ExecProcess." }) {
       if (full.StartsWith(library) && full.IndexOf('.', library.Length) < 0) {
         return full[library.Length..];   // also Root.ExecProcess.RunResult
@@ -460,7 +460,7 @@ public sealed partial class CodeGen {
         // *i32{count}: the bound is applied by the declaration (spec 12.1)
         return ResolvePointerType(n, n.Children[0], n.Kind == "WritablePointer", false);   // *T, &*T (spec 12.1)
       case "Type": {
-        string t = StripLibraryQualifier(n.Text!);
+        string t = StripLibraryQualifier(n.Text!, n.Line);
         if (t == "View" && vecPrelude) {
           return ViewTypeOf(n);   // View<vec<i32>>: the view class of that collection (spec 6.5)
         }
@@ -492,7 +492,7 @@ public sealed partial class CodeGen {
         if (TypeFeatures.TryGetValue(t, out var feature)) {
           throw NotSupported(feature, n);
         }
-        if (t == "pointer" && !typeAliases.ContainsKey(t) && !IsKnownType(t)) {
+        if (t == "pointer" && !typeAliases.ContainsKey(t, n) && !IsKnownType(t)) {
           // pointer<T>, pointer<&T> (spec 12.1); pointer alone takes its type from its value (ResolveDeclType)
           if (n.Children.Count != 1) {
             throw Error(n.Children.Count == 0 ? "'pointer' without a type argument takes its type from its value: pointer p = pointer.to(x) (spec 12.1)"
@@ -530,7 +530,7 @@ public sealed partial class CodeGen {
         if (n.Children.Count > 0) {
           throw Error($"'{t}' is not generic", n);
         }
-        if (typeAliases.TryGetValue(t, out var aliased)) {
+        if (typeAliases.TryGetValue(t, n, out var aliased)) {
           return aliased;
         }
         if (!IsKnownType(t)) {

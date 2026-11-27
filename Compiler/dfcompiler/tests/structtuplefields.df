@@ -1,0 +1,16 @@
+// Tuple fields in structs (spec 11.1.5, F18): a tuple of values (numbers, enums, nullable values, tuples of them), written, copied,
+// in a vec and a map, compared
+import Root
+enum Side { Left, Right }
+struct Span { (i32, i32) range, string label, (i32?, (Side, i64)) more }
+fun go() {
+  Span s = Span((1, 5), $"a{1}", (null, (Side.Right, 7)))
+  s.range = (2, 6)
+  Span t = s
+  t.range.0 = 9
+  vec<Span> v = [s, t]
+  map<i32, Span> m = map<i32, Span>()
+  m[1] = t
+  Console.log($"{s} {t.range} {v.len} {m[1].range.0} {s == t}")
+}
+go()

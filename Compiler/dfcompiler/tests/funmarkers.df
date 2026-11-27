@@ -1,0 +1,45 @@
+// Markers on function-type parameters (spec 13.3.2, H6): ->fun() h takes a usage the callee can keep (a field, a header parameter);
+// &fun h lets the callee give the variable another function; a tuple part takes a function value
+import Root
+class Btn {
+  fun() handler
+  public fun take(->fun() h) { handler = ->h }
+  public fun keepCopy(->fun() h) { handler = h }
+  public fun press() { handler() }
+}
+fun twice(&i32(i32) f) {
+  i32 before = f(1)
+  f = (i32 x; before!) { x * 2 + before }
+}
+fun go() {
+  Btn b = Btn()
+  string word = $"hello {1}"
+  fun() g = (; word!) { Console.log("pressed " + word) }
+  b.take(->g)
+  b.press()
+  b.take(() { Console.log("new lambda") })
+  b.press()
+  fun() k = () { Console.log("kept copy") }
+  b.keepCopy(->k)
+  b.press()
+  i32(i32) inc = (i32 x) { x + 1 }
+  twice(&inc)
+  Console.log($"{inc(5)}")
+  (i32, i32(i32)) t = (1, (i32 x) { x })
+  t.1 = (i32 x) { x * 10 }
+  i32(i32) part = t.1
+  Console.log($"{part(3)}")
+}
+go()
+class Button(->fun() handler) {
+  public fun press() { handler() }
+}
+fun buttons() {
+  string label = $"ok {1}"
+  fun() h = (; label!) { Console.log("pressed " + label) }
+  Button b = Button(->h)
+  b.press()
+  Button c = Button(() { Console.log("literal") })
+  c.press()
+}
+buttons()

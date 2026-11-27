@@ -1,0 +1,6 @@
+fun keep(->string? s) { }
+fun go() {
+  string? t = "x"
+  keep(t)
+}
+go()

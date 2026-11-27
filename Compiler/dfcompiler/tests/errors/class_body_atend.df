@@ -1,0 +1,7 @@
+class A {
+  i32 x = 1
+  atEnd {
+    x = 0
+  }
+}
+A a = A()

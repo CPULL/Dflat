@@ -1,0 +1,10 @@
+trait Source<Item> {
+  unrestricted fun Item take()
+}
+alias Source<string> as SourceString
+class Both : Source<i32>, SourceString {
+  replace fun i32 Source.take() { return 5 }
+  replace fun string SourceString.take() { return "five" }
+}
+Both b = Both()
+i32 n = b.take()

@@ -1,0 +1,6 @@
+trait Source<Item> {
+  public fun i32 size() { return 1 }
+}
+class Both : Source<i32>, Source<string> {
+  public fun i32 total() { return size() }
+}

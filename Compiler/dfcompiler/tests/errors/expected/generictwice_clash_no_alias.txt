@@ -1,0 +1,1 @@
+generictwice_clash_no_alias.df(4): error: Both implements Source<i32> and Source<string>, and 'take' clashes: give one an alias, alias Source<string> as ... , and write the alias in the header (spec 11.3.2)

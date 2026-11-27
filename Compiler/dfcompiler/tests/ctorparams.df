@@ -1,0 +1,63 @@
+// Variadic and & parameters of constructors (spec 11.1.1, 13.4, F4): in the header (read or written during the construction; a
+// variadic one kept as a field is a copy), in constructors of the body and of traits
+import Root
+class Bag(string label, i32 items...) {
+  public i32 total = sum(items)
+  fun i32 sum(arr<i32> xs) {
+    i32 t = 0
+    for x in xs { t += x }
+    return t
+  }
+}
+class Kept(i32 items...) {
+  public fun i32 count() { return (i32)items.len }
+}
+class Counter(&i32 total, i32 inc) {
+  public i32 seen = add(&total, inc)
+  static fun i32 add(&i32 t, i32 d) {
+    t += d
+    return t
+  }
+  public fun bumpLater() { }
+}
+class Body {
+  public i32 total = 0
+  public string names = ""
+  public Body(string first, string others...) {
+    names = first
+    for o in others { names += "," + o }
+  }
+  public Body(&i32 out) { out = 42 }
+}
+trait Tr {
+  public i32 base = 0
+  public Tr(i32 xs...) { for x in xs { base += x } }
+}
+class K : Tr {
+  public K() : Tr(1, 2, 3) { }
+}
+fun go() {
+  Bag b = Bag("b", 1, 2, 3)
+  Bag none = Bag("n")
+  arr<i32> list = [10, 20]
+  Bag lent = Bag("l", list)
+  Kept k = Kept(4, 5, 6)
+  i32 n = 7
+  Counter c = Counter(&n, 3)
+  Body bo = Body("a", "b", "c")
+  i32 got = 0
+  Body w = Body(&got)
+  K kk = K()
+  Console.log($"{b.total} {none.total} {lent.total} {k.count()} {c.seen} {n} {bo.names} {got} {kk.base}")
+}
+go()
+class KeptCopy(i32 items...) {
+  public fun i32 first() { return items[0] }
+}
+fun keptCopy() {
+  arr<i32> src = [1, 2]
+  KeptCopy k = KeptCopy(src)
+  src[0] = 99
+  Console.log($"{k.first()} {src[0]}")
+}
+keptCopy()

@@ -5,7 +5,8 @@ namespace dfcompiler;
 // f(&v[i]), f(&l[i]), f(&m[k]) (spec 13.1, 6.4): the address of an item of a vec, a list or a map, lent read/write to a call. While the
 // call runs the collection counts one more open iterator, so nothing can change its size (the item cannot move or end); the counter goes
 // down with the temporaries of the statement (df_iter_unfreeze). A missing key of a map is added first with the zero value. A map lends
-// the values it keeps as they are (numbers, bool, char, enums, dates); its strings and objects are kept in another form: not lent yet.
+// its values in place (objects, arrays and string? too); a string value is kept inline in its slot, so the call gets a copy of its own that
+// goes back to the slot at the end of the statement (df_sval_lend_out).
 // a[i] ??= v, l[i] ??= v, m[k] ??= v (spec 7.1): the item is assigned only when it is null (ItemNullAssign).
 public sealed partial class CodeGen {
   string? LentItemAddress(Expr obj, Node target, Scope scope, string type, Node at) {
@@ -25,13 +26,15 @@ public sealed partial class CodeGen {
     fn!.UsesTmp = true;
     if (isMap) {
       NeedMapChunk(obj.Type);
-      if (SlotC(obj.Type) != CType(elem) || IsClass(elem) || IsArr(elem) || elem == "string" || elem == "string?") {
-        throw NotSupported($"&m[k] on the {DisplayName(elem)} values of a map (the values a map keeps as they are: numbers, bool, char, enums, dates)", at);
+      if (elem != "string" && SlotC(obj.Type) != CType(elem)) {
+        throw NotSupported($"&m[k] on the {DisplayName(elem)} values of a map", at);
       }
       string key = NewTemp();
       string slot = NewTemp();
+      // a string value is kept inline in its slot: the call gets a string of its own, which goes back to the slot after the statement
+      string lent = elem == "string" ? $"df_sval_lend_out((uint8_t*){slot}); " : $"({CType(elem)}*){slot}; ";
       return $"({{ {CType(obj.Type)} {held} = {NullChecked(obj.Code, obj.Type)}; {MapKeyArg(target.Children[1], scope, MapKey(obj.Type), key, taking: true)}"
-        + MapSlot(held, obj.Type, key, slot, true) + freeze + $"({CType(elem)}*){slot}; }})";
+        + MapSlot(held, obj.Type, key, slot, true) + freeze + lent + "})";
     }
     var index = ExprOf(target.Children[1], scope, "u64");
     string position = NewTemp();

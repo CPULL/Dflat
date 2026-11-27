@@ -1,0 +1,67 @@
+// filter, map and reduce on more types (spec 6.6, F11): filter keeps copies of tuples, structs and nullable items; map makes tuples,
+// arrays, nullable values, objects in tuples and function values; reduce carries nullable values, tuples, structs and string?
+import Root
+struct P { i32 x, i32 y }
+class Dog {
+  public string name
+  public Dog(string name) { this.name = name }
+}
+fun filtersAndMaps() {
+  vec<(i32, string)> pairs = [(1, "a"), (2, "bb"), (3, "ccc")]
+  var long = pairs.filter(((i32, string) p) { p.1.len > 1 })
+  list<P> points = [P(1, 2), P(3, 4)]
+  var right = points.filter((P p) { p.x > 1 })
+  arr<i32?> maybe = [1, null, 3]
+  var some = maybe.filter((i32? m) { m != null })
+  Console.log($"{long} {right} {some}")
+  vec<i32> nums = [1, 2, 3]
+  var tuples = nums.map<(i32, string)>((i32 n) { (n, $"#{n}") })
+  var arrays = nums.map<arr<i32>>((i32 n) { [n, n * 2] })
+  var opts = nums.map<i32?>((i32 n) {
+    if n == 2 {
+      return null
+    }
+    return n * 10
+  })
+  var dogs = nums.map<(Dog, i32)>((i32 n) { (Dog($"d{n}"), n) })
+  var funs = nums.map<fun i32(i32)>((i32 n) { (i32 x) { x + 1 } })
+  Console.log($"{tuples} {arrays} {opts} {dogs.len} {dogs[1].0.name} {funs[0](5)}")
+}
+
+struct Stats { i32 count, i64 sum }
+fun borrowedArray() {
+  vec<i32> nums = [1, 2]
+  arr<i32> shared = [9, 9]
+  var arrays = nums.map<arr<i32>>((i32 n) { shared })
+  Console.log($"{arrays} {shared}")
+}
+fun totals() {
+  vec<i32> nums = [3, 1, 4, 1, 5]
+  i32? biggest = nums.reduce(null, (i32? best, i32 n) {
+    if best == null || n > (best ?? 0) {
+      return n
+    }
+    return best
+  })
+  (i32, i32) minMax = nums.reduce((100, -100), ((i32, i32) mm, i32 n) {
+    i32 low = mm.0
+    i32 high = mm.1
+    if n < low then low = n
+    if n > high then high = n
+    return (low, high)
+  })
+  Stats st = nums.reduce(Stats(0, 0), (Stats s, i32 n) { Stats(s.count + 1, s.sum + n) })
+  list<string> words = ["a", "bb", "ccc"]
+  string? longest = words.reduce(null, (string? best, string w) {
+    if best == null || w.len > (best ?? "").len {
+      return w
+    }
+    return best
+  })
+  vec<i32> empty = []
+  string? none = empty.reduce(null, (string? t, i32 n) { $"{n}" })
+  Console.log($"{biggest ?? -1} {minMax} {st} {longest ?? "-"} {none ?? "null"}")
+}
+filtersAndMaps()
+borrowedArray()
+totals()

@@ -1,0 +1,41 @@
+keep(false):
+  end of keep
+  fragment: [99, 8] [1, 2, 3] [5, 0, 0, ...] (4 items) 2 dogs
+  w rex
+  wl rex
+  dog a ends
+  dog b ends
+  dog rex ends
+keep(true):
+  dog rex ends
+  end of keep
+  fragment: [99, 8] [1, 2, 3] [5, 0, 0, ...] (4 items) 2 dogs
+  w gone
+  wl gone
+  dog a ends
+  dog b ends
+follow:
+  follows bob
+  dog bob ends
+  dog ann ends
+branches(1):
+  res 100 ends
+  res 101 ends
+  built
+  fragment: k 1 r 10 loop 102
+  res 10 ends
+  res 102 ends
+branches(-1):
+  res 100 ends
+  res 101 ends
+  built
+  fragment: k 2 r 20 loop 102
+  res 20 ends
+  res 102 ends
+traits:
+  hello t
+  hello done
+  6
+  twice done
+  4
+---- exit code 0 ----

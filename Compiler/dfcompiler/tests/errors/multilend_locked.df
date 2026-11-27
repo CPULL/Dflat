@@ -1,0 +1,14 @@
+class Board {
+  i32 score = 10
+  string title = "board"
+  public fun &i32, string pick() { return score, title }
+  public fun &i32 one() { return score }
+  public fun bump() { score++ }
+}
+fun go() {
+  Board b = Board()
+  &i32 s, string t = b.pick()
+  b.bump()
+  s = 3
+}
+go()

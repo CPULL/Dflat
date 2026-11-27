@@ -1,0 +1,1 @@
+reduce_object_total.df(5): error: the total of reduce is a value: numbers, bool, char, dates, enums, strings, the nullable ones, tuples and structs of them, not Bag (spec 6.6)

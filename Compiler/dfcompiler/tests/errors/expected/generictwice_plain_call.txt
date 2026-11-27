@@ -1,0 +1,1 @@
+generictwice_plain_call.df(10): error: 'take' is in Source<i32> and Source<string>: name the trait, x.Trait.take(...) (an alias for a copy of a generic trait, spec 11.2), or replace it in the class

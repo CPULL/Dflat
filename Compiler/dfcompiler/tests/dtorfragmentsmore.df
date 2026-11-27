@@ -1,0 +1,129 @@
+// Destructor fragments, the rest of spec 11.4 (F2): a fragment that keeps arrays (->arr<T> parameters, array and sized locals),
+// weak references (parameters and locals, read through enforce), names declared in several scopes of the constructor;
+// and the trailing atEnd of a trait function (14.2, form 2)
+import Root
+
+class Dog {
+  public string name
+  public Dog(string name) { this.name = name }
+} atEnd {
+  Console.log("  dog " + name + " ends")
+}
+
+class Keeper {
+  public Keeper(->arr<i32> xs, i32 n, %Dog w) {
+    arr<i32> mine = [1, 2, 3]
+    arr<i32>[4] sized
+    sized[0] = n
+    xs[0] = 99
+    %Dog wl = w
+    arr<Dog> dogs = [Dog("a"), Dog("b")]
+  } atEnd {
+    Console.log($"  fragment: {xs} {mine} {sized} {dogs.len} dogs")
+    enforce w {
+      Console.log("  w " + w.name)
+    } else {
+      Console.log("  w gone")
+    }
+    enforce wl {
+      Console.log("  wl " + wl.name)
+    } else {
+      Console.log("  wl gone")
+    }
+  }
+}
+
+// a weak local assigned again: the fragment sees the last value
+class Follower {
+  public Follower(%Dog first, %Dog second) {
+    %Dog now = first
+    now = second
+  } atEnd {
+    enforce now {
+      Console.log("  follows " + now.name)
+    }
+  }
+}
+
+class Res {
+  public i32 id
+  public Res(i32 id) { this.id = id }
+} atEnd {
+  Console.log($"  res {id} ends")
+}
+
+// the same name in two branches and in a loop: one value, the last one written; a new value ends the old object
+class Branches {
+  public Branches(i32 n) {
+    if n > 0 {
+      i32 k = 1
+      Res r = Res(10)
+    } else {
+      i32 k = 2
+      Res r = Res(20)
+    }
+    for i in [0, 1, 2] {
+      Res loop = Res((i32)(100 + i))
+    }
+  } atEnd {
+    Console.log($"  fragment: k {k} r {r.id} loop {loop.id}")
+  }
+}
+
+trait Named {
+  public string name = "t"
+  public fun hello() {
+    Console.log("  hello " + name)
+    return
+  } atEnd {
+    Console.log("  hello done")
+  }
+  public fun i32 twice(i32 x) {
+    return x * 2
+  }
+  atEnd {
+    Console.log("  twice done")
+  }
+}
+class Own : Named {
+  replace fun i32 twice(i32 x) {
+    return x * 3
+  }
+}
+class Plain : Named { }
+
+fun keep(bool drop) {
+  arr<i32> v = [7, 8]
+  @Dog d = @Dog("rex")
+  Keeper k = Keeper(->v, 5, %d)
+  if drop {
+    d is done.
+  }
+  Console.log("  end of keep")
+}
+fun follow() {
+  @Dog a = @Dog("ann")
+  @Dog b = @Dog("bob")
+  Follower f = Follower(%a, %b)
+}
+fun branches(i32 n) {
+  Branches b = Branches(n)
+  Console.log("  built")
+}
+
+Console.log("keep(false):")
+keep(false)
+Console.log("keep(true):")
+keep(true)
+Console.log("follow:")
+follow()
+Console.log("branches(1):")
+branches(1)
+Console.log("branches(-1):")
+branches(-1)
+Console.log("traits:")
+Own o = Own()
+o.hello()
+Console.log($"  {o.twice(2)}")
+Plain p = Plain()
+Console.log($"  {p.twice(2)}")

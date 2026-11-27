@@ -16,6 +16,7 @@ sealed class TypeParam {
   public List<Node> Constraints { get; } = new();   // type nodes: a trait, a class or a set; all must hold
   public string? ValueType { get; set; }            // a value parameter (11.3.3): its type; null for a type parameter
   public List<(string Placeholder, Node Constraint)> PlaceholderConstraints { get; } = new();   // where Source.Item : Numeric (11.3.4)
+  public bool IsPlaceholder { get; init; }          // 'placeholder Out' of a trait: fixed by 'with (Out is i32)', after the type parameters
 }
 
 // a generic function: the template is kept as a tree and a copy is made for each list of type arguments
@@ -44,7 +45,9 @@ sealed class GenericClass {
   public Node Node { get; }
   public List<TypeParam> Params { get; }
   public bool IsTrait => Node.Kind == "Trait";
-  public bool HasPlaceholders { get; init; }   // a trait with 'placeholder Item': the Params are the placeholders, fixed by 'with (Item is u32)' in a class
+  public bool HasPlaceholders { get; init; }   // a trait with 'placeholder Item': the Params end with the placeholders, fixed by 'with (Item is u32)' in a class
+  public List<TypeParam> TypeParams => Params.Where(param => !param.IsPlaceholder).ToList();
+  public List<TypeParam> Placeholders => Params.Where(param => param.IsPlaceholder).ToList();
 }
 
 // the instances of generic classes the program needs; they survive from one attempt to the next (see Compile)
@@ -245,16 +248,18 @@ public sealed partial class CodeGen {
       }
       var placeholders = PlaceholdersOf(node);
       if (placeholders.Count > 0) {
-        // a trait with placeholders: copied for each class that fixes them (the placeholders play the part of type parameters)
-        if (node.Children.Any(c => c.Kind is "GenericParams" or "Where")) {
-          throw Error("feature not supported yet (a trait with both type parameters and placeholders)", node);
+        // a trait with placeholders: copied for each class that fixes them (the placeholders play the part of type parameters, after
+        // the type parameters of the trait when it has some: trait Mapper<Key> { placeholder Out }, Mapper<string> with (Out is i32))
+        if (!node.Children.Any(c => c.Kind == "GenericParams") && node.Children.Any(c => c.Kind == "Where")) {
+          throw Error($"'where' is for type parameters: '{name}' has only placeholders (constrain them where the trait is used, 11.3.4)", node);
         }
-        var placeholderParams = new List<TypeParam>();
+        var placeholderParams = node.Children.Any(c => c.Kind == "GenericParams") ? ReadTypeParams(node, name) : new List<TypeParam>();
         foreach (var placeholder in placeholders) {
           if (placeholderParams.Any(existing => existing.Name == placeholder.Text)) {
-            throw Error($"duplicate placeholder '{placeholder.Text}'", placeholder);
+            throw Error(placeholderParams.Any(existing => existing.Name == placeholder.Text && !existing.IsPlaceholder)
+              ? $"'{placeholder.Text}' is already a type parameter of {name}" : $"duplicate placeholder '{placeholder.Text}'", placeholder);
           }
-          placeholderParams.Add(new TypeParam(placeholder.Text!, placeholder));
+          placeholderParams.Add(new TypeParam(placeholder.Text!, placeholder) { IsPlaceholder = true });
         }
         genericClasses[name] = new GenericClass(name, node, placeholderParams) { HasPlaceholders = true };
         program.Children.Remove(node);
@@ -555,7 +560,7 @@ public sealed partial class CodeGen {
     }
     foreach (var trait in AllTraits(cls)) {
       if (classInstanceArgs.TryGetValue(trait.Name, out var copy) && copy.Template.HasPlaceholders) {
-        int position = copy.Template.Params.FindIndex(p => p.Name == placeholder);
+        int position = copy.Template.Params.FindIndex(p => p.Name == placeholder && p.IsPlaceholder);
         if (position >= 0) {
           return copy.Args[position];
         }

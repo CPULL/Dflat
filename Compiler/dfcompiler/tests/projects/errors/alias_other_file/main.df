@@ -1,0 +1,4 @@
+namespace app
+import Root
+alias i8 as small
+Root.Console.log(fromSibling())

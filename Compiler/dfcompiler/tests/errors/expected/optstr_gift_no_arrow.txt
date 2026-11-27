@@ -1,0 +1,1 @@
+optstr_gift_no_arrow.df(4): error: 's' takes the string?: write ->t, or give a new text (spec 7.1)

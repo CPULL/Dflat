@@ -213,6 +213,24 @@ static void df_bt_sval_put(uint8_t* slot, df_string value) {
   }
 }
 
+/* &m[k] on a string value (spec 13.1, 6.4): the slot holds the string inline, so the call gets a string of its own in a cell, and at the end
+   of the statement (with the other temporaries) it goes back to the slot; the map cannot change its size meanwhile, so the slot stays */
+typedef struct { uint8_t* slot; df_string s; } df_sval_lend;
+
+static void df_sval_lend_back(void* p) {
+  df_sval_lend* cell = (df_sval_lend*)p;
+  df_bt_sval_put(cell->slot, cell->s);
+  free(cell);
+}
+
+static df_string* df_sval_lend_out(uint8_t* slot) {
+  df_sval_lend* cell = (df_sval_lend*)df_calloc(1, sizeof *cell);
+  cell->slot = slot;
+  cell->s = df_str_dup(df_bt_sval(slot));
+  df_tmpf(cell, df_sval_lend_back);
+  return &cell->s;
+}
+
 /* the string leaves the slot: the caller owns it */
 static df_string df_bt_sval_take(uint8_t* slot) {
   df_string taken = df_bt_sval_moved(slot) ? df_bt_sval_target(slot) : df_str_dup(df_bt_sval(slot));

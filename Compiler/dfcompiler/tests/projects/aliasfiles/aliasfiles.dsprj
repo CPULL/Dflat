@@ -1,0 +1,2 @@
+; aliases are seen only in their own file (spec 16): two files with their own alias of the same name, and two aliases of one copy
+source=main.df

@@ -103,15 +103,16 @@ public sealed partial class CodeGen {
     if (IsStrItem(elem)) {
       return StrItemDup(elem, item);
     }
-    if (IsClass(elem) && !IsCountedType(elem) && !boxInner.ContainsKey(elem) || IsArr(elem)) {
-      // the new collection owns clones of the objects and arrays it keeps (spec 6.6, 12.6)
-      if (IsClass(elem) && classes.TryGetValue(elem, out var cls) && NotClonableReason(cls) is string reason) {
-        throw Error($"filter copies the items it keeps, and {DisplayName(elem)} cannot be cloned: {reason} (spec 6.6, 12.6)", at);
-      }
-      cloneUsed = true;
-      return CloneValue(item, elem, at);
+    if (IsCountedType(elem) || boxInner.ContainsKey(elem)) {
+      throw NotSupported($"filter on items of type {DisplayName(elem)} (counted items, spec 6.6, 12.7)", at);
     }
-    throw NotSupported($"filter on items of type {DisplayName(elem)} (spec 6.6)", at);
+    if (IsClass(elem) && classes.TryGetValue(elem, out var cls) && NotClonableReason(cls) is string reason) {
+      throw Error($"filter copies the items it keeps, and {DisplayName(elem)} cannot be cloned: {reason} (spec 6.6, 12.6)", at);
+    }
+    // the new collection owns copies of what it keeps, as a copy of the collection (v!) makes them: objects and arrays cloned, tuples,
+    // structs and nullable values with their parts (spec 6.6, 12.6)
+    cloneUsed = true;
+    return CloneValue(item, elem, at);
   }
 
   // a new collection of the kind of the source with items of type elem, filled by the C 'fill' (which calls add(value) for each item); the
@@ -172,8 +173,11 @@ public sealed partial class CodeGen {
     if (target == null) {
       throw Error("write the type of the new items: map<string>((i32 x) { x.toStr() }) (spec 6.6)", at);
     }
-    if (target == "void" || IsArr(target) || IsFunType(target) || IsNullable(target) && target != "string?" || IsTuple(target) || IsCountedType(target)) {
-      throw NotSupported($"map to items of type {target} (spec 6.6)", at);
+    if (target == "void") {
+      throw Error("map gives a new item for each item: its function returns a value (spec 6.6)", at);
+    }
+    if (IsCountedType(target) || IsNullable(target) && IsCountedType(BaseOf(target))) {
+      throw NotSupported($"map to items of type {DisplayName(target)} (counted items, spec 6.6, 12.7)", at);
     }
     var (setup, held) = FunctionArg(args[0], MakeFunType(target, new[] { elem }), scope);
     string s = NewTemp();
@@ -195,13 +199,15 @@ public sealed partial class CodeGen {
     if (acc == null) {
       throw Error("reduce takes a lambda that names the type of the total: reduce(0, (i32 total, i32 item) { total + item }) (spec 6.6)", at);
     }
-    if (!IsPlainValueType(acc) && acc != "string") {
-      throw NotSupported($"reduce with a total of type {acc} (spec 6.6)", at);
+    if (!PlainTotal(acc) && acc is not ("string" or "string?")) {
+      throw Error($"the total of reduce is a value: numbers, bool, char, dates, enums, strings, the nullable ones, tuples and structs of them, not {DisplayName(acc)} (spec 6.6)", at);
     }
     var start = ExprOf(args[0], scope, acc);
     string startCode = Convert(start, acc, args[0]);
     if (acc == "string") {
       startCode = StrOwned(start, startCode);   // the total is a string of its own
+    } else if (acc == "string?") {
+      startCode = $"df_opt_str_dup({startCode})";   // a text of its own (a null stays null)
     }
     var (setup, held) = FunctionArg(args[1], MakeFunType(acc, new[] { acc, elem }), scope);
     string s = NewTemp();
@@ -210,15 +216,22 @@ public sealed partial class CodeGen {
     string accC = CType(acc);
     string length = SourceLength(source.Type, s);
     string loop = ForEachSourceItem(source.Type, s, "0", length, item => {
-      string call = CheckedLambdaCall(held, acc, new[] { accC, CType(elem) }, new[] { total, item },
-        (acc == "string" ? $"df_str_free({total}); " : "") + FreshSourceEnd(source, s));   // an exception: the total ends
-      return acc == "string"
-        ? $"{accC} {next} = {call}; df_str_free({total}); {total} = {next}; "   // the old total ends
+      string freeTotal = acc == "string" ? $"df_str_free({total}); " : acc == "string?" ? $"if ({total}.has) {{ df_str_free({total}.val); }} " : "";
+      string call = CheckedLambdaCall(held, acc, new[] { accC, CType(elem) }, new[] { total, item }, freeTotal + FreshSourceEnd(source, s));   // an exception: the total ends
+      return freeTotal != ""
+        ? $"{accC} {next} = {call}; {freeTotal}{total} = {next}; "   // the old total ends
         : $"{total} = {call}; ";
     });
     string code = EndFreshSource(source, s, $"{CType(source.Type)} {s} = {SourceValue(source)}; {setup}{accC} {total} = {startCode}; ", $"{loop}{total}; ", acc);
-    return new Expr(code, acc, acc == "string");
+    return new Expr(code, acc, acc is "string" or "string?");
   }
+
+  // a total of reduce that is a value with nothing to own: a number, bool, char, a date, an enum, string1k, a nullable one, a tuple or a
+  // struct of them
+  bool PlainTotal(string type) =>
+    IsPlainValueType(type) || IsNullable(type) && IsPlainValueType(BaseOf(type))
+    || IsTuple(type) && TupleElems(type).All(elem => PlainTotal(elem.Type))
+    || IsStruct(type) && !StructHoldsObjects(type) && structs[type].Fields.All(field => field.Buffer != null || PlainTotal(field.Type));
 
   // ({ head body }) where body ends with the value; a new collection the member was called on ([1, 2].filter(...)) ends after it
   string EndFreshSource(Expr source, string s, string head, string body, string type) {

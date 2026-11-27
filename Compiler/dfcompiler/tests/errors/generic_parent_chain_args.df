@@ -1,0 +1,6 @@
+class Box<Item>(Item first) {
+  public Item held = first
+}
+class Bag : Box<i32> {
+  public Bag() : Box<i32>(7) { }
+}

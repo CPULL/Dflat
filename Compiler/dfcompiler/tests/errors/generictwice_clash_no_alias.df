@@ -1,0 +1,6 @@
+trait Source<Item> {
+  public fun Item take()
+}
+class Both : Source<i32>, Source<string> {
+  replace fun i32 take() { return 5 }
+}

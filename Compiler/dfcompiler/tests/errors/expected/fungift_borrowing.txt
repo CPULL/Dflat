@@ -1,0 +1,1 @@
+fungift_borrowing.df(8): error: this function value borrows variables, so it cannot be given to 'h', which may keep it: capture them with x! or ->x (spec 13.3.4)

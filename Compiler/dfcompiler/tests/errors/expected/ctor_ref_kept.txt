@@ -1,0 +1,1 @@
+ctor_ref_kept.df(1): error: 'total' is lent with & only for the construction: it cannot be kept as a field (a method, an accessor or a lambda uses it); copy what you need into a field (spec 11.1.1)

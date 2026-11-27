@@ -1,0 +1,1 @@
+fungift_used_after.df(9): error: 'g' was moved away with ->g: it cannot be used until it gets a new value (spec 12.4)

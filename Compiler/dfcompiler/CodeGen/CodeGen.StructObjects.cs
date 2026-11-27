@@ -12,6 +12,14 @@ public sealed partial class CodeGen {
   readonly HashSet<string> structCloneHelpers = new();
   readonly HashSet<string> structDropHelpers = new();
   readonly HashSet<Node> structObjDecls = new();
+  readonly HashSet<Node> maybeStructObjDecls = new();   // var b = a and its forms: owners only when the type is such a struct (AddImplicitDrops)
+
+  // var b = <a name, a field, an item, a!, ->a>: a value that may be a struct of the program, typed only when it is compiled
+  bool MaybeStructVarDecl(Node decl) =>
+    !LibraryCode && !decl.Children.Any(child => child.Kind == "Mods")
+    && decl.Children.FirstOrDefault(child => TypeNodeKinds.Contains(child.Kind)) is { Kind: "Type", Text: "var" }
+    && decl.Children.FirstOrDefault(child => child.Kind == "Init")?.Children[0] is { Kind: "Name" or "Member" or "Index" or "Copy" or "Gift" or "Paren" }
+    && structs.Values.Any(info => StructHoldsObjects(info.Name));
 
   // a field that owns something: a string, a string?, an object (a collection too), a usage of a function value (spec 13.3.3)
   bool IsOwningFieldType(string type) => type is "string" or "string?" || IsClass(type) || IsFunType(type) || SetOwns(type);

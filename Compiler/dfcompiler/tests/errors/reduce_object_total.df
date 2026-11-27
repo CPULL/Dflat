@@ -1,0 +1,5 @@
+class Bag {
+  public i32 n = 0
+}
+vec<i32> nums = [1, 2]
+Bag b = nums.reduce(Bag(), (Bag total, i32 x) { total })

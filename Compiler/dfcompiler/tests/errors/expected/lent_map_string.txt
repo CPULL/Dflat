@@ -1,1 +1,0 @@
-lent_map_string.df(4): error: feature not supported: &m[k] on the string values of a map (the values a map keeps as they are: numbers, bool, char, enums, dates)

@@ -195,7 +195,7 @@ public sealed partial class CodeGen {
       if (hops == 0 && root is "this" or "parent") {
         return false;
       }
-      bool staticRoot = root is "Root" or "root" || nameAliases.ContainsKey(root) || IsEnum(root);
+      bool staticRoot = root is "Root" or "root" || nameAliases.ContainsKey(root, current) || IsEnum(root);
       if (staticRoot) {
         return false;
       }
@@ -291,13 +291,26 @@ public sealed partial class CodeGen {
     return frame;
   }
 
+  // var b = a of a struct that holds strings or objects (maybeStructObjDecls): hoisted as an owner, so its drop sees it; any other type is
+  // an ordinary declaration
+  bool HoistsAsStructOwner(Node decl, Scope typingScope) {
+    if (!maybeStructObjDecls.Contains(decl)) {
+      return false;
+    }
+    try {
+      return StructHoldsObjects(TypeForHoist(decl, typingScope));
+    } catch (CompileException) {
+      return false;
+    }
+  }
+
   // atEnd sees every variable of its scope, wherever declared: they are created at the start
   // of the scope with their default value
   void HoistDeclarations(Frame frame, HashSet<Node>? only) {
     // the type of 'var x = Foo(n)' needs the variables declared before it in this scope
     var typingScope = new Scope(frame.ParentScope);
     void Hoist(Node decl) {
-      if (only != null && !only.Contains(decl)) {
+      if (only != null && !only.Contains(decl) && !HoistsAsStructOwner(decl, typingScope)) {
         try {
           typingScope.Vars[decl.Text!] = new VarInfo(TypeForHoist(decl, typingScope), "", false);
         } catch (CompileException) {
@@ -501,7 +514,7 @@ public sealed partial class CodeGen {
     var typeNode = catchNode.Children.FirstOrDefault(child => child.Kind == "Type");
     string? name = catchNode.Text;
     if (typeNode != null) {
-      string typeName = ResolveCatchName(typeNode.Text!);
+      string typeName = ResolveCatchName(typeNode.Text!, typeNode.Line);
       if (typeName == "all") {
         return (null, name);
       }
@@ -516,7 +529,7 @@ public sealed partial class CodeGen {
     if (name == "all") {
       return (null, null);              // catch all { }
     }
-    string resolved = ResolveCatchName(name);
+    string resolved = ResolveCatchName(name, catchNode.Line);
     if (ExceptionId(resolved) is int id) {
       return (id, null);                // catch DivisionByZeroException { }
     }
@@ -543,10 +556,10 @@ public sealed partial class CodeGen {
   }
 
   // first segment through name aliases: r.DivisionByZeroException → Root.DivisionByZeroException
-  string ResolveCatchName(string name) {
+  string ResolveCatchName(string name, int line) {
     int dot = name.IndexOf('.');
     string first = dot < 0 ? name : name[..dot];
-    if (nameAliases.TryGetValue(first, out var target)) {
+    if (nameAliases.TryGetValue(first, line, out var target)) {
       return target + (dot < 0 ? "" : name[dot..]);
     }
     return name;
@@ -562,7 +575,7 @@ public sealed partial class CodeGen {
     if (typeNode == null) {
       return null;
     }
-    string typeName = ResolveCatchName(typeNode.Text!);
+    string typeName = ResolveCatchName(typeNode.Text!, typeNode.Line);
     return classes.TryGetValue(typeName, out var cls) && cls.IsException ? cls : null;
   }
 

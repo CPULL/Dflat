@@ -1,0 +1,25 @@
+// & results of values among several results (spec 13.1.1, H6): &i32 a, string b = k.pick() lends the place read/write, a plain
+// target copies it
+import Root
+class Board {
+  i32 score = 10
+  string title = "board"
+  public fun &i32, string pick() { return score, title }
+  public fun &i32, &string both() { return score, title }
+  public fun show() { Console.log($"{score} {title}") }
+}
+fun go() {
+  Board b = Board()
+  &i32 s, string t = b.pick()
+  s += 5
+  Console.log($"{s} {t}")
+  b.show()
+  i32 copy, string t2 = b.pick()
+  copy = 99
+  b.show()
+  &i32 s2, &string name = b.both()
+  s2 = 1
+  name = name + "!"
+  b.show()
+}
+go()

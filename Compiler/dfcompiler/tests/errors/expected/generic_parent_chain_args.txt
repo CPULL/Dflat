@@ -1,0 +1,1 @@
+generic_parent_chain_args.df(5,21): error: a constructor chain names Box without type arguments, : Box(...): the header of the class gives them (spec 11.3.2), found '<'

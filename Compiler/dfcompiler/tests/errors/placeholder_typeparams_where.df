@@ -1,0 +1,12 @@
+trait Mapper<Key> {
+  placeholder Out
+  public fun Out apply(Key k)
+}
+class Label : Mapper<i32> with (Out is string) {
+  replace fun string apply(i32 k) { return $"#{k}" }
+}
+fun r64 doubled<M : Mapper>(->M m) where M.Out : Numeric {
+  return 0.0
+}
+Label b = Label()
+r64 d = doubled(->b)

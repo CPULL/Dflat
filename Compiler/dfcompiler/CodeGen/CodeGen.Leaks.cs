@@ -118,7 +118,7 @@ public sealed partial class CodeGen {
         return;
       }
       if (path != null) {
-        string resolved = ResolveCatchName(path);
+        string resolved = ResolveCatchName(path, value.Line);
         int? known = ExceptionId(resolved);
         if (known is int found && found >= 0) {
           if (IsSilentId(found)) {

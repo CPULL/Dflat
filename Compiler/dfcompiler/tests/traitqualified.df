@@ -1,0 +1,23 @@
+// Qualified implementations (spec 11.2): two traits with take() of different results; the class writes A.take() and B.take(),
+// the users write b.A.take(); a value of each trait calls its own
+import Root
+trait A {
+  public i32 count = 1
+  unrestricted fun i32 take()
+}
+trait B {
+  public i32 count = 2
+  unrestricted fun string take()
+}
+class Both : A, B {
+  replace fun i32 A.take() { return 5 }
+  replace fun string B.take() { return "five" }
+  public fun show() { Console.log($"{A.count} {B.count} {this.A.take()} {this.B.take()}") }
+}
+Both b = Both()
+b.show()
+Console.log($"{b.A.count} {b.A.take()} {b.B.take()}")
+A a = b
+Console.log($"{a.take()}")
+B bb = b
+Console.log(bb.take())

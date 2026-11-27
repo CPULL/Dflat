@@ -1,0 +1,1 @@
+funref_no_amp.df(4): error: 'f' can change the function value: write &f at the call

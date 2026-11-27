@@ -141,11 +141,11 @@ public sealed partial class CodeGen {
       // set tags = ["red", "blue"], hset tags = [...]: the item type comes from the literal (spec 6.3)
       return InferSetType(init.Children[0], scope, decl, typeNode.Text == "hset");
     }
-    if (typeNode is { Kind: "Type", Text: "pointer", Children.Count: 0 } && !typeAliases.ContainsKey("pointer") && !IsKnownType("pointer")) {
+    if (typeNode is { Kind: "Type", Text: "pointer", Children.Count: 0 } && !typeAliases.ContainsKey("pointer", typeNode) && !IsKnownType("pointer")) {
       return InferPointerDecl(decl, init, scope);   // pointer p = pointer.to(x) (spec 12.1)
     }
     // var x = value: the type of the value
-    if (typeNode.Kind == "Type" && typeNode.Text == "var" && typeNode.Children.Count == 0 && !typeAliases.ContainsKey("var")) {
+    if (typeNode.Kind == "Type" && typeNode.Text == "var" && typeNode.Children.Count == 0 && !typeAliases.ContainsKey("var", typeNode)) {
       if (init == null || scope == null) {
         throw Error("'var' needs a value to take its type from", decl);
       }

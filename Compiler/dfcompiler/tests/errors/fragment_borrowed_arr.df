@@ -1,0 +1,9 @@
+class A {
+  public i32 n
+  public A(arr<i32> xs) {
+  } atEnd {
+    n = xs.len
+  }
+}
+arr<i32> v = [1, 2]
+A a = A(v)

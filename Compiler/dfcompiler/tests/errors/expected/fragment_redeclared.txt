@@ -1,0 +1,1 @@
+fragment_redeclared.df(6): error: 'k' is already declared in this block or an enclosing one

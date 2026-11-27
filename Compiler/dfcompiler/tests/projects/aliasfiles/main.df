@@ -1,0 +1,19 @@
+// Aliases are per file (spec 16): this file and sibling.df both declare 'small', each for its own type; sibling.df names the copy
+// Source<string> with an alias of its own, Texts, to call the member that clashes (spec 11.2, 11.3.2)
+namespace app
+import Root
+alias i8 as small
+alias Source<string> as SourceString
+
+trait Source<Item> {
+  unrestricted fun Item take()
+}
+class Both : Source<i32>, SourceString {
+  replace fun i32 Source.take() { return 5 }
+  replace fun string SourceString.take() { return "five" }
+}
+
+small s = 100
+Console.log($"{s} {fromSibling()}")
+Both b = Both()
+Console.log($"{b.SourceString.take()} {viaOtherAlias(b)} {b.Source.take()}")

@@ -1,0 +1,6 @@
+fun twice(&i32(i32) f) { f = (i32 x) { x } }
+fun go() {
+  i32(i32) f = (i32 x) { x }
+  twice(f)
+}
+go()

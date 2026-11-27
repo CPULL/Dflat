@@ -1,0 +1,9 @@
+text 1? none?
+cleared
+kept 2
+new 3
+empty
+echo 4
+consumed temp 5
+[1: x?, 2: none?]
+---- exit code 0 ----

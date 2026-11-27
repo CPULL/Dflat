@@ -1,0 +1,38 @@
+// &m[k] on string, object and array values of map and hmap (spec 13.1, F14): a string value, kept inline in its slot, is lent as a
+// copy that goes back to the slot after the statement (short and long texts, a missing key); a replaced object ends
+import Root
+class Dog {
+  public string name
+  public Dog(string name) { this.name = name }
+} atEnd {
+  Console.log("  dog " + name + " ends")
+}
+fun shout(&string s) { s = s + "!" }
+fun longer(&string s) { s = s + " and a text longer than fifty nine bytes, so that the slot points to it" }
+fun rename(&Dog d) { d.name = d.name + "2" }
+fun replaceDog(&Dog d) { d = Dog("new") }
+fun grow(&arr<i32> a) { a[0] = 99 }
+fun go() {
+  map<string, string> m = map<string, string>()
+  m["a"] = "hi"
+  shout(&m["a"])
+  shout(&m["b"])
+  longer(&m["a"])
+  shout(&m["a"])
+  Console.log($"{m["a"].len} {m["b"]} {m.len}")
+  hmap<i32, string> h = hmap<i32, string>()
+  h[1] = "x"
+  shout(&h[1])
+  Console.log($"{h}")
+  map<i32, Dog> dogs = map<i32, Dog>()
+  dogs[1] = Dog("rex")
+  rename(&dogs[1])
+  Console.log(dogs[1].name)
+  replaceDog(&dogs[1])
+  Console.log(dogs[1].name)
+  map<i32, arr<i32>> arrays = map<i32, arr<i32>>()
+  arrays[1] = [1, 2]
+  grow(&arrays[1])
+  Console.log($"{arrays}")
+}
+go()

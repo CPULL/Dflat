@@ -1,6 +1,17 @@
-Compiler version 0.0.209 alpha for version 0.0.41 of the specs 2026/11/25
+Compiler version 0.0.210 alpha for version 0.0.41 of the specs 2026/11/27
 
 Changes from the previous version -----------------------
+- Constructors (spec 11.1.1, 13.4): variadic parameters in the header (class Bag(string label, i32 items...): read during the construction, a copy when kept as a field), in constructors of the body and of traits; & parameters in the header (class Counter(&i32 total): written during the construction, kept as a field is a compile error). Tests ctorparams, errors/ctor_ref_kept (errors/ref_constructor is gone)
+- Structs (spec 11.1.5): var b = a (also a!, a field, an item, ->a, a parameter) of a struct that holds strings or objects takes its own copy and ends it with its scope (was "feature not supported"); a struct field can be a tuple of values (numbers, bool, char, dates, enums, nullable ones, tuples of them). Tests structvardecls, structtuplefields, errors/struct_tuple_field_strings (errors/struct_var_copy is gone)
+- Fix (spec 13.1.1): a result built in the function is given without -> also when it is a collection kept in a local first (map<K, V>(), [1, 2], [], a constructor of a generic class) and when a local gets its new object after its declaration (Dog d = null, then d = Dog(...) in every branch); a local that receives a borrowed value is still not a given result. Test inferredgivesmore
+- Functions and lambdas (spec 13.3, 13.1.1, 7.1): captures x!, ->x, &x of tuples, structs, nullable values and string? (with their parts; ->n of a number copies); ->fun() h parameters (the callee keeps a usage, a field or a header parameter; a borrowing value is a compile error; ->g leaves g empty) and &fun h parameters (the callee gives the variable another function); a function value in a tuple part; &string? and ->string? parameters (also &m[k] of string? values; ->s of a string? moves); &T results of values among several results (&i32 a, string b = k.pick(), the lender locked until the last use). Calling a function variable after ->g is a compile error. Tests lambdacapturetypes, funmarkers, optstrparams, multilends, errors/multilend_locked, fungift_borrowing, fungift_no_arrow, fungift_used_after, funref_no_amp, optstr_gift_no_arrow, capture_moved_optstr
+- &m[k] (spec 13.1): the string, object and array values of a map or an hmap are lent too; a string value, kept inline in its slot, is lent as a copy of its own that goes back to the slot at the end of the statement (df_sval_lend_out). Test lentmapvalues (errors/lent_map_string is gone)
+- filter, map and reduce (spec 6.6): filter keeps copies of tuples, structs and nullable items; map makes tuples, arrays, nullable values and function values; reduce carries nullable values (i32?, string?: its text owned), tuples and structs of plain values. Tests functionalmore, errors/reduce_object_total
+- Maps and sets (spec 6.2, 6.6): clock and lapse are keys of map and items of set and hset (a lapse sorts by its sign); string?, string1k and string1k? are values of map and hmap (the map owns the text of a string? and frees the replaced and removed ones; a variable that reads one takes its copy); h[k] += x and h[k] -= x on a set or a map that is the value of an entry or an item change it in place (a missing key: NullPointerException). Tests timekeys, mapstringvalues, entryoperators
+- Aliases are per file (spec 16): an alias is seen only in the file that declares it (namespace aliases too); an alias of a function type (a callback type) is still seen everywhere; an alias can name a copy of a generic, alias Source<string> as SourceString. Tests projects/aliasfiles, projects/errors/alias_other_file
+- Traits (spec 11.2, 11.3.2): a function with the same parameters in two traits is answered with the name of its trait, replace fun i32 A.take(), and called b.A.take() / this.A.take(); a generic trait implemented twice (class Both : Source<i32>, SourceString), the copies that clash need an alias (compile error that says so), the copy without alias is Source; the call of a function found in two traits says to name the trait. Tests traitqualified, generictwice, errors/generictwice_clash_no_alias, generictwice_plain_call, generictwice_default_call, qualified_not_a_trait
+- Generics (spec 11.3.2, 11.3.4): a class extends a copy of a generic class (class Ints : Stack<i32>, class Named<T> : Stack<T>), with arguments in the header (: Box<string>(label, 3)) and in a constructor of the body, which names the parent without type arguments (: Box(7, 9); with them it is a compile error that says so); a trait has type parameters and placeholders together (trait Mapper<Key> { placeholder Out }, class Len : Mapper<string> with (Out is i32)). Tests genericparents, placeholdertypeparams, errors/generic_parent_chain_args, placeholder_typeparams_missing, placeholder_typeparam_clash, placeholder_typeparams_where
+- Destructors (spec 11.4, 14.2): a destructor fragment keeps ->arr<T> parameters, array and sized locals (the object owns them until it dies), weak parameters and locals (read with enforce), and a name declared in several scopes of its constructor (one variable, the last value written; two types or a redeclaration in scope are compile errors); a & parameter or a borrowed array is a compile error that says why (was "feature not supported"); a trait function can have a trailing atEnd; an atEnd in a class body is a compile error that points to } atEnd { }. Tests dtorfragmentsmore, errors/class_body_atend, errors/fragment_ref_param, fragment_borrowed_arr, fragment_two_types, fragment_redeclared
 - Bitfields (spec 3.1.1): the constants of every bitfield are NONE and ALL, uppercase as MIN and MAX (were None and All); the value 0 prints NONE; a flag named NONE or ALL is a compile error; the default of delete() is DeleteOptions.NONE. Tests bitfields, bitfieldinplace, errors/bitfield_none_is_reserved
 - Fields of a function type (spec 13.3.2): the ones of a trait and the static ones are called too (obj.f(), this.f(), f() inside the class, a variable of the trait type, Class.f()); before, the call said the class has no such function. Test funfields
 - Copies of views (spec 6.5, 12.6): view!, view.clone(), view.tryClone() of a view in a variable or a parameter, and c[a..b].clone() / c[a..b].tryClone() (no view is made) give a new collection of the type of the collection; tryClone raises ObjectNotClonableException before copying anything. Fixed: a program that cloned anything and had a vec, list, map or set of a notclonable class did not compile (the clone of that collection was generated); such a collection now cannot be cloned (compile error for c!, tryClone raises). Tests viewcopies, errors/clone_notclonable_items
@@ -148,13 +159,15 @@ E. Things to be checked interactively that are not working
 F. [x] Features not implemented: sorted into PRIORITY 2 (2026-11-26)
 
 PRIORITY 1.99 (2026-11-25; details in Specs/specs-progress.md, Multitasking)
+	 [1] G10 We miss a way to always print the decimal point on real numbers, in case the decimal part is zero
+	 [2] G11 I tried to create a custom class and replace the toStr() function but I got the message that such function did not exist
    [ ] G1 mutex: a reference that escapes the enforce (the case tried is refused), the warning for a blocking call inside, the order of the locks (today both fail at their timeout), a mutex as a field or a global; fair queues for mutex, semaphore, &@T and global locks (a yield loop today)
-   [ ] G2 calls through the handle: properties, &string, counted / weak / variadic / function parameters, borrowed results, maps and sets as results
-   [ ] G3 threads: variadic and function parameters, return! / return? in a lambda, a lambda written inside Thread(...), an override of a subclass
-   [ ] G4 wait: several values with a timeout block of several lines, also in an assignment; a return inside a loop of the block; not tested: a global Task inside its lock
-   [ ] G5 the soft kill is not seen by a busy global lock, Root.Time.sleep and loops with no checkpoint; a busy global lock does not serve the calls
-   [ ] G6 parent, children, startTime of a Runnable; Root.Tasks.Task written in full as a type
-   [ ] G7 thread-safe runtime: the console state and the class static fields have no lock (the static fields only between the main program and its threads: a task cannot use them)
+   [10] G2 calls through the handle: properties, &string, counted / weak / variadic / function parameters, borrowed results, maps and sets as results
+   [11] G3 threads: variadic and function parameters, return! / return? in a lambda, a lambda written inside Thread(...), an override of a subclass
+   [12] G4 wait: several values with a timeout block of several lines, also in an assignment; a return inside a loop of the block; not tested: a global Task inside its lock
+   [13] G5 the soft kill is not seen by a busy global lock, Root.Time.sleep and loops with no checkpoint; a busy global lock does not serve the calls
+   [14] G6 parent, children, startTime of a Runnable; Root.Tasks.Task written in full as a type
+   [15] G7 thread-safe runtime: the console state and the class static fields have no lock (the static fields only between the main program and its threads: a task cannot use them)
    [ ] G8 hardKill() and the release of the locks of a hard-killed runnable (20.10): it needs the per-task heaps (20.12)
    [ ] G9 asparent for tasks (20.11), per-task heaps (20.12). Not designed or parked: promises (20.18), farm (20.5), pipe (20.6), chapter 21 (Process, PostOffice, MailBox), thread pool and priority
 
@@ -163,26 +176,26 @@ PRIORITY 2 (2026-11-26): what the compiler refuses ("feature not supported", "no
 Needed (as soon as possible)
  Classes and traits
    [x] F1 (0.0.208alpha) replace <field> = <expression> in constructors, constructors in the body of an exception class (2026-11-26)
-   [ ] F2 Destructors: atEnd after a class or a constructor, atEnd in a class body; destructor fragments that use a reference, weak, array or sized local, or a name declared twice
+   [x] F2 (0.0.210alpha) Destructors: atEnd after a trait function; destructor fragments that use a reference (compile error), weak, array or sized local, or a name declared twice; atEnd in a class body is a compile error (user, 2026-11-27: the destructor is only after the closing brace)
    [x] F3 (0.0.208alpha) Arguments to the constructor of the parent class (refused when the class has no primary constructor of its own that passes them)
-   [ ] F4 Variadic and & parameters of constructors (Task(Filler, &buff): see also D5)
+   [x] F4 (0.0.210alpha) Variadic and & parameters of constructors: in the header (a variadic one kept as a field is a copy, a & one kept as a field is a compile error), in constructors of the body and of traits (& in the body was built already). Left: Task(Filler, &buff), the & parameters of the constructor of a task (D5, parked)
    [ ] F5 Nested types (a type declared inside a class)
-   [ ] F6 Generic traits, generic parent classes and traits; a class that implements a generic trait more than once; a trait with type parameters and placeholders; placeholders in traits
+   [x] F6 (0.0.210alpha) Generic traits, generic parent classes and traits; a class that implements a generic trait more than once (user, 2026-11-27: an alias names a copy, alias Source<string> as SourceString, aliases are per file; replace fun T Trait.f() for clashing functions, also for plain traits); a trait with type parameters and placeholders; placeholders in traits. Left (not F6): a parent trait with placeholders (spec 11.3.2: not supported yet); x is Stack<i32> y (is with a generic type)
    [ ] F7 Function values as fields of classes and traits. Done (0.0.208alpha): fields of the class (already built), of a trait, static, properties with R:.
-          [ ] TO DECIDE (2026-11-27): a header parameter of a function type kept as a field, class Button(fun() handler) with handler() in a method: refused today ("borrows variables, so it cannot be kept"). Either it follows the objects of 11.1.1 (given implicitly, level 1 warning), or it waits for H6 (->fun() handler written)
+          [ ] TO DECIDE (2026-11-27): a header parameter of a function type kept as a field. Built with H6 (0.0.210alpha): class Button(->fun() handler). Still to decide: the plain form class Button(fun() handler) (refused: given implicitly as objects in 11.1.1, or keep requiring ->)
    [ ] F8 A trait as the type of the parent
  Collections
-   [ ] F9 map, hmap, set, hset: the key, value and item types not built yet (the error lists the built ones)
+   [x] F9 (0.0.210alpha) map, hmap, set, hset: the key, value and item types not built yet. Built: clock and lapse keys of map and items of set / hset; string?, string1k, string1k? values of map and hmap; += and -= on the set or map of an entry (h[k] += x). Checked: collections as values already worked. Left: counted and weak values (%T, @T: F16)
    [x] F10 (0.0.208alpha, checked: already built) Sized declarations arr<T>[n] name (functions, classes, traits)
-   [ ] F11 filter, map and reduce on the item and total types not built yet (6.6)
+   [x] F11 (0.0.210alpha) filter, map and reduce on the item and total types not built yet (6.6). Done: filter on tuples, structs and nullable items (copied as v! does); map to tuples, arrays, nullable values and function values; reduce with nullable totals (i32?, string?), tuples and structs of plain values. An object, array or collection total of reduce is a compile error (user, 2026-11-27: a reduce works on native types). Left: counted items (F16)
    [ ] F12 for &x over views, custom collections, the string values of a map and the other item types; & on a part of a tuple item
    [x] F13 (0.0.208alpha) A copy of a view: c[a..b]!, c[a..b].tryClone()
    [x] F14 (0.0.208alpha; op= on a map entry was already built; &m[k] of string and object values left) ??= on an array or list item; op= on a map entry; lending an item of a list or a map
+   [x] F14 leftovers (0.0.210alpha): &m[k] of string, object and array values of map and hmap (a string value is lent as a copy that goes back to its slot after the statement). Not F14: &string? parameters (H6)
  Values
    [ ] F15 Dflat has no literal for a bitfield, and bitfield.NONE and bitfield.ALL don't work. NONE and ALL done (0.0.208alpha, the spec had None and All); left: the literal (to decide)
-   [ ] F16 Counted values (@T) as fields, results and items; counted type arguments of generics; counted fields of traits
-   [ ] F17 Set values: a string or object member inside a tuple or a collection; read as an object or a tuple type; keys of sets whose members are not exact natives
-   [ ] F18 Structs: one that holds strings or objects declared with var, inside tuples and collections; more types inside a struct
+   [8] F16 Counted values (@T) as fields, results and items; counted type arguments of generics; counted fields of traits
+   [x] F18 (0.0.210alpha) Structs: one that holds strings or objects declared with var, inside tuples and collections; more types inside a struct. Done: var b = a, a!, a field, an item, ->a, a parameter of such a struct (its own copy, ended with the scope); tuple fields of values (numbers, enums, nullable values, tuples of them). Checked: tuples and collections of such structs were built already. Left: a tuple field that holds strings, objects, arrays or function values (needs the ownership of strings in tuples); counted and weak fields (@T, %T) do not parse in a struct (not in the spec)
    [ ] F19 Tuple destructuring on the left (an open item in the spec)
    [x] F20 (0.0.208alpha) real as a declared type (real x = 2.5 is refused; int and uns work)
    [x] F21 (0.0.208alpha) string? declared with var; a top-level variable used by functions, declared with var from a value known only at run time
@@ -196,7 +209,8 @@ Nice to have (when there is time)
  Counted and weak
    [ ] H5 Writing &@T?; counted variables from several results (a, b = f()); counted and weak variables outside blocks and function bodies; ->, &, swap, ++, out arguments on counted fields and variables; @x outside the value of a counted variable; methods on collections of counted objects; _= on items and trait fields
  Lambdas and functions
-   [ ] H6 Captures with !, & and -> of the types not built yet; a function value in the places refused; markers on function-type parameters; & results among several results; &string? and ->string? parameters
+   [ ] F17 Set values: a string or object member inside a tuple or a collection; read as an object or a tuple type; keys of sets whose members are not exact natives
+   [x] H6 (0.0.210alpha) Captures with !, & and -> of the types not built yet; a function value in the places refused; markers on function-type parameters; & results among several results; &string? and ->string? parameters. Left: a call straight out of a tuple part (t.1(3)); fun name = expression in a class or trait body (not in the spec)
    [ ] H7 A set as the type of a parameter of a method
  Generics
    [ ] H8 Value parameters of more types (11.3.3); where on a placeholder (11.3.4); constraints that are not a plain name; a generic call on an expression

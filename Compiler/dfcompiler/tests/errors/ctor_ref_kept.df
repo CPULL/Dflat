@@ -1,0 +1,5 @@
+class Counter(&i32 total) {
+  public fun i32 read() { return total }
+}
+i32 n = 1
+Counter c = Counter(&n)

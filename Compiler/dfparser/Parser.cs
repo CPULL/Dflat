@@ -963,13 +963,19 @@ public sealed class Parser {
       EndStatement(false);
       return funAlias;
     }
+    int beforeOriginal = pos;
     string original = ParseQualifiedName();
+    Node originalType = new Node("Type", start, original);
+    if (IsOp("<")) {
+      pos = beforeOriginal;
+      originalType = ParseType(false);   // alias Source<string> as SourceString: a copy of a generic (spec 16)
+    }
     if (!IsKw("as")) {
       throw Error("expected 'as' in alias");
     }
     Next();
     var name = ExpectIdent();
-    var node = new Node("Alias", name, name.Text).Add(new Node("Type", start, original));
+    var node = new Node("Alias", name, name.Text).Add(originalType);
     EndStatement(false);
     return node;
   }
@@ -1822,13 +1828,18 @@ public sealed class Parser {
 
   // fun [type[, type...]] name(params) { }   |   fun [type] name(params)   (no body: trait)
   // fun [type] name = lambda
+  // Trait.name( after the results of a function header
+  bool QualifiedFunNameAhead() =>
+    Peek.Kind == TokenKind.Ident && PeekAt(1).Is(".") && PeekAt(2).Kind == TokenKind.Ident && PeekAt(3).Is("(");
+
   Node ParseFun() {
     var t = Next();
     var resultNames = new List<string>();
     var rets = new Node("Returns", t);
     var marks = new List<string>();   // fun ->Dog make() gives "g0", fun &Dog at(uns i) lends read/write "w0" (spec 13.1.1)
     while (!(Peek.Kind == TokenKind.Ident && (PeekAt(1).Is("(") || PeekAt(1).Is("=") || IsGenericCallAhead(0)))
-           && !((IsOp("==") || IsOp("!=")) && PeekAt(1).Is("("))) {
+           && !((IsOp("==") || IsOp("!=")) && PeekAt(1).Is("("))
+           && !QualifiedFunNameAhead()) {
       if (AcceptOp("->")) {
         if (IsCountedMarker() || IsReadWriteMarker("@")) {
           throw Error("a counted result gives its usage already: write fun @T name(), without ->");
@@ -1870,8 +1881,17 @@ public sealed class Parser {
     if (IsOp("!=")) {
       throw Error("'!=' is the negation of '==' and cannot be overloaded");
     }
+    // replace fun string SourceString.take(): the implementation of the method of one trait of the class (spec 11.2)
+    Token? qualifier = null;
+    if (QualifiedFunNameAhead()) {
+      qualifier = Next();
+      Next();
+    }
     var name = IsOp("==") ? Next() : ExpectIdent();
     var node = new Node("Fun", name, name.Text);
+    if (qualifier != null) {
+      node.Add(new Node("ImplOf", qualifier, qualifier.Text));
+    }
     if (rets.Children.Count == 1 && marks is ["c0"] or ["r0"]) {
       rets.Text = marks[0] == "r0" ? "counted-rw" : "counted";   // the only result is counted
     } else if (marks.Count > 0) {
@@ -2372,6 +2392,9 @@ public sealed class Parser {
         SkipNewlines();
         var start = Peek;
         string target = ParseQualifiedName();
+        if (IsOp("<")) {
+          throw Error($"a constructor chain names {target} without type arguments, : {target}(...): the header of the class gives them (spec 11.3.2)");
+        }
         chain.Add(new Node("Call", start, target).Add(ParseArgs()));
       } while (AcceptOp(","));
       node.Add(chain);

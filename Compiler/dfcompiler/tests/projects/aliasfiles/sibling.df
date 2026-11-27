@@ -1,0 +1,11 @@
+namespace app
+alias u16 as small
+alias Source<string> as Texts
+
+fun string fromSibling() {
+  small big = 60000
+  return $"{big}"
+}
+fun string viaOtherAlias(Both b) {
+  return b.Texts.take()
+}

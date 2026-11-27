@@ -1,0 +1,8 @@
+pressed hello 1
+new lambda
+kept copy
+12
+30
+pressed ok 1
+literal
+---- exit code 0 ----

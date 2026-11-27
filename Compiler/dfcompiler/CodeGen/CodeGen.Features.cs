@@ -319,6 +319,12 @@ public sealed partial class CodeGen {
     var best = applicable.Where(entry => !applicable.Any(other => Dominates(other, entry))).ToList();
     if (best.Count != 1) {
       string options = string.Join(", ", best.Select(entry => FunHeader(entry.Fun)));
+      if (best.All(entry => entry.Fun.Class is { IsTrait: true }) && best.Select(entry => entry.Fun.Class).Distinct().Count() == best.Count) {
+        // the same function in two traits of the class (two copies of a generic trait too): the trait is named (spec 11.2)
+        string bare = best[0].Fun.Name[(best[0].Fun.Name.LastIndexOf('.') + 1)..];
+        throw Error($"'{bare}' is in {string.Join(" and ", best.Select(entry => DisplayName(entry.Fun.Class!.Name)))}: name the trait, x.Trait.{bare}(...) "
+          + $"(an alias for a copy of a generic trait, spec 11.2), or replace it in the class", at);
+      }
       throw Error($"ambiguous call: it matches {options}", at);
     }
     return best[0].Fun;

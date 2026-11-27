@@ -1,0 +1,1 @@
+struct P { (i32, string) f }

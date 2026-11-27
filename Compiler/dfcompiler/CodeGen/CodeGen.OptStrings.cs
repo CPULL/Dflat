@@ -77,7 +77,7 @@ public sealed partial class CodeGen {
 
   // x = value and x ??= value on a string? variable
   string OptStrAssign(LValueInfo target, Node targetNode, string op, Node valueNode, Scope scope, Node at) {
-    if (target.Variable is { IsParam: true } or { ReadOnlyString: true }) {
+    if (target.Variable is { IsParam: true, RefSlot: false, Own: false } or { ReadOnlyString: true }) {
       throw Error($"'{targetNode.Text}' is a read-only string? (a parameter or a loop variable, spec 7.1)", at);
     }
     MarkAssigned(target.Variable);
@@ -92,7 +92,7 @@ public sealed partial class CodeGen {
 
   // return x from a function that returns string?: a local moves out, anything else is copied
   string OptStrReturned(Expr value, Node expression, Scope scope, Node at) {
-    if (value.Type == "string?" && expression.Kind == "Name" && scope.Find(expression.Text!) is VarInfo { IsParam: false, Type: "string?" } local) {
+    if (value.Type == "string?" && expression.Kind == "Name" && scope.Find(expression.Text!) is VarInfo { Type: "string?", RefSlot: false } local && (!local.IsParam || local.Own)) {
       string taken = NewTemp();
       return $"({{ df_opt_string {taken} = {local.CName}; {local.CName} = (df_opt_string){{0}}; {taken}; }})";
     }

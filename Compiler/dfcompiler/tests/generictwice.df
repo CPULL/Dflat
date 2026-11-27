@@ -1,0 +1,20 @@
+// A generic trait implemented twice (spec 11.3.2, 16): alias Source<string> as SourceString names one copy, the copy without
+// an alias is Source; a value of each copy calls its own; a function of both copies is named with the trait
+import Root
+trait Source<Item> {
+  unrestricted fun Item take()
+  unrestricted fun i32 size() { return 1 }
+}
+alias Source<string> as SourceString
+class Both : Source<i32>, SourceString {
+  replace fun i32 Source.take() { return 5 }
+  replace fun string SourceString.take() { return "five" }
+  public fun show() { Console.log($"{this.Source.take()} {this.SourceString.take()} {this.Source.size()} {this.SourceString.size()}") }
+}
+fun useInts(Source<i32> s) { Console.log($"ints {s.take()}") }
+fun useStrings(SourceString s) { Console.log("strings " + s.take()) }
+Both b = Both()
+b.show()
+Console.log($"{b.Source.take()} {b.SourceString.take()}")
+useInts(b)
+useStrings(b)

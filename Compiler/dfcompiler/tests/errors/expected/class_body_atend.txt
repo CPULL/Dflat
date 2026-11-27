@@ -1,0 +1,1 @@
+class_body_atend.df(3): error: an atEnd in a class body: the destructor of a class is the atEnd written after its closing brace, } atEnd { } (spec 11.4)

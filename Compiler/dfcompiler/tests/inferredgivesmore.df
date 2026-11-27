@@ -1,0 +1,51 @@
+// Results built in the function are given without -> (spec 13.1.1): a collection kept in a local first (map, vec, list, set, a literal
+// or a constructor), and a local that gets its new object after its declaration
+import Root
+class Dog {
+  public string name
+  public Dog(string name) { this.name = name }
+} atEnd {
+  Console.log("  dog " + name + " ends")
+}
+fun map<string, i32> counts() {
+  map<string, i32> m = map<string, i32>()
+  m["a"] = 1
+  m["b"] = 2
+  return m
+}
+fun vec<i32> numbers() {
+  vec<i32> v = [1, 2, 3]
+  v.add(4)
+  return v
+}
+fun list<string> words() {
+  list<string> l = []
+  l.add($"w{1}")
+  return l
+}
+fun set<i32> evens() {
+  set<i32> s = set<i32>()
+  s += 2
+  s += 4
+  return s
+}
+fun Dog pick(bool big) {
+  Dog d = null
+  if big {
+    d = Dog("big")
+  } else {
+    d = Dog("small")
+  }
+  d.name = d.name + "!"
+  return d
+}
+fun go() {
+  var m = counts()
+  var v = numbers()
+  var l = words()
+  var s = evens()
+  Dog a = pick(true)
+  Dog b = pick(false)
+  Console.log($"{m} {v} {l} {s} {a.name} {b.name}")
+}
+go()

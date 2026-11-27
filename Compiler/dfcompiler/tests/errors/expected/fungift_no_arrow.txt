@@ -1,0 +1,1 @@
+fungift_no_arrow.df(8): error: 'h' takes the function value: write ->g, or give a new lambda (spec 13.3.2)

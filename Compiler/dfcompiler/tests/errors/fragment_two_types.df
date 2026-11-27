@@ -1,0 +1,13 @@
+class A {
+  public string seen
+  public A(i32 n) {
+    if n > 0 {
+      i32 k = 1
+    } else {
+      string k = "x"
+    }
+  } atEnd {
+    seen = $"{k}"
+  }
+}
+A a = A(1)

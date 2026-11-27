@@ -1,0 +1,10 @@
+class Btn {
+  fun() handler
+  public fun take(->fun() h) { handler = ->h }
+}
+fun go() {
+  Btn b = Btn()
+  fun() g = () { }
+  b.take(g)
+}
+go()

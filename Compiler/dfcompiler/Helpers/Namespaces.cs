@@ -32,7 +32,10 @@ sealed partial class SourceLoader {
 
   readonly Dictionary<string, List<NsDecl>> nsDecls = new();
   readonly HashSet<string> knownNamespaces = new();
-  readonly Dictionary<string, string> nsAliases = new(StringComparer.OrdinalIgnoreCase);   // alias name -> namespace (lower case)
+  // (file, alias name in lower case) -> namespace (lower case): an alias is seen only in its own file (spec 16)
+  readonly Dictionary<(int File, string Name), string> nsAliases = new();
+
+  bool NsAlias(int file, string name, out string target) => nsAliases.TryGetValue((file, name.ToLowerInvariant()), out target!);
   readonly Dictionary<string, List<Node>> typeDecls = new();
   readonly HashSet<Node> resolvedNodes = new();                                // class and trait nodes by name, for the members
 
@@ -44,8 +47,8 @@ sealed partial class SourceLoader {
     for (bool added = true; added;) {
       added = false;
       var loaded = order.Select(file => file.Namespace).ToHashSet();
-      var aliases = CollectAliases();
       foreach (var file in order.ToList()) {
+        var aliases = CollectAliases(file);
         foreach (var (segments, line) in QualifiedCandidates(file.Tree)) {
           var path = ExpandAlias(segments, aliases);
           for (int k = path.Count - 1; k >= 1; k--) {
@@ -69,13 +72,12 @@ sealed partial class SourceLoader {
     }
   }
 
-  Dictionary<string, string> CollectAliases() {
+  // the aliases a file declares (spec 16: each file has its own)
+  static Dictionary<string, string> CollectAliases(SourceFile file) {
     var aliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-    foreach (var file in order) {
-      foreach (var alias in file.Tree.Children.Where(statement => statement.Kind == "Alias")) {
-        if (alias.Text != null && alias.Children.Count == 1 && alias.Children[0] is { Kind: "Type", Children.Count: 0, Text: string target }) {
-          aliases[alias.Text] = target;
-        }
+    foreach (var alias in file.Tree.Children.Where(statement => statement.Kind == "Alias")) {
+      if (alias.Text != null && alias.Children.Count == 1 && alias.Children[0] is { Kind: "Type", Children.Count: 0, Text: string target }) {
+        aliases[alias.Text] = target;
       }
     }
     return aliases;
@@ -126,9 +128,11 @@ sealed partial class SourceLoader {
       knownNamespaces.Add(file.Namespace);
       SourceMap.SetNamespace(file.Index, file.Namespace);
     }
-    foreach (var (alias, target) in CollectAliases()) {
-      if (knownNamespaces.Contains(target.ToLowerInvariant())) {
-        nsAliases[alias] = target.ToLowerInvariant();
+    foreach (var file in order) {
+      foreach (var (alias, target) in CollectAliases(file)) {
+        if (knownNamespaces.Contains(target.ToLowerInvariant())) {
+          nsAliases[(file.Index, alias.ToLowerInvariant())] = target.ToLowerInvariant();
+        }
       }
     }
     foreach (var file in order) {
@@ -166,7 +170,7 @@ sealed partial class SourceLoader {
         if (statement.Kind is "Namespace" or "NamespaceLocal" or "Import") {
           continue;
         }
-        if (statement.Kind == "Alias" && statement.Text != null && nsAliases.ContainsKey(statement.Text)) {
+        if (statement.Kind == "Alias" && statement.Text != null && NsAlias(file.Index, statement.Text, out _)) {
           file.Tree.Children.Remove(statement);   // an alias of a namespace is only for the names written with it
           continue;
         }
@@ -429,7 +433,7 @@ sealed partial class SourceLoader {
       var segments = text.Split('.').ToList();
       if (Qualified(segments, scope, type.Line) is { } found) {
         type.Text = found.Internal;
-      } else if (!nsAliases.ContainsKey(segments[0])) {
+      } else if (!NsAlias(scope.File.Index, segments[0], out _)) {
         StdlibType(type, scope);
       }
       return;
@@ -496,7 +500,7 @@ sealed partial class SourceLoader {
 
   // the stdlib namespace a bare name comes from in this file, or null; without the import, a name of the stdlib is an error
   string? StdlibNamespace(string name, NameScope scope, int line) {
-    if (nsAliases.ContainsKey(name) || name == "Root") {
+    if (NsAlias(scope.File.Index, name, out _) || name == "Root") {
       return null;
     }
     var found = StdImports(scope.File).Where(ns => StdNames(ns).ContainsKey(name)).Select(ns => StdNames(ns)[name])
@@ -623,7 +627,7 @@ sealed partial class SourceLoader {
       return null;
     }
     var path = segments.Take(segments.Count - 1).ToList();
-    string ns = nsAliases.TryGetValue(path[0], out var aliased) ? string.Join(".", new[] { aliased }.Concat(path.Skip(1))) : string.Join(".", path);
+    string ns = NsAlias(scope.File.Index, path[0], out var aliased) ? string.Join(".", new[] { aliased }.Concat(path.Skip(1))) : string.Join(".", path);
     ns = ns.ToLowerInvariant();
     string name = segments[^1];
     if (!knownNamespaces.Contains(ns) || !nsDecls.TryGetValue(name, out var list)) {

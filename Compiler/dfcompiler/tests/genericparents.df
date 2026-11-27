@@ -1,0 +1,56 @@
+// Generic parent classes (spec 11.3.2, F6): a class extends a copy of a generic class (Ints : Stack<i32>), a generic class extends
+// one with its own parameter (Named<T> : Stack<T>); the header passes arguments with the type (Box<string>(...)), a constructor
+// of the body names the parent without them (: Box(7, 9)); replace and the destructors work as with any parent
+import Root
+class Stack<Item> {
+  public list<Item> items = []
+  public i32 pushes = 0
+  public fun push(Item v) {
+    items.add(v)
+    pushes++
+  }
+  unrestricted fun string describe() { return $"stack of {items.len}" }
+}
+class Ints : Stack<i32> {
+  public fun i32 total() {
+    i32 t = 0
+    for x in items { t += x }
+    return t
+  }
+  replace fun string describe() { return $"ints, total {total()}" }
+}
+class Named<T> : Stack<T> {
+  public string name = "named"
+}
+fun show(Stack<i32> s) { Console.log(s.describe()) }
+Ints s = Ints()
+s.push(3)
+s.push(4)
+Console.log($"{s.total()} {s.pushes}")
+show(s)
+Named<string> n = Named<string>()
+n.push("a")
+Console.log($"{n.name} {n.items} {n.describe()}")
+Stack<i32> plain = Stack<i32>()
+show(plain)
+class Box<Item>(Item first, i32 size) {
+  public Item held = first
+  public i32 room = size
+} atEnd {
+  Console.log($"box of {room} ends")
+}
+class Crate(string label) : Box<string>(label + "!", 3) {
+  public string tag = label
+} atEnd {
+  Console.log("crate ends")
+}
+class Bag : Box<i32> {
+  public Bag() : Box(7, 9) { }
+}
+fun go() {
+  Crate c = Crate("x")
+  Console.log($"{c.held} {c.room} {c.tag}")
+  Bag b = Bag()
+  Console.log($"{b.held} {b.room}")
+}
+go()

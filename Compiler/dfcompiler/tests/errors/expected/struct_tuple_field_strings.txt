@@ -1,0 +1,1 @@
+struct_tuple_field_strings.df(1): error: feature not supported: a tuple field that holds strings, objects, arrays or function values ((i32,string)); a tuple of values is built

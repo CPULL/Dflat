@@ -1,0 +1,6 @@
+fun go() {
+  string? owned = $"o{1}"
+  string() f = (; ->owned) { owned ?? "-" }
+  Root.Console.log(owned ?? "x")
+}
+go()

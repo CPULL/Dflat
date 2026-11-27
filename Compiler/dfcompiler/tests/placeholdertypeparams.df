@@ -1,0 +1,27 @@
+// A trait with type parameters and placeholders (spec 11.3.2, 11.3.4, F6): Mapper<Key> { placeholder Out }, fixed by
+// class Len : Mapper<string> with (Out is i32); used as a constraint with where M.Out : Numeric
+import Root
+trait Mapper<Key> {
+  placeholder Out
+  public fun Out apply(Key k)
+  public fun string name() { return "mapper" }
+}
+class Len : Mapper<string> with (Out is i32) {
+  replace fun i32 apply(string k) { return (i32)k.len }
+}
+class Half : Mapper<r64> with (Out is r64) {
+  replace fun r64 apply(r64 k) { return k / 2.0 }
+}
+class Label : Mapper<i32> with (Out is string) {
+  replace fun string apply(i32 k) { return $"#{k}" }
+}
+fun r64 doubled<M : Mapper>(->M m, string k) where M.Out : Numeric {
+  return (r64)m.apply(k) * 2.0
+}
+Len l = Len()
+Console.log($"{l.apply("abc")} {l.name()}")
+Half h = Half()
+Console.log($"{h.apply(3.0)}")
+Label b = Label()
+Console.log(b.apply(7))
+Console.log($"{doubled(->l, "abcd")}")

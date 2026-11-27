@@ -1,0 +1,4 @@
+[a: 1, b: 2] [1, 2, 3, ...] (4 items) [w1] [2, 4] big! small!
+  dog small! ends
+  dog big! ends
+---- exit code 0 ----

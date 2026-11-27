@@ -185,9 +185,6 @@ public sealed partial class CodeGen {
           if (member.Children.FirstOrDefault(child => child.Kind == "Chain") is Node chain) {
             throw NotSupported("Trait constructors that chain (: Super(...))", chain);
           }
-          if (member.Children.First(child => child.Kind == "Params").Children.FirstOrDefault(p => p.Kind == "VariadicParam") is Node variadic) {
-            throw NotSupported("Variadic constructor parameters", variadic);
-          }
           trait.CtorNodes.Add(member);              // a trailing atEnd is a destructor fragment (spec 11.4, RegisterTraitInit)              // overloads, like the constructors of a class (spec 11.1.1, 11.2)
           break;
         }
@@ -216,7 +213,6 @@ public sealed partial class CodeGen {
       }
     }
     foreach (var member in members) {
-      RejectAtEnd(member);
       var (visibility, explicitVisibility, isStatic, isConst, isOverride) = ReadMods(member);
       if (isStatic || isConst) {
         throw Error("a trait function cannot be static", member);
@@ -450,10 +446,20 @@ public sealed partial class CodeGen {
 
   // for every class: what answers each method of each trait it implements
   void BuildImpls(ClassInfo cls) {
+    CheckCopyClashes(cls);
     foreach (var trait in AllTraits(cls)) {
       var methods = new List<FunSig>();
       foreach (var method in trait.TraitMethods) {
         FunSig? implementation = null;
+        // replace fun ... Trait.name(): the implementation written for this trait (or a sub-trait of it) wins (spec 11.2)
+        string methodBare = method.Name[(method.Name.IndexOf('.') + 1)..];
+        for (var c = cls; c != null && implementation == null; c = c.Parent) {
+          foreach (var named in AllTraits(cls).Where(t => t == trait || DerivesFrom(t, trait))) {
+            if (implementation == null && funs.TryGetValue(c.Name + "." + named.Name + "." + methodBare, out var own)) {
+              implementation = own.FirstOrDefault(g => !g.IsStatic && ParamTypes(g).SequenceEqual(ParamTypes(method)) && g.Ret == method.Ret);
+            }
+          }
+        }
         for (var c = cls; c != null && implementation == null; c = c.Parent) {
           if (funs.TryGetValue(c.Name + "." + method.Name[(method.Name.IndexOf('.') + 1)..], out var candidates)) {
             implementation = candidates.FirstOrDefault(g => !g.IsStatic && ParamTypes(g).SequenceEqual(ParamTypes(method)) && g.Ret == method.Ret);
@@ -482,6 +488,30 @@ public sealed partial class CodeGen {
       cls.Impls.Add(new ImplInfo(trait, methods));
     }
   }
+
+  // two copies of one generic trait that the header writes without an alias (class Both : Source<i32>, Source<string>): fine until
+  // they clash, a function with the same parameters and another result, or a public property with the same name; then one needs an
+  // alias, so that the class and its users can name it (spec 11.3.2, 16)
+  void CheckCopyClashes(ClassInfo cls) {
+    var plain = cls.Traits.Where(trait => classInstanceArgs.ContainsKey(trait.Name) && !cls.AliasedTraits.Contains(trait.Name))
+      .GroupBy(trait => classInstanceArgs[trait.Name].Template).Where(group => group.Count() > 1);
+    foreach (var group in plain) {
+      var copies = group.ToList();
+      for (int i = 0; i < copies.Count; i++) {
+        for (int j = i + 1; j < copies.Count; j++) {
+          string? clash = copies[i].TraitMethods.FirstOrDefault(m => copies[j].TraitMethods.Any(o => Bare(o) == Bare(m)
+              && ParamTypes(o).SequenceEqual(ParamTypes(m)) && o.Ret != m.Ret)) is FunSig method ? Bare(method)
+            : copies[i].Fields.FirstOrDefault(f => !f.IsStatic && f.Visibility != Vis.Private && copies[j].Fields.Any(o => o.Name == f.Name))?.Name;
+          if (clash != null) {
+            throw Error($"{DisplayName(cls.Name)} implements {DisplayName(copies[i].Name)} and {DisplayName(copies[j].Name)}, and '{clash}' clashes: "
+              + $"give one an alias, alias {DisplayName(copies[j].Name)} as ... , and write the alias in the header (spec 11.3.2)", cls.Node);
+          }
+        }
+      }
+    }
+  }
+
+  static string Bare(FunSig f) => f.Name[(f.Name.LastIndexOf('.') + 1)..];
 
   // ---------------------------------------------------------------- properties of traits
 
@@ -538,10 +568,45 @@ public sealed partial class CodeGen {
     return ArgsFirst(new Expr(UserCallCode(chosen, call), chosen.Ret, IsClass(chosen.Ret) && chosen.ReturnsOwned), prefix);
   }
 
+  // the trait a qualifier names for a class (spec 11.2, 11.3.2): a trait, an alias of a copy of a generic trait (in this file, spec 16),
+  // or the name of a generic trait: its only copy, or the one the header writes without an alias; null when it names no trait
+  ClassInfo? QualifiedTrait(ClassInfo cls, string written, Node at) {
+    if (traits.TryGetValue(written, out var direct)) {
+      return direct;
+    }
+    if (typeAliases.TryGetValue(written, at, out var aliased) && traits.TryGetValue(aliased, out var viaAlias)) {
+      return viaAlias;
+    }
+    if (!genericClasses.TryGetValue(written, out var template) || !template.IsTrait) {
+      return null;
+    }
+    var copies = AllTraits(cls).Where(trait => classInstanceArgs.TryGetValue(trait.Name, out var copy) && copy.Template == template).ToList();
+    if (copies.Count <= 1) {
+      return copies.FirstOrDefault();
+    }
+    var plain = copies.Where(trait => !AliasedIn(cls, trait)).ToList();
+    return plain.Count == 1 ? plain[0]
+      : throw Error($"{DisplayName(cls.Name)} implements {written} more than once: name the copy with an alias of it (alias {DisplayName(copies[^1].Name)} as ...)", at);
+  }
+
+  // a copy of a generic trait that the header of the class (or of a parent) writes through an alias
+  static bool AliasedIn(ClassInfo cls, ClassInfo trait) {
+    for (var c = cls; c != null; c = c.Parent) {
+      if (c.AliasedTraits.Contains(trait.Name)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   // x.TraitName: the object seen as that trait
   Expr? TraitView(Expr obj, string traitName, Node at) {
     if (!traits.TryGetValue(traitName, out var trait)) {
-      return null;
+      if (!classes.TryGetValue(obj.Type, out var objClass) || QualifiedTrait(objClass, traitName, at) is not ClassInfo found) {
+        return null;
+      }
+      trait = found;   // b.SourceString, b.Source: a copy of a generic trait (spec 11.3.2)
+      traitName = found.Name;
     }
     if (!IsSubtype(obj.Type, traitName)) {
       throw Error($"{obj.Type} does not implement the trait {traitName}", at);

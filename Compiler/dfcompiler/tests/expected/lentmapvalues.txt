@@ -1,0 +1,8 @@
+75 ! 2
+[1: x!]
+rex2
+  dog rex2 ends
+new
+[1: [99, 2]]
+  dog new ends
+---- exit code 0 ----

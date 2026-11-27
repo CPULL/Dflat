@@ -1,0 +1,10 @@
+7 2
+ints, total 7
+named [a] stack of 1
+stack of 0
+x! 3 x
+7 9
+box of 9 ends
+crate ends
+box of 3 ends
+---- exit code 0 ----

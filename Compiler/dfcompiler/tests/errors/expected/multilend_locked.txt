@@ -1,0 +1,1 @@
+multilend_locked.df(11): error: 'b' is lent to 's' until its last use: until then only its unrestricted methods can be called, not 'bump' (spec 13.1.1)

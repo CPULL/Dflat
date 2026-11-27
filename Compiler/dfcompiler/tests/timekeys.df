@@ -1,0 +1,35 @@
+// clock and lapse as keys of map and items of set and hset (spec 6.2, F9): a lapse can be negative and sorts first
+import Root
+lapse day = date("2024-01-02") - date("2024-01-01")
+lapse back = date("2024-01-01") - date("2024-01-03")
+lapse week = date("2024-01-08") - date("2024-01-01")
+map<lapse, string> m = map<lapse, string>()
+m[week] = "week"
+m[back] = "back"
+m[day] = "day"
+for k, v in m { Console.log(v) }
+Console.log($"{m.hasKey(day)} {m.len}")
+m.removeAt(back)
+Console.log($"{m.len} {m[week]}")
+set<lapse> s = set<lapse>()
+s += week
+s += back
+s += week
+Console.log($"{s.len} {s.has(back)}")
+clock a = Time.clock()
+clock b = Time.clock()
+set<clock> cs = set<clock>()
+cs += b
+cs += a
+cs += a
+bool ordered = true
+clock last = a
+for c in cs { if c < last then ordered = false; last = c }
+Console.log($"{cs.len <= 2} {ordered} {cs.has(a)} {cs.has(b)}")
+hset<clock> hc = hset<clock>()
+hc += a
+hc += a
+map<clock, i32> mc = map<clock, i32>()
+mc[a] = 1
+mc[a] += 2
+Console.log($"{hc.has(a)} {hc.len} {mc[a]}")

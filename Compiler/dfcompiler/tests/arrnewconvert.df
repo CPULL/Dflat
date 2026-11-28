@@ -1,0 +1,35 @@
+// c.transformTo<arr>() and c.map<U>(f) give a new array (spec 6.6): the variable that receives it owns it, so ->x moves it into an
+// array field, and a field takes it directly; the items are objects, so a copy is not possible (spec 6.8.1)
+import Root
+
+public class Dog(string name) {
+  public string name
+} atEnd {
+  Console.log("  end " + name)
+}
+
+public class Kennel {
+  public arr<Dog> dogs = []
+}
+
+fun main() {
+  Kennel k = Kennel()
+  vec<Dog> collected = []
+  collected.add(Dog("Rex"))
+  collected.add(Dog("Fido"))
+  arr<Dog> done = collected.transformTo<arr>()
+  k.dogs = ->done                                   // done owns the new array: it moves into the field
+  Console.log($"{k.dogs.len} dogs: {k.dogs[0].name}, {k.dogs[1].name}; done has {done.len}")
+
+  vec<Dog> more = []
+  more.add(Dog("Max"))
+  k.dogs = more.transformTo<arr>()                  // straight into the field: the old array and its dogs end
+  Console.log($"{k.dogs.len} dog: {k.dogs[0].name}")
+
+  arr<string> names = ["Bo", "Ty"]
+  Kennel k2 = Kennel()
+  arr<Dog> made = names.map<Dog>((string n) { Dog(n) })
+  k2.dogs = ->made
+  Console.log($"{k2.dogs.len} dogs: {k2.dogs[0].name}, {k2.dogs[1].name}")
+  Console.log("main ends")
+}

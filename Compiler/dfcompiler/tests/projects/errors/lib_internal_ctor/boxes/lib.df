@@ -1,0 +1,18 @@
+// an internal constructor (spec 1.6.1, 11.1.1): only the namespace of the library calls it, so the interface leaves it out
+namespace boxes
+import Root
+
+internal class Inner(i32 v) {
+  public i32 v
+}
+
+public class Box {
+  internal i32 size
+  internal Box(i32 s) {
+    size = s
+  }
+  public static fun ->Box make(i32 s) {
+    return Box(s * 2)            // the namespace of the library: the internal constructor is seen
+  }
+  public fun i32 getSize() { size }
+}

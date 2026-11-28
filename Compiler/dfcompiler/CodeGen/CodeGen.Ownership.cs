@@ -687,7 +687,8 @@ public sealed partial class CodeGen {
   bool IsNewArray(Node? value) =>
     value is { Kind: "List" or "Copy" } || value is { Kind: "Index" } && value.Children[0].Kind == "GenericRef"
     || value is { Kind: "Call" } && CalleesOf(value) is { Count: > 0 } callees && callees.All(ReturnsNewArray)
-    || value is { Kind: "Call" } && value.Children[0] is { Kind: "Member", Text: "filter" or "map" };   // a.filter(f), a.map<U>(f): a new array (spec 6.6)
+    || value is { Kind: "Call" } && value.Children[0] is { Kind: "Member", Text: "filter" or "map" }   // a.filter(f), a.map(f): a new array (spec 6.6)
+    || value is { Kind: "Call" } && value.Children[0] is { Kind: "GenericRef", Children: [{ Kind: "Member", Text: "transformTo" or "map" }, ..] };   // a.transformTo<arr>(), a.map<U>(f): a new array (spec 6.6)
 
   static bool IsArrTypeNode(Node? type) =>
     type is { Kind: "Type", Text: "arr", Children.Count: 1 } || type is { Kind: "ResolvedType" } && type.Text!.StartsWith("arr<");

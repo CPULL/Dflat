@@ -2200,10 +2200,21 @@ public sealed class Parser {
     if (IsOp("<")) {
       node.Add(ParseGenericParams());
     }
+    // class JsonNode internal(...): the visibility of the primary constructor (spec 11.1), public when none is written
+    Token? ctorVisibility = null;
+    if (Peek.Kind == TokenKind.Keyword && Peek.Text is "public" or "internal" or "asparent" or "unrestricted" && PeekAt(1).Is("(")) {
+      ctorVisibility = Next();
+      if (ctorVisibility.Text is "asparent" or "unrestricted") {
+        throw ErrorAt($"the primary constructor can be public or internal, not {ctorVisibility.Text}", ctorVisibility);
+      }
+    }
     if (IsOp("(")) {
       var ps = ParseParams();
       ps.Kind = "PrimaryCtor";
       node.Add(ps);
+      if (ctorVisibility != null) {
+        node.Add(new Node("PrimaryVisibility", ctorVisibility, ctorVisibility.Text));
+      }
     }
     if (IsOp(":")) {
       node.Add(ParseBases(Next(), node));

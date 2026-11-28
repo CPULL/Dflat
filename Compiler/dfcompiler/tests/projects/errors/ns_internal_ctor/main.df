@@ -1,0 +1,7 @@
+// an internal constructor is seen only by its namespace and its sub-namespaces (spec 1.6.1): app is the parent of app.zoo, not inside it
+namespace app
+import Root
+import app.zoo
+
+Cage ok = Cage.one()
+Cage c = Cage(5)

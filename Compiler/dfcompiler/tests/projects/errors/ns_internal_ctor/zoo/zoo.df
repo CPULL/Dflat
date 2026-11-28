@@ -1,0 +1,10 @@
+namespace app.zoo
+import Root
+
+public class Cage {
+  internal i32 n
+  internal Cage(i32 x) {
+    n = x
+  }
+  public static fun ->Cage one() { Cage(1) }
+}

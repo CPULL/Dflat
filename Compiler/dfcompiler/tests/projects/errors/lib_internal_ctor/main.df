@@ -1,0 +1,7 @@
+// the internal constructor of a library class cannot be called by a program (spec 1.6.1)
+namespace app
+import Root
+import lib boxes
+import boxes
+
+Box b = Box(3)

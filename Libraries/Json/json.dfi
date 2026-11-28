@@ -1,0 +1,46 @@
+DFI {
+ compiler: 0.0.232alpha
+ library: json
+ namespace: serialization.json
+ runtime: arriter,numfmt,text
+ stdlib: vec<JsonNode>,vecIterator<JsonNode>
+}
+namespace serialization.json
+public bitfield32 JsonOptions { PrettyPrint: 0, AllowCommentsInSerialization: 1, NoStrict: 2, AllowCommentsInParsing: 3 }
+class JSON -> df_cls_serialization__json__JSON {
+  layout-win-x64: { const df_class* cls; }
+  public static fun ->JsonNode parse(string json, JsonOptions options) -> f_json_JSON_parse error
+  public static fun ->string serialize(JsonNode node, JsonOptions options) -> f_json_JSON_serialize error
+  public JSON() -> f_json_JSON
+}
+class JsonNode -> df_cls_serialization__json__JsonNode {
+  layout-win-x64: { const df_class* cls; df_opt_string m_key; df_setv m_value; }
+  unrestricted fun bool isNull() -> f_json_JsonNode_isNull
+  unrestricted fun bool isNumberInt() -> f_json_JsonNode_isNumberInt error
+  unrestricted fun bool isNumberFloat() -> f_json_JsonNode_isNumberFloat error
+  unrestricted fun bool isNumber() -> f_json_JsonNode_isNumber
+  unrestricted fun bool isString() -> f_json_JsonNode_isString
+  unrestricted fun bool isBool() -> f_json_JsonNode_isBool
+  unrestricted fun bool isObject() -> f_json_JsonNode_isObject
+  unrestricted fun bool isArray() -> f_json_JsonNode_isArray
+  unrestricted fun bool isComment() -> f_json_JsonNode_isComment
+  unrestricted fun JsonNode get(string targetKey) -> f_json_JsonNode_get error
+  unrestricted fun bool hasKey(string targetKey) -> f_json_JsonNode_hasKey error
+  unrestricted fun string? getKey() -> f_json_JsonNode_getKey
+  unrestricted fun i64 getIntValue() -> f_json_JsonNode_getIntValue error
+  unrestricted fun r64 getFloatValue() -> f_json_JsonNode_getFloatValue error
+  unrestricted fun ->string getStringValue() -> f_json_JsonNode_getStringValue
+  unrestricted fun bool getBoolValue() -> f_json_JsonNode_getBoolValue
+  unrestricted fun arr<JsonNode> getArrayValue() -> f_json_JsonNode_getArrayValue error
+  unrestricted fun arr<JsonNode> getObjectValue() -> f_json_JsonNode_getObjectValue error
+}
+class JsonParsingException : Exception -> df_cls_serialization__json__JsonParsingException {
+  layout-win-x64: { const df_class* cls; uint64_t id; const df_descriptor* descriptor; char* message; char* function; uint64_t line; df_trace_item* trace; uint64_t traceLen; uint64_t m_position; df_s1k m_part; }
+  public u64 position
+  public string1k part
+  public JsonParsingException(string message = "", u64 position = 0) -> f_json_JsonParsingException
+  public JsonParsingException(u64 pos, string json, string msg) -> f_json_JsonParsingException_o9774e778 error
+}
+ids -> df_libids_json
+atLibStart -> df_libstart_json
+atEnd -> df_libend_json

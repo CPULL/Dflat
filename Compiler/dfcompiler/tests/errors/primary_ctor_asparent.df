@@ -1,0 +1,5 @@
+// the primary constructor can be public or internal (spec 11.1): asparent there is a compile error
+import Root
+
+class Pet asparent(string name) {
+}

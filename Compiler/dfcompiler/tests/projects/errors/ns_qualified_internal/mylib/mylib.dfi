@@ -1,5 +1,5 @@
 DFI {
- compiler: 0.0.229alpha
+ compiler: 0.0.232alpha
  library: mylib
  namespace: mylib
  runtime: 

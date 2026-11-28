@@ -1,0 +1,10 @@
+2 dogs: Rex, Fido; done has 0
+  end Rex
+  end Fido
+1 dog: Max
+2 dogs: Bo, Ty
+main ends
+  end Bo
+  end Ty
+  end Max
+---- exit code 0 ----

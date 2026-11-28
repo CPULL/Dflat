@@ -1,0 +1,22 @@
+DFI {
+ compiler: 0.0.232alpha
+ library: boxes
+ namespace: boxes
+ runtime: 
+ stdlib: 
+}
+namespace boxes
+class Box -> df_cls_boxes__Box {
+  layout-win-x64: { const df_class* cls; int32_t m_size; df_setv m_label; }
+  public static fun ->Box make(i32 s) -> f_boxes_Box_make
+  public fun i32 getSize() -> f_boxes_Box_getSize
+  public fun ->string describe() -> f_boxes_Box_describe error
+}
+class Tag -> df_cls_boxes__Tag {
+  layout-win-x64: { const df_class* cls; df_string m_text; }
+  public string text
+  public static fun ->Tag of(string t) -> f_boxes_Tag_of
+}
+ids -> df_libids_boxes
+atLibStart -> df_libstart_boxes
+atEnd -> df_libend_boxes

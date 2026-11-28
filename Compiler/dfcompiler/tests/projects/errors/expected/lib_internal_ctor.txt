@@ -1,0 +1,1 @@
+main.df(7): error: Box has no constructor the program can call: its constructors are internal or private to its library

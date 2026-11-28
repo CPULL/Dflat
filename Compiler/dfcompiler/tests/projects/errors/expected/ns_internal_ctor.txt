@@ -1,0 +1,1 @@
+main.df(7): error: 'Cage(i32)' is internal in Cage: only the namespace 'app.zoo' and its sub-namespaces see it

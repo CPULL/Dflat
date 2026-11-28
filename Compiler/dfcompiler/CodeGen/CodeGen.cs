@@ -3244,6 +3244,10 @@ public sealed partial class CodeGen {
       }
       bool enumMethod = callee.Kind == "Member" && IsEnum(path.Split('.')[0]);
       if ((callee.Kind == "Name" || enumMethod) && funs.TryGetValue(path, out var overloads)) {
+        if (overloads.Count == 0 && classes.TryGetValue(path, out var closed)) {
+          // a class of a compiled library whose constructors are all internal or private: its interface lists none (spec 15.8, 1.6.1)
+          throw Error($"{DisplayName(closed.Name)} has no constructor the program can call: its constructors are internal or private to its library", n);
+        }
         return UserCall(ResolveOverload(overloads, args, scope, n), args, scope, n);
       }
       // inside an enum method, sibling methods without the enum name
@@ -3279,6 +3283,9 @@ public sealed partial class CodeGen {
     if (f.IsCtor && f.Visibility == Vis.Private && currentClass != f.Class && !LibraryCode) {
       // a private constructor (spec 11.1.1): only the code of its class calls it, its static functions included
       throw Error($"this constructor of {DisplayName(f.Class!.Name)} is private: only the code of {DisplayName(f.Class.Name)} can call it", at);
+    }
+    if (f.IsCtor && f.Visibility == Vis.Internal) {
+      CheckAccess(Vis.Internal, f.Class!, $"{DisplayName(f.Class!.Name)}({string.Join(", ", f.Params.Select(p => DisplayName(p.Type)))})", at);   // internal (spec 1.6.1): its namespace only
     }
     var (slots, problem) = MapArgs(f, args);
     if (slots == null) {

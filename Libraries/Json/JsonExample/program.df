@@ -1,0 +1,31 @@
+// Example: parses a JSON file and writes it back, with the options given on the command line
+namespace jsonexample
+import Root
+import Root.io
+import lib json
+import serialization.json
+
+fun main(arr<string> params) {
+  string json = ""
+  if params.len < 2{
+    Console.log("Usage: json <file.json> [-pp] [-pc] [-sc] [-ns]\n-pp enables prettyprint\n-pc reads comments in json\n-sc writes comments when serializing\n-ns allows no strict json")
+	return
+  }
+
+  File jf = File(params[1])
+  json = jf.readAllText()
+  JsonOptions opts = JsonOptions.NONE
+  for i = 2..params.len {
+    if params[i]=="--pp" || params[i]=="-pp" || params[i]=="pp" then opts.set(JsonOptions.PrettyPrint)
+    if params[i]=="--pc" || params[i]=="-pc" || params[i]=="pc" then opts.set(JsonOptions.AllowCommentsInParsing)
+    if params[i]=="--sc" || params[i]=="-sc" || params[i]=="sc" then opts.set(JsonOptions.AllowCommentsInSerialization)
+    if params[i]=="--ns" || params[i]=="-ns" || params[i]=="ns" then opts.set(JsonOptions.NoStrict)
+  }
+  var test = JSON.parse(json, opts)
+  Console.log(JSON.serialize(test, opts))
+  
+  catch Exception ex {
+    Console.log("Error: " + ex.message)
+	Console.log("Original:\n" + json)
+  }
+}

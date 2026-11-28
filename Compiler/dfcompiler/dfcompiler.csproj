@@ -8,7 +8,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>dfcompiler</AssemblyName>
     <RootNamespace>dfcompiler</RootNamespace>
-    <Version>0.0.229-alpha</Version>
+    <Version>0.0.232-alpha</Version>
   </PropertyGroup>
 
 

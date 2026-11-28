@@ -1,0 +1,1 @@
+primary_ctor_asparent.df(4,11): error: the primary constructor can be public or internal, not asparent

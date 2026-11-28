@@ -900,7 +900,8 @@ public sealed partial class CodeGen {
       var ctorSig = new FunSig(cls.Name, cls.Name, ctorParams.ToList(), initNode, null) {
         Class = cls,
         IsCtor = true,
-        Visibility = Vis.Public,
+        // class JsonNode internal(...): an internal primary constructor (spec 11.1); public when no keyword is written
+        Visibility = cls.Node.Children.Any(child => child.Kind == "PrimaryVisibility" && child.Text == "internal") ? Vis.Internal : Vis.Public,
         CtorInit = initSig
       };
       ctors.Add(ctorSig);
@@ -1035,7 +1036,7 @@ public sealed partial class CodeGen {
       funs.Remove(init.Name);           // listed with the other init functions of the class
       init.Class = cls;
       init.IsInit = true;
-      init.Visibility = visibility == Vis.Private ? Vis.Private : Vis.Public;   // private: only the code of the class calls it (spec 11.1.1)
+      init.Visibility = visibility;   // private: only the code of the class calls it; internal: only its namespace (spec 11.1.1, 1.6.1)
       init.ChainsToSelf = selfCall != null;
       init.ParentInit = selfCall == null && parentCall == null ? implicitParent : null;
       if (ctors.Any(existing => existing.Params.Select(param => param.Type).SequenceEqual(init.Params.Select(param => param.Type)))) {
@@ -1399,6 +1400,9 @@ public sealed partial class CodeGen {
     var chosenCtor = ResolveOverload(funs[target.Name], args, scope, n);
     if (target != currentClass && chosenCtor.Visibility == Vis.Private) {
       throw Error($"this constructor of {DisplayName(target.Name)} is private: a subclass cannot call it", n);
+    }
+    if (chosenCtor.Visibility == Vis.Internal) {
+      CheckAccess(Vis.Internal, target, $"{DisplayName(target.Name)}({string.Join(", ", chosenCtor.Params.Select(p => DisplayName(p.Type)))})", n);   // a subclass in another namespace (spec 1.6.1)
     }
     var chosen = chosenCtor.CtorInit!;
     if (target == currentClass && currentFun != null) {

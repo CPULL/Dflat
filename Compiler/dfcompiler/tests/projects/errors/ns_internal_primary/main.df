@@ -1,0 +1,7 @@
+// an internal primary constructor (spec 11.1) is seen only by its namespace and its sub-namespaces: app is the parent of app.zoo
+namespace app
+import Root
+import app.zoo
+
+Cage ok = Cage.one()
+Cage c = Cage(5)

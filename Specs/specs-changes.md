@@ -835,3 +835,4 @@
 - 7.2.1 `enforce` names a field of the class or trait bare inside a method (`enforce total { }`)
 - 11.2 Trait properties can be counted or weak (`@T`, `&@T`, `%T`, `&%T`), with the rules of the fields of a class (12.7)
 - 11.3.13, 12.7 Counted objects and weak references are never type arguments of generics (`Box<@Dog>`, `smaller(@a, @b)`, `class K : Holder<@Dog>`): compile error `Reference Counted objects cannot be used in Generics`; the collections of the language keep `list<@T>`, `vec<@T>`, `arr<@T>`, `map<K, @T>`
+- 11.1 The primary constructor is public; `internal` before the header parameters makes it internal (`public class JsonNode internal(string? key, JsonType value)`); other keywords there are compile errors

@@ -1,0 +1,12 @@
+// a program that gets objects of a library class whose only constructor is internal (spec 1.6.1); the class has a hidden set field
+namespace app
+import Root
+import lib boxes
+import boxes
+
+Box b = Box.make(21)
+Console.log($"size {b.getSize()}: {b.describe()}")
+Box s = Box.make(3)
+Console.log($"size {s.getSize()}: {s.describe()}")
+Tag t = Tag.of("blue")
+Console.log(t.text)

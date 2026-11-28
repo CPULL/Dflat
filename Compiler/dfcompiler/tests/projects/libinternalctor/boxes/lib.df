@@ -1,0 +1,32 @@
+// an internal constructor (spec 1.6.1, 11.1.1): only the namespace of the library calls it, so the interface leaves it out.
+// Box also has a hidden field of a set type (spec 11.3.6): the program that copies its layout defines the C type of set values
+namespace boxes
+import Root
+
+Generic Label { i32, string }
+
+public class Box {
+  internal i32 size
+  internal Label label
+  internal Box(i32 s) {
+    size = s
+    label = s > 10 ? { "big", s }
+  }
+  public static fun ->Box make(i32 s) {
+    return Box(s * 2)            // the namespace of the library: the internal constructor is seen
+  }
+  public fun i32 getSize() { size }
+  public fun string describe() {
+    return label is ? {
+      string: "a big box",
+      i32: "box number " + size.toStr(),
+      default: "?"
+    }
+  }
+}
+
+// an internal primary constructor (spec 11.1): written before the header parameters
+public class Tag internal(string text) {
+  public string text
+  public static fun ->Tag of(string t) { Tag("#" + t) }
+}

@@ -1,20 +1,23 @@
+namespace serialization.json
+
 import Root
 import Root.io
 
 Generic JsonType { JsonNull, JsonNum, string, bool, JsonArray, JsonObject, JsonComment }
 
-class JSON {
-  public static fun JsonNode parse(string json, JsonSerializationOptions options) { 
+public class JSON {
+  public static fun JsonNode parse(string json, JsonOptions options) { 
     JsonParser parser = JsonParser(json, 0, options)
     return parser.parseDocument()
   }
-  public static fun string serialize(JsonNode node, JsonSerializationOptions options) {
+  public static fun string serialize(JsonNode node, JsonOptions options) {
     JsonWriter writer = JsonWriter(options)
 	string res = writer.writeNode(node, 0)
     return ->res
   }
 }
 
+##region Json internal classes
 // Object classes
 
 class JsonNull {
@@ -44,61 +47,71 @@ class JsonNum {
 }
 
 class JsonArray {
-  public vec<JsonType> arr = []
+  public arr<JsonNode> arr = []    // the elements: nodes with key null
 }
 
 class JsonObject {
-  public vec<JsonNode> obj = []
+  public arr<JsonNode> obj = []    // the members, in document order (comments have key null)
 }
 
 class JsonComment(string comment) {
   public string comment
 }
 
+##endregion
+
 // Main Json node class
 
-class JsonNode(string? key, JsonType value) {
-  public string? key
-  public JsonType value
+public class JsonNode internal(string? key, JsonType value) {
+  internal string? key
+  internal JsonType value
   
   
-  public fun bool isNull() { 
+  unrestricted fun bool isNull() { 
     value is ? {
 			JsonNull: true,
 		  default: false 
 		} 
   }
-  public fun bool isNumber() { 
+  unrestricted fun bool isNumberInt() { 
+    if value is JsonNum n then return !n.isFloat
+		return false 
+  }
+  unrestricted fun bool isNumberFloat() { 
+    if value is JsonNum n then return n.isFloat
+		return false 
+  }
+  unrestricted fun bool isNumber() { 
     value is ? {
 	  	JsonNum: true,
 			default: false 
 		} 
   }
-  public fun bool isString() { 
+  unrestricted fun bool isString() { 
     value is ? {
 			string: true,
 			default: false 
 		} 
   }
-  public fun bool isBool() { 
+  unrestricted fun bool isBool() { 
     value is ? {
 			bool: true,
 			default: false 
 		} 
   }
-  public fun bool isObject() { 
+  unrestricted fun bool isObject() { 
     value is ? {
 			JsonObject: true,
 			default: false 
 		} 
   }
-  public fun bool isArray() { 
+  unrestricted fun bool isArray() { 
     value is ? {
 			JsonArray: true,
 			default: false 
 		} 
   }
-  public fun bool isComment() { 
+  unrestricted fun bool isComment() { 
     value is ? {
 			JsonComment: true,
 			default: false 
@@ -106,7 +119,7 @@ class JsonNode(string? key, JsonType value) {
   }
   
   
-  public fun JsonNode get(string targetKey) {
+  unrestricted fun JsonNode get(string targetKey) {
     if value is JsonObject jo {
       for child in jo.obj {
         if child.key == targetKey {
@@ -117,57 +130,65 @@ class JsonNode(string? key, JsonType value) {
     return null
   }
   
-  public fun bool hasKey(string targetKey) {
+  unrestricted fun bool hasKey(string targetKey) {
     get(targetKey) != null
   }
   
-  public fun bool set(string targetKey, JsonType newValue) {
-    if value is JsonObject jo {
-      for child in jo.obj {
-        if child.key == targetKey {
-          child.value = newValue
-          return true
-        }
-      }
-      jo.obj.add(JsonNode(targetKey, newValue))
-      return true
-    }
-    return false
-  }
-  
-  public fun bool remove(string targetKey) {
-    if value is JsonObject jo {
-	  int pos = -1
-      for i = 0..jo.obj.len {
-        if jo.obj[i].key == targetKey {
-		  pos = (int)i
-		  break
-        }
-      }
-	  if pos !=-1 {
-	    jo.obj.removeAt((uns)pos)
-        return true
-      }
-    }
-    return false
-  }  
+
+	unrestricted fun string? getKey() { key }
+
+	unrestricted fun i64 getIntValue() {
+		if value is JsonNum n {
+			if !n.isFloat then return n.intValue
+		}
+		return 0
+	}
+	unrestricted fun r64 getFloatValue() {
+		if value is JsonNum n {
+			if n.isFloat then return n.floatValue
+		}
+		return 0.0
+	}
+	unrestricted fun string getStringValue() {
+		if value is string v then return v!
+		return ""
+	}
+	unrestricted fun bool getBoolValue() {
+		if value is bool v then return v
+		return false
+	}
+	// the elements of an array node, lent; an empty array when the node is not an array
+	unrestricted fun arr<JsonNode> getArrayValue() {
+		if value is JsonArray a then return a.arr
+		return noNodes
+	}
+	// the members of an object node (key from getKey()), lent; an empty array when the node is not an object
+	unrestricted fun arr<JsonNode> getObjectValue() {
+		if value is JsonObject o then return o.obj
+		return noNodes
+	}
+	static arr<JsonNode> noNodes = []    // lent by the two getters above when the node has no children
 }
 
-bitfield32 JsonSerializationOptions { PrettyPrint:0, AllowCommentsInSerialization:1, NoStrict:2, AllowCommentsInParsing:3 }
+public bitfield32 JsonOptions { PrettyPrint:0, AllowCommentsInSerialization:1, NoStrict:2, AllowCommentsInParsing:3 }
+
+
 
 // a parsing error: where it happened and the text that was parsed
-class JsonParsingException(uns position, string1k text) : Exception {
+public class JsonParsingException(uns position) : Exception {
   public uns position
-  public string1k text
-  public JsonParsingException(uns pos, string json, string msg) : JsonParsingException("", pos, json) {
-    string part = pos > 16 ? { json.substr(pos-16, 32), json.substr(0, 32) }
+  public string1k part
+  public JsonParsingException(uns pos, string json, string msg) : JsonParsingException("", pos) {
+    part = pos > 16 ? { json.substr(pos-16, 32), json.substr(0, 32) }
     replace message = $"JSON Error: {msg} at position {pos}: {part}\n{json}"
   }
 }
 
-class JsonWriter(JsonSerializationOptions options) {
-  bool pretty = options.isSet(JsonSerializationOptions.PrettyPrint)
-  bool allowComments = options.isSet(JsonSerializationOptions.AllowCommentsInSerialization)
+##region Serializer
+
+class JsonWriter(JsonOptions options) {
+  bool pretty = options.isSet(JsonOptions.PrettyPrint)
+  bool allowComments = options.isSet(JsonOptions.AllowCommentsInSerialization)
 
   public fun string writeNode(JsonNode node, uns depth) {
     string text = ""
@@ -242,7 +263,7 @@ class JsonWriter(JsonSerializationOptions options) {
     uns lastItem = 0
     uns index = 0
     while (index < source.arr.len) {
-	  if source.arr[index] is JsonComment jc {
+	  if source.arr[index].value is JsonComment {
 	  }
 	  else {
         lastItem = index
@@ -253,14 +274,14 @@ class JsonWriter(JsonSerializationOptions options) {
     bool wroteAny = false
     index = 0
     while (index < source.arr.len) {
-      JsonType item = source.arr[index]
-	  if source.arr[index] is JsonComment jc {
+      JsonNode item = source.arr[index]
+	  if source.arr[index].value is JsonComment jc {
         if (allowComments) {
           body = body + lineBreak(depth + 1) + writeComment(jc)
           wroteAny = true
         }
       } else {
-        body = body + lineBreak(depth + 1) + writeValue(item, depth + 1)
+        body = body + lineBreak(depth + 1) + writeNode(item, depth + 1)
         if (index < lastItem) {
           body = body + ","
         }
@@ -334,9 +355,13 @@ class JsonWriter(JsonSerializationOptions options) {
 
 }
 
-class JsonParser(string text, uns position, JsonSerializationOptions options) {
-  bool lenient = options.isSet(JsonSerializationOptions.NoStrict)
-  bool parseComments = options.isSet(JsonSerializationOptions.AllowCommentsInParsing)
+##endregion
+
+##region Parser
+
+class JsonParser(string text, uns position, JsonOptions options) {
+  bool lenient = options.isSet(JsonOptions.NoStrict)
+  bool parseComments = options.isSet(JsonOptions.AllowCommentsInParsing)
 
   public fun JsonNode parseDocument() {
     skipTrivia()
@@ -379,6 +404,7 @@ class JsonParser(string text, uns position, JsonSerializationOptions options) {
 
   fun JsonObject parseObject() {
     JsonObject result = JsonObject()
+    vec<JsonNode> members = []
     position++
     bool memberAllowed = true
     bool closeAllowed = true
@@ -391,7 +417,7 @@ class JsonParser(string text, uns position, JsonSerializationOptions options) {
       char current = text[position]
       if (atComment()) {
         if (parseComments) {
-          result.obj.add(JsonNode(null, readComment()))
+          members.add(JsonNode(null, readComment()))
         } else {
           readComment()
         }
@@ -400,6 +426,8 @@ class JsonParser(string text, uns position, JsonSerializationOptions options) {
           throw JsonParsingException(position, text, "Trailing comma is not allowed")
         }
         position++
+        arr<JsonNode> done = members.transformTo<arr>()
+        result.obj = ->done
         return result
       } else if (current == ',') {
         if (!commaAllowed) {
@@ -425,7 +453,7 @@ class JsonParser(string text, uns position, JsonSerializationOptions options) {
         position++
         skipTrivia()
 		var jn = JsonNode(memberKey, parseValue())
-        result.obj.add(->jn)
+        members.add(->jn)
         memberAllowed = false
         closeAllowed = true
         commaAllowed = true
@@ -438,6 +466,7 @@ class JsonParser(string text, uns position, JsonSerializationOptions options) {
 
   fun JsonArray parseArray() {
     JsonArray result = JsonArray()
+    vec<JsonNode> items = []
     position++
     bool itemAllowed = true
     bool closeAllowed = true
@@ -450,7 +479,7 @@ class JsonParser(string text, uns position, JsonSerializationOptions options) {
       char current = text[position]
       if (atComment()) {
         if (parseComments) {
-          result.arr.add(readComment())
+          items.add(JsonNode(null, readComment()))
         } else {
           readComment()
         }
@@ -459,6 +488,8 @@ class JsonParser(string text, uns position, JsonSerializationOptions options) {
           throw JsonParsingException(position, text, "Trailing comma is not allowed")
         }
         position++
+        arr<JsonNode> done = items.transformTo<arr>()
+        result.arr = ->done
         return result
       } else if (current == ',') {
         if (!commaAllowed) {
@@ -469,7 +500,7 @@ class JsonParser(string text, uns position, JsonSerializationOptions options) {
         closeAllowed = false
         commaAllowed = false
       } else if (itemAllowed) {
-        result.arr.add(parseValue())
+        items.add(JsonNode(null, parseValue()))
         itemAllowed = false
         closeAllowed = true
         commaAllowed = true
@@ -703,28 +734,4 @@ class JsonParser(string text, uns position, JsonSerializationOptions options) {
 
 }
 
-
-fun main(arr<string> params) {
-  string json = ""
-  if params.len < 2{
-    Console.log("Usage: json <file.json> [-pp] [-pc] [-sc] [-ns]\n-pp enables prettyprint\n-pc reads comments in json\n-sc writes comments when serializing\n-ns allows no strict json")
-	return
-  }
-
-  File jf = File(params[1])
-  json = jf.readAllText()
-  JsonSerializationOptions opts = JsonSerializationOptions.NONE
-  for i = 2..params.len {
-    if params[i]=="--pp" || params[i]=="-pp" || params[i]=="pp" then opts.set(JsonSerializationOptions.PrettyPrint)
-    if params[i]=="--pc" || params[i]=="-pc" || params[i]=="pc" then opts.set(JsonSerializationOptions.AllowCommentsInParsing)
-    if params[i]=="--sc" || params[i]=="-sc" || params[i]=="sc" then opts.set(JsonSerializationOptions.AllowCommentsInSerialization)
-    if params[i]=="--ns" || params[i]=="-ns" || params[i]=="ns" then opts.set(JsonSerializationOptions.NoStrict)
-  }
-  var test = JSON.parse(json, opts)
-  Console.log(JSON.serialize(test, opts))
-  
-  catch Exception ex {
-    Console.log("Error: " + ex.message)
-	Console.log("Original:\n" + json)
-  }
-}
+##endregion

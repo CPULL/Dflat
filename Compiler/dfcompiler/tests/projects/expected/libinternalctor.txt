@@ -1,0 +1,4 @@
+size 42: a big box
+size 6: box number 6
+#blue
+---- exit code 0 ----

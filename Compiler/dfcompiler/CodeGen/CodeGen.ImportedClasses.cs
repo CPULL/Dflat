@@ -45,6 +45,9 @@ public sealed partial class CodeGen {
       if (known.TryGetValue(name, out var field)) {
         parts.Add($"{(field.IsCounted || field.IsWeak ? "df_rc*" : CType(field.Type))} {name}");
       } else {
+        if (Regex.IsMatch(part, @"\bdf_setv\b")) {
+          SetValueCType();   // a hidden field of a set type (spec 11.3.6.1): the program defines the C type of set values too
+        }
         parts.Add(Regex.Replace(part, @"\b(struct\s+)?c_[A-Za-z0-9_]+\s*\*", "void* "));
       }
     }

@@ -862,14 +862,19 @@ public sealed partial class CodeGen {
     if (IsCountedType(itemType) || BoxInner(itemType) != null) {
       throw Error($"for &{name.Text}: {what} are counted (@T); a read/write usage is declared on the collection, list<&@T> (spec 12.7)", name);
     }
-    // a string value of a map lives inside the entry (64 bytes, df_bt_sval): it has no df_string place to point to
-    if (itemType == "string" && what.StartsWith("the values of")) {
-      throw NotSupported($"for (k, &string {name.Text}) in m: the string values of a map (string items of arr, vec and list have it)", name);
-    }
     // the strings inside a tuple item are not owned by the collection yet: they cannot be replaced through a borrow
     if (IsTuple(itemType) && TupleElems(itemType).Any(elem => elem.Type is "string" or "string?" || IsFunType(elem.Type) || IsCountedType(elem.Type) || StructHoldsObjects(elem.Type) || IsTuple(elem.Type))) {
       throw NotSupported($"for &{name.Text} on {DisplayName(itemType)} items (tuples of numbers, objects, arrays and plain structs have it; write & on a part)", name);
     }
+  }
+
+  // &string v over the string values of a map (spec 6.4): the value lives inside the entry (64 bytes, df_bt_sval), so each pass lends it in a
+  // cell of the loop body, put back in the slot when the pass ends (the cleanup also runs on break, continue, return and a raise)
+  string StringValueLoopLend(string name, string slot, string pad) {
+    NeedChunk("map");
+    string cell = "df_svl_" + name + "_" + ++tempCounter;
+    return $"{pad}  df_sval_lend {cell} __attribute__((cleanup(df_sval_loop_back))) = {{ {slot}, df_str_dup(df_bt_sval({slot})) }};\n"
+      + $"{pad}  df_string* l_{name} = &{cell}.s;\n";
   }
 
   // the for loops over a vec or a list being compiled: the C variable that points to the counter of open iterators, and the collection
@@ -1020,8 +1025,11 @@ public sealed partial class CodeGen {
           throw Error(collection.Type == "string" ? "the characters of a string are copies: & is not allowed in for c in text (spec 6.4)"
             : "the keys of a map are read-only: & on the key is not allowed (spec 6.4)", s);
         }
-        if (overView || customElem != null) {
-          throw NotSupported("for &T x over a view or a custom collection (arr, vec, list and the values of a map have it)", s);
+        if (overView) {
+          throw Error("a view is always read-only: for &x over a view is not allowed (spec 6.5); loop over the collection, or copy the view with !", s);
+        }
+        if (customElem != null && CustomMapTypes(collection.Type) != null) {
+          throw NotSupported("for &v over the values of a custom map (writableNext() of MapIterator, spec 6.7)", s);
         }
         if (!varNode.Text!.StartsWith("__item")) {   // the hidden item of for (&T a, b) in c: each part is checked on its own
           CheckWritableLoopItem(boxedElem ?? elem, varNode, s, mapPart == "values" ? "the values of this map" : "the items of this collection");
@@ -1098,7 +1106,9 @@ public sealed partial class CodeGen {
     if (customElem != null) {
       // the iterator was asked for once, in the block around the loop; each pass calls next() and stops when isValid is false
       var iterator = ExprOf(Synthetic("Name", s, counted.Counter!), scope);
-      var step = ObjectCall(iterator, "next", new List<Node>(), scope, s) ?? throw Error("no next()", s);
+      // for &x: writableNext() gives the address of each item (spec 6.7); its default raises at the first call, at the start of the loop
+      bool writableStep = varNode.Kind == "WritableVar" && CustomMapTypes(collection.Type) == null;
+      var step = ObjectCall(iterator, writableStep ? "writableNext" : "next", new List<Node>(), scope, s) ?? throw Error("no next()", s);
       string tuple = $"df_step{tempCounter}";
       iteration = CustomMapTypes(collection.Type) != null
         ? $"({{ {CType(step.Type)} {tuple} = {step.Code}; if (!{tuple}.e2) {{ break; }} ({CType(customElem)}){{ {tuple}.e0, {tuple}.e1 }}; }})"   // (key, value)
@@ -1159,7 +1169,11 @@ public sealed partial class CodeGen {
           ? CellRead($"(({itemCode}) != NULL ? ({itemCode})->{BoxField(boxedElem)} : NULL)", elem)   // a counted value item; an empty slot reads as zero (spec 12.7)
           : $"DF_RC_OBJ({CType(elem)}, ({itemCode})->{BoxField(boxedElem)})";
       }
-      if (loopVars[0].Node.Kind == "WritableVar") {
+      if (loopVars[0].Node.Kind == "WritableVar" && mapPart == "values" && MapValue(collection.Type) == "string") {
+        sb.Append(StringValueLoopLend(loopVars[0].Node.Text!, CursorValue(whole, collection.Type, position), innerPad));   // for &string v in m.values (spec 6.4)
+      } else if (loopVars[0].Node.Kind == "WritableVar" && customElem != null) {
+        sb.Append($"{innerPad}  {CType(type)}* l_{loopVars[0].Node.Text} = {itemCode};\n");   // writableNext() gives the place of the item (spec 6.7)
+      } else if (loopVars[0].Node.Kind == "WritableVar") {
         sb.Append($"{innerPad}  {CType(type)}* l_{loopVars[0].Node.Text} = &({itemCode});\n");   // for &T x in c: the place of the item (spec 6.4)
       } else {
         sb.Append($"{innerPad}  {CType(type)} {cname} = {ForConvert(new Expr(itemCode, elem), type, s)};\n");
@@ -1169,7 +1183,9 @@ public sealed partial class CodeGen {
     if (overMap && mapPart == null) {
       var (valueNode, valueType, valueElem) = loopVars[1];
       var slotValue = UnboxRead(new Expr(ReadSlot(collection.Type, CursorValue(whole, collection.Type, position)), MapValue(collection.Type)));   // spec 12.7
-      if (valueNode.Kind == "WritableVar") {
+      if (valueNode.Kind == "WritableVar" && MapValue(collection.Type) == "string") {
+        sb.Append(StringValueLoopLend(valueNode.Text!, CursorValue(whole, collection.Type, position), innerPad));   // spec 6.4
+      } else if (valueNode.Kind == "WritableVar") {
         sb.Append($"{innerPad}  {CType(valueType)}* l_{valueNode.Text} = &({ReadSlot(collection.Type, CursorValue(whole, collection.Type, position))});\n");   // spec 6.4
       } else {
         sb.Append($"{innerPad}  {CType(valueType)} v_{valueNode.Text} = {ForConvert(new Expr(slotValue.Code, valueElem), valueType, s)};\n");

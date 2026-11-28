@@ -1,0 +1,35 @@
+// A constructor of a sub-trait chains to a constructor of its parent trait, as a class does (spec 11.2): Named(string n) : Sized(n.len);
+// the constructor of the parent trait runs first and the parent trait is initialized once; the chain also goes over several levels
+namespace traitctorchain
+import Root
+trait Sized {
+  public uns size
+  Sized(uns s) {
+    size = s
+    Console.log("Sized " + s)
+  }
+}
+trait Named : Sized {
+  public string label
+  Named(string n) : Sized(n.len) {
+    label = n
+    Console.log("Named " + n)
+  }
+}
+trait Tagged : Named {
+  public string tag
+  Tagged(string t) : Named(t + "!") {
+    tag = t
+    Console.log("Tagged " + t)
+  }
+}
+class Box : Named {
+  public Box(string n) : Named(n) { }
+}
+class Crate : Tagged {
+  public Crate() : Tagged("crate") { }
+}
+Box b = Box("apple")
+Console.log(b.label + " " + b.size)
+Crate c = Crate()
+Console.log(c.tag + " " + c.label + " " + c.size)

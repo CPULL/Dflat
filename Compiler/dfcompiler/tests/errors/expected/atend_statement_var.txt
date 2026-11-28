@@ -1,0 +1,1 @@
+atend_statement_var.df(5): error: feature not supported: 'x' is used by the atEnd of its statement and declared with var: write its type (14.2)

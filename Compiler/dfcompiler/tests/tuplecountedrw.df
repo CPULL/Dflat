@@ -1,0 +1,47 @@
+// Read/write counted and weak parts of tuples (spec 3.2, 12.7): a (&@Dog, i32) part holds a read/write usage, a (&%Dog, i32) part a
+// read/write weak reference; only a &@T, &%T or a new object goes in; (&@x, 1) and (&%x, 1) are the writable forms in a literal; a &@i32
+// part writes its shared cell with the lock; a &@T variable, a read-only @T and destructuring take one more user
+namespace tuplecountedrw
+import Root
+class Dog { public string name = "Rex"
+  public i32 age = 1 }
+&@Dog max = @Dog()
+(&@Dog pet, i32 n) t = (Dog(), 1)
+(&@Dog, i32) u = (&@max, 2)
+&@Dog a = t.pet
+@Dog r = t.0
+enforce a { a.age = 7 }
+Console.log("t.pet age " + t.pet.age + " r " + r.age + " users " + max.usersCount)
+t.pet = &@max
+Console.log("now " + t.pet.age + " users " + max.usersCount)
+(&@i32 hits, string label) c = (5, "x")
+&@i32 shared = c.hits
+enforce shared { c.hits += 3 }
+Console.log("hits " + c.hits + " shared " + shared)
+(&%Dog w, i32) k = (%max, 1)
+&%Dog back = k.0
+enforce back { back.age++ }
+Console.log("max age " + max.age)
+&@Dog d2, i32 m = u
+enforce d2 { d2.age = 40 }
+Console.log("max age " + max.age + " m " + m)
+Console.log(t)
+max is done.
+d2 is done.
+Console.log("users after " + u.0.usersCount)
+Console.log("-- inferred, copies, items")
+&@Dog rw = @Dog()
+var v = (&@rw, 1)
+@Dog r2 = v.0
+&@Dog w2 = v.0
+var q = (&%rw, 2)
+&%Dog back2 = q.0
+enforce back2 { back2.age = 9 }
+Console.log(rw.age)
+Console.log(rw.usersCount)
+(&@Dog, i32) t3 = (rw, 1)
+Console.log(t3 == (rw, 1))
+(&@Dog, i32) t4 = t3
+Console.log(rw.usersCount)
+list<(&@Dog, i32)> l = [t3]
+Console.log(rw.usersCount)

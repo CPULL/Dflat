@@ -1,0 +1,4 @@
+namespace tuple_destructure_count
+import Root
+(i32, string, bool) record = (5, "five", true)
+i32 a, string b = record

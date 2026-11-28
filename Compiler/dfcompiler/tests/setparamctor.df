@@ -1,0 +1,49 @@
+// A set as the type of a parameter (spec 11.3.6): methods, static methods, struct methods and trait methods take one copy per member (a
+// generic method); a replacing method is chosen by the class of the object; a constructor of the body takes a set value, as the primary one
+namespace setparamctor
+import Root
+Generic Nums { i32, r64 }
+trait Shower {
+  public fun ->string shown(Nums n) {
+    return "trait " + n
+  }
+}
+class Calc : Shower {
+  public string text = ""
+  public Calc(Nums n) {
+    switch n is ? {
+      i32 v: text = "whole " + v
+      r64 v: text = "real " + v
+    }
+  }
+  public fun ->string show(Nums n) {
+    return "show " + n
+  }
+  public static fun ->string stat(Nums n) {
+    return "stat " + n
+  }
+}
+class Loud : Calc {
+  public Loud() : Calc(0) { }
+  replace fun ->string show(Nums n) {
+    return "LOUD " + n
+  }
+}
+struct P {
+  i32 x
+  public fun ->string twice(Nums n) {
+    return "p " + n
+  }
+}
+Calc c = Calc(4)
+Console.log(c.text)
+Calc d = Calc(2.5)
+Console.log(d.text)
+Console.log(c.show(4))
+Console.log(c.show(2.5))
+Console.log(Calc.stat(1))
+Console.log(c.shown(7))
+Calc l = Loud()
+Console.log(l.show(3))
+P p = P(1)
+Console.log(p.twice(7))

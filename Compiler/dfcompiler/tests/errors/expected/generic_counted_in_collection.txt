@@ -1,0 +1,1 @@
+generic_counted_in_collection.df(7): error: Reference Counted objects cannot be used in Generics (spec 11.3.13)

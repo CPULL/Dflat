@@ -1,0 +1,7 @@
+namespace generic_counted_class_arg
+import Root
+class Dog { }
+class Box<T> {
+  T item
+}
+Box<@Dog> b = Box<@Dog>()

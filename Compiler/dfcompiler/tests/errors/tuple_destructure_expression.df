@@ -1,0 +1,4 @@
+namespace tuple_destructure_expression
+import Root
+fun (i32, string) make() { return (1, "a") }
+i32 a, string b = make()

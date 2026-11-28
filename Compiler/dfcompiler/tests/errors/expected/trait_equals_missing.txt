@@ -1,0 +1,1 @@
+trait_equals_missing.df(6): error: class 'Square' must implement Shape.==

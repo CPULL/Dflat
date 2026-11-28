@@ -1,0 +1,6 @@
+namespace tuple_rw_weak_from_readonly
+import Root
+class Dog { public i32 age = 1 }
+@Dog ro = @Dog()
+&@Dog rw = @Dog()
+(&%Dog, i32) k = (%ro, 1)

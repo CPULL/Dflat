@@ -1,5 +1,5 @@
 DFI {
- compiler: 0.0.222alpha
+ compiler: 0.0.229alpha
  library: plain
  namespace: tests.plain
  runtime: 

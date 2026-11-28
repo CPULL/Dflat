@@ -1,0 +1,45 @@
+// == declared in a trait (spec 11.2): fun bool ==(Shape o) with a default body, or replaced by the class; == on two values of the trait
+// type calls the version of the class of the left object, != is its negation, equals comes first when the class defines it, null compares
+// by identity
+namespace traitequals
+import Root
+trait Shape {
+  unrestricted fun uns sides()
+  public fun bool ==(Shape o) {
+    return sides() == o.sides()
+  }
+}
+class Square : Shape {
+  replace fun uns sides() { 4 }
+}
+class Diamond : Shape {
+  replace fun uns sides() { 4 }
+  replace fun bool ==(Shape o) {
+    return false
+  }
+}
+class Circle : Shape {
+  replace fun uns sides() { 0 }
+  replace fun bool equals(T other) {
+    Console.log("equals of Circle")
+    return true
+  }
+}
+class Tri : Shape {
+  replace fun uns sides() { 3 }
+}
+Shape a = Square()
+Shape b = Square()
+Shape c = Tri()
+Shape d = Diamond()
+Shape none = null
+Console.log(a == b)
+Console.log(a == c)
+Console.log(a != c)
+Console.log(a == d)
+Console.log(d == a)
+Console.log(a == none)
+Console.log(none == none)
+Shape circle = Circle()
+Console.log(circle == c)
+Console.log(c == circle)

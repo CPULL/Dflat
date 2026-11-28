@@ -13,13 +13,14 @@ public sealed partial class CodeGen {
   bool TupleHoldsArrays(string type) => IsTuple(type) && TupleElems(type).Any(elem => IsTupleOwnedPart(elem.Type) || TupleHoldsArrays(elem.Type));
 
   // the parts a tuple owns: arrays, function values, objects (spec 3.2) and counted usages (spec 12.7)
-  bool IsTupleOwnedPart(string type) => IsArr(type) || IsFunType(type) || IsClass(type) || IsCountedType(type) || StructHoldsObjects(type) || SetOwns(type);
+  bool IsTupleOwnedPart(string type) => IsArr(type) || IsFunType(type) || IsClass(type) || IsCountedType(type) || IsWeakType(type) || StructHoldsObjects(type) || SetOwns(type);
 
   // the end of one part of a tuple
   string TuplePartDrop(string type, string code) =>
     IsArr(type) ? $"{ArrDropHelper(type)}({code}); {code} = {ZeroValue(type)}; "
     : IsFunType(type) ? $"df_fn_drop(&{code}); "
     : IsCountedType(type) ? $"df_rc_release({code}); {code} = NULL; "
+    : IsWeakType(type) ? $"df_rc_unweak({code}); {code} = NULL; "
     : IsClass(type) ? $"if ({code} != NULL) {{ void* o = (void*){code}; {code} = NULL; df_drop(o); }} "
     : SetOwns(type) ? SetDropCode(type, code, genericSets[type]) + " "   // a set value part ends what it owns (spec 11.3.6.1)
     : StructHoldsObjects(type) ? StructDropCode(type, code) + " "   // a struct part ends its strings and objects (spec 11.1.5.3)
@@ -64,8 +65,10 @@ public sealed partial class CodeGen {
         copies += $"{code}.e{index} = {ArrCloneHelper(elems[index].Type, at)}({code}.e{index}); ";
       } else if (IsFunType(elems[index].Type) && !(item is { Kind: "Lambda" or "Call" or "Copy" or "Null" })) {
         copies += $"{code}.e{index} = df_fn_retain({code}.e{index}); ";   // one more usage (spec 13.3.5)
-      } else if (IsCountedType(elems[index].Type) && !(item is { Kind: "Call" or "Null" or "Gift" })) {
-        copies += $"{code}.e{index} = df_rc_use({code}.e{index}); ";   // one more user (spec 12.7)
+      } else if (IsCountedType(elems[index].Type) && valueNode is not { Kind: "Tuple" }) {
+        copies += $"{code}.e{index} = df_rc_use({code}.e{index}); ";   // one more user (spec 12.7); an item of a literal holds its own usage
+      } else if (IsWeakType(elems[index].Type) && valueNode is not { Kind: "Tuple" }) {
+        copies += $"{code}.e{index} = df_rc_weak({code}.e{index}); ";   // one more weak reference (spec 12.7)
       } else if (IsClass(elems[index].Type) && !(item is { Kind: "Call" or "Copy" or "Null" or "Gift" })) {
         if (NotClonableReason(ObjInfo(elems[index].Type)) is string reason) {
           throw Error($"a copy of a tuple clones its objects: {DisplayName(elems[index].Type)} cannot be cloned, {reason}; give the tuple a new object or move it with -> (spec 3.2)", at);
@@ -135,7 +138,7 @@ public sealed partial class CodeGen {
     }
     if (typeNode is { Kind: "Type", Text: "var" }) {
       var init = decl.Children.FirstOrDefault(child => child.Kind == "Init")?.Children[0];
-      return init is { Kind: "Tuple" } && init.Children.Any(item => item.Kind is "List" or "Name" or "Copy" or "Gift" or "Call" or "Member" or "Index" or "Tuple")
+      return init is { Kind: "Tuple" } && init.Children.Any(item => item.Kind is "List" or "Name" or "Copy" or "Gift" or "Call" or "Member" or "Index" or "Tuple" or "CountedOf" or "WeakOf")
         || init is { Kind: "Call" } && CalleesOf(init) is { Count: > 0 } callees && callees.All(f => f.Node.Line < LibraryLine && TupleHoldsArrays(f.Ret));
     }
     return typeNode is { Kind: "TupleType" or "ResolvedType" } && TryResolveType(typeNode) is string type && TupleHoldsArrays(type)
@@ -261,7 +264,7 @@ public sealed partial class CodeGen {
       string part = elems[index].Type;
       bool isNew = IsArr(part) ? item.Kind != "Null" && GivesOwnArray(item)
         : IsFunType(part) ? item is { Kind: "Lambda" or "Call" or "Copy" }
-        : IsCountedType(part) ? false
+        : IsCountedType(part) || IsWeakType(part) ? true   // a counted or weak item of a literal holds its own usage (CountedTupleItem)
         : SetOwns(part) ? item.Kind is not ("Name" or "Member" or "Index" or "Null")
         : IsClass(part) || StructHoldsObjects(part) ? item is { Kind: "Call" or "Copy" or "Gift" }
         : false;

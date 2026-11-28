@@ -1,0 +1,1 @@
+trait_replace_nothing.df(9): error: 'bark' replaces nothing: no parent trait of Dog has it

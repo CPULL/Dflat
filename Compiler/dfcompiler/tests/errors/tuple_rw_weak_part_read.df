@@ -1,0 +1,7 @@
+namespace tuple_rw_weak_part_read
+import Root
+class Dog { public i32 age = 1 }
+@Dog ro = @Dog()
+&@Dog rw = @Dog()
+(&%Dog, i32) k = (%rw, 1)
+Console.log(k.0.age)

@@ -1,0 +1,14 @@
+t.pet age 7 r 7 users 2
+now 1 users 3
+hits 8 shared 8
+max age 2
+max age 40 m 2
+(Dog { name: Rex, age: 40 }, 1)
+users after 2
+-- inferred, copies, items
+9
+4
+true
+6
+7
+---- exit code 0 ----

@@ -1,0 +1,7 @@
+namespace tuple_rw_part_assign_readonly
+import Root
+class Dog { public i32 age = 1 }
+@Dog ro = @Dog()
+&@Dog rw = @Dog()
+(&@Dog, i32) t = (rw, 1)
+t.0 = ro

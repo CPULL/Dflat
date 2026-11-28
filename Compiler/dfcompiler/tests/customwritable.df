@@ -1,0 +1,68 @@
+// for &x over a custom collection (spec 6.7): the iterator writes writableNext(), a (&Item value, bool isValid) tuple that borrows the
+// item; an iterator with only next() is read-only: for &x on it raises MissingWritableIteratorForCustomCollectionException (15.3 #73) when
+// the loop starts, also on an empty collection
+namespace customwritable
+import Root
+public class Bag(uns size) : IndexCollection<i32> {
+  public arr<i32> items = arr<i32>[size]
+  replace fun uns get_len() { size }
+  replace fun bool has(i32 value) { items.has(value) }
+  replace fun clear() { }
+  replace fun ->IndexIterator<i32> getIterator() {
+    return BagIterator(&this)
+  }
+}
+public class BagIterator(&Bag bag as parent) : IndexIterator<i32> {
+  uns cursor = 0
+  replace fun (i32 value, bool isValid) next() {
+    if cursor >= bag.items.len {
+      return (0, false)
+    }
+    cursor += 1
+    return (bag.items[cursor - 1], true)
+  }
+  replace fun (&i32 value, bool isValid) writableNext() {
+    if cursor >= bag.items.len {
+      return (&bag.items[0], false)
+    }
+    cursor += 1
+    return (&bag.items[cursor - 1], true)
+  }
+}
+public class Evens(uns limit) : IndexCollection<u64> {
+  replace fun uns get_len() { limit }
+  replace fun bool has(u64 value) { value % 2 == 0 && value < limit * 2 }
+  replace fun clear() { }
+  replace fun ->IndexIterator<u64> getIterator() {
+    return EvenIterator(limit)
+  }
+}
+public class EvenIterator(u64 limit) : IndexIterator<u64> {
+  u64 cursor = 0
+  replace fun (u64 value, bool isValid) next() {
+    if cursor >= limit {
+      return (0, false)
+    }
+    u64 item = cursor * 2
+    cursor += 1
+    return (item, true)
+  }
+}
+fun tryWrite(uns limit) {
+  Evens evens = Evens(limit)
+  for &u64 n in evens {
+    n = 1
+  }
+  catch MissingWritableIteratorForCustomCollectionException ex {
+    Console.log("raised: " + ex.message)
+  }
+}
+Bag bag = Bag(3)
+for &i32 x in bag {
+  x = 7
+}
+for i32 x in bag {
+  Console.log(x)
+}
+tryWrite(2)
+tryWrite(0)

@@ -19,7 +19,7 @@ public sealed partial class CodeGen {
     void Walk(Node node) {
       for (int index = 0; index < node.Children.Count; index++) {
         var child = node.Children[index];
-        if (child.Kind == "CountedType") {
+        if (child.Kind == "CountedType" && node.Kind != "Field") {   // a counted part of a tuple type stays @T (spec 3.2)
           node.Children[index] = BoxTypeFor(node, index, child, boxes);
           continue;
         }
@@ -40,17 +40,27 @@ public sealed partial class CodeGen {
       throw Error("counted objects (@T) cannot be keys of a map or items of a set: a key must be stable (spec 6.2)", counted);
     }
     if (collection is not ("vec" or "list" or "arr" or "map" or "bmap" or "hmap")) {
-      throw NotSupported("Generics with a counted type argument (spec 12.7)", counted);
+      throw Error(CountedInGenerics, counted);
     }
     var inner = counted.Children[0];
+    bool nullable = false;
+    if (inner is { Kind: "Nullable", Children: [{ Kind: "Type", Children.Count: 0, Text: not null } plain] }) {
+      // list<@i32?>: a counted nullable value; objects are already nullable (the usual error of T?)
+      if (!IsCountedValueType(plain.Text!)) {
+        throw Error($"objects are already nullable; '{plain.Text}?' is not allowed", counted);
+      }
+      nullable = true;
+      inner = plain;
+    }
     if (inner is not { Kind: "Type", Children.Count: 0 } || inner.Text == null) {
       throw NotSupported("Counted items of this type", counted);
     }
     bool writable = counted.Children.Any(child => child.Kind == "ReadWrite");   // list<&@Dog> (spec 12.7)
-    string box = (writable ? "RcRw__" : "Rc__") + inner.Text;
+    string box = (writable ? "RcRw__" : "Rc__") + inner.Text + (nullable ? "_opt" : "");
     if (!boxInner.ContainsKey(box)) {
-      boxInner[box] = inner.Text;
-      var param = Synthetic("Param", counted, "value").Add(Synthetic("Type", counted, inner.Text)).Add(Synthetic("Counted", counted));
+      boxInner[box] = inner.Text + (nullable ? "?" : "");
+      var valueType = Synthetic("Type", counted, inner.Text);
+      var param = Synthetic("Param", counted, "value").Add(nullable ? Synthetic("Nullable", counted).Add(valueType) : valueType).Add(Synthetic("Counted", counted));
       if (writable) {
         param.Add(Synthetic("ReadWrite", counted));
         writableBoxes.Add(box);

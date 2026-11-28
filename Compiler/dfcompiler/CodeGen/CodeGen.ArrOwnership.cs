@@ -167,10 +167,11 @@ public sealed partial class CodeGen {
     sb.Append(FileVarsEndCode());   // the top-level variables of the root file end with its top-level code (spec 14.1)
     sb.Append(GlobalsEndCode());   // the globals first, in reverse order: their atEnd may use the statics (spec 18.2)
     var statics = OwnStatics.Where(field => (IsArr(field.Type) || TupleHoldsArrays(field.Type) || IsOwningNullableTuple(field.Type) || StructHoldsObjects(field.Type) || field.IsCounted
-        || IsClass(field.Type) && !field.IsWeak || field.Type is "string" or "string?") && field.Owner.Node.Line < LibraryLine).ToList();   // objects and strings end too (their atEnd runs)
+        || field.IsWeak || IsClass(field.Type) || field.Type is "string" or "string?") && field.Owner.Node.Line < LibraryLine).ToList();   // objects and strings end too (their atEnd runs)
     for (int index = statics.Count - 1; index >= 0; index--) {
       var field = statics[index];
-      sb.Append(field.IsCounted ? $"  df_rc_release({field.CName});\n  {field.CName} = NULL;\n"   // a counted static: its usage (spec 12.7)
+      sb.Append(field.IsWeak ? $"  df_rc_unweak({field.CName});\n  {field.CName} = NULL;\n"   // a weak static: its weak reference (spec 12.7)
+        : field.IsCounted ? $"  df_rc_release({field.CName});\n  {field.CName} = NULL;\n"   // a counted static: its usage (spec 12.7)
         : IsClass(field.Type) || field.Type is "string" or "string?" ? OwnedGlobalEnd(field.Type, field.CName)
         : IsArr(field.Type) ? $"  {ArrDropHelper(field.Type)}({field.CName});\n  {field.CName}.p = NULL;\n  {field.CName}.len = 0;\n"
         : StructHoldsObjects(field.Type) ? $"  {StructDropCode(field.Type, field.CName)}\n"

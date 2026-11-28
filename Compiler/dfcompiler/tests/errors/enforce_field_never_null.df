@@ -1,0 +1,8 @@
+namespace enforce_field_never_null
+import Root
+class Counter {
+  i32 count = 0
+  public fun show() {
+    enforce count { Console.log(count) }
+  }
+}

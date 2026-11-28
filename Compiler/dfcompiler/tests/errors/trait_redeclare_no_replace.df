@@ -1,0 +1,12 @@
+namespace trait_redeclare_no_replace
+import Root
+trait Animal {
+  public fun ->string sound() {
+    return "..."
+  }
+}
+trait Dog : Animal {
+  public fun ->string sound() {
+    return "woof"
+  }
+}

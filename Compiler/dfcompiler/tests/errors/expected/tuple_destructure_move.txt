@@ -1,0 +1,1 @@
+tuple_destructure_move.df(5): error: feature not supported: Moving the parts out of a tuple (a, b = ->t; ->t.0)

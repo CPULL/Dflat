@@ -180,6 +180,9 @@ public sealed partial class CodeGen {
     if (globalWrites.TryGetValue(node, out var written) && own.Contains(written.Name)) {
       return true;   // g.f = v on a global of the class
     }
+    if (globalReads.TryGetValue(node, out var incremented) && incremented.Write && own.Contains(incremented.Global.Name)) {
+      return true;   // g.count++ inside an expression
+    }
     if (node.Kind == "Call" && node.Children.Count > 0) {
       var callee = node.Children[0];
       if (callee.Kind is "Lambda" or "Call" or "Paren") {
@@ -573,6 +576,27 @@ static void df_gl_exit(void) {
         at--;
         continue;
       }
+      if (next is { Kind: "Index" } && next.Children[0] == top && next.Children.Count == 2 && next.Children[1].Kind == "Range") {
+        // g.name[0..2], g.items[1..]: a part of the field, copied under the lock (a view would keep the global borrowed, spec 18.3)
+        type = null;   // a view of a collection field: the copy step makes a new collection
+        top = next;
+        at--;
+        continue;
+      }
+      if (next is { Kind: "SafeMember" } && next.Children[0] == top) {
+        // g.item?.n, g.item?.m(): the whole chain under the lock (spec 18.3, 7.1)
+        if (at >= 1 && ancestors[at - 1] is { Kind: "Call" } safeCall && safeCall.Children[0] == next) {
+          writes |= !ReadOnlyMember(type, next.Text!);
+          type = null;
+          top = safeCall;
+          at -= 2;
+          continue;
+        }
+        type = null;
+        top = next;
+        at--;
+        continue;
+      }
       break;
     }
     var holder = at >= 0 ? ancestors[at] : null;
@@ -580,7 +604,7 @@ static void df_gl_exit(void) {
       return;
     }
     if (holder.Kind is "SafeMember" or "Index" && holder.Children[0] == top) {
-      throw NotSupported($"this use of a field of global '{global.Name}' (?., a range): write a method of its class for now (spec 18.3)", holder);
+      throw NotSupported($"this use of a field of global '{global.Name}': write a method of its class for now (spec 18.3)", holder);
     }
     if (holder.Kind == "Assign" && holder.Children[0] == top) {
       globalWrites[holder] = global;   // g.f = v, g.f += v, g.items[0] = v: the statement under the write lock
@@ -592,14 +616,24 @@ static void df_gl_exit(void) {
     }
     if (holder.Kind is "PreInc" or "PreDec" or "PostInc" or "PostDec") {
       if (at < 1 || ancestors[at - 1].Kind != "ExprStmt") {
-        throw NotSupported($"++ and -- on a field of global '{global.Name}' inside an expression: write it as a statement (spec 18.3)", holder);
+        globalReads[holder] = (global, true);   // i32 a = g.count++ + 1: the ++ and its value under the write lock (spec 18.3)
+        return;
       }
       globalWrites[ancestors[at - 1]] = global;
       return;
     }
+    if (holder.Kind == "Targets" && at >= 1 && ancestors[at - 1] is { Kind: "MultiAssign" } multi) {
+      // g.a, g.b = 4, 5: the whole statement under the write lock (spec 18.3); the targets of two globals take the locks in rank order
+      if (globalWrites.TryGetValue(multi, out var first) && first != global) {
+        throw NotSupported($"several targets on fields of two globals ('{first.Name}' and '{global.Name}'): write them as two statements", holder);
+      }
+      globalWrites[multi] = global;
+      return;
+    }
     if (holder.Kind is "WritableAddressOf" or "Gift" or "Counted" or "WeakOf" or "Targets" or "Finalize" or "Done" or "WritablePointerOf") {
-      throw NotSupported($"this use of a field of global '{global.Name}' (&, ->, @, %, several targets, is atEnd.): write a method of its class "
-        + "for now (spec 18.3)", holder);
+      // a borrow, a move or a share of a part of the global would keep it locked or take it from its owner (spec 18.3)
+      throw Error($"a field of global '{global.Name}' cannot be lent (&), given (->), shared (@, %) or ended: what comes out of a global is a copy "
+        + "(spec 18.3)", holder);
     }
     if (holder.Kind is "Return" or "ExprStmt" && ancestors.LastOrDefault(node => node.Kind == "Fun") is Node funNode
         && funs.Values.SelectMany(list => list).FirstOrDefault(f => f.Node == funNode) is { Writes.Count: > 0 }) {

@@ -1,0 +1,1 @@
+counted_trait_property_replaced.df(8): error: feature not supported: Replacing a counted or weak property of a trait

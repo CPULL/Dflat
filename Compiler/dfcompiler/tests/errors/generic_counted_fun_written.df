@@ -1,0 +1,9 @@
+namespace generic_counted_fun_written
+import Root
+class Dog { }
+fun Item pick<Item>(Item first, Item second) {
+  return first
+}
+@Dog a = @Dog()
+@Dog b = @Dog()
+pick<@Dog>(a, b)

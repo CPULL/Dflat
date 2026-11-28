@@ -1,0 +1,5 @@
+namespace tuple_counted_value_compound
+import Root
+class Dog { public string name = "x" }
+(@i32, string) t = (1, "a")
+t.0 += 1

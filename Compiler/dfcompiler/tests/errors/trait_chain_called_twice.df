@@ -1,0 +1,17 @@
+namespace trait_chain_called_twice
+import Root
+trait Sized {
+  public uns size
+  Sized(uns s) {
+    size = s
+  }
+}
+trait Named : Sized {
+  public string label
+  Named(string n) : Sized(n.len) {
+    label = n
+  }
+}
+class Box : Named {
+  public Box(string n) : Named(n), Sized(3) { }
+}

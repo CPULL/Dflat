@@ -1,0 +1,46 @@
+// Static weak fields and static field groups (spec 12.7, 11.1.4.1): a static %T / &%T is a weak reference of the class, set with = %x,
+// read through enforce inside the class and as Kennel.last, released at the end of the program; a static group is a set of static fields
+namespace staticweakgroups
+import Root
+class Dog { public string name = "Rex" }
+class Kennel {
+  public static %Dog last
+  public static &%Dog writer
+  public static fun show() {
+    enforce last { Console.log("inside " + last.name) } else { Console.log("inside gone") }
+  }
+  public static fun keep(&@Dog d) {
+    writer = %d
+  }
+}
+Kennel.show()
+@Dog rex = @Dog()
+Kennel.last = %rex
+%Dog w = Kennel.last
+enforce w { Console.log(w.name) }
+Kennel.show()
+&@Dog max = @Dog()
+Kennel.keep(&@max)
+&%Dog ww = Kennel.writer
+enforce ww { ww.name = "Max" }
+enforce max { Console.log(max.name) }
+rex is done.
+w is done.
+Kennel.show()
+class Conf {
+  public static pos { r32 x = 1.5, r32 y }
+  public static fun bump() {
+    pos.x += 1
+    pos = (pos.x, 9)
+  }
+}
+Console.log(Conf.pos.x)
+Conf.pos.x = 3
+Console.log(Conf.pos.x)
+Conf.bump()
+Console.log(Conf.pos.x)
+Console.log(Conf.pos.y)
+Conf.pos.y++
+Console.log(Conf.pos)
+Conf.pos = (7, 8)
+Console.log(Conf.pos)

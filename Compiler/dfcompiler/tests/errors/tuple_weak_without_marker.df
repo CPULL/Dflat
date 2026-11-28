@@ -1,0 +1,5 @@
+namespace tuple_weak_without_marker
+import Root
+class Dog { public string name = "x" }
+@Dog rex = Dog()
+(%Dog, i32) t = (rex, 1)

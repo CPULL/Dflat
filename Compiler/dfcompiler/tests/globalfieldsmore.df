@@ -1,0 +1,43 @@
+// Fields of a global used from outside (spec 18.3): ++ and -- inside an expression (the change and its value under the write lock), ?. along
+// the chain, a range of a collection field (a copy, made under the lock), several targets (the statement under the write lock)
+namespace globalfieldsmore
+import Root
+class Item {
+  public i32 n = 1
+  public fun i32 bump() {
+    n++
+    return n
+  }
+}
+class State {
+  public i32 count = 0
+  public i32 other = 10
+  public Item item = Item()
+  public Item none = null
+  public list<i32> nums = [1, 2, 3, 4]
+}
+global State st = State()
+fun i32 twice(i32 v) {
+  return v * 2
+}
+i32 a = st.count++ + 1
+Console.log(a)
+Console.log(++st.count)
+Console.log(twice(st.count--))
+Console.log(st.count)
+Console.log(st.item?.n)
+Console.log(st.none?.n)
+Console.log(st.item?.bump())
+Console.log(st.none?.bump())
+list<i32> part = st.nums[1..3]
+part.add(9)
+Console.log(part)
+Console.log(st.nums.len)
+st.count, st.other = 4, 5
+Console.log(st.count + st.other)
+st.count, st.other = st.other, st.count
+Console.log(st.count)
+Console.log(st.other)
+i32 local = 0
+local, st.count = 7, 8
+Console.log(local + st.count)

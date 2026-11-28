@@ -1,0 +1,35 @@
+// A sub-trait gives a method of its parent trait a new default body with replace fun (spec 11.2): the classes of the sub-trait use it
+// unless they replace the method themselves; through the parent trait type the version of the class of the object runs
+namespace traitreplacemethod
+import Root
+trait Animal {
+  public fun ->string sound() {
+    return "..."
+  }
+  public fun ->string speak() {
+    return "I say " + sound()
+  }
+}
+trait Dog : Animal {
+  replace fun ->string sound() {
+    return "woof"
+  }
+}
+class Plain : Animal { }
+class Rex : Dog { }
+class Loud : Dog {
+  replace fun ->string sound() {
+    return "WOOF"
+  }
+}
+Plain p = Plain()
+Rex r = Rex()
+Loud l = Loud()
+Console.log(p.sound())
+Console.log(r.sound())
+Console.log(l.sound())
+Console.log(r.speak())
+list<Animal> all = [Plain(), Rex(), Loud()]
+for &Animal a in all {
+  Console.log(a.speak())
+}

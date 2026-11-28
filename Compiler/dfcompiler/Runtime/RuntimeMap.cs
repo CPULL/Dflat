@@ -231,6 +231,12 @@ static df_string* df_sval_lend_out(uint8_t* slot) {
   return &cell->s;
 }
 
+/* for (k, &string v) in m, for &string v in m.values (spec 6.4): each pass lends the string in a cell of the loop body; when the pass ends
+   (also through break, continue, return or a raise) the cleanup puts it back in the slot; the map cannot change its size during the loop */
+static void df_sval_loop_back(df_sval_lend* cell) {
+  df_bt_sval_put(cell->slot, cell->s);
+}
+
 /* the string leaves the slot: the caller owns it */
 static df_string df_bt_sval_take(uint8_t* slot) {
   df_string taken = df_bt_sval_moved(slot) ? df_bt_sval_target(slot) : df_str_dup(df_bt_sval(slot));

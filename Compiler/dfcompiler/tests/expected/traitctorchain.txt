@@ -1,0 +1,8 @@
+Sized 5
+Named apple
+apple 5
+Sized 6
+Named crate!
+Tagged crate
+crate crate! 6
+---- exit code 0 ----

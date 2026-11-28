@@ -1,0 +1,7 @@
+namespace generic_counted_in_collection
+import Root
+class Dog { }
+class Box<T> {
+  T item
+}
+list<Box<@Dog>> boxes = []

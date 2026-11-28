@@ -1,0 +1,9 @@
+namespace counted_trait_field_borrow
+import Root
+class Dog { }
+trait Owner {
+  public @Dog pet
+}
+class Person : Owner { }
+Person p = Person()
+Dog view = p.pet

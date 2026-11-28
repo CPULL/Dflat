@@ -1,0 +1,15 @@
+5 five true
+5 true
+5 true
+2 1
+tea 2.5
+1 2 in
+north 3
+2 two
+loop 1
+loop 2
+inner text 4
+Rex 2 Rex
+5 x 1.5 one 7 seven true c
+end
+---- exit code 0 ----

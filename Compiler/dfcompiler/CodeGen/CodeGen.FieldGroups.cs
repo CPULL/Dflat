@@ -27,9 +27,6 @@ public sealed partial class CodeGen {
           continue;
         }
         var mods = member.Children.FirstOrDefault(child => child.Kind == "Mods");
-        if (mods?.Text?.Split(' ').Contains("static") == true) {
-          throw NotSupported("Static field groups", member);
-        }
         if (groups.ContainsKey(member.Text!)) {
           throw Error($"the field group '{member.Text}' is declared twice", member);
         }

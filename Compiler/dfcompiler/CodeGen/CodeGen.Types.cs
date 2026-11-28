@@ -453,6 +453,18 @@ public sealed partial class CodeGen {
       }
       case "ResolvedType":
         return n.Text!;   // a type parameter replaced by its type argument (generics)
+      case "LendType":
+        return "&" + ResolveType(n.Children[0]);   // a writable borrow inside a tuple: the address of the place (spec 3.2)
+      case "CountedType" or "WeakType": {
+        // (@Dog, i32), (@i32, string), (%Dog, i32): a counted or weak part of a tuple (spec 3.2, 12.7)
+        // (&@Dog, i32), (&%Dog, i32): a read/write part, written ^Dog and ~Dog inside the compiler (a leading & is a lent value, &i32)
+        bool readWrite = n.Children.Any(child => child.Kind == "ReadWrite");
+        string inner = ResolveType(n.Children[0]);
+        if (n.Kind == "WeakType") {
+          return IsClass(inner) ? (readWrite ? "~" : "_") + inner : throw Error("only objects have weak references", n);
+        }
+        return IsClass(inner) || IsCountedValueType(inner) ? (readWrite ? "^" : "@") + inner : throw NotSupported($"Counted values of type {inner} (spec 12.7)", n);
+      }
       case "FunType":
         return ResolveFunType(n);   // fun(i32), string(char, char) (spec 13.3.2)
       case "Pointer":
@@ -980,6 +992,15 @@ public sealed partial class CodeGen {
     : StrOf(e, at);
 
   string StrOf(Expr e, Node at) {
+    if (IsCountedType(e.Type)) {
+      // a counted part of a tuple prints its object or its value (spec 12.7)
+      string plain = CountedBase(e.Type);
+      return StrOf(IsCountedValueType(plain) ? new Expr(CellRead(e.Code, plain), plain) : new Expr($"DF_RC_OBJ({CType(plain)}, {e.Code})", plain), at);
+    }
+    if (IsWeakType(e.Type)) {
+      string shown = "%" + DisplayName(e.Type[1..]);
+      return $"df_str_lit(\"{shown}\", {System.Text.Encoding.UTF8.GetByteCount(shown)})";   // a weak part is not read without enforce: only its type is printed
+    }
     e = WideToI64(e, at);   // spec 3.5.1
     if (e.Type == "string1k") {
       return $"df_s1k_to_str({e.Code})";   // spec 4.5
@@ -1102,6 +1123,16 @@ public sealed partial class CodeGen {
 
   // C bool expression for l == r. Null equals only null.
   string EqualsCode(Expr l, Expr r, Node at) {
+    if (IsCountedType(l.Type) || IsCountedType(r.Type)) {
+      // the counted parts of two tuples: compared as their objects or values, @ changes nothing (spec 12.7)
+      Expr Plain(Expr side) => !IsCountedType(side.Type) ? side
+        : IsCountedValueType(CountedBase(side.Type)) ? new Expr(CellRead(side.Code, CountedBase(side.Type)), CountedBase(side.Type))
+        : new Expr($"DF_RC_OBJ({CType(CountedBase(side.Type))}, {side.Code})", CountedBase(side.Type));
+      return EqualsCode(Plain(l), Plain(r), at);
+    }
+    if (IsWeakType(l.Type) && IsWeakType(r.Type)) {
+      return $"(({l.Code}) == ({r.Code}))";   // two weak parts: the same counting block
+    }
     if (IsCPtr(l.Type) && IsCPtr(r.Type)) {
       return $"((void*)({l.Code}) == (void*)({r.Code}))";   // pointer fields of two structs: the same address (spec 12.1)
     }

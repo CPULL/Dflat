@@ -1,0 +1,1 @@
+tuple_destructure_var_null.df(4): error: cannot infer the type of 'b' from this value: write its type

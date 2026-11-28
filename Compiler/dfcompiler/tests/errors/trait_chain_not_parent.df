@@ -1,0 +1,14 @@
+namespace trait_chain_not_parent
+import Root
+trait Sized {
+  public uns size
+  Sized(uns s) {
+    size = s
+  }
+}
+trait Named {
+  public string label
+  Named(string n) : Sized(n.len) {
+    label = n
+  }
+}

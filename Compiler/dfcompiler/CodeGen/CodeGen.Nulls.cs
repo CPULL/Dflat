@@ -274,6 +274,18 @@ public sealed partial class CodeGen {
     return outer;
   }
 
+  // a field named bare inside a method of its class or trait, seen by enforce as a variable (spec 7.2.1): its C place, its counting and lock
+  VarInfo? FieldAsEnforced(Node name, Scope scope) {
+    if (currentClass == null || FindField(currentClass, name.Text!, name) is not FieldInfo field || field.HasAccessors || field.IsWeak) {
+      return null;   // a weak field goes through WeakRef; a property with accessor blocks has no place to check
+    }
+    if (!field.IsStatic && scope.Find("this") == null) {
+      return null;
+    }
+    var place = BareField(name.Text!, scope, name, true)!.Value;
+    return new VarInfo(field.Type, place.Code, field.IsConst) { IsCounted = field.IsCounted, IsWritable = field.IsWritable };
+  }
+
   void EmitEnforce(Node s, StringBuilder sb, Scope scope, int indent) {
     string pad = Pad(indent);
     var block = s.Children.First(child => child.Kind == "Block");
@@ -356,6 +368,9 @@ public sealed partial class CodeGen {
       }
       if (s.Text == "expr" && (variable == null || variable.Type == "string" && !variable.IsCounted || !(IsNullable(variable.Type) || variable.IsCounted || IsClass(variable.Type)))) {
         continue;   // the expression form enforces only what can be checked: names of functions, types and plain values are skipped
+      }
+      if (variable == null && FieldAsEnforced(name, scope) is VarInfo fieldVar) {
+        variable = fieldVar;   // enforce total { } with a field of the class or the trait, named bare inside its method (spec 7.2.1)
       }
       if (variable == null) {
         throw Error($"unknown variable '{name.Text}'", name);

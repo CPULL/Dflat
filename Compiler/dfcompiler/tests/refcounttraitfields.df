@@ -1,0 +1,104 @@
+// Counted fields of traits (spec 12.7, 11.2): @T, &@T and counted values declared in a trait are users of their object or cell, as the
+// counted fields of a class; they are read and written through the trait type and through the class, and released when the holder ends
+namespace refcounttraitfields
+import Root
+
+class Dog(string name) {
+  public string name
+} atEnd {
+  Console.log($"{name} ends")
+}
+
+trait Owner {
+  public @Dog pet
+  public &@Dog walker
+  public @i32 visits
+  public &@i32 total
+  public @string label
+  public &@string note
+
+  unrestricted fun string describe() {
+    string text = "none"
+    if pet != null { text = pet.name }
+    return $"{label}: pet {text}, visits {visits}"
+  }
+
+  public fun addVisit() {
+    &@i32 cell = total
+    enforce cell { cell += 1 }
+    visits = total
+  }
+}
+
+trait Parent : Owner {
+  public @Dog second
+}
+
+class Person(string name) : Parent {
+  public string name
+} atEnd {
+  Console.log($"{name} ends")
+}
+
+fun showOwner(Owner o) {
+  Console.log($"through the trait: {o.describe()}, pet users {o.pet.usersCount}")
+}
+
+fun shared() {
+  @Dog rex = Dog("Rex")
+  Person anna = Person("Anna")
+  anna.pet = rex                          // a new user of rex
+  anna.label = "Anna's"
+  Console.log($"users of rex {rex.usersCount}")
+  Person bob = Person("Bob")
+  bob.pet = anna.pet                      // a third user
+  bob.second = rex
+  bob.label = anna.label
+  Console.log($"users of rex {rex.usersCount}, bob {bob.describe()}")
+  anna.addVisit()
+  anna.addVisit()
+  Console.log($"anna visits {anna.visits}, total users {anna.total.usersCount}")
+  &@i32 cell = bob.total                  // shares bob's cell: 2 users
+  enforce cell { cell = anna.total + 10 }  // = on a &@i32 writes the shared cell, with its lock
+  bob.addVisit()
+  Console.log($"anna total {anna.total}, bob visits {bob.visits}, cell {cell}, cell users {cell.usersCount}")
+  bob.total = 3                           // no lock: raises
+  Console.log("not reached")
+}
+
+fun released() {
+  @Dog rex = Dog("Rex")
+  Person anna = Person("Anna")
+  anna.pet = rex
+  anna.label = "Anna's"
+  Person bob = Person("Bob")
+  bob.pet = rex
+  bob.second = rex
+  showOwner(anna)
+  bob is atEnd.
+  Console.log($"after bob, users of rex {rex.usersCount}")
+}
+
+fun writer() {
+  Person carl = Person("Carl")
+  carl.walker = Dog("Max")
+  &@Dog kept = carl.walker
+  enforce kept { kept.name = "Maximus" }
+  Console.log($"walker {carl.walker.name}, users {kept.usersCount}")
+  &@string text = carl.note               // shares the zero cell of the property
+  enforce text { text = "draft" }
+  enforce text { text += " two" }
+  Console.log(enforce text lockfail { "busy" })
+  carl.walker = null
+  Console.log($"users of the walker {kept.usersCount}")
+  &Owner o = carl
+  o.pet = Dog("Fido")
+  Console.log($"pet through the trait {o.pet.name}")
+}
+
+shared()
+catch WritingOnRefCountWithoutLockingException { Console.log("write without the lock") }
+released()
+Console.log("----")
+writer()
+Console.log("end")

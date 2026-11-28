@@ -1,0 +1,1 @@
+for_rw_view.df(4): error: a view is always read-only: for &x over a view is not allowed (spec 6.5); loop over the collection, or copy the view with !

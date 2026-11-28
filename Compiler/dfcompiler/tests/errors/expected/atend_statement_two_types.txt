@@ -1,0 +1,1 @@
+atend_statement_two_types.df(7): error: 'x' is declared with two types in a statement that has an atEnd (spec 14.2)

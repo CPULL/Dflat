@@ -1,0 +1,9 @@
+whole 4
+real 2.5
+show 4
+show 2.5
+stat 1
+trait 7
+LOUD 3
+p 7
+---- exit code 0 ----

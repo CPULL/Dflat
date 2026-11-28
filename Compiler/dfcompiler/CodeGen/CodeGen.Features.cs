@@ -317,6 +317,11 @@ public sealed partial class CodeGen {
       return strictly;
     }
     var best = applicable.Where(entry => !applicable.Any(other => Dominates(other, entry))).ToList();
+    if (best.Count > 1 && best.All(entry => entry.Fun.Class is { IsTrait: true })) {
+      // a sub-trait that replaces a method of its parent trait (spec 11.2): its version is the one, not a clash
+      best.RemoveAll(entry => best.Any(other => other.Fun != entry.Fun && DerivesFrom(other.Fun.Class!, entry.Fun.Class!)
+        && ParamTypes(other.Fun).SequenceEqual(ParamTypes(entry.Fun))));
+    }
     if (best.Count != 1) {
       string options = string.Join(", ", best.Select(entry => FunHeader(entry.Fun)));
       if (best.All(entry => entry.Fun.Class is { IsTrait: true }) && best.Select(entry => entry.Fun.Class).Distinct().Count() == best.Count) {

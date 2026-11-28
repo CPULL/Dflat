@@ -1,0 +1,14 @@
+len 4, users of first 2
+item 4
+item -1
+item 7
+item -1
+got 4, users 3
+plain -1
+team 1 -1, users 2
+word a
+word <null>
+word c
+tea 2.5, air -1
+end
+---- exit code 0 ----

@@ -826,3 +826,12 @@
 - 20.12 A call through the handle takes function values that capture nothing or only with `x!` / `->x`; a result that lends the memory of the task is allowed with a level 2 warning
 - 19.2 dfparser removed: `dfcompiler --tokens` and `dfcompiler --ast` print the tokens and the syntax tree
 - 11.1.3 `replace fun string toStr()`: how a class replaces the default printing
+- 18.3 A write from outside through the members of a field of a global is one access under the write lock (the whole statement); 18.3.1 `enforce g { }` holds the write lock of a global for a block of several steps (no read-only form); statements in a row on the same global outside `enforce`, with a write, give a level 2 warning
+- 6.7 `next()` required in an iterator, `writableNext()` optional: its default raises `MissingWritableIteratorForCustomCollectionException` (15.3 #73, new) when a `for &x` starts
+- 11.2 A sub-trait gives a parent trait method a new default body with `replace fun`; a sub-trait constructor chains to the parent trait (`: Base(...)`), the parent is initialized once; `==` declared in a trait, required of its classes, called by the class of the left object
+- 11.2 `executeAfter` of a method with several results reads them as `m.result.0`, `m.result.1`; on a generic method every copy runs the blocks
+- 18.3 One access to a global is the whole chain: `?.`, a range (a copy), `++` / `--` inside an expression; several targets on its fields run under the write lock
+- 3.2 Read/write counted and weak parts of a tuple: `(&@Dog, i32)`, `(&%Dog, i32)`; only a `&@T`, `&%T` or a new object goes in; a `&@i32` part writes its shared cell with the lock
+- 7.2.1 `enforce` names a field of the class or trait bare inside a method (`enforce total { }`)
+- 11.2 Trait properties can be counted or weak (`@T`, `&@T`, `%T`, `&%T`), with the rules of the fields of a class (12.7)
+- 11.3.13, 12.7 Counted objects and weak references are never type arguments of generics (`Box<@Dog>`, `smaller(@a, @b)`, `class K : Holder<@Dog>`): compile error `Reference Counted objects cannot be used in Generics`; the collections of the language keep `list<@T>`, `vec<@T>`, `arr<@T>`, `map<K, @T>`

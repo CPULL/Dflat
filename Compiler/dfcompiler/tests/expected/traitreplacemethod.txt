@@ -1,0 +1,8 @@
+...
+woof
+WOOF
+I say woof
+I say ...
+I say woof
+I say WOOF
+---- exit code 0 ----

@@ -1,0 +1,6 @@
+namespace trait_equals_missing
+import Root
+trait Shape {
+  public fun bool ==(Shape o)
+}
+class Square : Shape { }

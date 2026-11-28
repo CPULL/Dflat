@@ -1,0 +1,4 @@
+namespace tuple_destructure_types
+import Root
+(i32, string) pair = (1, "a")
+i32 a, i32 b = pair

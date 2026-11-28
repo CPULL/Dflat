@@ -1,0 +1,13 @@
+4
+none is null
+total 1 item 1 plain 2
+all 10
+4
+none is null
+total 2 item 2 plain 4
+all 20
+limit 10
+hits 1
+limit 10
+hits 2
+---- exit code 0 ----

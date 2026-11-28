@@ -140,6 +140,9 @@ public sealed partial class CodeGen {
         return EqualsByOperator(l, r, cls, op);
       }
     }
+    if (IsTraitType(l.Type) && !IsNullable(r.Type) && TraitEqualsOp(l.Type, r.Type) != null) {
+      return TraitEquals(l, r, at);   // a == b on values of a trait that declares == (spec 11.2)
+    }
     if (!IsClass(r.Type)) {
       throw Error($"cannot compare {l.Type} and {r.Type}", at);
     }
@@ -148,6 +151,34 @@ public sealed partial class CodeGen {
       throw Error($"cannot compare {l.Type} and {r.Type}", at);
     }
     return $"((const void*)({l.Code}) == (const void*)({r.Code}))";
+  }
+
+  // the == a trait (or one of its parent traits) declares for this right operand
+  FunSig? TraitEqualsOp(string traitName, string rightType) {
+    for (var trait = traits.TryGetValue(traitName, out var found) ? found : null; trait != null; trait = trait.Super) {
+      if (trait.TraitMethods.FirstOrDefault(f => f.Name == trait.Name + ".==" && f.Params.Count == 1 && Assignable(f.Params[0].Type, rightType)) is FunSig op) {
+        return op;
+      }
+    }
+    return null;
+  }
+
+  // the == of the class of the left object, through the trait; equals comes first when that class defines it (spec 11.2, 11.1.3)
+  string TraitEquals(Expr l, Expr r, Node at) {
+    string left = NewTemp();
+    string right = NewTemp();
+    var argument = Synthetic("CValue", at, right).Add(Synthetic("Type", at, r.Type));
+    var call = ObjectCall(new Expr(left, l.Type), "==", new List<Node> { argument }, new Scope(null), at) ?? throw Error($"no == in {DisplayName(l.Type)}", at);
+    string compare = call.Code;
+    if (classes.Values.Any(cls => cls.EqualsNode != null && !cls.IsImported)) {
+      string table = EqualsTable(r.Type);
+      string found = NewTemp();
+      string fn = $"{ResultPair("bool")} (*)(void*, {CType(r.Type)})";
+      string viaEquals = PairCheck($"(({fn}){found})((void*){left}, {right})", "bool");
+      compare = $"({{ void* {found} = {table}(*(const df_class* const*){left}); {found} != NULL ? {viaEquals} : {compare}; }})";
+    }
+    return $"({{ {CType(l.Type)} {left} = {l.Code}; {CType(r.Type)} {right} = {r.Code}; "
+      + $"({left} == NULL || {right} == NULL) ? ((const void*){left} == (const void*){right}) : {compare}; }})";
   }
 
   FunSig? OperatorFor(ClassInfo cls, string rightType) {

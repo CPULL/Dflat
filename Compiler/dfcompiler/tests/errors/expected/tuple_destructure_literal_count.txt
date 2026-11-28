@@ -1,0 +1,1 @@
+tuple_destructure_literal_count.df(3): error: the tuple has 3 items, not 2

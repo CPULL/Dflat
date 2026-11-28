@@ -1,0 +1,1 @@
+tuple_destructure_expression.df(4): error: feature not supported: Tuple destructuring of the result of an expression (keep the tuple in a variable first)

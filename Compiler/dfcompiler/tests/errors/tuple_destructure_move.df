@@ -1,0 +1,5 @@
+namespace tuple_destructure_move
+import Root
+class Dog { }
+(Dog, i32) pair = (Dog(), 2)
+Dog d, i32 k = ->pair

@@ -1,0 +1,5 @@
+namespace tuple_counted_borrow
+import Root
+class Dog { public string name = "x" }
+(@Dog, i32) t = (Dog(), 1)
+Dog view = t.0

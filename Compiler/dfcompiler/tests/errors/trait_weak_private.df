@@ -1,0 +1,10 @@
+namespace trait_weak_private
+import Root
+class Dog { }
+trait Watcher {
+  %Dog seen
+}
+class Guard : Watcher { }
+@Dog rex = @Dog()
+Guard g = Guard()
+g.seen = %rex

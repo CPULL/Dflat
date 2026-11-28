@@ -1,0 +1,23 @@
+users of rex 2
+users of rex 4, bob Anna's: pet Rex, visits 0
+anna visits 2, total users 1
+anna total 2, bob visits 13, cell 13, cell users 2
+Bob ends
+Anna ends
+Rex ends
+write without the lock
+through the trait: Anna's: pet Rex, visits 0, pet users 4
+Bob ends
+after bob, users of rex 2
+Anna ends
+Rex ends
+----
+walker Maximus, users 2
+draft two
+users of the walker 1
+pet through the trait Fido
+Maximus ends
+Carl ends
+Fido ends
+end
+---- exit code 0 ----

@@ -1,0 +1,9 @@
+namespace counted_trait_property_replaced
+import Root
+class Dog { }
+trait Owner {
+  public @Dog pet
+}
+class Person : Owner {
+  replace public @Dog pet { R: { field } }
+}

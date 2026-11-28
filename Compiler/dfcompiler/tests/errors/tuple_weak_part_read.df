@@ -1,0 +1,6 @@
+namespace tuple_weak_part_read
+import Root
+class Dog { public string name = "x" }
+@Dog rex = Dog()
+(%Dog, i32) t = (%rex, 1)
+Console.log(t.0.name)

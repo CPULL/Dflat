@@ -150,12 +150,20 @@ public sealed partial class CodeGen {
           if (member.Children.Any(child => child.Kind == "Size")) {
             throw NotSupported("Sized declarations (arr<T>[n] name)", member);
           }
-          if (IsCountedDecl(member)) {
-            throw NotSupported("Counted fields (@T name, spec 12.7)", member);
+          bool countedField = IsCountedDecl(member);   // @Dog pet, &@i32 total: a user of its object or cell, as a counted field of a class (spec 12.7)
+          if (countedField && member.Children.Any(child => child.Kind == "Property")) {
+            throw NotSupported("Replacing a counted property of a trait", member);
           }
           var init = member.Children.FirstOrDefault(child => child.Kind is "Init" or "WeakInit");
-          if (init?.Kind == "WeakInit") {
-            throw NotSupported("Ownership", init);
+          bool weakField = member.Children.Any(child => child.Kind == "Weak");   // %Dog seen, &%Dog writer: a weak reference, as a weak field of a class (spec 12.7)
+          if (init?.Kind == "WeakInit" && !weakField) {
+            throw Error($"a weak property is declared with % before its type: %Type {member.Text}", init);
+          }
+          if (weakField && member.Children.Any(child => child.Kind == "Property")) {
+            throw NotSupported("Replacing a counted or weak property of a trait", member);
+          }
+          if (init is { Kind: "WeakInit", Text: "default" }) {
+            init = null;   // the null start of %T name is not written
           }
           var typeNode = member.Children.First(child => TypeNodeKinds.Contains(child.Kind));
           if (typeNode is { Kind: "Type", Text: "var" }) {
@@ -165,8 +173,18 @@ public sealed partial class CodeGen {
             throw Error($"the property '{member.Text}' is already declared in {trait.Name} or its parent trait", member);
           }
           // private (no keyword, spec 1.6.1): only the code of the trait and, read-only, its sub-traits (spec 11.2)
-          var traitField = new FieldInfo(member.Text!, ResolveType(typeNode), trait, member) {
+          string fieldType = ResolveType(typeNode);
+          if (countedField && !IsClass(fieldType) && !IsTraitType(fieldType) && !IsCountedValueType(fieldType)) {
+            throw NotSupported($"Counted values of type {fieldType} (spec 12.7)", member);
+          }
+          if (weakField && !IsClass(fieldType)) {
+            throw Error("only objects have weak references", member);
+          }
+          var traitField = new FieldInfo(member.Text!, fieldType, trait, member) {
             Visibility = visibility,
+            IsCounted = countedField,
+            IsWeak = weakField,
+            IsWritable = (countedField || weakField) && member.Children.Any(child => child.Kind == "ReadWrite"),
             Init = init?.Children[0],
             IsReadOnly = ModsOf(member).Contains("readonly")   // a simple field: the trait and its classes write it, the others read it (spec 11.2)
           };
@@ -183,7 +201,12 @@ public sealed partial class CodeGen {
         }
         case "Constructor": {
           if (member.Children.FirstOrDefault(child => child.Kind == "Chain") is Node chain) {
-            throw NotSupported("Trait constructors that chain (: Super(...))", chain);
+            // Named(string n) : Base(n.len): the constructor of the parent trait runs first (spec 11.2)
+            if (chain.Children.Count != 1 || trait.Super == null || chain.Children[0].Text != trait.Super.Name && chain.Children[0].Text != TemplateName(trait.Super)) {
+              throw Error($"a constructor of the trait {DisplayName(trait.Name)} chains only to its parent trait{(trait.Super != null ? ", " + DisplayName(trait.Super.Name) : " (it has none)")}", chain);
+            }
+            chain.Children[0].Text = trait.Super.Name;
+            trait.ChainsToSuper = true;
           }
           trait.CtorNodes.Add(member);              // a trailing atEnd is a destructor fragment (spec 11.4, RegisterTraitInit)              // overloads, like the constructors of a class (spec 11.1.1, 11.2)
           break;
@@ -217,12 +240,13 @@ public sealed partial class CodeGen {
       if (isStatic || isConst) {
         throw Error("a trait function cannot be static", member);
       }
-      if (isOverride) {
-        throw NotSupported("A trait that replaces a function of its parent trait", member);
+      if (isOverride && member.Children.Any(child => child.Kind == "NoBody")) {
+        throw Error($"'{member.Text}': a sub-trait replaces a method of its parent trait with a new default body (spec 11.2)", member);
       }
-      if (member.Text == "==") {
-        throw NotSupported("The equality operator (fun bool ==(V o))", member);
+      if (isOverride && explicitVisibility) {
+        throw Error("a replacing function takes the visibility of the original: write none on it", member);
       }
+
       if (FieldCandidates(trait, member.Text!).Any()) {
         throw Error($"'{member.Text}' is already a property of {trait.Name}", member);
       }
@@ -233,6 +257,13 @@ public sealed partial class CodeGen {
       var f = RegisterFun(member, null, trait)!;
       f.Class = trait;
       f.IsAbstract = member.Children.Any(child => child.Kind == "NoBody");
+      if (member.Text == "==") {
+        // fun bool ==(Shape o) in a trait: required of its classes, called by the class of the left object (spec 11.2)
+        CheckOperatorEquals(f, member);
+        if (!IsSubtype(trait.Name, f.Params[0].Type) && f.Params[0].Type != trait.Name) {
+          throw Error($"the == of the trait {DisplayName(trait.Name)} takes a {DisplayName(trait.Name)}: fun bool ==({DisplayName(trait.Name)} o) (spec 11.2)", member);
+        }
+      }
       f.IsAccessor = member.Children.Any(child => child.Kind == "AccessorFun");   // the default accessors of a replaced property (spec 11.2)
       f.Visibility = visibility;   // private (no keyword, spec 1.6.1): only the trait, its sub-traits and the class that implements it
       f.IsAsParent = mods.Contains("asparent");
@@ -250,10 +281,22 @@ public sealed partial class CodeGen {
             f.Visibility = parentMethod.Visibility;
             break;
           }
+          if (isOverride) {
+            // replace fun m() { } in a sub-trait: the new default body of m for the classes of the sub-trait (spec 11.2)
+            if (!ParamTypes(parentMethod).SequenceEqual(ParamTypes(f)) || parentMethod.Ret != f.Ret) {
+              throw Error($"'{member.Text}' of {DisplayName(trait.Name)} must have the parameters and the result of '{member.Text}' of {DisplayName(up.Name)} to replace it", member);
+            }
+            f.Visibility = parentMethod.Visibility;
+            isOverride = false;   // found
+            break;
+          }
           if (ParamTypes(parentMethod).SequenceEqual(ParamTypes(f))) {
-            throw NotSupported($"A trait that redeclares '{member.Text}' of its parent trait {up.Name}", member);
+            throw Error($"'{member.Text}' is a method of the parent trait {DisplayName(up.Name)}: write replace fun to give it a new default body (spec 11.2)", member);
           }
         }
+      }
+      if (isOverride) {
+        throw Error($"'{member.Text}' replaces nothing: no parent trait of {DisplayName(trait.Name)} has it", member);
       }
     }
     RegisterTraitInit(trait);
@@ -296,6 +339,12 @@ public sealed partial class CodeGen {
     return false;
   }
 
+  // the name m.result is written with: a copy of a generic method (same__i32) answers to the name of the generic (same, spec 11.3.1)
+  string WrittenMethodName(string name) {
+    string shown = ShownMethodName(name);
+    return methodCopyNames.TryGetValue(shown, out var display) && display.IndexOf('<') is int open and > 0 ? display[..open] : shown;
+  }
+
   // the method name as the program wrote it (without the __impl_ of the chain)
   static string ShownMethodName(string name) {
     while (name.StartsWith(ImplPrefix)) {
@@ -315,9 +364,7 @@ public sealed partial class CodeGen {
       throw NotSupported("executeBefore / executeAfter on a generic function", member);
     }
     var returns = member.Children.FirstOrDefault(child => child.Kind == "Returns");
-    if (returns != null && returns.Children.Count > 1) {
-      throw NotSupported("executeBefore / executeAfter on a function with several return values", member);
-    }
+    int results = returns?.Children.Count ?? 0;   // several results: each in its own local, read as m.result.0, m.result.1 (spec 11.2)
     var before = member.Children.FirstOrDefault(child => child.Kind == "ExecuteBefore")?.Children[0];
     var after = member.Children.FirstOrDefault(child => child.Kind == "ExecuteAfter")?.Children[0];
     var parameters = member.Children.First(child => child.Kind == "Params");
@@ -346,15 +393,27 @@ public sealed partial class CodeGen {
     }
     if (returns == null) {
       block.Add(Synthetic("ExprStmt", member).Add(call));
+    } else if (results > 1) {
+      var targets = Synthetic("Targets", member);
+      for (int index = 0; index < results; index++) {
+        targets.Add(Synthetic("Decl", member, "__result" + index).Add(Synthetic("Type", member, "var")));
+      }
+      block.Add(Synthetic("MultiAssign", member).Add(targets).Add(Synthetic("Values", member).Add(call)));
     } else {
       block.Add(Synthetic("Decl", member, "__result").Add(Synthetic("Type", member, "var")).Add(Synthetic("Init", member).Add(call)));
     }
     if (after != null) {
       foreach (var statement in after.Children) {
-        block.Add(ResultReads(statement, ShownMethodName(name), returns != null));   // m.result, also in a link of a chain
+        block.Add(ResultReads(statement, WrittenMethodName(name), returns != null, results));   // m.result, also in a link of a chain
       }
     }
-    if (returns != null) {
+    if (results > 1) {
+      var multiReturn = Synthetic("Return", member);
+      for (int index = 0; index < results; index++) {
+        multiReturn.Add(Synthetic("Name", member, "__result" + index));
+      }
+      block.Add(multiReturn);
+    } else if (returns != null) {
       block.Add(Synthetic("Return", member).Add(Synthetic("Name", member, "__result")));
     }
     member.Children.RemoveAll(child => child.Kind is "Block" or "NoBody" or "ExecuteBefore" or "ExecuteAfter");
@@ -363,17 +422,23 @@ public sealed partial class CodeGen {
   }
 
   // m.result in an executeAfter block: the value the implementation returned, read-only
-  Node ResultReads(Node node, string method, bool hasResult) {
+  Node ResultReads(Node node, string method, bool hasResult, int results = 1) {
     bool IsResult(Node n) => n is { Kind: "Member", Text: "result" } && n.Children[0] is { Kind: "Name" } owner && owner.Text == method;
     if (node.Kind is "Assign" or "PreInc" or "PostInc" && node.Children.Count > 0 && IsResult(node.Children[0])
         || node.Kind == "WritableAddressOf" && IsResult(node.Children[0]) || node.Kind == "Gift" && IsResult(node.Children[0])) {
       throw Error($"{method}.result is read-only", node);
     }
+    if (results > 1 && node is { Kind: "Member" } part && part.Children.Count == 1 && IsResult(part.Children[0])) {
+      // m.result.1 of a method with several results (spec 11.2)
+      return int.TryParse(part.Text, out int index) && index >= 0 && index < results ? Synthetic("Name", node, "__result" + index)
+        : throw Error($"{method} has {results} results: read them as {method}.result.0 to {method}.result.{results - 1}", node);
+    }
     if (IsResult(node)) {
-      return hasResult ? Synthetic("Name", node, "__result") : throw Error($"{method} returns nothing: there is no {method}.result", node);
+      return results > 1 ? throw Error($"{method} has {results} results: read each one, {method}.result.0 to {method}.result.{results - 1}", node)
+        : hasResult ? Synthetic("Name", node, "__result") : throw Error($"{method} returns nothing: there is no {method}.result", node);
     }
     for (int i = 0; i < node.Children.Count; i++) {
-      node.Children[i] = ResultReads(node.Children[i], method, hasResult);
+      node.Children[i] = ResultReads(node.Children[i], method, hasResult, results);
     }
     return node;
   }
@@ -382,8 +447,13 @@ public sealed partial class CodeGen {
   // a constructor with parameters is one more __tinit (overloads); the class names it with : Trait(...) (spec 11.1.1)
   void RegisterTraitInit(ClassInfo trait) {
     var statements = new List<Node>();
+    foreach (var field in trait.Fields.Where(field => field.IsCounted && field.Init == null && IsCountedValueType(field.Type) && !IsNullable(field.Type))) {
+      // &@i32 total: a counted value property starts with a cell of its own holding the zero value, as a field of a class (spec 12.7)
+      string plain = BaseOf(field.Type);
+      statements.Add(Assignment(field.Name, Synthetic("CValue", field.At, ZeroValue(plain)).Add(Synthetic("Type", field.At, plain)), field.At, false, false));
+    }
     foreach (var field in trait.Fields.Where(field => field.Init != null)) {
-      statements.Add(Assignment(field.Name, field.Init!, field.At, false));
+      statements.Add(Assignment(field.Name, field.Init!, field.At, false, field.IsWeak));
     }
     if (trait.CtorNodes.Count == 0) {
       if (statements.Count == 0) {
@@ -399,8 +469,15 @@ public sealed partial class CodeGen {
       trait.InitFun = f;
       return;
     }
+    if (trait.ChainsToSuper && trait.CtorNodes.Any(member => !member.Children.Any(child => child.Kind == "Chain"))) {
+      throw NotSupported($"a trait whose constructors do not all chain to its parent trait ({DisplayName(trait.Name)}: write : {DisplayName(trait.Super!.Name)}(...) on each)", trait.Node);
+    }
     foreach (var member in trait.CtorNodes) {
       var block = Synthetic("Block", member);
+      if (member.Children.FirstOrDefault(child => child.Kind == "Chain") is Node superCall) {
+        var called = superCall.Children[0];
+        block.Add(Synthetic("ExprStmt", called).Add(Synthetic("CtorChain", called, called.Text).Add(called.Children[0])));   // the parent trait first
+      }
       foreach (var statement in statements) {
         block.Add(CloneNode(statement));
       }
@@ -544,7 +621,8 @@ public sealed partial class CodeGen {
     var trait = field.Owner;
     int index = trait.Fields.Where(f => !f.IsStatic).ToList().IndexOf(field);
     string temp = NewTemp();
-    return $"(*({{ void* {temp} = (void*)({objectCode}); ({CType(field.Type)}*)((char*){temp} + df_impl_of({temp}, &df_trait_{trait.Name})->offsets[{index}]); }}))";
+    string ctype = field.IsCounted || field.IsWeak ? "df_rc*" : CType(field.Type);   // a counted property holds its counting block (spec 12.7)
+    return $"(*({{ void* {temp} = (void*)({objectCode}); ({ctype}*)((char*){temp} + df_impl_of({temp}, &df_trait_{trait.Name})->offsets[{index}]); }}))";
   }
 
   // TraitName.name(args) inside a class that implements the trait: the function of the trait itself
@@ -621,7 +699,16 @@ public sealed partial class CodeGen {
   // can only run the constructors without parameters
   List<Node> TraitInitStatements(ClassInfo cls, Node at, Dictionary<string, Node>? named) {
     var statements = new List<Node>();
-    foreach (var trait in IntroducedTraits(cls).Where(trait => trait.InitFun != null)) {
+    var introduced = IntroducedTraits(cls);
+    foreach (var sub in introduced.Where(sub => sub.ChainsToSuper)) {
+      if (!introduced.Contains(sub.Super!)) {
+        throw Error($"the trait {DisplayName(sub.Name)} initializes {DisplayName(sub.Super!.Name)}, which {DisplayName(cls.Name)} has already from its parent class: the parent trait is initialized once (spec 11.2)", at);
+      }
+      if (named != null && named.TryGetValue(sub.Super!.Name, out var twice)) {
+        throw Error($"the constructor of {DisplayName(sub.Name)} calls the constructor of {DisplayName(sub.Super.Name)}: the parent trait is initialized once, do not call it here (spec 11.2)", twice);
+      }
+    }
+    foreach (var trait in introduced.Where(trait => trait.InitFun != null && !introduced.Any(sub => sub.ChainsToSuper && sub.Super == trait))) {
       if (named != null && named.TryGetValue(trait.Name, out var call)) {
         statements.Add(Synthetic("ExprStmt", call).Add(Synthetic("CtorChain", call, trait.Name).Add(call.Children[0])));
         continue;

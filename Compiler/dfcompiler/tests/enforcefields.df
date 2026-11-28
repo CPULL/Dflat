@@ -1,0 +1,37 @@
+// enforce on a field named bare inside a method (spec 7.2.1): &@T and counted value fields take their lock, nullable fields are
+// unwrapped, objects are checked; in a class, in a trait, and on a static field
+namespace enforcefields
+import Root
+class Item { public i32 n = 0 }
+trait Tally {
+  &@i32 hits = 0
+  i32? limit = 10
+  public fun hit() {
+    enforce hits { hits += 1 }
+    enforce limit { Console.log("limit " + limit) }
+    enforce hits { Console.log("hits " + hits) }
+  }
+}
+class Counter : Tally {
+  &@i32 total = 0
+  i32? maybe = 3
+  i32? none
+  &@Item item = Item()
+  Item plain = Item()
+  static &@i32 all = 0
+  public fun bump() {
+    enforce total { total += 1 }
+    enforce maybe { Console.log(maybe + 1) }
+    enforce none { Console.log("never") } else { Console.log("none is null") }
+    enforce item { item.n++ }
+    enforce plain { plain.n += 2 }
+    enforce all { all += 10 }
+    enforce total, item { Console.log("total " + total + " item " + item.n + " plain " + plain.n) }
+    enforce all { Console.log("all " + all) }
+  }
+}
+Counter c = Counter()
+c.bump()
+c.bump()
+c.hit()
+c.hit()

@@ -1,0 +1,10 @@
+gone
+sees Rex
+sees Rex
+copy Rex
+no writer
+max age 3
+Guard { seen: Dog{}, writer: Dog{} }
+gone
+no writer
+---- exit code 0 ----

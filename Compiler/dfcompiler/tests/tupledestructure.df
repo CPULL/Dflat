@@ -1,0 +1,85 @@
+// Tuple destructuring on the left (spec 1.5, 3.2): the items of a tuple are unpacked into variables in one statement, _ skips an item;
+// each target takes what T x = t.i would give it. A tuple literal gives its items; var targets take the types of the values
+namespace tupledestructure
+import Root
+
+class Dog(string name) {
+  public string name
+}
+
+class Kennel {
+  public (string label, i32 size) info = ("north", 3)
+}
+
+fun i32, string two() { return 7, "seven" }
+
+fun values() {
+  (i32, string, bool) record = (5, "five", true)
+  i32 total, string name, bool on = record
+  Console.log($"{total} {name} {on}")
+  i32 onlyCount, _, bool onlyOn = record
+  Console.log($"{onlyCount} {onlyOn}")
+  i32 existing = 0
+  existing, _, bool fresh = record             // an existing variable, a skipped item, a new one
+  Console.log($"{existing} {fresh}")
+  i32 a = 1
+  i32 b = 2
+  a, b = (b, a)                                // a literal gives its items: every value is read before any target is written
+  Console.log($"{a} {b}")
+}
+
+fun named() {
+  (string label, r64 price) item = ("tea", 2.5)
+  string label, r64 price = item
+  Console.log($"{label} {price}")
+  (i32, (i32, string)) nested = (1, (2, "in"))
+  i32 outer, (i32, string) inner = nested
+  i32 deep, string text = inner
+  Console.log($"{outer} {deep} {text}")
+}
+
+fun places() {
+  Kennel k = Kennel()
+  string label, i32 size = k.info              // a field
+  Console.log($"{label} {size}")
+  list<(i32, string)> pairs = [(1, "one"), (2, "two")]
+  i32 n, string word = pairs[1]                // an item
+  Console.log($"{n} {word}")
+  for p in pairs {
+    i32 x, _ = p
+    Console.log($"loop {x}")
+  }
+}
+
+fun strings() {
+  string kept
+  i32 count
+  {
+    (string, i32) inner = ("inner text", 4)
+    kept, count = inner                        // kept takes its own copy: inner ends with its block
+  }
+  Console.log($"{kept} {count}")
+}
+
+fun objects() {
+  (Dog, i32) pair = (Dog("Rex"), 2)
+  Dog d, i32 k = pair                          // d borrows the dog the tuple owns, as Dog d = pair.0
+  Console.log($"{d.name} {k} {pair.0.name}")
+}
+
+fun inferred() {
+  var record = (5, "x")
+  var x, var y = record
+  var p, var q = 1.5, "one"
+  var r, string s = two()
+  var u, var v = (true, 'c')
+  Console.log($"{x} {y} {p} {q} {r} {s} {u} {v}")
+}
+
+values()
+named()
+places()
+strings()
+objects()
+inferred()
+Console.log("end")

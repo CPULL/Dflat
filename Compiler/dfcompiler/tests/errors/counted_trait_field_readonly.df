@@ -1,0 +1,8 @@
+namespace counted_trait_field_readonly
+import Root
+trait Owner {
+  public @i32 visits
+}
+class Person : Owner { }
+Person p = Person()
+p.visits += 1

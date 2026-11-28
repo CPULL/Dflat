@@ -1,0 +1,1 @@
+tuple_counted_borrow.df(5): error: 't.0' is counted and cannot be borrowed: take another usage with @Dog view = ... (spec 12.7)

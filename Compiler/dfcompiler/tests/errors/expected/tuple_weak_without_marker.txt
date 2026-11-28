@@ -1,0 +1,1 @@
+tuple_weak_without_marker.df(5): error: a weak reference is made with the marker: %rex (spec 12.7)

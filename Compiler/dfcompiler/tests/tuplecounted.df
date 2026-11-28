@@ -1,0 +1,130 @@
+// Counted and weak parts of tuples (spec 3.2, 12.7): a (@Dog, i32) tuple holds a usage of its dog; a copy of the tuple is one more user,
+// and the usage is released when the tuple ends or the part is replaced. A literal item takes its own usage (a new object starts counting,
+// @x adds a user, ->x moves it); t.0 reads the object; @Dog d = t.0 is one more user. %T parts hold a weak reference
+namespace tuplecounted
+import Root
+
+class Dog(string name) {
+  public string name
+} atEnd {
+  Console.log($"{name} ends")
+}
+
+class Kennel {
+  public (@Dog best, i32 rank) top
+}
+
+fun (@Dog, i32) champion() {
+  return (Dog("Champ"), 1)
+}
+
+fun string describe((@Dog pet, i32 age) t) {
+  return $"{t.pet.name} {t.age}, users {t.pet.usersCount}"
+}
+
+fun basics() {
+  @Dog rex = Dog("Rex")
+  (@Dog pet, i32 age) t = (@rex, 3)           // one more user
+  Console.log($"{t.pet.name} {t.age}, users {rex.usersCount}")
+  (@Dog, i32) copy = t                          // a copy: one more user
+  Console.log($"users after the copy {rex.usersCount}")
+  @Dog again = t.pet                            // one more user
+  Console.log($"users {rex.usersCount}, {describe(t)}")
+  t.pet = Dog("Max")                            // rex loses a user, Max starts counting
+  Console.log($"users of rex {rex.usersCount}, pet {t.pet.name}")
+  t.pet = null
+  Console.log($"users of rex {rex.usersCount}")
+}
+
+fun inferred() {
+  @Dog fido = Dog("Fido")
+  var t = (@fido, "dog")                        // @x gives the part its type: (@Dog, string)
+  Console.log($"{t.0.name} {t.1}, users {fido.usersCount}")
+  var u = (->fido, 2)                           // the usage moves
+  Console.log($"{u.0.name}, users {u.0.usersCount}, fido is null {fido == null}")
+}
+
+fun values() {
+  &@i32 total = 10
+  (@i32 count, string label) t = (@total, "shared")   // the same cell
+  Console.log($"{t.count} {t.label}, users {total.usersCount}")
+  enforce total { total = 20 }
+  Console.log($"the part sees the write: {t.count}")
+  t.count = 5                                   // a cell of its own
+  Console.log($"{t.count} {total}, users {total.usersCount}")
+  (@string, i32) words = ("text", 1)
+  Console.log($"{words.0} {words.1}")
+}
+
+fun weak() {
+  @Dog bolt = Dog("Bolt")
+  (string, %Dog) watch = ("watching", %bolt)
+  %Dog w = watch.1
+  enforce w { Console.log($"alive {w.name}, weak refs {bolt.weakrefsCount}") }
+  bolt is done.
+  enforce w { Console.log("not reached") } else { Console.log("gone") }
+}
+
+fun unpacked() {
+  (@Dog, i32) t = (Dog("Spot"), 4)
+  @Dog d, i32 n = t                             // d is one more user
+  Console.log($"{d.name} {n}, users {d.usersCount}")
+  (@Dog, i32) best = champion()               // the result is taken as it is: no copy
+  @Dog c, i32 rank = best
+  Console.log($"{c.name} {rank}, users {c.usersCount}")
+}
+
+fun holders() {
+  Kennel k = Kennel()
+  k.top = (Dog("Lassie"), 1)
+  Console.log($"{k.top.best.name} {k.top.rank}, users {k.top.best.usersCount}")
+  @Dog lassie = k.top.best
+  list<(@Dog, i32)> pack = []
+  pack.add((@lassie, 2))
+  pack.add((Dog("Rover"), 3))
+  Console.log($"users of lassie {lassie.usersCount}")
+  for p in pack {
+    Console.log($"item {p.0.name} {p.1}")
+  }
+  pack.removeAt(0)
+  Console.log($"users of lassie {lassie.usersCount}")
+}
+
+fun (@Dog, i32) pick(@Dog d) { return (@d, 9) }
+
+fun temporaries() {
+  @Dog rex = Dog("Rex")
+  Console.log(describe((@rex, 1)))              // the usage of the literal ends with the statement
+  Console.log($"after the call {rex.usersCount}")
+  Console.log(describe((Dog("Temp"), 2)))       // Temp ends with the statement
+  champion()                                    // an unused result ends at once
+  (@Dog, i32) t = (@rex, 1)
+  t = (Dog("B"), 2)                             // rex loses the user, B ends with the next assignment
+  t = (@rex, 3)
+  (@Dog, i32) p = pick(@rex)
+  Console.log($"rex {rex.usersCount}")
+  Kennel k = Kennel()
+  k.top = (@rex, 1)
+  Kennel copy = k!                              // the clone is one more user
+  Console.log($"cloned, rex {rex.usersCount}")
+  map<string, (@Dog, i32)> m = []
+  m["a"] = (@rex, 3)
+  Console.log($"in the map {rex.usersCount}")
+  m.removeAt("a")
+  Console.log($"removed {rex.usersCount}, printed {t}")
+}
+
+basics()
+Console.log("----")
+temporaries()
+Console.log("----")
+inferred()
+Console.log("----")
+values()
+Console.log("----")
+weak()
+Console.log("----")
+unpacked()
+Console.log("----")
+holders()
+Console.log("end")

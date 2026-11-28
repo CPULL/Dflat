@@ -1,0 +1,1 @@
+trait_chain_not_parent.df(11): error: a constructor of the trait Named chains only to its parent trait (it has none)

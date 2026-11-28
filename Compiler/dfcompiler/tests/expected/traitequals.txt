@@ -1,0 +1,11 @@
+true
+false
+true
+true
+false
+false
+true
+equals of Circle
+true
+false
+---- exit code 0 ----

@@ -1,0 +1,1 @@
+tuple_rw_part_read_readonly.df(7): error: 't.0' is read-only (@Dog): only a &@Dog or a &%Dog gives a read/write one (spec 12.7)

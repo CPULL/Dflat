@@ -1,0 +1,1 @@
+tuple_counted_arg_plain.df(6): error: 't.0' is counted and cannot be borrowed: the parameter 'd' takes a counted object only if declared @Dog d (spec 12.7)

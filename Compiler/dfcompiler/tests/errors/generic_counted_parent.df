@@ -1,0 +1,7 @@
+namespace generic_counted_parent
+import Root
+class Dog { }
+class Holder<T> {
+  T item
+}
+class Kennel : Holder<@Dog> { }

@@ -1,0 +1,1 @@
+trait_weak_private.df(10): error: 'seen' is private in the trait Watcher: only the code of the trait sees it

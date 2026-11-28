@@ -1,0 +1,8 @@
+namespace enforce_field_string
+import Root
+class Note {
+  string text = "a"
+  public fun show() {
+    enforce text { Console.log(text) }
+  }
+}

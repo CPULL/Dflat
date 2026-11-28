@@ -1809,7 +1809,23 @@ public sealed class Parser {
     var open = ExpectOp("(");
     var tuple = new Node("TupleType", open);
     do {
-      var fieldType = ParseType();
+      Node fieldType;
+      if (IsCountedMarker() || IsOp("%") && PeekAt(1).Kind == TokenKind.Ident && PeekAt(1).Line == Peek.Line && PeekAt(1).Col == Peek.Col + 1) {
+        // (@Dog, i32), (%Dog, i32): a counted or weak part (spec 3.2, 12.7)
+        var marker = Next();
+        fieldType = new Node(marker.Text == "@" ? "CountedType" : "WeakType", marker).Add(ParseType());
+      } else if (IsReadWriteMarker("@") || IsReadWriteMarker("%")) {
+        // (&@Dog, i32), (&%Dog, i32): a read/write counted part or a weak reference to a read/write object
+        var marker = Next();
+        bool counted = Next().Text == "@";
+        fieldType = new Node(counted ? "CountedType" : "WeakType", marker).Add(ParseType()).Add(new Node("ReadWrite", marker));
+      } else if (IsOp("&") && PeekAt(1).Kind == TokenKind.Ident && PeekAt(1).Line == Peek.Line) {
+        // (&Item value, bool isValid): a writable borrow inside a tuple, the result of writableNext() (spec 3.2, 6.7)
+        var marker = Next();
+        fieldType = new Node("LendType", marker).Add(ParseType());
+      } else {
+        fieldType = ParseType();
+      }
       if (Peek.Kind == TokenKind.Ident) {
         var n = Next();
         tuple.Add(new Node("Field", n, n.Text).Add(fieldType));

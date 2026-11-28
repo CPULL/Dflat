@@ -276,6 +276,7 @@ public sealed partial class CodeGen {
     CheckTopLevelFeatures(program);
     LowerFieldGroups(program);
     LowerWeakDecls(program);
+    LowerTrailingAtEnds(program);   // atEnd after a statement (spec 14.2, form 3, CodeGen.TrailingAtEnd.cs)
     LowerCountedDecls(program);
     LowerCountedTypeArgs(program);
     cloneUsed = UsesClone(program);
@@ -613,7 +614,9 @@ public sealed partial class CodeGen {
         throw NotSupported("a bound in the type of a parameter (*T{count} is for declarations)", p);
       }
       string paramType = ResolveType(p.Children[0]);
-      if (IsSetValue(paramType) && cls != null && !classInstanceArgs.ContainsKey(cls.Name) && funNode.Line < LibraryLine && p.Children[0] is { Kind: "Type" } setNode && setNode.Text == paramType) {
+      // a constructor of the body takes a set value, as the primary one (spec 11.3.6): it is not copied per member
+      if (IsSetValue(paramType) && cls != null && !classInstanceArgs.ContainsKey(cls.Name) && funNode.Line < LibraryLine && p.Children[0] is { Kind: "Type" } setNode && setNode.Text == paramType
+          && funNode.Text?.StartsWith("__init") != true) {
         throw NotSupported("A set as the type of a parameter of a method (one copy per type: a generic method, spec 11.3.6)", p);
       }
       bool variadic = p.Kind == "VariadicParam";
@@ -771,7 +774,7 @@ public sealed partial class CodeGen {
     currentClass = f.Class ?? f.LambdaClass;
     currentFun = f;
     currentGenericT = f.GenericT;
-    initializing = f.IsInit || f.IsStaticInit;
+    initializing = f.IsInit || f.IsStaticInit || f.Class is { IsTrait: true } && f.Name.EndsWith(TraitInitSuffix);   // a trait constructor too (spec 11.2)
     var scope = new Scope(FileScopeFor(f));
     if (f.Class != null && !f.IsStatic) {
       scope.Vars["this"] = new VarInfo(f.Class.Name, "self", true);
@@ -970,7 +973,7 @@ public sealed partial class CodeGen {
       sb.Append($"{pad}DF_LINE({SourceMap.RealLine(s.Line)});\n");   // the line of the statement, for the stack trace (spec 15.2)
     }
     if (s.Children.Any(child => child.Kind == "AtEnd" && child.Text == "trailing")) {
-      throw NotSupported("atEnd after a statement (14.2, form 3): only after a function or a class", s);
+      throw NotSupported("atEnd after this statement (14.2, form 3)", s);   // the others are lowered by LowerTrailingAtEnds
     }
     switch (s.Kind) {
       case "Namespace":
@@ -1818,7 +1821,7 @@ public sealed partial class CodeGen {
         && CalleesOf(target) is { Count: > 0 } lendingCallees && lendingCallees.All(f => IsValueLend(f.Ret))) {
       return new LValueInfo(lentPlace.Code, lentPlace.Type, false, null, lentPlace.Type == "string");   // board.scoreRef() += 1 (spec 13.1.1)
     }
-    if (target.Kind == "CellItem" && CountedItemRef(target.Children[0], scope) is CountedRefInfo cellItem) {
+    if (target.Kind == "CellItem" && (CountedItemRef(target.Children[0], scope) ?? TuplePartRef(target.Children[0], scope, true)) is CountedRefInfo cellItem) {
       return CountedValueItemPlace(cellItem, target.Children[0]);   // the shared cell of a list<&@i32> item (spec 12.7)
     }
     if (target.Kind == "Paren") {
@@ -1875,9 +1878,16 @@ public sealed partial class CodeGen {
       s = Synthetic("Assign", s, s.Text).Add(targetNode).Add(s.Children[1]);
     } else if (targetNode.Kind == "Index" && !TupleIndexTarget(targetNode, scope) && !IsPointerNode(targetNode.Children[0], scope)) {
       return IndexAssign(s, scope);
+    } else if (targetNode.Kind == "Member" && !LibraryCode && TuplePartRef(targetNode, scope, true) is { Writable: true } cellPart && IsCountedValueRef(cellPart)) {
+      // t.0 += 1 on a (&@i32, string) tuple: writes the shared cell of the part, with its lock (spec 3.2, 12.7)
+      targetNode = Synthetic("CellItem", targetNode).Add(targetNode);
+      s = Synthetic("Assign", s, s.Text).Add(targetNode).Add(s.Children[1]);
     }
     if (PropertyTarget(targetNode, scope) is var (propertyObj, property)) {
       return PropertyAssign(s, targetNode, propertyObj, property, scope);   // through the setter (spec 11.1.4)
+    }
+    if (targetNode.Kind == "Member" && !LibraryCode && TuplePartAssign(s, scope) is string partAssign) {
+      return partAssign;   // t.0 = @other on a (@Dog, i32) tuple (spec 3.2, 12.7)
     }
     if (targetNode.Kind == "Name" && scope.Find(targetNode.Text!) is VarInfo { IsCounted: true } counted) {
       if (!IsCountedValueVar(counted)) {
@@ -3315,7 +3325,7 @@ public sealed partial class CodeGen {
       if (path.StartsWith("Root.Math32.") && MathConsts.TryGetValue(name, out var v32)) {
         return new Expr($"({v32}f)", "r32");
       }
-      string[] parts = path.Split('.');
+      string[] parts = SplitMemberPath(path, n.Text);
       if (parts.Length == 2 && parts[1] == "hash" && IsKnownType(parts[0]) && !(classes.TryGetValue(parts[0], out var hashOwner) && FindField(hashOwner, "hash") != null)) {
         return TypeHash(Normalize(parts[0]));   // i32.hash, Dog.hash: the hash of the type (spec 6.2.1)
       }
@@ -3347,7 +3357,21 @@ public sealed partial class CodeGen {
     }
     if (IsTuple(obj.Type)) {
       int index = TupleFieldIndex(obj.Type, n.Text!, n);
-      return new Expr($"({obj.Code}).e{index}", TupleElems(obj.Type)[index].Type);
+      string partType = TupleElems(obj.Type)[index].Type;
+      if (IsCountedType(partType) && !LibraryCode) {
+        // t.pet of a (@Dog pet, i32) tuple: its object, or the value of its cell (spec 3.2, 12.7)
+        string plain = CountedBase(partType);
+        return IsCountedValueType(plain)
+          ? new Expr(CellRead($"({obj.Code}).e{index}", plain), plain)
+          : new Expr($"DF_RC_OBJ({CType(plain)}, ({obj.Code}).e{index})", plain);
+      }
+      if (IsValueLend(partType)) {
+        return new Expr($"(*({obj.Code}).e{index})", partType[1..]);   // t.value of a (&T value, bool) tuple: the place it borrows (spec 3.2)
+      }
+      if (IsWeakType(partType) && !LibraryCode && !typingOnly) {
+        throw Error($"'{SourceText(n)}' is a weak reference: copy it into a weak variable ({(IsWritablePart(partType) ? "&%" : "%")}{DisplayName(partType[1..])} w = {SourceText(n)}) and use that through enforce (spec 12.7)", n);
+      }
+      return new Expr($"({obj.Code}).e{index}", partType);
     }
     if (obj.Type == "Exception") {
       return ExceptionMember(obj, n.Text!, n);

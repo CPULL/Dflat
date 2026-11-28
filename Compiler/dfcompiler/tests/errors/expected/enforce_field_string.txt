@@ -1,0 +1,1 @@
+enforce_field_string.df(6): error: strings cannot be enforced ('text')

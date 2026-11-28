@@ -1,0 +1,1 @@
+trait_chain_called_twice.df(16): error: the constructor of Named calls the constructor of Sized: the parent trait is initialized once, do not call it here (spec 11.2)

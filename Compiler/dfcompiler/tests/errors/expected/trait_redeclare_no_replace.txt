@@ -1,0 +1,1 @@
+trait_redeclare_no_replace.df(9): error: 'sound' is a method of the parent trait Animal: write replace fun to give it a new default body (spec 11.2)

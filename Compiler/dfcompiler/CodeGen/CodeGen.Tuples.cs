@@ -15,7 +15,8 @@ public sealed partial class CodeGen {
         expectedElems = candidate;
       }
     }
-    var values = n.Children.Select((child, index) => ExprOf(child, scope, expectedElems?[index].Type)).ToList();
+    var values = n.Children.Select((child, index) => LendTupleItem(child, expectedElems?[index].Type, scope) ?? CountedTupleItem(child, expectedElems?[index].Type, scope)
+      ?? ExprOf(child, scope, expectedElems?[index].Type)).ToList();
     for (int index = 0; index < values.Count; index++) {
       CheckNotBorrowingFunction(values[index].Type, n.Children[index], scope, "a tuple");
     }
@@ -48,6 +49,57 @@ public sealed partial class CodeGen {
       declarations.Append($"{CType(elems[index].Type)} {temp} = {code}; ");
     }
     return new Expr($"({{ {declarations}({CType(tupleType)}){{ {string.Join(", ", temps)} }}; }})", tupleType);
+  }
+
+  // (&items[i], true) for a (&T value, bool isValid) tuple: the address of the place, written through the tuple (spec 3.2, 6.7); the borrow
+  // lives as long as the tuple, which follows the rule of the iterators
+  Expr? LendTupleItem(Node item, string? expected, Scope scope) {
+    if (expected == null || !IsValueLend(expected)) {
+      return null;
+    }
+    var value = TupleItemNode(item);
+    if (value is not { Kind: "WritableAddressOf", Children.Count: 1 }) {
+      throw Error($"this part is a writable borrow, &{DisplayName(expected[1..])}: write &place (spec 3.2)", item);
+    }
+    string lentType = expected[1..];
+    CheckWritableLend(value.Children[0], lentType, scope);
+    return new Expr(PlaceAddress(value.Children[0], lentType, scope), expected);
+  }
+
+  // an item of a tuple literal that is a counted or weak part (spec 3.2, 12.7): its own usage (a new object starts counting, @x adds a user,
+  // ->x moves the usage of x, @plain gives plain to the counting system) or its own weak reference (%x); null when the item is a plain one.
+  // The part is @T or %T when the tuple type says so, or when the item is written @x or %x
+  Expr? CountedTupleItem(Node item, string? expected, Scope scope) {
+    var value = TupleItemNode(item);
+    // (&@max, 2), (&%max, 2): the writable form of a call argument (f(&@x), spec 12.7); without a tuple type the part is &@T or &%T
+    bool rwMarked = value is { Kind: "WritableAddressOf", Children: [{ Kind: "CountedOf" or "WeakOf" }] };
+    if (rwMarked) {
+      value = value.Children[0];
+    }
+    bool movedUsage = expected == null && value is { Kind: "Gift", Children.Count: 1 } && CountedRef(value.Children[0], scope) != null;   // ->rc
+    if (expected != null && IsCountedType(expected) || expected == null && value.Kind == "CountedOf" || movedUsage) {
+      string type;
+      if (expected != null) {
+        type = CountedBase(expected);
+      } else if (CountedRef(value.Children[0], scope) is CountedRefInfo source) {
+        type = source.Type;
+      } else {
+        type = ExprOf(value.Children[0], scope).Type;   // @plain, @Dog(): the type of the object
+      }
+      if (!IsClass(type) && !IsCountedValueType(type)) {
+        throw Error($"@ applies to objects, numbers and strings, not to a {DisplayName(type)} (spec 12.7)", value);
+      }
+      bool writable = expected != null ? IsWritablePart(expected) : rwMarked;   // a &@T part takes a read/write usage or a new value (spec 12.7)
+      string code = IsCountedValueType(type) ? CountedCellValue(value, scope, type, writable, value) : CountedValue(value, scope, type, false, value, writable);
+      return new Expr(code, (writable ? "^" : "@") + type, true);
+    }
+    if (expected != null && IsWeakType(expected) || expected == null && value.Kind == "WeakOf") {
+      string type = expected != null ? expected[1..] : (CountedRef(value.Children[0], scope) ?? WeakRef(value.Children[0], scope))?.Type
+        ?? throw Error("weak references exist only on counted objects (spec 12.7)", value);
+      bool writableWeak = expected != null ? IsWritablePart(expected) : rwMarked;   // a &%T part: made only from a &@T or a &%T (spec 12.7)
+      return new Expr(WeakValue(value, scope, type, value, writableWeak), (writableWeak ? "~" : "_") + type, true);
+    }
+    return null;
   }
 
   // return a, b: the values are computed left to right into temporaries
@@ -145,6 +197,9 @@ public sealed partial class CodeGen {
       } else {
         values = new List<Node> { source };   // a struct: its fields in order (spec 11.1.5.8)
       }
+    }
+    if (values.Count == 1 && targets.Count > 1 && TupleParts(values[0], targets.Count, scope) is List<Node> parts) {
+      values = parts;   // i32 total, string name = record: each target takes what T x = record.i would give it (spec 1.5, 3.2)
     }
     if (values.Count == 1 && ExprOf(values[0], scope) is { } single && IsStruct(single.Type)) {
       // a, b = s: the fields of the struct in order (spec 11.1.5.8)
@@ -321,6 +376,53 @@ public sealed partial class CodeGen {
     stringFresh.Clear();
     ownStructTemps.Clear();
   }
+
+  // tuple destructuring on the left (spec 1.5): the parts of one tuple value as the values of a multiple assignment, or null when the value
+  // is not a tuple. A tuple literal gives its items (a, b = (1, 2) is a, b = 1, 2); a variable, a field or an item gives its parts t.0, t.1 ...
+  // Moving the parts out (->t) and any other expression (a call that gives a tuple) are not built yet
+  List<Node>? TupleParts(Node value, int count, Scope scope) {
+    if (value is { Kind: "Tuple" }) {
+      if (value.Children.Count != count) {
+        throw Error($"the tuple has {value.Children.Count} items, not {count}", value);
+      }
+      return value.Children.ToList();
+    }
+    bool gift = value.Kind == "Gift" && value.Children.Count == 1;
+    var source = gift ? value.Children[0] : value;
+    Expr typed;
+    bool wasTyping = typingOnly;
+    typingOnly = true;
+    try {
+      typed = ExprOf(source, scope);
+    } catch (CompileException) {
+      return null;   // the usual code reports it
+    } finally {
+      typingOnly = wasTyping;
+    }
+    if (!IsTuple(typed.Type) || IsMulti(typed.Type)) {
+      return null;
+    }
+    var elems = TupleElems(typed.Type);
+    if (elems.Count != count) {
+      throw Error($"the tuple has {elems.Count} items, not {count}", value);
+    }
+    if (gift) {
+      throw NotSupported("Moving the parts out of a tuple (a, b = ->t; ->t.0)", value);
+    }
+    if (!RereadableSource(source)) {
+      throw NotSupported("Tuple destructuring of the result of an expression (keep the tuple in a variable first)", value);
+    }
+    return Enumerable.Range(0, count).Select(index => Synthetic("Member", source, index.ToString()).Add(CopyTree(source))).ToList();
+  }
+
+  // a source read once for each part with no effect: a name, a field of one (k.info), an item at a literal or a variable (pairs[i])
+  static bool RereadableSource(Node node) => node.Kind switch {
+    "Name" => true,
+    "Paren" => node.Children.Count == 1 && RereadableSource(node.Children[0]),
+    "Member" => node.Children.Count == 1 && RereadableSource(node.Children[0]),
+    "Index" => node.Children.Count == 2 && RereadableSource(node.Children[0]) && node.Children[1].Kind is "Int" or "Name",
+    _ => false
+  };
 
   // the temporaries of a multiple assignment that hold a struct of their own (a new one or a clone) for an owner
   readonly HashSet<string> ownStructTemps = new();

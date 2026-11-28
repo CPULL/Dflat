@@ -1,0 +1,47 @@
+Rex 3, users 2
+users after the copy 3
+users 4, Rex 3, users 4
+users of rex 3, pet Max
+Max ends
+users of rex 3
+Rex ends
+----
+Rex 1, users 2
+after the call 1
+Temp 2, users 1
+Temp ends
+Champ ends
+B ends
+rex 3
+cloned, rex 5
+in the map 6
+removed 5, printed (Dog { name: Rex }, 3)
+Rex ends
+----
+Fido dog, users 2
+Fido, users 2, fido is null true
+Fido ends
+----
+10 shared, users 2
+the part sees the write: 20
+5 20, users 1
+text 1
+----
+alive Bolt, weak refs 2
+Bolt ends
+gone
+----
+Spot 4, users 2
+Champ 1, users 2
+Champ ends
+Spot ends
+----
+Lassie 1, users 1
+users of lassie 3
+item Lassie 2
+item Rover 3
+users of lassie 2
+Rover ends
+Lassie ends
+end
+---- exit code 0 ----

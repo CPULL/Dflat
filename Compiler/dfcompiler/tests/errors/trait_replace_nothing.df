@@ -1,0 +1,12 @@
+namespace trait_replace_nothing
+import Root
+trait Animal {
+  public fun ->string sound() {
+    return "..."
+  }
+}
+trait Dog : Animal {
+  replace fun ->string bark() {
+    return "woof"
+  }
+}

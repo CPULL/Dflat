@@ -1,0 +1,40 @@
+// Weak properties of traits (spec 12.7, 11.2): %T and &%T declared in a trait are weak references as the weak fields of a class: set
+// with = %x (also in the code of the trait), read through enforce, seen as gone once the object ends
+namespace traitweakfields
+import Root
+class Dog { public string name = "Rex"
+  public i32 age = 1 }
+trait Watcher {
+  public %Dog seen
+  public &%Dog writer
+  public fun look() {
+    enforce seen { Console.log("sees " + seen.name) } else { Console.log("gone") }
+  }
+  public fun watch(&@Dog d) {
+    writer = %d
+  }
+  public fun older() {
+    enforce writer { writer.age++ } else { Console.log("no writer") }
+  }
+}
+class Guard : Watcher { }
+@Dog rex = @Dog()
+&@Dog max = @Dog()
+Guard g = Guard()
+g.look()
+g.seen = %rex
+g.look()
+&Watcher w = g
+w.look()
+%Dog copy = g.seen
+enforce copy { Console.log("copy " + copy.name) }
+g.older()
+g.watch(&@max)
+g.older()
+g.older()
+enforce max { Console.log("max age " + max.age) }
+Console.log(g)
+rex is done.
+g.look()
+max is done.
+g.older()

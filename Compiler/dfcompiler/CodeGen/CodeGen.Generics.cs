@@ -155,6 +155,7 @@ public sealed partial class CodeGen {
   }
 
   string DisplayName(string type) => displayNames.TryGetValue(type, out var shown) ? shown : boxInner.TryGetValue(type, out var boxed) ? "@" + DisplayName(boxed) : type.StartsWith('#') ? type[1..] : type.StartsWith('_') ? "%" + type[1..]
+    : type.StartsWith('^') ? "&@" + DisplayName(type[1..]) : type.StartsWith('~') ? "&%" + type[1..]
     : IsFunType(type) ? FunDisplay(type) : type;
 
   bool IsSetName(string name) => PredefinedSets.ContainsKey(name) || genericSets.ContainsKey(name);
@@ -614,6 +615,9 @@ public sealed partial class CodeGen {
   // how deep generic copies are nested in a type name: Box__Box__i32 → 2
   static int NestingOf(string type) => Regex.Matches(type, "__").Count + 1;
 
+  // spec 11.3.13: the collections of the language hold counted items (list<@T>, 6.2, 12.7); the other generics take no counted or weak type
+  const string CountedInGenerics = "Reference Counted objects cannot be used in Generics (spec 11.3.13)";
+
   // the type arguments written in a Type node
   List<string> TypeArgsOf(IEnumerable<Node> nodes, List<TypeParam> ps) {
     var args = new List<string>();
@@ -621,6 +625,13 @@ public sealed partial class CodeGen {
       var param = args.Count < ps.Count ? ps[args.Count] : null;
       if (param?.ValueType != null) {
         args.Add(ValueArgOf(node, param));
+      } else if (node is { Kind: "ValueArg", Children: [{ Kind: "CountedOf" or "WeakOf" }] }) {
+        if (genericClasses.Values.Any(g => g.Params == ps && g.Name is "vec" or "list" or "arr" or "map" or "bmap" or "hmap" or "set" or "bset" or "hset")) {
+          throw NotSupported("Weak references as items of a collection (list<%T>; a collection holds counted objects, list<@T>)", node);
+        }
+        throw Error(CountedInGenerics, node);   // Box<%Dog> (spec 11.3.13)
+      } else if (node is { Kind: "ValueArg", Children: [{ Kind: "Tuple" } tuple] } && tuple.Children.Any(part => part.Kind is "CountedOf" or "WeakOf")) {
+        throw NotSupported("Counted and weak parts of a tuple type ((@T, i32), (%T, i32))", node);   // the parser reads them as a value
       } else if (node.Kind is "Count" or "ValueArg") {
         throw Error(param != null ? $"'{param.Name}' is a type parameter: write a type" : "a type is expected here, not a value", node);
       } else {
@@ -884,6 +895,9 @@ public sealed partial class CodeGen {
     foreach (var (pattern, argument) in PatternPairs(generic, args)) {
       if (!MentionsParam(pattern, names)) {
         continue;
+      }
+      if (argument.Kind is "CountedOf" or "WeakOf") {
+        throw Error(CountedInGenerics, argument);   // g(@d): a counted object would be the type argument (spec 11.3.13)
       }
       string actual = ExprOf(argument, scope).Type;
       if (actual is "null" or "void" || IsMulti(actual)) {

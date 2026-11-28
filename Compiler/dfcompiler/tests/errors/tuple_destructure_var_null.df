@@ -1,0 +1,6 @@
+namespace tuple_destructure_var_null
+import Root
+fun f() {
+  var a, var b = 1, null
+}
+f()

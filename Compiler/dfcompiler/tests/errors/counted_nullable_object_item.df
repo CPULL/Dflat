@@ -1,0 +1,4 @@
+namespace counted_nullable_object_item
+import Root
+class Dog { }
+list<@Dog?> pack = []

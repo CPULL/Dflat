@@ -11,7 +11,7 @@
 - Collections: widening of the stuck buckets of `hmap` / `hset` (6.8.5.1)
 - Collections: the other non-silent exceptions of the collection operations, to be formalized during the implementation (out of memory is decided, 6.1, 15.3)
 - Reference counting: the order of the locks, waiting and deadlocks with threads; nested locking of the same `&@T`
-- Reference counting: generics with counted type arguments (`Stack<@Dog>`), after 0.1.0; the `Rc` / `Arc` split, with threads
+- Reference counting: the `Rc` / `Arc` split, with threads (generics with counted type arguments: decided, never, 11.3.13)
 - DateTime library: import path, timezone database, parsing for `CalendarDate` / `ZonedDateTime`
 - Import paths of the standard library parts (`import stdrnd`)
 - Pointers: bound methods on unbounded pointers

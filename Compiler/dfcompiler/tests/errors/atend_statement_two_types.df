@@ -1,0 +1,11 @@
+namespace atend_statement_two_types
+import Root
+fun f(bool b) {
+  if b {
+    i32 x = 1
+  } else {
+    string x = "a"
+  } atEnd {
+    Console.log(x)
+  }
+}

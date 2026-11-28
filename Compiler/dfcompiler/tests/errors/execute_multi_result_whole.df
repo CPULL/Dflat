@@ -1,0 +1,6 @@
+namespace execute_multi_result_whole
+import Root
+trait Pair {
+  public fun i32, i32 two()
+    executeAfter { Console.log(two.result) }
+}

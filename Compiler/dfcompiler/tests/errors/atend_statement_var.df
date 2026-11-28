@@ -1,0 +1,9 @@
+namespace atend_statement_var
+import Root
+fun f(bool b) {
+  if b {
+    var x = 1
+  } atEnd {
+    Console.log(x)
+  }
+}

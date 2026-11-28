@@ -1,0 +1,4 @@
+namespace tuple_counted_not_countable
+import Root
+(i32, string) pair = (1, "a")
+var t = (@pair, 1)

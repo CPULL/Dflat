@@ -1,0 +1,10 @@
+namespace global_field_lent
+import Root
+class State {
+  public i32 count = 0
+}
+global State st = State()
+fun bump(&i32 v) {
+  v++
+}
+bump(&st.count)

@@ -1,0 +1,55 @@
+// atEnd after a statement (spec 14.2, form 3): it sees the locals of every scope of the statement (a branch not taken leaves its zero value),
+// runs once when the statement is left on any way out (the end, return, break, a raise passing through), after a loop only once, and after
+// the atEnd blocks inside the statement
+namespace atendstatement
+import Root
+class Res(string name) {
+  public string name
+}
+fun ->string pick(i32 kind) {
+  if kind == 1 {
+    Res first = Res("first")
+    return "one"
+  } else {
+    Res second = Res("second")
+  } atEnd {
+    Console.log("  if atEnd: " + (first == null ? { "no first", "first " + first.name }) + ", " + (second == null ? { "no second", "second " + second.name }))
+  }
+  return "other"
+}
+fun loops() {
+  for i32 i in [1, 2, 3] {
+    i32 seen = i * 10
+    if i == 2 {
+      break
+    }
+  } atEnd {
+    Console.log("  loop atEnd once, seen " + seen)
+  }
+}
+fun raises() {
+  if true {
+    Res held = Res("held")
+    throw IndexOutOfRangeException()
+  } atEnd {
+    Console.log("  atEnd while raising, held " + held.name)
+  }
+  catch IndexOutOfRangeException {
+    Console.log("  caught")
+  }
+}
+fun order() {
+  while true {
+    Res inner = Res("inner")
+    atEnd of inner { Console.log("  form 1 first") }
+    break
+  }
+  atEnd {
+    Console.log("  then the atEnd of the while, " + inner.name)
+  }
+}
+Console.log(pick(1))
+Console.log(pick(2))
+loops()
+raises()
+order()

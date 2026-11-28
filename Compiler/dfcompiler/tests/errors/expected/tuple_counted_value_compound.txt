@@ -1,0 +1,1 @@
+tuple_counted_value_compound.df(5): error: 't.0' is a read-only counted value (@i32): only = gives it a new cell (spec 12.7)

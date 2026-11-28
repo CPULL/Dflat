@@ -1,0 +1,1 @@
+counted_trait_field_readonly.df(8): error: 'visits' is a read-only counted value (@i32): it is written through a &@i32 (spec 12.7)

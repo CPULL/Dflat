@@ -151,6 +151,7 @@ public sealed partial class CodeGen {
     ["WaitingOnANotOwnedTaskException"] = 70,   // spec 20.2.6: a wait by a runnable that neither owns nor borrows the handle
     ["TokenAlreadyRegisteredException"] = 71,   // spec 20.3.2: a token registered again with the same name
     ["IncompatibleTypeInGenericException"] = 72,   // spec 11.3.6.1: a set value read as a type its member does not convert to
+    ["MissingWritableIteratorForCustomCollectionException"] = 73,   // spec 6.7: for &x on a custom collection whose iterator has no writableNext()
     ["DuplicateEventNameWithDataMismatchException"] = 69   // spec 20.4.3: an event name used with another struct
   };
 
@@ -278,6 +279,7 @@ public sealed partial class CodeGen {
     // the objects of the scope end with it (after the atEnd blocks that were written)
     bool writtenAtEnds = frame.AtEnds.Any(atEnd => atEnd.Text != "drop");
     HashSet<Node>? ownerDecls = null;
+    ResolveFrameVarTargets(statements, parentScope);   // var a, var b = two(): the types the drops and the hoisting need
     if (kind is not (FrameKind.AtEndBody or FrameKind.LoopBody)) {
       ownerDecls = AddImplicitDrops(frame, statements);
     }
@@ -367,6 +369,89 @@ public sealed partial class CodeGen {
       atEndScope.Vars[name] = variable;
     }
     frame.AtEndScope = atEndScope;
+  }
+
+  // the var targets of the multiple assignments of a frame, with the declarations before them in view (as the hoisting types them)
+  void ResolveFrameVarTargets(List<Node> statements, Scope parentScope) {
+    if (!statements.Any(statement => statement.Kind == "MultiAssign")) {
+      return;
+    }
+    var typingScope = new Scope(parentScope);
+    foreach (var statement in statements) {
+      if (statement.Kind == "MultiAssign") {
+        ResolveVarTargets(statement, typingScope);
+        foreach (var target in statement.Children[0].Children.Where(target => target.Kind == "Decl" && !IsCountedDecl(target))) {
+          try {
+            typingScope.Vars[target.Text!] = new VarInfo(ResolveType(target.Children.First(child => TypeNodeKinds.Contains(child.Kind))), "", false);
+          } catch (CompileException) {
+            // reported when the statement is compiled
+          }
+        }
+      } else if (statement.Kind == "Decl" && statement.Text != null) {
+        try {
+          typingScope.Vars[statement.Text] = new VarInfo(TypeForHoist(statement, typingScope), "", false);
+        } catch (CompileException) {
+          // a type that cannot be worked out yet: the name is simply not visible to the later statements
+        }
+      }
+    }
+  }
+
+  // var a, var b = two() | var x, i32 y = record | var p, var q = 1, "one": each var target takes the type of its value (spec 1.5), written
+  // in the target as a ResolvedType before the scope is prepared. A counted value keeps the written form (@T x)
+  void ResolveVarTargets(Node multi, Scope scope) {
+    var targets = multi.Children[0].Children;
+    bool IsVarTarget(Node target) => target.Kind == "Decl" && target.Children.FirstOrDefault(child => TypeNodeKinds.Contains(child.Kind)) is { Kind: "Type", Text: "var" };
+    if (!targets.Any(IsVarTarget)) {
+      return;
+    }
+    var values = multi.Children[1].Children;
+    string? saved = handlerOverride;
+    handlerOverride ??= "df_hoist_typing";
+    hoistTyping++;
+    bool wasTyping = typingOnly;
+    typingOnly = true;
+    List<string> types;
+    try {
+      if (values.Count == 1 && values[0].Kind == "Tuple") {
+        types = values[0].Children.Select(value => ExprOf(value, scope).Type).ToList();
+      } else if (values.Count == 1) {
+        var source = values[0].Kind == "Gift" && values[0].Children.Count == 1 ? values[0].Children[0] : values[0];
+        string type = ExprOf(source, scope).Type;
+        if (!IsTuple(type) && !IsMulti(type)) {
+          return;   // the usual code reports the count
+        }
+        types = TupleElems(type).Select(elem => elem.Type).ToList();
+      } else {
+        types = values.Select(value => ExprOf(value, scope).Type).ToList();
+      }
+    } catch (CompileException) {
+      return;   // reported when the statement is compiled
+    } finally {
+      typingOnly = wasTyping;
+      hoistTyping--;
+      handlerOverride = saved;
+    }
+    if (types.Count != targets.Count) {
+      return;
+    }
+    for (int index = 0; index < targets.Count; index++) {
+      if (!IsVarTarget(targets[index])) {
+        continue;
+      }
+      string type = types[index];
+      if (IsValueLend(type)) {
+        type = type[1..];   // var a = k.pick() with a &T result: a copy of the value
+      }
+      if (type == "null" || IsMulti(type) && values.Count > 1) {
+        throw Error($"cannot infer the type of '{targets[index].Text}' from this value: write its type", targets[index]);
+      }
+      if (IsCountedType(type) || IsWeakType(type)) {
+        throw Error($"'{targets[index].Text}' takes a counted or weak value: write its type (@T, &@T, %T)", targets[index]);
+      }
+      var typeNode = targets[index].Children.First(child => TypeNodeKinds.Contains(child.Kind));
+      targets[index].Children[targets[index].Children.IndexOf(typeNode)] = Synthetic("ResolvedType", typeNode, type);
+    }
   }
 
   // the type of a declaration while the scope is prepared: only the type is wanted, so the code the expression makes is dropped

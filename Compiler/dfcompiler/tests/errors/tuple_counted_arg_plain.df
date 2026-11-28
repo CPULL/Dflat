@@ -1,0 +1,6 @@
+namespace tuple_counted_arg_plain
+import Root
+class Dog { public string name = "x" }
+fun walk(Dog d) { }
+(@Dog, i32) t = (Dog(), 1)
+walk(t.0)

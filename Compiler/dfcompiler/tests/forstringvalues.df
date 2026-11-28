@@ -1,0 +1,63 @@
+// for (k, &string v) in m and for &string v in m.values (spec 6.4): the string values of map and hmap changed in place; each pass lends
+// the value and puts it back in its slot when the pass ends, also through break, continue, return and a raise; short (inline) and long values
+namespace forstringvalues
+import Root
+fun mark(&map<string, string> m) {
+  for (string k, &string v) in m {
+    if k == "c" {
+      return
+    }
+    v += "+"
+  }
+}
+fun i32 failAt(&map<string, string> m) {
+  for &string v in m.values {
+    v += "#"
+    if v.len > 70 {
+      throw IndexOutOfRangeException()
+    }
+  }
+  return 0
+}
+fun tryFail(&map<string, string> m) {
+  failAt(&m)
+  catch IndexOutOfRangeException {
+    Console.log("raised")
+  }
+}
+map<string, string> m = ["a": "x", "b": "y", "c": "z"]
+for (string k, &string v) in m {
+  v = v + "!"
+}
+Console.log(m)
+for &string v in m.values {
+  if v == "y!" {
+    continue
+  }
+  v += "?"
+  if v == "z!?" {
+    break
+  }
+}
+Console.log(m)
+mark(&m)
+Console.log(m)
+string long = "0123456789012345678901234567890123456789012345678901234567890123456789"
+map<i32, string> big = [1: "short", 2: long]
+for (i32 k, &string v) in big {
+  v = v + "-" + k
+}
+Console.log(big[1])
+Console.log(big[2])
+for &string v in big.values {
+  v = "s"
+}
+Console.log(big)
+map<string, string> f = ["k": long]
+tryFail(&f)
+Console.log(f["k"].len)
+hmap<string, string> h = ["one": "1"]
+for (string k, &string v) in h {
+  v += k
+}
+Console.log(h["one"])

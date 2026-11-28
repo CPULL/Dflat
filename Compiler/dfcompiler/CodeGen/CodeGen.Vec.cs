@@ -20,6 +20,10 @@ trait Iterator { }
 // the cursor is internal to each iterator, the trait fixes only the methods (spec 6.7.1)
 trait IndexIterator<Item> : Iterator {
   public fun (Item value, bool isValid) next()
+  // optional (spec 6.7): for &x on a collection whose iterator does not write it raises at the start of the loop
+  public fun (&Item value, bool isValid) writableNext() {
+    throw MissingWritableIteratorForCustomCollectionException("for &x: the iterator of this collection has no writableNext()")
+  }
 }
 
 // the counter of open iterators and views (spec 6.4, 11.2): private to the trait, so every collection has it and none can change it.

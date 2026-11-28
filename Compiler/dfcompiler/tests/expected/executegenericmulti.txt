@@ -1,0 +1,17 @@
+before same
+after same 4
+4
+before same
+after same 2.5
+2.5
+before two 4
+after two 8 k4
+8 k4
+before two 5
+after two 10 k5
+10 k5
+before two 7
+loud after default
+after two 7 default
+7 default
+---- exit code 0 ----

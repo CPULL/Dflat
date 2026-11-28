@@ -1,0 +1,1 @@
+enforce_field_never_null.df(6): error: 'count' is i32, which is never null

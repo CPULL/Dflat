@@ -67,6 +67,7 @@ sealed class ClassInfo {
   public Node? EqualsNode { get; set; }                       // equals(T other), compiled once for each T
   public bool IsTrait { get; init; }
   public ClassInfo? Super { get; set; }                       // the parent trait
+  public bool ChainsToSuper { get; set; }                     // the constructors of this trait chain to the parent trait: : Base(...) (spec 11.2)
   public List<ClassInfo> Traits { get; } = new();             // the traits a class lists in its header
   public HashSet<string> AliasedTraits { get; } = new();       // copies of a generic trait written through an alias in the header (spec 11.3.2)
   public List<ImplInfo> Impls { get; } = new();
@@ -493,9 +494,6 @@ public sealed partial class CodeGen {
           }
           if (weakField && !IsClass(type)) {
             throw Error("only objects have weak references", member);
-          }
-          if (weakField && isStatic) {
-            throw NotSupported("Static weak fields", member);
           }
           if (isConst && !isStatic) {
             throw Error("'const' on a field needs 'static'", member);
@@ -1935,7 +1933,8 @@ public sealed partial class CodeGen {
     }
     CheckAccess(field.Visibility, field.Owner, name, at);
     if (cls.IsTrait) {
-      return new Expr(TraitFieldCode(NullChecked(obj.Code, obj.Type), field), field.Type);
+      var place = new Expr(TraitFieldCode(NullChecked(obj.Code, obj.Type), field), field.Type);
+      return field.IsCounted && !raw ? CountedFieldRead(place, field, at) : place;   // a counted property of a trait (spec 12.7)
     }
     var stored = new Expr($"({NullChecked(obj.Code, obj.Type)})->{field.CName}", field.Type);
     return field.IsCounted && !raw ? CountedFieldRead(stored, field, at) : stored;
@@ -1957,10 +1956,14 @@ public sealed partial class CodeGen {
     return new Expr(field.CName, field.Type);
   }
 
+  // Conf.pos.x: the owner and the member, which keeps the dot of a field of a group ("pos.x", spec 11.1.4.1)
+  static string[] SplitMemberPath(string path, string? member) =>
+    member != null && member.Contains('.') && path.EndsWith("." + member) ? new[] { path[..^(member.Length + 1)], member } : path.Split('.');
+
   // writable fields
   LValueInfo? ClassLValue(Node target, Scope scope) {
     string? path = Path(target);
-    string[]? parts = path?.Split('.');
+    string[]? parts = path == null ? null : SplitMemberPath(path, target.Text);
     if (parts is { Length: 2 } && scope.Find(parts[0]) == null && classes.TryGetValue(parts[0], out var named)) {
       var field = FindField(named, parts[1]) ?? throw Error($"{named.Name} has no member '{parts[1]}'", target);
       if (!field.IsStatic) {
@@ -2791,7 +2794,7 @@ public sealed partial class CodeGen {
     }
     var ownFields = IntroducedTraits(cls).SelectMany(trait => trait.Fields).Concat(cls.Fields).Where(field => !field.IsStatic);
     foreach (var field in ownFields) {
-      if (!IsAllZeroBits(field.Type)) {
+      if (!field.IsCounted && !field.IsWeak && !IsAllZeroBits(field.Type)) {   // a counted or weak field holds a block: NULL is all zero bits
         sb.Append($"  self->{field.CName} = {ZeroValue(field.Type)};\n");
       }
     }

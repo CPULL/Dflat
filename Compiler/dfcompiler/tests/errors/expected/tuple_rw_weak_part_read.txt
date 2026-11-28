@@ -1,0 +1,1 @@
+tuple_rw_weak_part_read.df(7): error: 'k.0' is a weak reference: copy it into a weak variable (&%Dog w = k.0) and use that through enforce (spec 12.7)

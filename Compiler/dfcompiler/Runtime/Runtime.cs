@@ -375,6 +375,7 @@ static const df_descriptor df_desc_ReservedSignalException = { 68, "ReservedSign
 static const df_descriptor df_desc_WaitingOnANotOwnedTaskException = { 70, "WaitingOnANotOwnedTaskException", &df_desc_Exception, false };
 static const df_descriptor df_desc_TokenAlreadyRegisteredException = { 71, "TokenAlreadyRegisteredException", &df_desc_Exception, false };
 static const df_descriptor df_desc_IncompatibleTypeInGenericException = { 72, "IncompatibleTypeInGenericException", &df_desc_Exception, true };
+static const df_descriptor df_desc_MissingWritableIteratorForCustomCollectionException = { 73, "MissingWritableIteratorForCustomCollectionException", &df_desc_Exception, false };
 static const df_descriptor df_desc_DuplicateEventNameWithDataMismatchException = { 69, "DuplicateEventNameWithDataMismatchException", &df_desc_Exception, false };
 /* the soft kill (spec 20.10): the runnable ends at a checkpoint; no catch takes it (not an Exception), atEnd blocks and enforce scopes
    unwind as for any exception */

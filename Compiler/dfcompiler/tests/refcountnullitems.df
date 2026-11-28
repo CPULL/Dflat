@@ -1,0 +1,46 @@
+// Counted nullable values as items (spec 12.7, 7.1): list<@i32?>, vec<&@i32?>, arr<@string?>, map<K, @r64?>. Each item is a user of its
+// cell; an empty slot and a null item read as null; the read-only items share the cell of the counted value they came from
+namespace refcountnullitems
+import Root
+
+fun values() {
+  @i32? first = 4
+  @i32? none
+  list<@i32?> nums = []
+  nums.add(@first)
+  nums.add(@none)
+  nums.add(7)
+  nums.add(null)
+  Console.log($"len {nums.len}, users of first {first.usersCount}")
+  for n in nums {
+    Console.log($"item {n ?? -1}")
+  }
+  @i32? got = nums[0]
+  Console.log($"got {got ?? -1}, users {got.usersCount}")
+  i32? plain = nums[1]
+  Console.log($"plain {plain ?? -1}")
+}
+
+fun writable() {
+  vec<&@i32?> team = []
+  team.add(1)
+  team.add(null)
+  &@i32? shared = team[0]
+  Console.log($"team {team[0] ?? -1} {team[1] ?? -1}, users {shared.usersCount}")
+}
+
+fun texts() {
+  arr<@string?> words = ["a", null, "c"]
+  for w in words {
+    Console.log($"word {w ?? "<null>"}")
+  }
+  map<string, @r64?> prices = []
+  prices["tea"] = 2.5
+  prices["air"] = null
+  Console.log($"tea {prices["tea"] ?? 0.0}, air {prices["air"] ?? -1.0}")
+}
+
+values()
+writable()
+texts()
+Console.log("end")

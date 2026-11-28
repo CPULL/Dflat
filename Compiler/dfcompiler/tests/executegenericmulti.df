@@ -1,0 +1,40 @@
+// executeBefore / executeAfter (spec 11.2) on a generic method (every copy runs the blocks; same.result is the value of the copy) and on a
+// method with several results (read as two.result.0, two.result.1); a sub-trait adds its link; a default body is used when the class has none
+namespace executegenericmulti
+import Root
+trait Id {
+  public fun T same<T>(T x)
+    executeBefore { Console.log("before same") }
+    executeAfter { Console.log("after same " + same.result) }
+}
+trait Pair {
+  public fun i32, ->string two(i32 x)
+    executeBefore { Console.log("before two " + x) }
+    executeAfter { Console.log("after two " + two.result.0 + " " + two.result.1) }
+}
+trait LoudPair : Pair {
+  public fun i32, ->string two(i32 x) {
+    return x, "default"
+  }
+    executeAfter { Console.log("loud after " + two.result.1) }
+}
+class P : Id, Pair {
+  replace fun T same<T>(T x) {
+    return x
+  }
+  replace fun i32, ->string two(i32 x) {
+    return x * 2, "k" + x
+  }
+}
+class Q : LoudPair { }
+P p = P()
+Console.log(p.same(4))
+Console.log(p.same(2.5))
+i32 a, string b = p.two(4)
+Console.log(a + " " + b)
+&Pair r = p
+var c, var d = r.two(5)
+Console.log(c + " " + d)
+Q q = Q()
+i32 e, string f = q.two(7)
+Console.log(e + " " + f)

@@ -1,0 +1,1 @@
+global_field_lent.df(10): error: a field of global 'st' cannot be lent (&), given (->), shared (@, %) or ended: what comes out of a global is a copy (spec 18.3)

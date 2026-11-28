@@ -1,0 +1,1 @@
+tuple_destructure_types.df(4): error: cannot convert string to i32 implicitly; use a cast

@@ -1,0 +1,1 @@
+generic_counted_fun_inferred.df(9): error: Reference Counted objects cannot be used in Generics (spec 11.3.13)

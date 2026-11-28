@@ -1,0 +1,1 @@
+generic_counted_parent.df(7): error: Reference Counted objects cannot be used in Generics (spec 11.3.13)

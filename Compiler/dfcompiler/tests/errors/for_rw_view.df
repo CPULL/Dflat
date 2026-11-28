@@ -1,0 +1,6 @@
+namespace for_rw_view
+import Root
+vec<i32> v = [1, 2, 3]
+for &i32 x in v[0..2] {
+  x = 0
+}

@@ -1165,7 +1165,9 @@ public sealed partial class CodeGen {
 
   // "@Dog": the internal type of a counted parameter or result (its C type is the counting block, df_rc*); a counted variable keeps the plain
   // type with VarInfo.IsCounted
-  static bool IsCountedType(string type) => type.Length > 1 && type[0] == '@';
+  static bool IsCountedType(string type) => type.Length > 1 && type[0] is '@' or '^';   // ^T: a read/write counted part of a tuple, &@T (spec 3.2)
+  // ^T and ~T: the read/write counted and weak parts of a tuple (&@T, &%T, spec 3.2, 12.7)
+  static bool IsWritablePart(string type) => type.Length > 1 && type[0] is '^' or '~';
   static string CountedBase(string type) => type[1..];
 
   string CountedTypeOf(string type, Node at, bool values = false) {
@@ -1196,8 +1198,9 @@ public sealed partial class CodeGen {
       if (variable != null) {
         return variable.IsCounted ? new CountedRefInfo(variable.CName, variable.Type, value.Text!, variable, null) : null;
       }
-      if (currentClass is { IsTrait: false } && scope.Find("this") != null && FindField(currentClass, value.Text!) is { IsCounted: true, IsStatic: false, HasAccessors: false } own) {
-        return new CountedRefInfo($"self->{own.CName}", own.Type, value.Text!, null, own);
+      if (currentClass != null && scope.Find("this") != null && FindField(currentClass, value.Text!) is { IsCounted: true, IsStatic: false, HasAccessors: false } own) {
+        string ownPlace = currentClass.IsTrait ? TraitFieldCode("self", own) : $"self->{own.CName}";   // a counted property in the code of its trait
+        return new CountedRefInfo(ownPlace, own.Type, value.Text!, null, own);
       }
       if (currentClass is { IsTrait: false } && FindField(currentClass, value.Text!) is { IsCounted: true, IsStatic: true } ownStatic) {
         return new CountedRefInfo(ownStatic.CName, ownStatic.Type, value.Text!, null, ownStatic);   // a static counted field of the class (spec 12.7)
@@ -1210,11 +1213,82 @@ public sealed partial class CodeGen {
       CheckAccess(shared.Visibility, shared.Owner, value.Text!, value);
       return new CountedRefInfo(shared.CName, shared.Type, value.Text!, null, shared);
     }
+    if (TuplePartRef(value, scope, true) is CountedRefInfo part) {
+      return part;   // t.0 of a (@Dog, i32) tuple (spec 3.2)
+    }
     if (value.Kind == "Member" && CountedFieldOf(value, scope) is FieldInfo field) {
       var stored = ObjectField(ExprOf(value.Children[0], scope), value.Text!, value, true);
       return new CountedRefInfo(stored.Code, field.Type, value.Text!, null, field);
     }
     return CountedItemRef(value, scope);
+  }
+
+  // a counted (@T) or weak (%T) part of a tuple, named t.0 or t.pet: its counting block in place, or null when the member is something else
+  CountedRefInfo? TuplePartRef(Node member, Scope scope, bool counted) {
+    if (member.Kind != "Member" || member.Text == null || member.Children.Count != 1 || LibraryCode) {
+      return null;
+    }
+    Expr owner;
+    bool wasTyping = typingOnly;
+    try {
+      owner = ExprOf(member.Children[0], scope);
+    } catch (CompileException) {
+      return null;
+    } finally {
+      typingOnly = wasTyping;
+    }
+    if (!IsTuple(owner.Type) || IsMulti(owner.Type)) {
+      return null;
+    }
+    var elems = TupleElems(owner.Type);
+    int index = int.TryParse(member.Text, out int position) ? position : elems.FindIndex(elem => elem.Name == member.Text);
+    if (index < 0 || index >= elems.Count || !(counted ? IsCountedType(elems[index].Type) : IsWeakType(elems[index].Type))) {
+      return null;
+    }
+    return new CountedRefInfo($"({owner.Code}).e{index}", elems[index].Type[1..], SourceText(member), null, null, IsWritablePart(elems[index].Type));
+  }
+
+  // t.0 = value on a counted or weak part of a tuple: the new usage (or weak reference) is taken before the old one is let go; a read-only
+  // counted value part gets a cell of its own with a copy, as a read-only @T field (spec 12.7)
+  string? TuplePartAssign(Node s, Scope scope) {
+    var target = s.Children[0];
+    var counted = TuplePartRef(target, scope, true);
+    var weak = counted == null ? TuplePartRef(target, scope, false) : null;
+    if (counted == null && weak == null) {
+      return null;
+    }
+    var part = (counted ?? weak)!.Value;
+    if (s.Text != "=") {
+      throw Error(counted != null && IsCountedValueType(part.Type)
+        ? $"'{part.Name}' is a read-only counted value (@{part.Type}): only = gives it a new cell (spec 12.7)"
+        : $"'{part.Name}' holds a {(counted != null ? "counted object" : "weak reference")}: only = assigns it", s);
+    }
+    var place = LValue(target, scope);   // the tuple itself must be writable
+    if (place.IsConst) {
+      throw Error($"'{SourceText(target.Children[0])}' is const", target);
+    }
+    MarkAssigned(place.Variable);
+    var value = s.Children[1];
+    if (part.Writable && value is { Kind: "WritableAddressOf", Children: [{ Kind: "CountedOf" or "WeakOf" } marked] }) {
+      value = marked;   // t.0 = &@max: the writable form of a call argument (spec 12.7)
+    }
+    string code;
+    if (weak != null) {
+      code = WeakValue(value, scope, part.Type, s, part.Writable);   // a &%T part: from a &@T or a &%T (spec 12.7)
+    } else if (!IsCountedValueType(part.Type)) {
+      code = CountedValue(value, scope, part.Type, false, s, part.Writable);   // a &@T part: a read/write usage or a new object
+    } else if (value.Kind == "Null") {
+      code = "NULL";
+    } else if (CountedRef(value.Kind == "CountedOf" ? value.Children[0] : value, scope) is CountedRefInfo source) {
+      CheckCellType(source, part.Type, s);
+      code = CopyCell(source, part.Type);
+    } else {
+      code = NewCell(ExprOf(value, scope, BaseOf(part.Type)), part.Type, s);
+    }
+    string fresh = NewTemp();
+    string old = NewTemp();
+    string release = weak != null ? "df_rc_unweak" : "df_rc_release";
+    return $"({{ df_rc* {fresh} = {code}; df_rc* {old} = {place.Code}; {place.Code} = {fresh}; {release}({old}); }})";
   }
 
   // the counted field a member names (k.friend), or null: it only looks, an error of the owner is left to the usual code
@@ -1228,7 +1302,7 @@ public sealed partial class CodeGen {
     } catch (CompileException) {
       return null;
     }
-    if (!IsClass(owner.Type) || ObjInfo(owner.Type).IsTrait) {
+    if (!IsClass(owner.Type)) {
       return null;
     }
     return FindField(ObjInfo(owner.Type), member.Text) is { IsCounted: true, IsStatic: false, HasAccessors: false } field ? field : null;
@@ -1741,7 +1815,7 @@ public sealed partial class CodeGen {
     var program = classes.Values.Where(cls => !cls.IsTrait && cls.Node.Line < LibraryLine).ToList();
     var reported = new HashSet<string>();
     foreach (var start in program) {
-      foreach (var first in start.Fields.Where(field => field.IsCounted)) {
+      foreach (var first in CountedFieldsHeld(start)) {
         var path = new List<FieldInfo> { first };
         if (FindCountedCycle(first.Type, start, path, new HashSet<string>())
             && reported.Add(string.Join(",", path.Select(field => field.Owner.Name + "." + field.Name).Order()))) {
@@ -1752,6 +1826,10 @@ public sealed partial class CodeGen {
     }
   }
 
+  // the counted fields of a class and the counted properties of the traits it introduces
+  IEnumerable<FieldInfo> CountedFieldsHeld(ClassInfo cls) =>
+    cls.Fields.Concat(IntroducedTraits(cls).SelectMany(trait => trait.Fields)).Where(field => field.IsCounted && !field.IsStatic);
+
   bool FindCountedCycle(string type, ClassInfo start, List<FieldInfo> path, HashSet<string> seen) {
     if (type == start.Name || IsSubtype(start.Name, type)) {
       return true;
@@ -1759,7 +1837,7 @@ public sealed partial class CodeGen {
     if (!seen.Add(type) || !classes.TryGetValue(type, out var cls)) {
       return false;
     }
-    foreach (var field in cls.Fields.Where(field => field.IsCounted)) {
+    foreach (var field in CountedFieldsHeld(cls)) {
       path.Add(field);
       if (FindCountedCycle(field.Type, start, path, seen)) {
         return true;
@@ -1773,22 +1851,35 @@ public sealed partial class CodeGen {
 
   // "_Dog": the internal type of a weak parameter (its C type is the counting block, df_rc*); a weak variable or field keeps the plain type
   // with IsWeak
-  static bool IsWeakType(string type) => type.Length > 1 && type[0] == '_';
+  static bool IsWeakType(string type) => type.Length > 1 && type[0] is '_' or '~';   // ~T: a read/write weak part of a tuple, &%T (spec 3.2)
 
   // a weak variable or a weak field named by a value; Code is the C lvalue of the counting block it holds
   CountedRefInfo? WeakRef(Node value, Scope scope) {
     while (value.Kind == "Paren") {
       value = value.Children[0];
     }
+    if (TuplePartRef(value, scope, false) is CountedRefInfo part) {
+      return part;   // t.1 of a (Dog, %Dog) tuple (spec 3.2)
+    }
     if (value.Kind == "Name") {
       var variable = scope.Find(value.Text!);
       if (variable != null) {
         return variable.IsWeak ? new CountedRefInfo(variable.CName, variable.Type, value.Text!, variable, null) : null;
       }
-      if (currentClass is { IsTrait: false } && scope.Find("this") != null && FindField(currentClass, value.Text!) is { IsWeak: true, IsStatic: false } own) {
-        return new CountedRefInfo($"self->{own.CName}", own.Type, value.Text!, null, own);
+      if (currentClass != null && scope.Find("this") != null && FindField(currentClass, value.Text!) is { IsWeak: true, IsStatic: false } own) {
+        string ownPlace = currentClass.IsTrait ? TraitFieldCode("self", own) : $"self->{own.CName}";   // a weak property in the code of its trait
+        return new CountedRefInfo(ownPlace, own.Type, value.Text!, null, own);
+      }
+      if (currentClass is { IsTrait: false } && FindField(currentClass, value.Text!) is { IsWeak: true, IsStatic: true } ownStatic) {
+        return new CountedRefInfo(ownStatic.CName, ownStatic.Type, value.Text!, null, ownStatic);   // a static weak field of the class (spec 12.7)
       }
       return null;
+    }
+    // Kennel.last: a static weak field
+    if (value is { Kind: "Member", Children: [{ Kind: "Name" } staticOwner] } && scope.Find(staticOwner.Text!) == null && classes.TryGetValue(staticOwner.Text!, out var named)
+        && FindField(named, value.Text!) is { IsWeak: true, IsStatic: true } shared) {
+      CheckAccess(shared.Visibility, shared.Owner, value.Text!, value);
+      return new CountedRefInfo(shared.CName, shared.Type, value.Text!, null, shared);
     }
     if (value.Kind == "Member" && value.Text != null) {
       Expr owner;
@@ -1797,7 +1888,7 @@ public sealed partial class CodeGen {
       } catch (CompileException) {
         return null;
       }
-      if (!IsClass(owner.Type) || ObjInfo(owner.Type).IsTrait || FindField(ObjInfo(owner.Type), value.Text) is not { IsWeak: true, IsStatic: false } field) {
+      if (!IsClass(owner.Type) || FindField(ObjInfo(owner.Type), value.Text) is not { IsWeak: true, IsStatic: false } field) {
         return null;
       }
       var stored = ObjectField(owner, value.Text, value, true);
@@ -1948,6 +2039,12 @@ public sealed partial class CodeGen {
     }
     foreach (var field in DropFields(cls, true).Where(field => !field.IsStatic && field.Type == "string?" && !field.IsCounted)) {
       sb.Append($"  df_opt_str_drop(&self->{field.CName});\n");   // spec 7.1
+    }
+    foreach (var field in DropFields(cls, true).Where(field => field.IsCounted && !field.IsStatic)) {
+      sb.Append($"  {{ df_rc* r = self->{field.CName}; self->{field.CName} = NULL; df_rc_release(r); }}\n");   // a counted property is a user (spec 12.7)
+    }
+    foreach (var field in DropFields(cls, true).Where(field => field.IsWeak && !field.IsStatic)) {
+      sb.Append($"  {{ df_rc* r = self->{field.CName}; self->{field.CName} = NULL; df_rc_unweak(r); }}\n");   // a weak property (spec 12.7)
     }
     return sb.ToString();
   }

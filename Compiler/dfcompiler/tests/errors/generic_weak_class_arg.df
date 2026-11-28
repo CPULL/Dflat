@@ -1,0 +1,7 @@
+namespace generic_weak_class_arg
+import Root
+class Dog { }
+class Cache<T> {
+  T item
+}
+Cache<%Dog> c = Cache<%Dog>()

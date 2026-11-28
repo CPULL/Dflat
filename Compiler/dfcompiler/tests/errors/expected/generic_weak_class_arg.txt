@@ -1,0 +1,1 @@
+generic_weak_class_arg.df(7): error: Reference Counted objects cannot be used in Generics (spec 11.3.13)

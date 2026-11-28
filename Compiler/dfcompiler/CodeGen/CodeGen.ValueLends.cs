@@ -74,7 +74,7 @@ public sealed partial class CodeGen {
     frames.Peek().Hoisted.TryGetValue(s.Text!, out var hoisted);
     CheckNotShadowing(s.Text!, scope, s);
     string address;
-    if (value.Kind == "Call") {
+    if (value.Kind is "Call" or "Wait") {   // a call, or wait t.scoreRef() timeout n through the handle (spec 20.12)
       var lent = ExprOf(value, scope);
       if (lent.Type != type) {
         throw Error($"this call lends a {DisplayName(lent.Type)}, not a {DisplayName(type)}", value);

@@ -233,7 +233,7 @@ public sealed partial class CodeGen {
       return true;   // a call of a function value: its result is new (spec 13.3)
     }
     if (callee.Kind == "GenericRef" && callee.Children[0] is { Kind: "Name" } genericName) {
-      return genericClasses.ContainsKey(genericName.Text!)
+      return genericClasses.ContainsKey(genericName.Text!) || IsThreadCallee(callee, out _)   // Thread<T>(...): a new handle (spec 20.1)
         || (genericFuns.TryGetValue(genericName.Text!, out var explicitFun) && TemplateReturnsMoves(explicitFun));
     }
     string? simple = callee.Kind is "Name" or "Member" ? callee.Text : null;
@@ -287,6 +287,7 @@ public sealed partial class CodeGen {
   bool GuessOwner(Node e, Dictionary<FunSig, int>? state) {
     return e.Kind switch {
       "Null" or "Gift" => true,
+      "ZeroLike" => EnforcedGivesObject(e),   // the variable of an enforce expression moved before its statement (CodeGen.EnforceExpr.cs)
       "List" or "MapLit" or "EmptyNew" => true,   // a literal or (): a new collection or object (it only matters when the variable is an object)
       "Index" => e.Children[0].Kind == "GenericRef" || (e.Children.Count > 1 && e.Children[1].Kind == "Range"),   // vec<T>[n]: a new collection; c[a..b]: a new view
       "Paren" => GuessOwner(e.Children[0], state),
@@ -306,6 +307,9 @@ public sealed partial class CodeGen {
   // ---------------------------------------------------------------- implicit drops
 
   // the class or trait an object variable is declared with (null for anything else)
+  // the variable of an enforce expression starts null and receives what the expression gives: it owns it when that is a new object
+  bool EnforcedGivesObject(Node zeroLike) => zeroLike.Children.Count > 0 && GuessOwner(zeroLike.Children[0], null);
+
   string? ObjectTypeOf(Node decl) {
     var typeNode = decl.Children.FirstOrDefault(child => TypeNodeKinds.Contains(child.Kind));
     if (typeNode == null) {
@@ -329,6 +333,9 @@ public sealed partial class CodeGen {
       }
       if (typeNode.Text == "var" && init?.Children[0] is { Kind: "Wait" }) {
         return "var";   // var d = wait t timeout 500: an object that a task, a thread or a signal group gives is the variable's (spec 20.1)
+      }
+      if (typeNode.Text == "var" && init?.Children[0] is { Kind: "ZeroLike" } zeroLike && EnforcedGivesObject(zeroLike)) {
+        return "var";   // the variable of an enforce expression that gives a new object (CodeGen.EnforceExpr.cs): it owns it
       }
       if (typeNode.Text == "var" && init?.Children[0] is { Kind: "Copy" }) {
         return "var";   // var h2 = h!, var part = c[a..b]!: a new object, the variable owns it (spec 12.6)
@@ -444,7 +451,8 @@ public sealed partial class CodeGen {
       }
       var init = statement.Children.FirstOrDefault(child => child.Kind is "Init" or "WeakInit");
       // an object a task, a thread or a call through the handle gives: the caller owns it (spec 20.1, 20.12)
-      bool waited = init is { Kind: "Init" } && init.Children[0].Kind == "Wait" && ObjectTypeOf(statement) is string waitedType && (IsClass(waitedType) || waitedType == "var");
+      bool waited = init is { Kind: "Init" } && init.Children[0].Kind == "Wait" && ObjectTypeOf(statement) is string waitedType && (IsClass(waitedType) || waitedType == "var")
+        && !WaitedLentCall(init.Children[0]);   // a lent result of a call through the handle is a borrow (spec 20.12)
       if (!waited && !GuessOwnerInit(init)) {
         continue;
       }

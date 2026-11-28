@@ -1,0 +1,11 @@
+  blocked: before
+42
+  blocked: after, until the next checkpoint (v = 0)
+true
+Killed
+  reader: before
+true
+Killed
+1
+  blocked: atEnd
+---- exit code 0 ----

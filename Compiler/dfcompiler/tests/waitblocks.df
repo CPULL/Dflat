@@ -1,0 +1,56 @@
+// wait (spec 20.2.8): a timeout block of several lines that gives several values, in a declaration and in an assignment; a return
+// inside a loop of the block
+import Root
+import Root.Tasks
+
+class Slow {
+  fun i32, string taskRun() {
+    wait 300
+    return 5, "five"
+  }
+}
+
+class Quick {
+  fun i32, string taskRun() {
+    return 7, "seven"
+  }
+}
+
+class Late {
+  fun i32 taskRun() {
+    wait 300
+    return 9
+  }
+}
+
+Task s = Task(Slow, timeout: 2000).start()
+i32 a, string b = wait s timeout 10 {
+  Console.log("  timed out")
+  i32 n = 1
+  return n + 1, "fallback"
+}
+Console.log($"{a} {b}")
+Task q = Task(Quick, timeout: 2000).start()
+i32 c = 0
+string d = ""
+c, d = wait q timeout 500 {
+  Console.log("  never")
+  return 0, "none"
+}
+Console.log($"{c} {d}")
+Task s2 = Task(Slow, timeout: 2000).start()
+c, d = wait s2 timeout 10 {
+  string label = "late"
+  return 3, label
+}
+Console.log($"{c} {d}")
+Task l = Task(Late, timeout: 2000).start()
+var r = wait l timeout 10 {
+  for i in 0..5 {
+    if i == 2 {
+      return (i32)i * 100
+    }
+  }
+  return -1
+}
+Console.log(r)

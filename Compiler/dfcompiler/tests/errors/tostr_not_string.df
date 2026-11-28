@@ -1,0 +1,5 @@
+import Root
+class A(string n) {
+  replace fun i32 toStr() { return 1 }
+}
+Console.log(A("q"))

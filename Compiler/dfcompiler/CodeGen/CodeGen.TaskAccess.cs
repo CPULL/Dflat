@@ -19,6 +19,8 @@ public sealed partial class CodeGen {
   readonly Dictionary<FunSig, List<(string What, Node At)>> funSharedUses = new();   // a function -> the top-level state it may not share
   readonly List<(FunSig Fun, FunSig Started, Node At)> threadCreates = new();  // Thread(f, ...) written in a function
   readonly HashSet<FunSig> threadFuns = new();                                 // the functions run as threads
+  readonly HashSet<string> threadValueTypes = new();                           // Thread(value): any lambda of these types runs as a thread
+  readonly List<(FunSig Fun, Node At)> threadValueCreates = new();             // Thread(value, ...) written in a function
   readonly HashSet<string> sharedFileVars = new();                             // the top-level variables that are refcounted or weak
   readonly Dictionary<FunSig, HashSet<string>> funValueCalls = new();          // a function -> the function types it calls through a value
   readonly Dictionary<string, List<FunSig>> lambdasByType = new();             // a function type -> the lambdas of that type
@@ -137,6 +139,14 @@ public sealed partial class CodeGen {
     NoteSharedUse($"the static field {DisplayName(field.Owner.Name)}.{field.Name}", at);
   }
 
+  // Thread(f, ...) with a function value, or a lambda written in the call
+  void NoteThreadValue(string fnType, Node at) {
+    threadValueTypes.Add(fnType);
+    if (currentFun != null) {
+      threadValueCreates.Add((currentFun, at));
+    }
+  }
+
   void NoteThreadCreate(FunSig started, Node at) {
     threadFuns.Add(started);
     if (currentFun != null) {
@@ -147,9 +157,19 @@ public sealed partial class CodeGen {
 
   // once every function is compiled
   void CheckTaskAccess() {
+    foreach (string fnType in threadValueTypes) {
+      foreach (var lambda in lambdasByType.GetValueOrDefault(fnType) ?? new List<FunSig>()) {
+        threadFuns.Add(lambda);   // a lambda that may run as a thread (spec 20.1)
+      }
+    }
+    foreach (var (fun, at) in threadValueCreates) {
+      if (threadFuns.Contains(fun)) {
+        throw Error($"a thread cannot start another thread: {(fun.LambdaCtx != null ? "this lambda" : fun.Name)} runs as a thread (spec 20.1)", at);
+      }
+    }
     foreach (var (fun, started, at) in threadCreates) {
       if (threadFuns.Contains(fun)) {
-        throw Error($"a thread cannot start another thread: {fun.Name} runs as a thread (spec 20.1)", at);
+        throw Error($"a thread cannot start another thread: {(fun.LambdaCtx != null ? "this lambda" : fun.Name)} runs as a thread (spec 20.1)", at);
       }
     }
     foreach (var (fun, what, at) in sharedTaskWaits) {

@@ -1,0 +1,10 @@
+[a: 1, b: 2]
+[2, 4]
+6
+9
+hi Rex
+alive Rex
+4
+hey!
+true
+---- exit code 0 ----

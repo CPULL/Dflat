@@ -1,0 +1,11 @@
+import Root
+import Root.Tasks
+fun i32 one() {
+  return 1
+}
+i32() outer = () {
+  Thread<i32> inner = Thread(one).start()
+  return wait inner timeout 1000
+}
+Thread<i32> t = Thread(outer).start()
+Console.log(wait t timeout 1000)

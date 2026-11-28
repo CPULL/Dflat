@@ -1,0 +1,60 @@
+// enforce expressions in headers (spec 7.2.6): in an else if (evaluated only when the conditions before it fail), in a while header
+// (evaluated at every turn, also after continue), in the collection of a for (evaluated once)
+import Root
+
+public class Trouble(string1k text) : Exception { }
+
+public class Counter(i32 limit) {
+  public i32 limit
+  public i32 calls = 0
+  public fun bool next(i32 n) {
+    calls++
+    if n == 3 {
+      throw Trouble("three")
+    }
+    return n < limit
+  }
+  public fun ->vec<i32> items(bool fail) {
+    calls++
+    if fail {
+      throw Trouble("no items")
+    }
+    return [1, 2, 3]
+  }
+}
+
+Counter c = Counter(6)
+i32 n = 0
+while enforce c.next(n) catch Trouble { true } default { false } {
+  n++
+  if n == 2 {
+    continue
+  }
+  Console.log($"  turn {n}")
+}
+Console.log($"n {n}, calls {c.calls}")
+
+Counter d = Counter(1)
+for x in enforce d.items(false) default { [] } {
+  Console.log($"  item {x}")
+}
+for x in enforce d.items(true) catch Trouble { [9] } default { [] } {
+  Console.log($"  fallback {x}")
+}
+Console.log($"calls {d.calls}")
+
+Counter e = Counter(5)
+bool first = true
+if first {
+  Console.log("first")
+} else if enforce e.next(1) default { false } {
+  Console.log("second")
+}
+Console.log($"calls {e.calls}")
+first = false
+if first {
+  Console.log("first")
+} else if enforce e.next(3) catch Trouble { true } default { false } {
+  Console.log("second, after the catch")
+}
+Console.log($"calls {e.calls}")

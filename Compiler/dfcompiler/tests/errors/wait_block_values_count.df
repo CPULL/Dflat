@@ -1,0 +1,13 @@
+import Root
+import Root.Tasks
+class Slow {
+  fun i32, string taskRun() {
+    wait 300
+    return 5, "five"
+  }
+}
+Task s = Task(Slow, timeout: 2000).start()
+i32 a, string b = wait s timeout 10 {
+  return 1
+}
+Console.log($"{a} {b}")

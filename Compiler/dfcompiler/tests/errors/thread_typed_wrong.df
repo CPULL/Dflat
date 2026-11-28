@@ -1,0 +1,7 @@
+import Root
+import Root.Tasks
+fun i32 twice(i32 v) {
+  return v * 2
+}
+Thread<string> e = Thread<string>(twice, 21).start()
+Console.log(wait e timeout 1000)

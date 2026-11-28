@@ -25,6 +25,7 @@ public sealed partial class CodeGen {
         child.Children.Remove(own);   // Some a = Some() atEnd { } is a declaration followed by atEnd of a (spec 14.2)
         node.Children.Insert(index + 1, own);
       }
+      LowerEnforceHeader(child);
       var lowered = LowerEnforceStatement(child, node, index, fun);
       if (lowered != null) {
         node.Children.RemoveAt(index);
@@ -63,12 +64,32 @@ public sealed partial class CodeGen {
       return HoistEnforceExpr(statement);
     }
     if (statement.Kind is "If" or "Switch" && holder.Kind is "Block" or "Program" && ContainsEnforceExpr(statement.Children[0])) {
-      return HoistEnforceExpr(statement);   // if enforce f.ok() default { false } { }: evaluated once, before the if (an else if stays out)
+      return HoistEnforceExpr(statement);   // if enforce f.ok() default { false } { }: evaluated once, before the if
+    }
+    if (statement.Kind == "For" && holder.Kind is "Block" or "Program" && statement.Children.Any(child => child.Kind != "Block" && ContainsEnforceExpr(child))) {
+      return HoistEnforceExpr(statement);   // for x in enforce f.items() default { [] } { }: the header is evaluated once, before the loop
     }
     if (statement.Kind != "Fun" && ContainsEnforceExpr(statement)) {
       throw NotSupported("An enforce expression here (in a loop header or an else if: give it to a variable first)", statement);
     }
     return null;
+  }
+
+  // the headers that are evaluated more than once, or after other conditions (spec 7.2.6):
+  //   else if <enforce> { }        ->  else { if <enforce> { } }             (evaluated only when the conditions before it failed)
+  //   while <enforce> { body }     ->  while true { if !(<enforce>) { break } body }   (evaluated at every turn, also after continue)
+  static void LowerEnforceHeader(Node statement) {
+    if (statement.Kind == "If" && statement.Children.Count > 2 && statement.Children[2] is { Kind: "Else", Children: [{ Kind: "If" } elseIf] } elseNode
+        && ContainsEnforceExpr(elseIf.Children[0])) {
+      elseNode.Children[0] = Synthetic("Block", elseIf).Add(elseIf);
+    }
+    if (statement.Kind == "While" && statement.Children.Count == 2 && ContainsEnforceExpr(statement.Children[0])) {
+      var condition = statement.Children[0];
+      var stop = Synthetic("If", condition).Add(Synthetic("Not", condition).Add(condition))
+        .Add(Synthetic("Block", condition).Add(Synthetic("Break", condition)));
+      statement.Children[1].Children.Insert(0, stop);
+      statement.Children[0] = Synthetic("Bool", condition, "true");
+    }
   }
 
   // x = enforce ..., f(enforce ...), var r = enforce ...: the enforce expression moves before its statement into a variable that starts at
@@ -112,7 +133,8 @@ public sealed partial class CodeGen {
     if (type is "void" or "null") {
       throw Error("an enforce expression must give a value", node);
     }
-    return new Expr(ZeroValue(type), type);
+    // an object starts null: nothing to own yet, the variable owns what the enforce gives it (EnforcedGivesObject)
+    return new Expr(ZeroValue(type), type, IsClass(type) && EnforcedGivesObject(node));
   }
 
   static bool ContainsEnforceExpr(Node node) =>
@@ -174,35 +196,7 @@ public sealed partial class CodeGen {
   }
 
   // the value of a clause: { v } is r = v; a longer block gives the value with return, which becomes r = v and leaves the clause
-  Node ValueBlock(Node block, string target) {
-    if (block.Children.Count == 1 && block.Children[0].Kind == "ExprStmt") {
-      return Synthetic("Block", block).Add(AssignTo(target, block.Children[0].Children[0]));
-    }
-    var body = RewriteClauseReturns(block, target, 0);
-    body.Add(Synthetic("Break", block));
-    return Synthetic("Block", block).Add(Synthetic("While", block).Add(Synthetic("Bool", block, "true")).Add(body));
-  }
-
-  Node RewriteClauseReturns(Node block, string target, int loops) {
-    var result = Synthetic(block.Kind, block, block.Text);
-    foreach (var child in block.Children) {
-      if (child.Kind == "Return") {
-        if (loops > 0) {
-          throw NotSupported("A return inside a loop of an enforce clause", child);
-        }
-        if (child.Children.Count != 1) {
-          throw Error("a clause of an enforce expression gives its value with return value", child);
-        }
-        result.Add(AssignTo(target, child.Children[0]));
-        result.Add(Synthetic("Break", child));
-        continue;
-      }
-      if (child.Kind is "Fun" or "Lambda") {
-        result.Add(child);
-        continue;
-      }
-      result.Add(RewriteClauseReturns(child, target, loops + (child.Kind is "For" or "While" or "DoWhile" ? 1 : 0)));
-    }
-    return result;
-  }
+  // a clause that gives the value: return v assigns the target and leaves the clause, also from a loop inside it (spec 7.2.6)
+  Node ValueBlock(Node block, string target) =>
+    WaitValueBlock(block, new List<string> { target }, "a clause of an enforce expression gives its value with return value");
 }

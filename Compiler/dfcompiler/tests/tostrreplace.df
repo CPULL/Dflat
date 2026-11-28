@@ -1,0 +1,29 @@
+import Root
+// replace fun string toStr() (spec 2, 11.1.3): the object prints through it everywhere
+class Dog(string name) {
+  replace fun string toStr() { return "Dog " + name }
+}
+class Puppy(string n, i32 age) : Dog(n) {
+}
+class Cat(string name) {
+  replace fun string toStr() { return $"Cat<{name}>" }
+}
+class Kitten(string n) : Cat(n) {
+  replace fun string toStr() { return "Kitten of " + parent.toStr() }
+}
+class Plain(string label) {
+  replace fun string toStr() { return label }
+}
+Dog d = Dog("Rex")
+Console.log(d.toStr())
+Console.log(d)
+Console.log($"{d}!")
+Dog p = Puppy("Bit", 2)
+Console.log(p)
+Cat k = Kitten("Tom")
+Console.log(k)
+list<Dog> dogs = [Dog("A"), Dog("B")]
+Console.log(dogs)
+Plain f = Plain("field")
+Console.log(f.toStr() + "!")
+Console.log(f)

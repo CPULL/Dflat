@@ -4,7 +4,7 @@ using dfparser;
 namespace dfcompiler;
 
 public static class Program {
-  public const string Version = "0.0.210alpha";
+  public const string Version = "0.0.222alpha";
 
   // the version of the specification this compiler was built for: the variable `version` of the preprocessor (spec 19.1)
   public const string LanguageVersion = "0.0.41";
@@ -25,7 +25,7 @@ public static class Program {
 
   const string Usage = "usage: dfcompiler <file.df | project.dsprj | folder> [--output <file>] [--target <target>] [--os <os>] [--cpu <cpu>] "
     + "[--native-int <bits>] [--native-real <bits>] [--emit-c] [--cc <path-to-clang>] [--coptlev <0-3>] [--coptmode <size|speed>] [--debug | --release] "
-    + "[--run [-- program arguments]] | --version\n"
+    + "[--run [-- program arguments]] | --tokens <file.df> | --ast <file.df> | --version\n"
     + "  target: win-x64 win-x32 linux-x64 linux-arm64 osx-x64 osx-arm64, or CL:<options passed as they are to clang>\n"
     + "  os: windows linux osx; cpu: x86 x64 arm64 (the other cpus of the specification are not supported yet)\n"
     + "  option names are not case sensitive; --run must be the last option, the program arguments follow --";
@@ -45,6 +45,7 @@ public static class Program {
     public string? OptMode { get; set; }
     public string? Build { get; set; }
     public bool Run { get; set; }
+    public string? Dump { get; set; }                // --tokens / --ast: print the tokens or the syntax tree of the file, compile nothing
     public List<string> ProgramArgs { get; } = new();
     public List<string> Includes { get; } = new();   // include= of the project file: the folders of the libraries
     public List<string> CSources { get; } = new();   // csource= of the project file: C files compiled with the program (temporary, spec 15.9)
@@ -240,6 +241,9 @@ public static class Program {
     try {
       // the preprocessor (spec 19.1) builds the code that is compiled; its variables come from the options
       var variables = PpVariables.Build(os, cpu, nativeInt, build, optLevel, optMode, LanguageVersion, nativeReal);
+      if (cli.Dump != null) {
+        return DumpFile(path, cli.Dump, variables, projectVariables);
+      }
       Preprocessor preprocessor;
       try {
         preprocessor = new Preprocessor(variables, projectVariables);
@@ -409,6 +413,31 @@ public static class Program {
     return 0;
   }
 
+  // --tokens / --ast: the file after the preprocessor (spec 19.1), as tokens or as its syntax tree; nothing is compiled
+  static int DumpFile(string path, string what, Dictionary<string, PpVariable> variables, Dictionary<string, PpValue> projectVariables) {
+    try {
+      var preprocessor = new Preprocessor(variables, projectVariables);
+      var lexer = new Lexer(preprocessor.Process(File.ReadAllText(path)));
+      var tokens = lexer.Tokenize();
+      if (what == "tokens") {
+        foreach (var token in tokens) {
+          Console.WriteLine(token);
+        }
+        return 0;
+      }
+      var parser = new Parser(tokens);
+      var tree = parser.ParseProgram();
+      foreach (var warning in preprocessor.Warnings.Concat(lexer.Warnings).Concat(parser.Warnings)) {
+        Console.Error.WriteLine(path + warning);
+      }
+      tree.Dump(Console.Out, 0);
+      return 0;
+    } catch (DfException ex) {
+      Console.Error.WriteLine($"{path}({ex.Line},{ex.Col}): error: {ex.Message}");
+      return 1;
+    }
+  }
+
   // the command line: the input (a .df file, a .dsprj file or a folder) and the options; the options are not case sensitive
   static string? ReadCommandLine(string[] args, Settings settings) {
     string? input = null;
@@ -440,6 +469,10 @@ public static class Program {
           return null;
         case "--emit-c":
           settings.EmitC = true;
+          break;
+        case "--tokens":
+        case "--ast":
+          settings.Dump = option[2..];
           break;
         case "--force-lib":
           settings.ForceLib = true;

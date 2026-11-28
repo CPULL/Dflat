@@ -265,6 +265,7 @@ public sealed partial class CodeGen {
     LowerIntegerLimits(program);   // uns.MAX, i8.MIN (spec 2.1)
     LowerMutexDecls(program);   // mutex T name = v timeout ms (spec 20.13, CodeGen.Mutex.cs)
     if (TasksMode) {
+      LowerTasksTypeNames(program);   // Root.Tasks.Task written in full as a type (spec 16.1, 20)
       LowerTaskStarts(program);   // Task(MyTask).start(): one new handle (spec 20.1, CodeGen.TaskOwners.cs)
       LowerWaitMulti(program, new List<Node>());   // the scopes of the waits on several waitables (spec 20.2.4, CodeGen.WaitMulti.cs)
       LowerWaitDefaults(program);   // enforce wait ... default { v } (spec 20.2, CodeGen.Tasks.cs)

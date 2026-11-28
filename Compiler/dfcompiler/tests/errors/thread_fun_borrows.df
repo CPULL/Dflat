@@ -1,0 +1,8 @@
+import Root
+import Root.Tasks
+fun i32 apply(fun i32(i32) op, i32 v) {
+  return op(v)
+}
+i32 k = 7
+Thread<i32> d = Thread(apply, (i32 v) { v * k }, 3).start()
+Console.log(wait d timeout 1000)

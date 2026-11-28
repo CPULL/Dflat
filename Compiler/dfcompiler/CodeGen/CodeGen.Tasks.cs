@@ -26,11 +26,29 @@ public class Task(u64 handle) {
   public fun RunKind get_kind() { RunKind.Task }
   public fun string get_name() { Root.Tasks.Native.Name(handle) }
   public fun bool get_linked() { Root.Tasks.Native.Linked(handle) }
+  public fun date get_startTime() { Root.Tasks.Native.StartTime(handle) }
   unrestricted fun bool kill(lapse timeout) { Root.Tasks.Native.Kill(handle, timeout) }
 } atEnd {
   Root.Tasks.Native.Release(handle)
 }
 """;
+
+  // Root.Tasks.Task, Root.Tasks.Thread<i32>, Root.Tasks.Signal ... written in full as a type, and Root.Tasks.RunStatus.Running,
+  // Root.Tasks.Token.register(...) in the code: the name of Root.Tasks (spec 16.1)
+  static void LowerTasksTypeNames(Node node) {
+    if (node.Kind == "Type" && node.Text is string text && text.StartsWith("Root.Tasks.") && TasksLibraryNames.Contains(text["Root.Tasks.".Length..])) {
+      node.Text = text["Root.Tasks.".Length..];
+    }
+    for (int index = 0; index < node.Children.Count; index++) {
+      var child = node.Children[index];
+      if (child is { Kind: "Member", Text: string name, Children: [{ Kind: "Member", Text: "Tasks", Children: [{ Kind: "Name", Text: "Root" }] }] }
+          && TasksLibraryNames.Contains(name)) {
+        node.Children[index] = Synthetic("Name", child, name);
+        continue;
+      }
+      LowerTasksTypeNames(child);
+    }
+  }
 
   // the names of Root.Tasks (spec 16.1): bare with import Root.Tasks
   static readonly string[] TasksLibraryNames = { "Task", "Thread", "RunStatus", "RunKind", "Signal", "SignalMode", "KnownSignals", "SignalGroup", "Token", "Event", "EventMode", "EventQueueFullMode" };
@@ -47,6 +65,7 @@ public class Task(u64 handle) {
     Native("Status", "i32", "df_task_status", "u64");
     Native("Name", "string", "df_task_name", "u64");
     Native("Linked", "bool", "df_task_linked", "u64");
+    Native("StartTime", "date", "df_task_start_time", "u64");
     Native("Kill", "bool", "df_task_kill", "u64", "lapse");
   }
 
@@ -474,14 +493,18 @@ public class Task(u64 handle) {
           && declWait.Children.FirstOrDefault(c => c.Kind == "TimeoutBlock") is Node longBlock && longBlock.Children[0].Children is not [{ Kind: "ExprStmt" }]) {
         // i32 r = wait t timeout 500 { log("late"); return -1 } (spec 20.2.8, 7.2.6): r takes what the wait gives, then the timeout block runs
         // when the wait gave nothing (its C flag, WaitNote) and gives r its value with return
-        string note = $"df_wnote{++enforceTemps}";
-        declWait.Children.RemoveAll(c => c == longBlock);
-        declWait.Add(Synthetic("WaitNote", longBlock, note));
-        var lateBlock = ValueBlock(longBlock.Children[0], child.Text!);
-        NoteLateValues(lateBlock, child.Text!);
-        var late = Synthetic("If", longBlock).Add(Synthetic("CValue", longBlock, note).Add(Synthetic("Type", longBlock, "bool")))
-          .Add(lateBlock);
-        node.Children.Insert(index + 1, late);
+        node.Children.Insert(index + 1, LateWaitBlock(declWait, longBlock, new List<string> { child.Text! }));
+      }
+      if (child is { Kind: "Assign", Children: [{ Kind: "Name" } assigned, { Kind: "Wait" } assignWait] } && child.Text is null or "="
+          && assignWait.Children.FirstOrDefault(c => c.Kind == "TimeoutBlock") is Node assignBlock && assignBlock.Children[0].Children is not [{ Kind: "ExprStmt" }]) {
+        // r = wait t timeout 500 { several lines }: as for a declaration (spec 20.2.8)
+        node.Children.Insert(index + 1, LateWaitBlock(assignWait, assignBlock, new List<string> { assigned.Text! }));
+      }
+      if (child is { Kind: "MultiAssign" } && child.Children.Count == 2 && child.Children[1].Children is [{ Kind: "Wait" } multiWait]
+          && multiWait.Children.FirstOrDefault(c => c.Kind == "TimeoutBlock") is Node multiBlock
+          && child.Children[0].Children.All(target => target.Kind is "Name" or "Decl")) {
+        // i32 a, string b = wait t timeout 500 { ...; return 1, "x" }; a, b = wait ... (spec 20.2.8): several values
+        node.Children.Insert(index + 1, LateWaitBlock(multiWait, multiBlock, child.Children[0].Children.Select(target => target.Text!).ToList()));
       }
       if (child is { Kind: "ExprStmt", Children: [{ Kind: "Wait" } statementWait] } && statementWait.Children.Any(c => c.Kind == "TimeoutBlock")) {
         // wait t timeout 50 { ... } as a statement (spec 20.2.1): the statement form, with no block for the waitable
@@ -508,6 +531,62 @@ public class Task(u64 handle) {
     if (timeoutNode == null) {
       throw Error("a wait writes its timeout: wait x timeout 500 (spec 20.2.8)", at);
     }
+  }
+
+  // the timeout block runs after the wait, when the wait gave nothing (its C flag): if (note) { block }
+  Node LateWaitBlock(Node wait, Node timeoutBlock, List<string> targets) {
+    string note = $"df_wnote{++enforceTemps}";
+    wait.Children.RemoveAll(c => c == timeoutBlock);
+    wait.Add(Synthetic("WaitNote", timeoutBlock, note));
+    var lateBlock = WaitValueBlock(timeoutBlock.Children[0], targets);
+    foreach (string target in targets) {
+      NoteLateValues(lateBlock, target);
+    }
+    return Synthetic("If", timeoutBlock).Add(Synthetic("CValue", timeoutBlock, note).Add(Synthetic("Type", timeoutBlock, "bool"))).Add(lateBlock);
+  }
+
+  // the timeout block that gives the values: return v (or return a, b) assigns the targets and leaves the block, also from a loop inside it
+  // (break to a label after the block runs the ends of the scopes it leaves); a block that is one expression assigns it
+  Node WaitValueBlock(Node block, List<string> targets, string? oneValue = null) {
+    if (block.Children is [{ Kind: "ExprStmt" } single]) {
+      return Synthetic("Block", block).Add(WaitAssign(targets, single.Children, single));
+    }
+    string label = $"df_wlate{++enforceTemps}";
+    return Synthetic("Block", block).Add(RewriteWaitReturns(block, targets, label, oneValue)).Add(Synthetic("Label", block, label));
+  }
+
+  Node RewriteWaitReturns(Node block, List<string> targets, string label, string? oneValue = null) {
+    var result = Synthetic(block.Kind, block, block.Text);
+    foreach (var child in block.Children) {
+      if (child.Kind == "Return") {
+        if (child.Children.Count != targets.Count) {
+          throw Error(targets.Count == 1
+            ? oneValue ?? "the timeout block gives the value of the wait with return value (spec 20.2.8)"
+            : $"the timeout block gives the {targets.Count} values of the wait: return {string.Join(", ", targets)} (spec 20.2.8)", child);
+        }
+        result.Add(WaitAssign(targets, child.Children, child));
+        result.Add(Synthetic("Break", child, label));
+        continue;
+      }
+      if (child.Kind is "Fun" or "Lambda") {
+        result.Add(child);
+        continue;
+      }
+      result.Add(RewriteWaitReturns(child, targets, label, oneValue));
+    }
+    return result;
+  }
+
+  // target = value, or a, b = v1, v2
+  Node WaitAssign(List<string> targets, List<Node> values, Node at) {
+    if (targets.Count == 1 && values.Count == 1) {
+      return AssignTo(targets[0], values[0]);
+    }
+    var names = Synthetic("Targets", at);
+    targets.ForEach(target => names.Add(Synthetic("Name", at, target)));
+    var given = Synthetic("Values", at);
+    values.ForEach(value => given.Add(value));
+    return Synthetic("MultiAssign", at).Add(names).Add(given);
   }
 
   readonly HashSet<Node> lateValues = new(ReferenceEqualityComparer.Instance);   // the names assigned by the return of a timeout block
@@ -677,7 +756,7 @@ public class Task(u64 handle) {
   }
 
   // the members of the class Task itself (TasksPrelude): not calls through the handle
-  static readonly HashSet<string> TaskOwnMembers = new() { "start", "signal", "kill", "status", "kind", "name", "linked", "get_status", "get_kind", "get_name", "get_linked" };
+  static readonly HashSet<string> TaskOwnMembers = new() { "start", "signal", "kill", "status", "kind", "name", "linked", "startTime", "get_status", "get_kind", "get_name", "get_linked", "get_startTime" };
 
   // a method name of a class that runs as a task (for the exceptions a call can let out, CodeGen.Leaks.cs)
   bool IsTaskMethodName(string name) => TasksMode && !TaskOwnMembers.Contains(name)
@@ -722,14 +801,57 @@ public class Task(u64 handle) {
     if (TaskCallValueType(f.Ret)) {
       return true;
     }
-    if (IsCountedType(f.Ret) || IsWeakType(f.Ret) || IsFunType(f.Ret) || f.Writes.Count > 0 || f.RetWritable) {
+    if (IsCountedType(f.Ret) || IsWeakType(f.Ret) || IsFunType(f.Ret) || f.RetWritable) {
+      return false;
+    }
+    if (TaskCallLentResult(f)) {
+      return true;   // a lend of the memory of the task: allowed, with the level 2 warning of the call (spec 20.12)
+    }
+    if (f.Writes.Count > 0) {
       return false;
     }
     return IsClass(f.Ret) ? f.ReturnsOwned : IsArr(f.Ret) || IsTuple(f.Ret) || IsStruct(f.Ret);
   }
 
+  // a result that lends what the task holds (spec 13.1.1, 20.12): fun &i32 scoreRef(), fun Pet first(), fun &Pet edit(), fun arr<i32> items()
+  bool TaskCallLentResult(FunSig f) => !IsMulti(f.Ret)
+    && (IsValueLend(f.Ret) || IsClass(f.Ret) && !f.ReturnsOwned || IsArr(f.Ret) && !f.Gives.Contains(0));
+
+  // wait t.first() timeout n where every method of that name in the classes run as tasks lends its result: the local borrows it
+  bool WaitedLentCall(Node wait) {
+    if (wait.Children.Count == 0 || wait.Children[0] is not { Kind: "Call" } call || call.Children[0] is not { Kind: "Member" } member) {
+      return false;
+    }
+    var methods = classes.Values.Where(cls => TaskRunOf(cls) != null).SelectMany(cls => LookupMethods(cls, member.Text!)).Where(m => !m.IsStatic).ToList();
+    return methods.Count > 0 && methods.All(TaskCallLentResult);
+  }
+
+  // ... and every one of them lends it read/write (fun &Pet edit())
+  bool WaitedWritableCall(Node wait) => WaitedLentCall(wait) && wait.Children[0].Children[0] is { Kind: "Member" } member
+    && classes.Values.Where(cls => TaskRunOf(cls) != null).SelectMany(cls => LookupMethods(cls, member.Text!)).Where(m => !m.IsStatic).All(m => m.Writes.Contains(0));
+
+  // the name the warning of a lent result shows: what the method returns when it is a name or a field, otherwise the method
+  static string LentResultName(FunSig f) {
+    string method = f.Name.Split('.')[^1] + "()";
+    var block = f.Node.Children.FirstOrDefault(child => child.Kind == "Block");
+    if (block == null || block.Children.Count == 0) {
+      return method;
+    }
+    var last = block.Children[^1];
+    var value = last.Kind is "Return" or "ExprStmt" && last.Children.Count == 1 ? last.Children[0] : null;
+    return value switch {
+      { Kind: "Name" } => value.Text!,
+      { Kind: "Member", Children: [{ Kind: "Name", Text: "this" }, ..] } => value.Text!,
+      _ => method
+    };
+  }
+
   // a parameter of a call through the handle whose value the record owns (an object, an array, a collection, a struct or tuple of them)
-  bool TaskCallOwnedParam(ParamSig p) => !TaskCallValueType(p.Type);
+  bool TaskCallOwnedParam(ParamSig p) => !TaskCallValueType(p.Type) && !TaskCallUsage(p);
+
+  // @T and %T: the record holds the usage or the weak reference the argument took for the call; the method releases it, or the end of the
+  // record when the call never ran (spec 12.7, 20.12)
+  bool TaskCallUsage(ParamSig p) => IsCountedType(p.Type) || IsWeakType(p.Type);
 
   // the record of a method called through the handle: its arguments and its result, and the functions that run and end it
   string TaskCallRecord(FunSig f, Node at) {
@@ -740,11 +862,8 @@ public class Task(u64 handle) {
       throw Error("the handle of a thread never leaves its task (spec 20.1)", at);
     }
     foreach (var p in f.Params) {
-      if (p.IsVariadic || IsCountedType(p.Type) || IsWeakType(p.Type) || p.IsWeak || IsFunType(p.Type)) {
-        throw Error($"'{p.Name}' of {f.Name.Split('.')[^1]}: a call through the handle does not pass variadic, counted, weak or function parameters yet (spec 20.1)", at);
-      }
-      if (p.Ref == 2 && (p.Type == "string" || IsCountedType(p.Type))) {
-        throw Error($"'{p.Name}' of {f.Name.Split('.')[^1]}: a call through the handle does not lend a string read/write yet (spec 20.12)", at);
+      if ((IsCountedType(p.Type) || IsWeakType(p.Type)) && (p.IsWritable || p.Ref == 2)) {
+        throw Error($"'{p.Name}' of {f.Name.Split('.')[^1]}: a call through the handle does not lend a counted or weak reference read/write (&@T, &%T) yet (spec 20.12)", at);
       }
     }
     if (f.Ret != "void" && !TaskCallResultType(f)) {
@@ -767,13 +886,13 @@ public class Task(u64 handle) {
     fields.Append($"}} {name};\n\n");
     typeDefs.Append(fields);
     // invoke: the method on the object of the task, with the arguments of the record
-    string args = string.Concat(Enumerable.Range(0, f.Params.Count).Select(index => f.Params[index].IsGift && TaskCallOwnedParam(f.Params[index]) ? $", g{index}"
+    string args = string.Concat(Enumerable.Range(0, f.Params.Count).Select(index => f.Params[index].IsGift && TaskCallOwnedParam(f.Params[index]) || TaskCallUsage(f.Params[index]) ? $", g{index}"
       : f.Params[index].Ref == 2 ? $", r->a{index}" : IsByPointer(f.Params[index]) ? $", &r->a{index}" : $", r->a{index}"));
     string call = $"{f.CName}(({CType(f.Class!.Name)})obj{args})";
     var invoke = new StringBuilder($"static void {name}_invoke(void* obj, df_task_call* c) {{\n  {name}* r = ({name}*)c;\n");
     for (int index = 0; index < f.Params.Count; index++) {
-      if (f.Params[index].IsGift && TaskCallOwnedParam(f.Params[index])) {
-        // ->T: the method owns it now; the record keeps nothing to end (spec 20.12)
+      if (f.Params[index].IsGift && TaskCallOwnedParam(f.Params[index]) || TaskCallUsage(f.Params[index])) {
+        // ->T, @T, %T: the method owns it now (it releases a usage at its end); the record keeps nothing to end (spec 20.12)
         invoke.Append($"  {CType(f.Params[index].Type)} g{index} = r->a{index};\n  r->a{index} = {ZeroValue(f.Params[index].Type)};\n");
       }
     }
@@ -786,8 +905,14 @@ public class Task(u64 handle) {
     invoke.Append("}\n");
     var end = new StringBuilder($"static void {name}_end(df_task_call* c) {{\n  {name}* r = ({name}*)c;\n  (void)r;\n");
     for (int index = 0; index < f.Params.Count; index++) {
-      if (f.Params[index].Type == "string") {
+      if (f.Params[index].Type == "string" && f.Params[index].Ref != 2) {
         end.Append($"  df_str_free(r->a{index});\n");
+      } else if (IsFunType(f.Params[index].Type) && f.Params[index].Ref != 2) {
+        end.Append($"  df_fn_release(r->a{index});\n");   // the usage the record took (a gift was moved out by the call)
+      } else if (IsCountedType(f.Params[index].Type)) {
+        end.Append($"  if (r->a{index} != NULL) {{\n    (void)df_rc_release(r->a{index});\n  }}\n");   // a call never served
+      } else if (IsWeakType(f.Params[index].Type)) {
+        end.Append($"  if (r->a{index} != NULL) {{\n    df_rc_unweak(r->a{index});\n  }}\n");
       } else if (TaskCallOwnedParam(f.Params[index]) && f.Params[index].IsGift) {
         end.Append($"  {DropValueCode(f.Params[index].Type, $"r->a{index}")}\n");   // a gift never served
       } else if (TaskCallOwnedParam(f.Params[index]) && f.Params[index].Ref != 2) {
@@ -796,7 +921,7 @@ public class Task(u64 handle) {
     }
     if (f.Ret == "string") {
       end.Append("  if (!r->taken) {\n    df_str_free(r->result);\n  }\n");
-    } else if (f.Ret != "void" && (!TaskCallValueType(f.Ret) || IsMulti(f.Ret))) {
+    } else if (f.Ret != "void" && !TaskCallLentResult(f) && (!TaskCallValueType(f.Ret) || IsMulti(f.Ret))) {
       end.Append($"  if (!r->taken) {{\n    {DropValueCode(f.Ret, "r->result")}\n  }}\n");   // a result nobody collected (spec 20.1)
     }
     end.Append("}\n");
@@ -819,6 +944,9 @@ public class Task(u64 handle) {
     if (f.Visibility == Vis.Private && !f.IsUnrestricted) {
       throw Error($"'{name}' is private in {DisplayName(cls.Name)}: through the handle the public, unrestricted and internal methods are called (spec 20.1)", call);
     }
+    if (f.Visibility == Vis.Internal) {
+      CheckAccess(f.Visibility, f.Class!, name, call);   // internal: the namespace of the class and its sub-namespaces (spec 1.6.1, 20.1)
+    }
     if (!waited && f.Ret != "void") {
       throw Error($"{name}() gives a value: it is waited for, wait {DisplayName(receiverNode.Text ?? "t")}.{name}() timeout n (spec 20.1)", call);
     }
@@ -832,12 +960,45 @@ public class Task(u64 handle) {
     var code = new StringBuilder($"({{ {record}* {rec} = ({record}*)df_task_call_new(sizeof({record}), {record}_invoke, {record}_end, {(waited ? "true" : "false")}); ");
     var named = args.Where(a => a.Kind == "Named").ToDictionary(a => a.Text!, a => a.Children[0]);
     var positional = args.Where(a => a.Kind != "Named").ToList();
+    Node?[]? slots = null;
+    if (f.Params.Any(p => p.IsVariadic)) {
+      (slots, string? problem) = MapArgs(f, args);   // T name...: the extra arguments in one List node (spec 13.4)
+      if (slots == null) {
+        throw Error(problem!, call);
+      }
+    }
     bool lends = false;
     for (int index = 0; index < f.Params.Count; index++) {
       var p = f.Params[index];
-      Node? argNode = index < positional.Count ? positional[index] : named.GetValueOrDefault(p.Name);
+      Node? argNode = slots != null ? slots[index] : index < positional.Count ? positional[index] : named.GetValueOrDefault(p.Name);
       string value;
-      if (argNode == null) {
+      if (p.IsVariadic && argNode != null) {
+        // T name...: values are copied into an array of the record; objects are lent, so the call is waited for (spec 13.4, 20.12)
+        string lent = VariadicLend(p, argNode, scope) ?? ArgCode(p, argNode, scope, f, index);
+        if (TaskCallValueType(ArrElem(p.Type))) {
+          value = $"{ArrCloneHelper(p.Type, argNode)}({lent})";
+          code.Append($"{rec}->o{index} = true; ");
+        } else {
+          if (!waited) {
+            throw Error($"'{p.Name}...' of {name} lends its objects: a posted call does not lend (spec 20.12)", argNode);
+          }
+          value = lent;
+          code.Append($"{rec}->o{index} = false; ");
+          lends = true;
+        }
+      } else if (IsFunType(p.Type) && p.Ref != 2 && argNode != null) {
+        // a function value runs inside the task: it cannot borrow variables of the caller (spec 20.12); the record holds a usage of it
+        string fnCode = p.IsGift ? ArgCode(p, argNode, scope, f, index) : $"df_fn_retain({Convert(ExprOf(argNode, scope, p.Type), p.Type, argNode)})";
+        if (FnMayBorrow(argNode, scope)) {
+          throw Error($"this function value borrows variables of the caller, and '{p.Name}' of {name} runs it inside the task: capture them with x! or ->x (spec 20.12)", argNode);
+        }
+        value = fnCode;
+        if (!p.IsGift) {
+          code.Append($"{rec}->o{index} = true; ");
+        }
+      } else if (TaskCallUsage(p) && argNode != null) {
+        value = ArgCode(p, argNode, scope, f, index);   // @x, %x: one more usage or weak reference, carried by the record (spec 12.7)
+      } else if (argNode == null) {
         if (p.Default == null) {
           throw Error($"missing argument '{p.Name}' of {name}", call);
         }
@@ -889,31 +1050,59 @@ public class Task(u64 handle) {
       code.Append("})");
       return new Expr(code.ToString(), "void");
     }
+    if (TaskCallLentResult(f)) {
+      Warn($"The variable {LentResultName(f)} is lent outside the task, it can be modified. Be sure you take your precautions to avoid conflicts.", call, 2);
+    }
     string got = NewTemp();
     string error = NewTemp();
     string result = NewTemp();
     string waitCall = SilentCall(Serving($"df_task_wait_call({handle}, &{rec}->head, {timeoutCode}, &{got})"), "Exception",
       "TaskAlreadyTerminatedException", call);
-    code.Append($"bool {got}; df_exception* {error} = {waitCall}; {CType(f.Ret)} {result} = {ZeroValue(f.Ret)}; ");
+    code.Append($"bool {got}; df_exception* {error} = {waitCall}; {CType(f.Ret)} {result} = {(IsValueLend(f.Ret) ? "NULL" : ZeroValue(f.Ret))}; ");
     if (nothing != null) {
       code.Append($"{nothing} = !{got}; ");
     }
     code.Append($"if ({got}) {{ {result} = {rec}->result; {rec}->taken = true; }} df_task_call_release(&{rec}->head); ");
-    code.Append($"if ({error}) {{ df_err = {error}; df_err_thrown = false; goto {Handler}; }} {result}; }})");
+    code.Append($"if ({error}) {{ df_err = {error}; df_err_thrown = false; goto {Handler}; }} ");
+    if (IsValueLend(f.Ret)) {
+      // &T of a value: the place in the task; a call that did not run gives the zero value (spec 13.1.1, 20.12)
+      string value = f.Ret[1..];
+      string zero = NewTemp();
+      return new Expr($"(*{code}static DF_TLS {CType(value)} {zero}; {zero} = {ZeroValue(value)}; {result} != NULL ? {result} : &{zero}; }}))", value, false);
+    }
+    code.Append($"{result}; }})");
+    if (TaskCallLentResult(f)) {
+      return new Expr(code.ToString(), f.Ret, false);   // a borrow of what the task holds: the caller never frees it
+    }
     return new Expr(code.ToString(), f.Ret, f.Ret == "string" || !TaskCallValueType(f.Ret) && !IsMulti(f.Ret));
   }
 
   // ---------------------------------------------------------------- return! and return? (spec 20.1)
+
+  readonly Dictionary<string, string> threadDrops = new();
+
+  // the function that ends a value of this type that nobody collected (return! / return? of a lambda)
+  string ThreadDropOf(string type) {
+    if (threadDrops.TryGetValue(type, out var known)) {
+      return known;
+    }
+    string name = "df_thrdrop" + threadDrops.Count;
+    threadDrops[type] = name;
+    // the lambdas are compiled after TaskRunFunctions: written with the helpers of the lambdas, before every body
+    lambdaHelpers.Append($"static void {name}(void* p) {{\n  {CType(type)}* v = ({CType(type)}*)p;\n  (void)v;\n  {DropValueCode(type, "(*v)")}\n}}\n");
+    return name;
+  }
 
   void EmitTaskGive(Node s, StringBuilder sb, Scope scope, string pad) {
     bool hold = s.Kind == "ReturnHold";
     string written = hold ? "return!" : "return?";
     // in taskRun() of a task, or in a plain function that runs as a thread (spec 20.1)
     bool inTask = currentFun is { Class: not null, IsStatic: false } && currentFun.Name.Split('.')[^1] == "taskRun";
-    bool inThread = currentFun is { Struct: null, LambdaCtx: null } && !inTask;   // a function or a method run by Thread() (spec 20.1)
+    bool inThread = currentFun is { Struct: null } && !inTask;   // a function, a method or a lambda run by Thread() (spec 20.1)
     if (!inTask && !inThread) {
       throw Error($"{written} hands out a value of a task or a thread: it is written in taskRun() or in a function run by Thread() (spec 20.1)", s);
     }
+    bool inLambda = currentFun is { LambdaCtx: not null };
     if (currentRet == "void") {
       throw Error($"{written} hands out a value, and this {(inTask ? "taskRun()" : "function")} returns nothing", s);
     }
@@ -930,6 +1119,10 @@ public class Task(u64 handle) {
       }
       drop = TaskDropName(cls);
       give = $"df_task_give_from((void*)self, &{{0}}, {mode})";
+    } else if (inLambda) {
+      // a lambda: run as a thread when the thread was made from it; anywhere else the value is ended and the exception raised (spec 20.1)
+      drop = ThreadDropOf(currentRet!);
+      give = $"df_thread_give_from((void*){currentFun!.CName}, &{{0}}, {mode})";
     } else {
       drop = ThreadRecord(currentFun!, s) + "_drop";
       give = $"df_thread_give_from((void*){currentFun!.CName}, &{{0}}, {mode})";
@@ -945,7 +1138,7 @@ public class Task(u64 handle) {
     sb.Append($"{pad}{{\n{pad}  {CType(currentRet!)} {held} = {value};\n");
     sb.Append($"{pad}  if (!{string.Format(give, held)}) {{\n");
     sb.Append($"{pad}    {drop}(&{held});\n");
-    sb.Append($"{pad}    df_raise(&df_desc_ReturnOutsideATaskException, {fn!.NameConst});\n{pad}    {RaiseJump}\n{pad}  }}\n{pad}}}\n");
+    sb.Append($"{pad}    df_raise(&df_desc_ReturnProvidedOutsideATaskException, {fn!.NameConst});\n{pad}    {RaiseJump}\n{pad}  }}\n{pad}}}\n");
     sb.Append($"{pad}if (df_pending) {RaiseJump}\n");   // a return is a checkpoint: the cancel signal (spec 20.10)
   }
 

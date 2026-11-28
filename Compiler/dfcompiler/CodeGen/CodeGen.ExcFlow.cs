@@ -54,6 +54,9 @@ public sealed partial class CodeGen {
   // the code of a call to the user function f: checked the way its signature says
   string UserCallCode(FunSig f, string call) {
     NoteCall(f);   // what the code of a task reaches (spec 20.12, CodeGen.TaskAccess.cs)
+    if (lockedMethods.Contains(f) && GlobalServe() is { Length: > 0 } serve) {
+      call = $"({{ {serve}{call}; }})";   // a method of a global called in taskRun(): its wait for the lock serves the calls (spec 20.8)
+    }
     if (PairReturn(f)) {
       return PairCheck(call, f.Ret);
     }

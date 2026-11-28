@@ -88,7 +88,7 @@ fun direct() {
   Holder h = Holder()
   string got = h.taskRun()
   Console.log(got)
-  catch ReturnOutsideATaskException e { Console.log($"direct call: {e.message}") }
+  catch ReturnProvidedOutsideATaskException e { Console.log($"direct call: {e.message}") }
 }
 
 fun neverStarted() {

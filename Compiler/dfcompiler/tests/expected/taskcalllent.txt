@@ -1,0 +1,6 @@
+MyName
+5
+Rex
+MyName 5 Max
+true
+---- exit code 0 ----

@@ -1,0 +1,12 @@
+import Root
+// D# (spec 8.1): the decimal symbol always, .0 when there are no decimals
+r64 z = 0.0
+r64 w = 3.0
+r64 x = 3.14159
+r64 n = -2.0
+Console.log($"{z} {z:D#} {w:D#} {x:D#} {n:D#}")
+Console.log(z.toStr("D#") + " " + z.toStr())
+Console.log($"{x:D2#} {x:D2t#} {w:D,#} {w:D#,} {w:D02#} {w:D0#} {5:D#}")
+Console.log($"[{w:w6D#}] [{w:w8a.D2#}] {1000000.0:g,3D#} {w:e[E+]02D#}")
+r32 f = 1.0
+Console.log($"{f:D#} {f}")

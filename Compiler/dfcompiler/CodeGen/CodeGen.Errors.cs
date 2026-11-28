@@ -143,7 +143,7 @@ public sealed partial class CodeGen {
     ["TaskWasNotStartedException"] = 60,   // spec 20.1: a wait on a task that was not started (silent)
     ["CalledANotRunningTaskException"] = 61,   // spec 20.1: a call through the handle of a task that is not running
     ["TaskAlreadyStartedException"] = 62,   // spec 20.1: a second start() of the same task
-    ["ReturnOutsideATaskException"] = 63,   // spec 20.1: return! or return? in a taskRun() that does not run as a task
+    ["ReturnProvidedOutsideATaskException"] = 63,   // spec 20.1: return! or return? in a taskRun() that does not run as a task
     ["ThreadStartedByAThreadException"] = 65,   // spec 20.1: start() of a thread inside a thread
     ["SignalModeMismatchException"] = 66,   // spec 20.3: a signal made again with another mode
     ["ExclusiveSignalBusyException"] = 67,   // spec 20.3: a second listener of an Exclusive signal

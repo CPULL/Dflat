@@ -1,0 +1,1 @@
+thread_fun_borrows.df(7): error: this function value borrows variables, and 'op' runs it in a thread, in parallel with this code: capture them with x! or ->x (spec 20.1)

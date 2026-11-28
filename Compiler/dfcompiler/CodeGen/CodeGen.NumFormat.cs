@@ -126,15 +126,25 @@ public sealed partial class CodeGen {
         }
         case 'd' or 'D': {
           int n = Peek();
+          if (n == '#') {
+            i++;   // D#: the decimal symbol always (# is never the symbol)
+            n = Peek();
+          }
           if (n is 'l' or 'L') {
             i++;
-          } else if (Symbol(n) && !Digit(n)) {
+          } else if (Symbol(n) && n != '#' && !Digit(n)) {
             i++;
           }
           Number();
-          n = Peek();
-          if (n is 'u' or 'b' or 'c' or 'f' or 't' or 'U' or 'B' or 'C' or 'F' or 'T') {
-            i++;
+          bool rounding = false;
+          for (int k = 0; k < 2; k++) {   // the rounding and # (the decimal symbol always), in any order
+            n = Peek();
+            if (n == '#') {
+              i++;
+            } else if (!rounding && n is 'u' or 'b' or 'c' or 'f' or 't' or 'U' or 'B' or 'C' or 'F' or 'T') {
+              i++;
+              rounding = true;
+            }
           }
           break;
         }

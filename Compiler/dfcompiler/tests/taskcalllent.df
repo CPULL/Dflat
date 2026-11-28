@@ -1,0 +1,37 @@
+// calls through the handle (spec 20.12): a lent result (&T of a value, a plain or & object) is a borrow of the memory of the task,
+// with the level 2 warning; plain T x = copies the value, &T x and &Pet e write in the task
+import Root
+import Root.Tasks
+
+class Pet(string name) {
+  public string name
+}
+
+class Store {
+  string title = "MyName"
+  i32 score = 5
+  Pet first = Pet("Rex")
+  fun i32 taskRun() {
+    while true {
+      wait 5
+    }
+    return 0
+  }
+  public fun &string getName() { title }
+  public fun &i32 getScore() { score }
+  public fun Pet getFirst() { first }
+  public fun &Pet editFirst() { first }
+  public fun string show() { return $"{title} {score} {first.name}" }
+}
+
+Task t = Task(Store, timeout: 2000).start()
+string s = wait t.getName() timeout 500
+Console.log(s)
+i32 n = wait t.getScore() timeout 500
+Console.log(n)
+Pet p = wait t.getFirst() timeout 500
+Console.log(p.name)
+&Pet e = wait t.editFirst() timeout 500
+e.name = "Max"
+Console.log(wait t.show() timeout 500)
+Console.log(t.kill(1000))

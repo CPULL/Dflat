@@ -1,0 +1,69 @@
+// a task waiting for a busy global lock (spec 18.4, 20.8, 20.10): it serves its calls through the handle while it holds no other global
+// lock; the cancel signal stops the wait: a method call is not made (zero value, the runnable ends at its next checkpoint), a field read
+// raises the cancel at once
+import Root
+import Root.Tasks
+
+class Store {
+  public i32 value = 1
+  public fun hold(lapse pause) {
+    Token held = Token("store.held")
+    held.produce()
+    Root.Time.sleep(pause)
+  }
+  public fun i32 get() {
+    return value
+  }
+}
+
+global Store store = Store()
+
+class Holder {
+  fun i32 taskRun() {
+    store.hold(1500)
+    return 1
+  }
+}
+
+class Blocked {
+  fun i32 taskRun() {
+    Console.log("  blocked: before")
+    i32 v = store.get()
+    Console.log($"  blocked: after, until the next checkpoint (v = {v})")
+    return v
+  }
+  public fun i32 ping() {
+    return 42
+  }
+} atEnd {
+  Console.log("  blocked: atEnd")
+}
+
+class Reader {
+  fun i32 taskRun() {
+    Token ready = Token("reader.ready")
+    ready.produce()
+    Console.log("  reader: before")
+    i32 v = store.value
+    Console.log("  reader: after (not printed: the field read raises the cancel)")
+    return v
+  }
+}
+
+Token held = Token.register("store.held")
+Task h = Task(Holder, timeout: 5000).start()
+wait held timeout 3000 {
+  Console.log("the holder never took the lock")
+}
+Task<Blocked> b = Task(Blocked, timeout: 5000).start()
+Console.log(wait b.ping() timeout 1000 { -1 })
+Console.log(b.kill(1000))
+Console.log(b.status)
+Token ready = Token.register("reader.ready")
+Task r = Task(Reader, timeout: 5000).start()
+wait ready timeout 3000 {
+  Console.log("the reader never started")
+}
+Console.log(r.kill(1000))
+Console.log(r.status)
+Console.log(wait h timeout 3000 { -1 })

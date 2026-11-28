@@ -1,0 +1,1 @@
+thread_typed_wrong.df(6): error: this function gives i32, not string (Thread<string>) (spec 20.1)

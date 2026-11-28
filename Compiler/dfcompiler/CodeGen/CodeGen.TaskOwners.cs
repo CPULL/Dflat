@@ -26,7 +26,7 @@ public sealed partial class CodeGen {
         while (made.Kind == "Paren" && made.Children.Count == 1) {
           made = made.Children[0];
         }
-        if (made.Kind == "Call" && made.Children[0] is { Kind: "Name", Text: "Task" or "Thread" } && made.Children[1].Children.Count > 0) {
+        if (made.Kind == "Call" && (made.Children[0] is { Kind: "Name", Text: "Task" or "Thread" } || IsThreadCallee(made.Children[0], out _)) && made.Children[1].Children.Count > 0) {
           var begin = Synthetic("Named", child, StartArgument);
           begin.Add(child.Children[1]);   // the arguments of start
           made.Children[1].Add(begin);

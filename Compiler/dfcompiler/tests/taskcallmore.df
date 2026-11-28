@@ -1,0 +1,66 @@
+// calls through the handle (spec 20.1, 20.12): maps and sets as results; variadic parameters (values copied into the call, objects lent
+// to a waited call); @T and %T parameters (the usage goes with the call and is released when the call is never served); &string lent
+import Root
+import Root.Tasks
+
+class Pet(string name) {
+  public string name
+}
+
+class Store {
+  i32 total = 0
+  fun i32 taskRun() {
+    while true {
+      wait 5
+    }
+    return 0
+  }
+  public fun map<string, i32> counts() {
+    map<string, i32> m = map<string, i32>()
+    m["a"] = 1
+    m["b"] = 2
+    return m
+  }
+  public fun set<i32> evens() {
+    set<i32> s = set<i32>()
+    s += 2
+    s += 4
+    return s
+  }
+  public fun i32 sum(i32 values...) {
+    i32 t = 0
+    for v in values { t += v }
+    return t
+  }
+  public fun add(i32 values...) {
+    for v in values { total += v }
+  }
+  public fun i32 getTotal() { return total }
+  public fun string greet(@Pet p) {
+    return "hi " + p.name
+  }
+  public fun string check(%Pet p) {
+    enforce p {
+      return "alive " + p.name
+    }
+    return "gone"
+  }
+  public fun i32 shout(&string text) {
+    text = text + "!"
+    return (i32)text.len
+  }
+}
+
+Task t = Task(Store, timeout: 2000).start()
+Console.log(wait t.counts() timeout 500)
+Console.log(wait t.evens() timeout 500)
+Console.log(wait t.sum(1, 2, 3) timeout 500)
+t.add(4, 5)
+Console.log(wait t.getTotal() timeout 500)
+@Pet rex = Pet("Rex")
+Console.log(wait t.greet(@rex) timeout 500)
+Console.log(wait t.check(%rex) timeout 500)
+string word = "hey"
+Console.log(wait t.shout(&word) timeout 500)
+Console.log(word)
+Console.log(t.kill(1000))

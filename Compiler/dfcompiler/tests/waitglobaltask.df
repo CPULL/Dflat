@@ -1,0 +1,41 @@
+// wait (spec 20.2.8, 18): tasks owned by a global, waited on inside its methods (the lock of the global is held); a string local in
+// the loop of the timeout block ends when return leaves it
+import Root
+import Root.Tasks
+
+class Late {
+  fun i32 taskRun() {
+    wait 300
+    return 9
+  }
+}
+class Quick {
+  fun i32 taskRun() {
+    return 4
+  }
+}
+
+class Manager {
+  Task<Late> slow = Task(Late, timeout: 2000).start()
+  Task<Quick> fast = Task(Quick, timeout: 2000).start()
+  public fun i32 quick() {
+    return wait fast timeout 500 { -1 }
+  }
+  public fun i32 slowOne() {
+    var r = wait slow timeout 10 {
+      for i32 i in 0..5 {
+        string tag = "try" + i.toStr()
+        if i == 3 {
+          Console.log("  " + tag)
+          return i * 100
+        }
+      }
+      return -1
+    }
+    return r
+  }
+}
+
+global Manager m = Manager()
+Console.log(m.quick())
+Console.log(m.slowOne())

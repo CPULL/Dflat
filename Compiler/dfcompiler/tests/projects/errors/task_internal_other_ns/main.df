@@ -1,0 +1,8 @@
+namespace app
+import Root
+import Root.Tasks
+import app.store
+
+Task t = Task(Store, timeout: 2000).start()
+t.reset()
+Root.Console.log(t.kill(1000))

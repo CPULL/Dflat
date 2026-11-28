@@ -1,0 +1,30 @@
+// Runnable (spec 20.9): startTime is the null date before start(), then the date of start(); Root.Tasks.Task, Root.Tasks.Thread<T> and
+// the other names of Root.Tasks written in full as types
+import Root
+import Root.Tasks
+
+class Work {
+  fun i32 taskRun() {
+    return 3
+  }
+}
+
+fun i32 twice(i32 x) {
+  return x * 2
+}
+
+Root.Tasks.Task t = Task(Work, timeout: 2000).start()
+Console.log(wait t timeout 500)
+Root.Tasks.Task<Work> u = Task(Work, timeout: 2000)
+Console.log(u.startTime == null)
+date before = Root.Time.now()
+u.start()
+Console.log(u.startTime >= before)
+Console.log(wait u timeout 500)
+Root.Tasks.Thread<i32> th = Thread(twice, 4)
+Console.log(th.startTime == null)
+th.start()
+Console.log(th.startTime >= before)
+Console.log(wait th timeout 500)
+Root.Tasks.RunStatus st = th.status
+Console.log(st == RunStatus.Running || st == RunStatus.Completed)

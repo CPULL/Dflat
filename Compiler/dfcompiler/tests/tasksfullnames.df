@@ -1,0 +1,20 @@
+// the names of Root.Tasks written in full in the code (spec 16.1): Root.Tasks.RunStatus.Running, Root.Tasks.Token.register(...),
+// Root.Tasks.Task(...), as their bare names
+import Root
+import Root.Tasks
+
+class Work {
+  fun i32 taskRun() {
+    return 3
+  }
+}
+
+Root.Tasks.Task t = Root.Tasks.Task(Work, timeout: 2000)
+Console.log(t.status == Root.Tasks.RunStatus.Ready)
+t.start()
+Console.log(wait t timeout 500)
+Root.Tasks.RunKind k = t.kind
+Console.log(k == Root.Tasks.RunKind.Task)
+Root.Tasks.Token jobs = Root.Tasks.Token.register("jobs")
+jobs.produce()
+Console.log(jobs.count)

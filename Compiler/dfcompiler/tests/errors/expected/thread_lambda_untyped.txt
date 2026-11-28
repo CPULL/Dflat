@@ -1,0 +1,1 @@
+thread_lambda_untyped.df(3): error: a lambda written inside Thread(...) takes its result type from Thread<T>: Thread<i32>((i32 x) { x * 2 }, 5) (spec 20.1)

@@ -20,6 +20,7 @@ public class Thread(u64 handle) {
   public fun RunStatus get_status() { (RunStatus)Root.Tasks.Native.Status(handle) }
   public fun RunKind get_kind() { RunKind.Thread }
   public fun string get_name() { Root.Tasks.Native.Name(handle) }
+  public fun date get_startTime() { Root.Tasks.Native.StartTime(handle) }
   unrestricted fun bool kill(lapse timeout) { Root.Tasks.Native.Kill(handle, timeout) }
 } atEnd {
   Root.Tasks.Native.Release(handle)
@@ -48,11 +49,55 @@ public class Thread(u64 handle) {
   }
 
   ThreadTarget? FindThreadTarget(Node call, Scope scope) {
-    if (!TasksMode || call.Kind != "Call" || call.Children[0] is not { Kind: "Name", Text: "Thread" } || scope.Find("Thread") != null
+    if (!TasksMode || call.Kind != "Call" || !IsThreadCallee(call.Children[0], out var typed) || scope.Find("Thread") != null
         || call.Children[1].Children.Count == 0 || call.Children[1].Children[0].Kind is "Named" or "CValue") {
       return null;
     }
     var first = call.Children[1].Children[0];
+    if (first.Kind == "Lambda") {
+      // Thread<T>((i32 x) { ... }, 5): T is the result of the lambda written inside the call (spec 20.1)
+      if (typed == null) {
+        throw Error("a lambda written inside Thread(...) takes its result type from Thread<T>: Thread<i32>((i32 x) { x * 2 }, 5) (spec 20.1)", first);
+      }
+      string fnType = MakeFunType(ResolveType(typed), LambdaParamTypes(first));
+      var lambda = ExprOf(first, scope, fnType);
+      var (lambdaRet, lambdaTypes) = FunParts(lambda.Type);
+      var lambdaParams = lambdaTypes.Select((type, index) => ParamFromFunType($"argument {index + 1}", type)).ToList();
+      return new ThreadTarget(null, null, lambda, lambdaParams, lambdaRet);
+    }
+    var found = FindThreadTargetOf(call, first, scope);
+    if (found != null && typed != null && found.Ret != ResolveType(typed)) {
+      throw Error($"this function gives {DisplayName(found.Ret)}, not {DisplayName(ResolveType(typed))} (Thread<{DisplayName(ResolveType(typed))}>) (spec 20.1)", first);
+    }
+    return found;
+  }
+
+  // Thread(...) or Thread<T>(...); T: the result type it names, null without it
+  static bool IsThreadCallee(Node callee, out Node? resultType) {
+    resultType = null;
+    if (callee is { Kind: "Name", Text: "Thread" }) {
+      return true;
+    }
+    if (callee is { Kind: "GenericRef", Children.Count: 2 } && callee.Children[0] is { Kind: "Name", Text: "Thread" }) {
+      resultType = callee.Children[1];
+      return true;
+    }
+    return false;
+  }
+
+  // the parameter types of a lambda with their markers, as a function type writes them (->T, &T, @T ...)
+  List<string> LambdaParamTypes(Node lambda) {
+    var paramsNode = lambda.Children.FirstOrDefault(child => child.Kind == "Params");
+    var types = new List<string>();
+    foreach (var p in paramsNode?.Children.Where(child => child.Kind == "Param") ?? Enumerable.Empty<Node>()) {
+      var sig = LambdaParam(p);
+      string marker = sig.IsGift ? "->" : sig.Ref == 2 || sig.IsWritable ? "&" : "";
+      types.Add(marker + sig.Type);
+    }
+    return types;
+  }
+
+  ThreadTarget? FindThreadTargetOf(Node call, Node first, Scope scope) {
     var args = call.Children[1].Children.Skip(1).Where(arg => arg is not { Kind: "Named", Text: "timeout" }).ToList();
     // a top-level function by its name
     if (first.Kind == "Name" && scope.Find(first.Text!) == null && funs.TryGetValue(first.Text!, out var named)) {
@@ -113,11 +158,7 @@ public class Thread(u64 handle) {
       return madeValue;
     }
     string what = target.Fun?.Name ?? "this function";
-    foreach (var p in target.Params) {
-      if (p.IsVariadic || IsFunType(p.Type)) {
-        throw Error($"'{p.Name}' of {what}: a thread does not take variadic or function parameters yet (spec 20.1)", at);
-      }
-    }
+    _ = what;
     string name = "df_thr" + (threadRecords.Count + threadValueRecords.Count);
     if (target.Fun != null) {
       threadRecords[target.Fun] = name;
@@ -147,6 +188,10 @@ public class Thread(u64 handle) {
         // given to the function: the record keeps nothing to end (a usage, a weak reference, ->T)
         run.Append($"  {ThreadArgCType(p)} g{index} = r->a{index};\n  r->a{index} = {ThreadArgZero(p)};\n");
         args.Add($"g{index}");
+      } else if (IsFunType(p.Type) && p.IsGift) {
+        // ->fun: the function keeps the usage the record held (spec 13.3.4)
+        run.Append($"  df_fn g{index} = r->a{index};\n  r->a{index}.code = NULL;\n  r->a{index}.ctx = NULL;\n");
+        args.Add($"g{index}");
       } else {
         args.Add(p.Ref == 2 ? $"r->a{index}" : IsByPointer(p) ? $"&r->a{index}" : $"r->a{index}");
       }
@@ -155,7 +200,13 @@ public class Thread(u64 handle) {
     bool hasValue = ret != "void";
     if (target.Fun != null) {
       var f = target.Fun;
-      string call = $"{f.CName}({string.Join(", ", (method ? new[] { "r->self" } : Array.Empty<string>()).Concat(args))})";
+      string callee = f.CName;
+      if (method && f.Root.GroupSize > 0) {
+        // a method that subclasses replace: the version of the class of the object (spec 11.1.2)
+        string cTypes = string.Join(", ", new[] { CType(f.Class!.Name) }.Concat(ps.Select(ParamCType)));
+        callee = $"(({RetCType(f)} (*)({cTypes}))(r->self->cls->vtable[{f.Slot}]))";
+      }
+      string call = $"{callee}({string.Join(", ", (method ? new[] { "r->self" } : Array.Empty<string>()).Concat(args))})";
       if (PairReturn(f)) {
         run.Append(hasValue
           ? $"  {RetCType(f)} result = {call};\n  df_exception* err = result.err;\n  {CType(ret)} value = result.value;\n"
@@ -182,6 +233,11 @@ public class Thread(u64 handle) {
       var p = ps[index];
       if (p.Type == "string" && !p.IsGift && p.Ref != 2) {
         end.Append($"  df_str_free(r->a{index});\n");
+      } else if (p.IsVariadic) {
+        // T name...: the record owns the array; its strings and structs too, the objects stay with their owners (spec 13.4)
+        end.Append(TaskCallValueType(ArrElem(p.Type)) ? $"  {DropValueCode(p.Type, $"r->a{index}")}\n" : $"  free(r->a{index}.p);\n");
+      } else if (IsFunType(p.Type) && p.Ref != 2) {
+        end.Append($"  df_fn_release(r->a{index});\n");   // the usage the record took (a gift was moved out by the run)
       } else if (ThreadArgMoves(p)) {
         end.Append($"  if (r->a{index}) {{\n    {ThreadArgEnd(p, $"r->a{index}")}\n  }}\n");
       }
@@ -210,7 +266,7 @@ public class Thread(u64 handle) {
 
   // Thread(x, args..., timeout: t) (spec 20.1); null when the call is not one (the prelude makes Thread(handle))
   Expr? ThreadCreate(Node n, Scope scope) {
-    if (!TasksMode || n.Children[0] is not { Kind: "Name", Text: "Thread" } || scope.Find("Thread") != null || !classes.ContainsKey("Thread")) {
+    if (!TasksMode || !IsThreadCallee(n.Children[0], out _) || scope.Find("Thread") != null || !classes.ContainsKey("Thread")) {
       return null;
     }
     var args = n.Children[1].Children;
@@ -243,6 +299,16 @@ public class Thread(u64 handle) {
     var named = given.Where(a => a.Kind == "Named").ToDictionary(a => a.Text!, a => a.Children[0]);
     var positional = given.Where(a => a.Kind != "Named").ToList();
     var ps = target.Params;
+    Node?[]? slots = null;
+    if (target.Fun != null && ps.Any(p => p.IsVariadic)) {
+      (slots, string? problem) = MapArgs(target.Fun, given);   // T name...: the extra arguments in one List node (spec 13.4)
+      if (slots == null) {
+        throw Error(problem!, n);
+      }
+    }
+    if (target.Fun == null) {
+      NoteThreadValue(target.Value!.Value.Type, n);   // any lambda of this type runs as a thread (CodeGen.TaskAccess.cs)
+    }
     if (target.Fun == null && positional.Count != ps.Count) {
       throw Error($"this function takes {ps.Count} argument{(ps.Count == 1 ? "" : "s")}, not {positional.Count} ({FunDisplay(target.Value!.Value.Type)})", n);
     }
@@ -257,7 +323,7 @@ public class Thread(u64 handle) {
     }
     for (int index = 0; index < ps.Count; index++) {
       var p = ps[index];
-      Node? argNode = index < positional.Count ? positional[index] : named.GetValueOrDefault(p.Name);
+      Node? argNode = slots != null ? slots[index] : index < positional.Count ? positional[index] : named.GetValueOrDefault(p.Name);
       if (argNode == null && p.Default == null) {
         throw Error($"missing argument '{p.Name}' of {target.Fun?.Name ?? "the function"}", n);
       }
@@ -266,7 +332,26 @@ public class Thread(u64 handle) {
         NoteTaskLent(argNode, scope);   // one borrower at a time (spec 20.2.6)
         lends.Add(index);
       }
-      if (p.Ref == 2 || ThreadArgMoves(p)) {
+      if (p.IsVariadic && argNode != null) {
+        // T name...: values copied into an array of the record; objects in a new array, still lent (the thread shares the memory of its
+        // task, spec 20.1); the array of the call itself ends with the statement
+        string lent = VariadicLend(p, argNode, scope) ?? ArgCode(p, argNode, scope, target.Fun, index);
+        string elem = ArrElem(p.Type);
+        if (TaskCallValueType(elem)) {
+          converted = $"{ArrCloneHelper(p.Type, argNode)}({lent})";
+        } else {
+          string source = NewTemp();
+          string copy = NewTemp();
+          converted = $"({{ {CType(p.Type)} {source} = {lent}; {CType(p.Type)} {copy} = {{ NULL, {source}.len }}; if ({source}.len > 0) {{ "
+            + $"{copy}.p = ({CType(elem)}*)df_calloc({source}.len, sizeof({CType(elem)})); memcpy({copy}.p, {source}.p, {source}.len * sizeof({CType(elem)})); }} {copy}; }})";
+        }
+      } else if (IsFunType(p.Type) && p.Ref != 2 && argNode != null) {
+        // a function value runs in the thread, in parallel with its starter: it cannot borrow variables (spec 20.1); the record holds a usage
+        converted = p.IsGift ? ArgCode(p, argNode, scope, target.Fun, index) : $"df_fn_retain({Convert(ExprOf(argNode, scope, p.Type), p.Type, argNode)})";
+        if (FnMayBorrow(argNode, scope)) {
+          throw Error($"this function value borrows variables, and '{p.Name}' runs it in a thread, in parallel with this code: capture them with x! or ->x (spec 20.1)", argNode);
+        }
+      } else if (p.Ref == 2 || ThreadArgMoves(p)) {
         // &x: the place of the caller (a thread shares the memory of its task, spec 20.1, 20.12); @x, %x, ->x: held by the record
         converted = ArgCode(p, argNode ?? p.Default!, scope, target.Fun, index);
       } else {

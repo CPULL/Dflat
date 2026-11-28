@@ -1,0 +1,36 @@
+// enforce expression (spec 7.2.6): a return inside a loop of a clause leaves the whole clause and gives the value; the locals of the
+// loop end on the way out
+import Root
+
+public class Trouble(string1k text) : Exception { }
+
+public class Box(i32 size) {
+  public i32 size
+  unrestricted fun i32 test(bool fail) {
+    if fail {
+      throw Trouble("box trouble")
+    }
+    return size * 10
+  }
+}
+
+fun i32 search(Box f, bool fail) {
+  i32 res = enforce f.test(fail)
+    catch Trouble {
+      for i32 i in 0..10 {
+        string tag = "try" + i.toStr()
+        for i32 j in 0..10 {
+          if i * j == 12 {
+            Console.log("  found at " + tag)
+            return i * 100 + j
+          }
+        }
+      }
+      return -1
+    }
+    default { -2 }
+  return res
+}
+
+Console.log(search(Box(3), false))
+Console.log(search(Box(3), true))

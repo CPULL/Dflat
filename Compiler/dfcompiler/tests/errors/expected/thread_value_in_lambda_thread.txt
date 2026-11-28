@@ -1,0 +1,1 @@
+thread_value_in_lambda_thread.df(5): error: a thread cannot start another thread: this lambda runs as a thread (spec 20.1)

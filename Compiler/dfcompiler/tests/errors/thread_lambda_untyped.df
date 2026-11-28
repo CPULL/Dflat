@@ -1,0 +1,4 @@
+import Root
+import Root.Tasks
+Thread<i32> e = Thread((i32 v) { v * 2 }, 21).start()
+Console.log(wait e timeout 1000)

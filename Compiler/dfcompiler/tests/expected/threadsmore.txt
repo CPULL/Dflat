@@ -1,0 +1,11 @@
+kept,two,
+6
+15
+A B 
+21
+42
+woof
+10
+20
+outside: Return Provided Outside A Task Exception
+---- exit code 0 ----

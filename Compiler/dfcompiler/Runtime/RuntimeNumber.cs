@@ -25,6 +25,7 @@ typedef struct {
   int dsize;              /* decimals, -1 when not written */
   bool dfixed;            /* D02: exactly that many */
   char dmode;             /* rounding: u b c f t, 0 = u */
+  bool dpoint;            /* D#: the decimal symbol always, .0 when there are no decimals */
   int sign;               /* 0 negatives only, 1 always, 2 parentheses */
   bool signedge;          /* St: the sign at the left edge of the width */
   int width;              /* -1: none */
@@ -116,10 +117,15 @@ static bool df_nf_parse(df_sv s, df_nf* f) {
       case 'D': {
         f->dgiven = true;
         uint32_t n = df_nf_peek(s, i);
+        if (n == '#') {
+          df_nf_get(s, &i);
+          f->dpoint = true;
+          n = df_nf_peek(s, i);
+        }
         if (n == 'l' || n == 'L') {
           df_nf_get(s, &i);
           f->decsep = '.';
-        } else if (df_nf_symbol(n) && !(n < 128 && DF_ISD(n))) {
+        } else if (df_nf_symbol(n) && n != '#' && !(n < 128 && DF_ISD(n))) {
           df_nf_get(s, &i);
           f->decsep = n;
         }
@@ -129,10 +135,16 @@ static bool df_nf_parse(df_sv s, df_nf* f) {
           f->dsize = size;
           f->dfixed = (i - start) > 1 && s.p[start] == '0';
         }
-        n = df_nf_peek(s, i);
-        if (n != DF_NF_NONE && strchr("ubcftUBCFT", (int)n) != NULL && n < 128) {
-          df_nf_get(s, &i);
-          f->dmode = (char)(n | 0x20);
+        /* the rounding and #, in any order */
+        for (int k = 0; k < 2; k++) {
+          n = df_nf_peek(s, i);
+          if (n == '#') {
+            df_nf_get(s, &i);
+            f->dpoint = true;
+          } else if (n != DF_NF_NONE && n < 128 && strchr("ubcftUBCFT", (int)n) != NULL && !f->dmode) {
+            df_nf_get(s, &i);
+            f->dmode = (char)(n | 0x20);
+          }
         }
         break;
       }
@@ -518,6 +530,10 @@ static df_string df_nf_render(const df_nf* f, df_nv* v) {
       if (zero) {
         neg = false;
         df_sb_bytes(&body, "0", 1);
+        if (f->dpoint) {
+          df_sb_cp(&body, f->decsep);
+          df_sb_bytes(&body, "0", 1);
+        }
       } else {
         df_nf_round(digs, &nd, &dp, 1 + size, mode, neg);
         df_sb_bytes(&body, digs, 1);
@@ -529,6 +545,9 @@ static df_string df_nf_render(const df_nf* f, df_nv* v) {
           while (fl < size) {
             fp[fl++] = '0';
           }
+        }
+        if (f->dpoint && fl == 0) {
+          fp[fl++] = '0';
         }
         if (fl > 0) {
           df_sb_cp(&body, f->decsep);
@@ -582,6 +601,9 @@ static df_string df_nf_render(const df_nf* f, df_nv* v) {
         while (fl < size) {
           fp[fl++] = '0';
         }
+      }
+      if (f->dpoint && fl == 0) {
+        fp[fl++] = '0';
       }
       df_nf_groups(&body, f, ip, il);
       if (fl > 0) {

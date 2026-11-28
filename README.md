@@ -9,7 +9,7 @@ A new language D♭ that is the same as C# but easier to write and faster to exe
 Designed to bring the C# style where C++ is used today, it compiles to C and then to native code, and it is designed to scale from high-performance graphics down to microcontrollers. If you know any C-style language, you can already read Dflat.
 
 ## Implementation
-The current toolchain consists of a parser (`dfparser`) and a transpiler/compiler (`dfcompiler`):
+The current toolchain is one transpiler/compiler (`dfcompiler`), with its own lexer and parser:
 - Source files with the `.df` extension are parsed and lowered into efficient native C.
 - The emitted C code is compiled via **Clang** to produce the final executable.
 - The generic C standard library is currently statically linked; a minimal/zero-libc runtime is planned.

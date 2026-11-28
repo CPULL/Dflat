@@ -744,6 +744,15 @@ public sealed partial class CodeGen {
           if (f.Ret != NativeUns) {
             throw Error("get_hash returns uns", member);
           }
+        } else if (member.Text == "toStr" && f.Params.Count == 0) {
+          // toStr() is offered by Root.Class (spec 2, 11.1.3): the first replacement in a class chain prints the object everywhere
+          if (!isOverride) {
+            throw Error("toStr is defined by Root.Class: write 'replace'", member);
+          }
+          if (f.Ret != "string") {
+            throw Error("toStr returns string", member);
+          }
+          f.Visibility = Vis.Public;
         } else if (isOverride) {
           throw Error($"'{member.Text}' replaces nothing: no function with this signature in a parent class or trait", member);
         }
@@ -2641,6 +2650,50 @@ public sealed partial class CodeGen {
       var sb = classCode;
       sb.Append($"static df_string df_str_{cls.Name}(const {cls.StructName}* o) {{\n");
       sb.Append("  if (o == NULL) {\n    return df_str_lit(\"null\", 4);\n  }\n");
+      if (!boxInner.ContainsKey(cls.Name) && ToStrOverride(cls) is FunSig printer) {
+        // replace fun string toStr(): the object prints through it everywhere (toStr(), Console.log, interpolation, collections)
+        string call = $"{printer.CName}(({CType(printer.Class!.Name)})o)";
+        sb.Append(PairReturn(printer)
+          ? $"  {ResultPair("df_string")} r = {call};\n  if (r.err) {{\n    df_panic_unhandled(r.err);\n  }}\n  return r.value;\n"
+          : $"  return {call};\n");
+        all.Clear();
+        sb.Append("}\n");
+      } else {
+        EmitDefaultStr(cls, all, sb);
+      }
+      sb.Append($"static df_string df_strp_{cls.Name}(const void* o) {{\n  return df_str_{cls.Name}((const {cls.StructName}*)o);\n}}\n\n");
+
+      string slots = cls.Vtable.Count == 0 ? "NULL" : $"df_vt_{cls.Name}";
+      if (cls.Vtable.Count > 0) {
+        sb.Append($"static const void* const df_vt_{cls.Name}[] = {{ {string.Join(", ", cls.Vtable.Select(f => $"(const void*){f.CName}"))} }};\n");
+      }
+      string parent = cls.Parent == null ? "NULL" : "&" + cls.Parent.Descriptor;
+      string impls = EmitImpls(cls);
+      EmitDropGlue(cls);
+      if (hashUsed) {
+        EmitHashFunction(cls, sb);
+      }
+      string hash = hashUsed ? $"df_hash_{cls.Name}" : "NULL";
+      string clone = EmitCloneFunction(cls, sb);
+      string cmp = EmitCompareFunction(cls, sb);
+      sb.Append($"static {RecordConst}df_class {cls.Descriptor} = {{ {256 + cls.Index}, \"{DisplayName(cls.Name)}\", {parent}, {slots}, df_strp_{cls.Name}, {impls}, df_dropall_{cls.Name}, {hash}, {clone}, "
+        + $"\"{BareClassName(cls)}\", {cmp} }};\n\n");
+    }
+  }
+
+  // the replacement of toStr() that a class uses: its own or the nearest one of its parents (spec 2, 11.1.3)
+  FunSig? ToStrOverride(ClassInfo cls) {
+    for (var c = cls; c != null; c = c.Parent) {
+      if (funs.TryGetValue(c.Name + ".toStr", out var list) && list.FirstOrDefault(f => f.Params.Count == 0 && !f.IsStatic && f.Ret == "string") is FunSig found) {
+        return found;
+      }
+    }
+    return null;
+  }
+
+  // the body of df_str_<class> without a replacement: the class name and the first 3 fields (spec 2)
+  void EmitDefaultStr(ClassInfo cls, List<FieldInfo> all, StringBuilder sb) {
+    {
       if (boxInner.ContainsKey(cls.Name)) {
         // the box of an item of list<@T> prints as its object (spec 12.7)
         all.Clear();
@@ -2675,23 +2728,6 @@ public sealed partial class CodeGen {
         sb.Append($"  r = df_str_cat(r, {CString(CodePoints(" }"))});\n");
       }
       sb.Append("  return r;\n}\n");
-      sb.Append($"static df_string df_strp_{cls.Name}(const void* o) {{\n  return df_str_{cls.Name}((const {cls.StructName}*)o);\n}}\n\n");
-
-      string slots = cls.Vtable.Count == 0 ? "NULL" : $"df_vt_{cls.Name}";
-      if (cls.Vtable.Count > 0) {
-        sb.Append($"static const void* const df_vt_{cls.Name}[] = {{ {string.Join(", ", cls.Vtable.Select(f => $"(const void*){f.CName}"))} }};\n");
-      }
-      string parent = cls.Parent == null ? "NULL" : "&" + cls.Parent.Descriptor;
-      string impls = EmitImpls(cls);
-      EmitDropGlue(cls);
-      if (hashUsed) {
-        EmitHashFunction(cls, sb);
-      }
-      string hash = hashUsed ? $"df_hash_{cls.Name}" : "NULL";
-      string clone = EmitCloneFunction(cls, sb);
-      string cmp = EmitCompareFunction(cls, sb);
-      sb.Append($"static {RecordConst}df_class {cls.Descriptor} = {{ {256 + cls.Index}, \"{DisplayName(cls.Name)}\", {parent}, {slots}, df_strp_{cls.Name}, {impls}, df_dropall_{cls.Name}, {hash}, {clone}, "
-        + $"\"{BareClassName(cls)}\", {cmp} }};\n\n");
     }
   }
 

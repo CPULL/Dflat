@@ -1,0 +1,40 @@
+// calls through the handle (spec 20.12): function parameters take lambdas that capture nothing or only with ! / ->; the record holds a
+// usage of the value; ->fun gives it to the method
+import Root
+import Root.Tasks
+
+class Store {
+  i32 score = 5
+  i32 total = 0
+  fun i32 taskRun() {
+    while true {
+      wait 5
+    }
+    return 0
+  }
+  public fun &i32 getScore() { score }
+  public fun apply(fun i32(i32) op) {
+    total = op(10)
+  }
+  public fun i32 run(fun i32(i32) op) {
+    return op(total)
+  }
+  public fun keep(->fun() op) {
+    op()
+  }
+}
+
+Task t = Task(Store, timeout: 2000).start()
+&i32 n = wait t.getScore() timeout 500
+n += 10
+Console.log(wait t.getScore() timeout 500)
+t.apply((i32 x) { x * 2 })
+Console.log(wait t.run((i32 x) { x + 1 }) timeout 500)
+i32 bonus = 100
+t.apply((i32 x; bonus!) { x + bonus })
+Console.log(wait t.run((i32 x) { x }) timeout 500)
+string word = "given"
+fun() f = (; word!) { Console.log("  ran " + word) }
+t.keep(->f)
+Console.log(wait t.run((i32 x) { x }) timeout 500)
+Console.log(t.kill(1000))

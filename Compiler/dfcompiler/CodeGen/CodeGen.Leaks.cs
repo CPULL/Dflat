@@ -154,7 +154,7 @@ public sealed partial class CodeGen {
       case "ReturnHold":
       case "ReturnPost":
         if (!ctx.InCatchBody) {
-          ctx.Flow.Raises.Add((StandardExceptions["ReturnOutsideATaskException"], ctx.Cover));   // a direct call of taskRun() (spec 20.1)
+          ctx.Flow.Raises.Add((StandardExceptions["ReturnProvidedOutsideATaskException"], ctx.Cover));   // a direct call of taskRun() (spec 20.1)
         }
         break;
       case "TypeSwitch" or "TypeSwitchStmt":

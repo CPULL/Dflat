@@ -7,6 +7,8 @@ Option names are not case sensitive. The arguments after `CL:`, file names and p
 - `--cpu <cpu>` the processor, with the names of spec 19.1: `x86`, `x64`, `arm32`, `armeb`, `arm64`, `arm64be`, `arm64_32`, `riscv32`, `riscv64`, `ppc32`, `ppc64`, `ppc64le`, `mips`, `mipsel`, `mips64`, `mips64el`, `sparc`, `sparcel`, `sparcv9`, `avr`, `m68k`. It overrides the cpu of the target. Only `x86`, `x64` and `arm64` are built today; the others give the error `<sparc> is not yet a supported cpu`. The cpu gives the preprocessor variables `bits` and `endian` and the default native size of `int` and `uns`.
 - Which value wins: an option of the command line always beats the same option in the project file; `--os` / `--cpu` beat the target written in the same place. So the os and the cpu come from `--os` / `--cpu`, then `--target`, then `os=` / `cpu=` of the project, then `target=` of the project, then the machine running the compiler.
 - `--emit-c` generate only the C file (`.compilation/<name>.c`), no compilation of this file will occur.
+- `--tokens <file.df>` prints the tokens of the file (after the preprocessor, spec 19.1), one per line with its line and column; nothing is compiled.
+- `--ast <file.df>` prints the syntax tree of the file (after the preprocessor), with the warnings of the parser; nothing is compiled.
 - `--check-each <file|folder> ...` (for the tests) runs `--emit-c` on each file or project folder, one after the other, in the same process; what each one prints is written between `==== <file>` and `==== exit <code>`. It must be the first option.
 - `--embed-binaries` when building a compiled Dflat library (spec 15.8): one `.dfc` file with the interface and the binaries of each target inside; without it the interface is a `.dfi` and the binaries go in `libpath/<target>/`. A build for another target adds it to the file (spec 15.8). In the project file: `embed-binaries=true`.
 - `--run` run the program after the build. It must be the very last option; everything written after `--` is given to the program as its arguments: `dfcompiler source.df --target linux-x64 --run -- first second`. It can be used only in a direct compilation, not in a `.dsprj` file.
@@ -101,4 +103,4 @@ A library can need C code and C libraries. Until the libraries can describe this
 5. Keys used in the example but missing from the list of options: `name` and the file to compile (`source` or `root`). `include` is defined in "Libraries" above.
 6. A folder with several `.dsprj` files is an error, unless the compiler is given the file to use.
 7. Keys are not case sensitive. Values and paths follow the rules of the operating system, and the arguments after `CL:` are passed as they are.
-8. `--emit-c` can be used in a `.dsprj`; `--run` and `--version` cannot.
+8. `--emit-c` can be used in a `.dsprj`; `--run`, `--version`, `--tokens` and `--ast` cannot.

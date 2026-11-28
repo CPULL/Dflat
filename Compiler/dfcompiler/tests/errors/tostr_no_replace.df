@@ -1,0 +1,5 @@
+import Root
+class A(string n) {
+  public fun string toStr() { return n }
+}
+Console.log(A("q"))

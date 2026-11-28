@@ -231,7 +231,11 @@ public sealed partial class CodeGen {
     sb.Append("typedef struct { int32_t rank; int32_t readers; bool writer; } df_glock;\n");
     sb.Append("typedef struct { df_glock* lock; bool write; bool taken; } df_gl_hold;\n");
     sb.Append("static DF_TLS df_gl_hold* df_gl_held = NULL;\nstatic DF_TLS size_t df_gl_depth = 0;\nstatic DF_TLS size_t df_gl_cap = 0;\n");
-    sb.Append("#ifdef DF_TASKS\nstatic df_mutex df_gl_state = DF_MUTEX_INIT;   /* guards the readers and writer of every lock of this unit */\n#endif\n");
+    sb.Append("#ifdef DF_TASKS\nstatic df_mutex df_gl_state = DF_MUTEX_INIT;   /* guards the readers and writer of every lock of this unit */\n");
+    sb.Append("static df_exception* df_task_cancel_now(void);\n#endif\n");
+    // a call written in taskRun() names its task here, read once by the next df_gl_enter: while that one waits for a busy lock and the
+    // thread holds no other global lock, the calls through the handle are served (spec 20.8, 18.4)
+    sb.Append("static DF_TLS void* df_gl_serve = NULL;\n");
     sb.Append("typedef struct { void** object; df_glock lock; } df_gl_entry;\n");
     sb.Append($"static df_gl_entry df_gl_table[{globalOrder.Count}] = {{");
     sb.Append(string.Join(",", globalOrder.Select(global => $" {{ (void**)&{global.CName}, {{ {global.Rank}, 0, false }} }}")));
@@ -260,6 +264,9 @@ static void df_gl_push(df_glock* lock, bool write, bool taken) {
 }
 /* false: the exception is raised (df_pending) and nothing is taken */
 static bool df_gl_enter(df_glock* lock, bool write, const char* function) {
+  void* serve = df_gl_serve;
+  df_gl_serve = NULL;
+  (void)serve;
   bool held = false;
   bool heldWrite = false;
   for (size_t i = 0; i < df_gl_depth; i++) {
@@ -299,6 +306,12 @@ static bool df_gl_enter(df_glock* lock, bool write, const char* function) {
     if (free_now) {
       break;
     }
+    if (DF_CANCEL_ASKED()) {
+      return false;   /* the cancel signal (spec 20.10): the call is not made, the runnable ends at its next checkpoint */
+    }
+    if (serve != NULL && df_gl_depth == 0 && df_serve_hook != NULL) {
+      df_serve_hook(serve);   /* no other global lock held: the calls through the handle (spec 20.8) */
+    }
     df_thread_yield();
   }
 #else
@@ -311,6 +324,18 @@ static bool df_gl_enter(df_glock* lock, bool write, const char* function) {
 #endif
   df_gl_push(lock, write, true);
   return true;
+}
+/* the lock was not taken: the exception is in df_pending, or the cancel signal came while waiting and is raised now (spec 20.10) */
+static bool df_gl_enter_raising(df_glock* lock, bool write, const char* function) {
+  if (df_gl_enter(lock, write, function)) {
+    return true;
+  }
+#ifdef DF_TASKS
+  if (df_pending == NULL) {
+    df_pending = df_task_cancel_now();
+  }
+#endif
+  return false;
 }
 static void df_gl_exit(void) {
   df_gl_hold hold = df_gl_held[--df_gl_depth];
@@ -700,6 +725,9 @@ static void df_gl_exit(void) {
 
   static string LockOf(GlobalInfo global) => $"(&df_gl_table[{global.Rank}].lock)";
 
+  // in taskRun(): the next wait for a global lock serves the calls through the handle (spec 20.8)
+  string GlobalServe() => InTaskRunBody ? "df_gl_serve = (void*)df_task_of((void*)self); " : "";
+
 
   // an expression under the lock of a global: the lock is released on the normal way out and before an exception goes on
   Expr GlobalReadExpr(Node n, GlobalInfo global, bool write, Scope scope, string? expected) {
@@ -708,7 +736,7 @@ static void df_gl_exit(void) {
       string before = PrebuildChain(n, scope, built);   // the arguments, before the lock (an exception there has nothing to release)
       string release = "gl_rel_" + NewTemp();
       string outer = Handler;
-      string enter = $"if (!df_gl_enter({LockOf(global)}, {(write ? "true" : "false")}, {fn!.NameConst})) {RaiseJump}";
+      string enter = $"{GlobalServe()}if (!df_gl_enter_raising({LockOf(global)}, {(write ? "true" : "false")}, {fn!.NameConst})) {RaiseJump}";
       string? saved = handlerOverride;
       handlerOverride = release;
       Expr e;
@@ -744,7 +772,7 @@ static void df_gl_exit(void) {
     }
     string release = "gl_rel_" + NewTemp();
     string outer = Handler;
-    sb.Append(pad).Append($"  if (!df_gl_enter({LockOf(global)}, true, {fn!.NameConst})) {RaiseJump}\n");
+    sb.Append(pad).Append($"  {GlobalServe()}if (!df_gl_enter_raising({LockOf(global)}, true, {fn!.NameConst})) {RaiseJump}\n");
     string? saved = handlerOverride;
     handlerOverride = release;
     try {

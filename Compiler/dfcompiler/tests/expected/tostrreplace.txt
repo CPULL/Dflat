@@ -1,0 +1,9 @@
+Dog Rex
+Dog Rex
+Dog Rex!
+Dog Bit
+Kitten of Cat<Tom>
+[Dog A, Dog B]
+field!
+field
+---- exit code 0 ----

@@ -1,0 +1,19 @@
+import Root
+import Root.Tasks
+class Pet(string name) {
+  public string name
+}
+class Store {
+  fun i32 taskRun() {
+    while true {
+      wait 5
+    }
+    return 0
+  }
+  public fun i32 swap(&@Pet p) {
+    return 1
+  }
+}
+Task t = Task(Store, timeout: 2000).start()
+@Pet rex = Pet("Rex")
+Console.log(wait t.swap(&@rex) timeout 500)

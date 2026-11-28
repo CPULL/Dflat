@@ -1,0 +1,80 @@
+// threads (spec 20.1): variadic parameters (values copied, objects lent), function parameters (lambdas with ! / -> captures),
+// Thread<T>(lambda, ...) with the type of the lambda, a method replaced by a subclass, return! / return? in a lambda, and
+// ReturnProvidedOutsideATaskException when the lambda is called directly
+import Root
+import Root.Tasks
+
+class Pet(string name) {
+  public string name
+}
+
+class Animal {
+  public fun string speak() { return "..." }
+}
+class Dog : Animal {
+  replace fun string speak() { return "woof" }
+}
+
+fun i32 sum(i32 values...) {
+  i32 t = 0
+  for v in values { t += v }
+  return t
+}
+
+fun ->string names(Pet pets...) {
+  string all = ""
+  for p in pets { all += p.name + " " }
+  return all
+}
+
+fun ->string joined(string parts...) {
+  string all = ""
+  for s in parts { all += s + "," }
+  return all
+}
+
+fun i32 apply(fun i32(i32) op, i32 v) {
+  return op(v)
+}
+
+fun i32 counter(i32 n) {
+  for i in 1..n {
+    return? i
+  }
+  return 0
+}
+
+string word = "kept"
+Thread<string> w = Thread(joined, word, "two").start()
+word = "changed"
+Console.log(wait w timeout 1000)
+Thread<i32> a = Thread(sum, 1, 2, 3).start()
+Console.log(wait a timeout 1000)
+arr<i32> nums = [4, 5, 6]
+Thread<i32> b = Thread(sum, nums).start()
+Console.log(wait b timeout 1000)
+Pet x = Pet("A")
+Pet y = Pet("B")
+Thread<string> c = Thread(names, x, y).start()
+Console.log(wait c timeout 1000)
+i32 k = 7
+Thread<i32> d = Thread(apply, (i32 v; k!) { v * k }, 3).start()
+Console.log(wait d timeout 1000)
+Thread<i32> e = Thread<i32>((i32 v) { v * 2 }, 21).start()
+Console.log(wait e timeout 1000)
+Animal pet = Dog()
+Thread<string> f = Thread(pet.speak).start()
+Console.log(wait f timeout 1000)
+i32(i32) gen = (i32 n) {
+  for i in 1..n {
+    return! i * 10
+  }
+  return 0
+}
+Thread<i32> g = Thread(gen, 3).start()
+Console.log(wait g timeout 1000)
+Console.log(wait g timeout 1000)
+i32 direct = gen(2)
+catch ReturnProvidedOutsideATaskException ex {
+  Console.log("outside: " + ex.message)
+}

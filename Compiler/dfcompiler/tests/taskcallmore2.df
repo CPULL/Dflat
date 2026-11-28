@@ -1,0 +1,59 @@
+// calls through the handle (spec 20.1, 13.4, 12.7): variadic objects, arrays and vecs given whole, a posted call copies its strings;
+// the usage of an @T argument comes back when the call is not served (the task is not running)
+import Root
+import Root.Tasks
+
+class Pet(string name) {
+  public string name
+}
+
+class Store {
+  fun i32 taskRun() {
+    while true {
+      wait 5
+    }
+    return 0
+  }
+  public fun ->string names(Pet pets...) {
+    string all = ""
+    for p in pets { all += p.name + " " }
+    return all
+  }
+  public fun ->string words(string items...) {
+    string all = ""
+    for w in items { all += w + "," }
+    return all
+  }
+  public fun log(string items...) {
+    for w in items { Console.log("  log " + w) }
+  }
+  public fun string greet(@Pet p) {
+    return "hi " + p.name
+  }
+  public fun keep(@Pet p) {
+    Console.log("  keep " + p.name)
+  }
+}
+
+Task t = Task(Store, timeout: 2000).start()
+Console.log(wait t.names(Pet("A"), Pet("B")) timeout 500)
+arr<string> list = ["x", "y", "z"]
+Console.log(wait t.words(list) timeout 500)
+vec<string> v = ["p", "q"]
+Console.log(wait t.words(v) timeout 500)
+string s = "one"
+t.log(s, "two")
+s = "changed"
+@Pet rex = Pet("Rex")
+Console.log(wait t.greet(@rex) timeout 500)
+t.keep(@rex)
+Console.log(wait t.words() timeout 500)
+Console.log(rex.usersCount)
+Console.log(t.kill(1000))
+Console.log(rex.usersCount)
+Task idle = Task(Store, timeout: 2000)
+idle.keep(@rex)
+catch CalledANotRunningTaskException e {
+  Console.log("not running")
+}
+Console.log(rex.usersCount)

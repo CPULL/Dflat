@@ -1,0 +1,1 @@
+taskcall_fun_borrows.df(17): error: this function value borrows variables of the caller, and 'op' of apply runs it inside the task: capture them with x! or ->x (spec 20.12)

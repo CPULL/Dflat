@@ -64,6 +64,7 @@ public sealed partial class CodeGen {
   bool DeclBorrows(Node init, string type, Scope scope) => init.Kind switch {
     "Name" or "Member" or "Index" => true,
     "Call" => !IsNewResult(init, type, scope),
+    "Wait" => WaitedLentCall(init),   // a lent result of a call through the handle (spec 20.12)
     _ => false
   };
 
@@ -136,6 +137,9 @@ public sealed partial class CodeGen {
     }
     if (init.Kind == "Call") {
       return CalleesOf(init) is { Count: > 0 } callees && callees.All(f => f.Writes.Contains(0)) ? null : "this value is lent read-only";
+    }
+    if (init.Kind == "Wait") {
+      return WaitedWritableCall(init) ? null : "this value is lent read-only";   // wait t.edit() timeout n: a &T result through the handle (spec 20.12)
     }
     var root = init;
     while (root.Kind is "Member" or "Index" or "Paren" && root.Children.Count > 0) {

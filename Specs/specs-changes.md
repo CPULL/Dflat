@@ -819,3 +819,10 @@
 - 6.5 A view held in a variable or a parameter is copied with `view!`, `view.clone()` and `view.tryClone()`, as `c[a..b]!`
 - 12.6 A collection whose items cannot be cloned cannot be cloned either
 - 3.1.1 The constants of every bitfield are `.NONE` and `.ALL` (were `.None` and `.All`)
+- 8.1 `D#` (`D2#`, `D,#`): the decimal point is always printed, a number without decimals gets `.0` (`{0.0:D#}` → `0.0`); `#` is never a decimal symbol
+- 18.4, 20.8, 20.10 The wait for a busy global lock: the cancel signal stops it (a method call is not made, a field access raises the cancel); in `taskRun()` with no other global lock held it serves the calls through the handle; stdlib: `Root.Time.sleep` is never a checkpoint
+- 20.2.8 The timeout block of a wait that gives several values returns them all (`return 0, "none"`); a `return` in a loop of the block ends the block
+- 20.1 Threads take variadic and function parameters (lambdas that capture nothing or only with `x!` / `->x`); `Thread<T>(lambda, ...)` gives a lambda written in the call its result type; `return!` / `return?` in a lambda; 15.3 #63 renamed `ReturnProvidedOutsideATaskException`
+- 20.12 A call through the handle takes function values that capture nothing or only with `x!` / `->x`; a result that lends the memory of the task is allowed with a level 2 warning
+- 19.2 dfparser removed: `dfcompiler --tokens` and `dfcompiler --ast` print the tokens and the syntax tree
+- 11.1.3 `replace fun string toStr()`: how a class replaces the default printing

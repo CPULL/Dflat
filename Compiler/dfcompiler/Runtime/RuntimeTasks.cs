@@ -50,6 +50,7 @@ typedef struct df_task {
   df_exception* (*run)(void* obj);    /* calls taskRun() of the object; gives the exception that left it */
   df_exception* failure;              /* the exception that ended the task (Failed), until a waiter takes it */
   struct df_task* parent;             /* NULL: the main program */
+  int64_t startTime;                  /* the date of start(), in ms (spec 20.9); the null date before */
   /* the values handed out */
   df_mutex lock;
   df_cond changed;
@@ -209,6 +210,7 @@ static uint64_t df_task_new(void* obj, df_exception* (*run)(void*), const char* 
   task->threadFn = NULL;
   task->run = run;
   task->parent = linked ? df_task_current : NULL;
+  task->startTime = INT64_MIN;
   task->id = DF_ATOMIC_ADD(df_task_ids, 1);
   task->owner = task->holder = df_task_me();
   if (task->parent) {
@@ -849,6 +851,7 @@ static int32_t df_task_start(uint64_t handle, int64_t timeout) {
   if (ms >= 0) {
     task->timeout = ms;
   }
+  task->startTime = df_time_now();
   DF_ATOMIC_STORE(task->status, DF_RUN_RUNNING);
   df_cond_broadcast(&task->changed);
   df_mutex_unlock(&task->lock);
@@ -934,6 +937,15 @@ static int32_t df_task_status(uint64_t handle) {
 
 static df_string df_task_name(uint64_t handle) {
   return df_str_from_cstr(((df_task*)(uintptr_t)handle)->name);
+}
+
+/* the date of start() (spec 20.9): the null date while it is not started */
+static int64_t df_task_start_time(uint64_t handle) {
+  df_task* task = (df_task*)(uintptr_t)handle;
+  df_mutex_lock(&task->lock);
+  int64_t when = task->startTime;
+  df_mutex_unlock(&task->lock);
+  return when;
 }
 
 static bool df_task_linked(uint64_t handle) {

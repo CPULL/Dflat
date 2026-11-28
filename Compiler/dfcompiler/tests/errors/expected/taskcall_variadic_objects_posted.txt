@@ -1,0 +1,1 @@
+taskcall_variadic_objects_posted.df(18): error: 'pets...' of show lends its objects: a posted call does not lend (spec 20.12)
